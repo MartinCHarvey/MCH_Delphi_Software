@@ -1,0 +1,63 @@
+object AuthenticateFrm: TAuthenticateFrm
+  Left = 0
+  Top = 0
+  Caption = 'Authentication URL:'
+  ClientHeight = 130
+  ClientWidth = 391
+  FormFactor.Width = 320
+  FormFactor.Height = 480
+  FormFactor.Devices = [dkDesktop, dkiPhone, dkiPad]
+  DesignerMobile = False
+  DesignerWidth = 0
+  DesignerHeight = 0
+  DesignerDeviceName = ''
+  DesignerOrientation = 0
+  object Label1: TLabel
+    Height = 17.000000000000000000
+    Position.X = 16.000000000000000000
+    Position.Y = 32.000000000000000000
+    Text = 'Paste the complete authentication URL here:'
+    Width = 225.000000000000000000
+  end
+  object Label2: TLabel
+    Height = 17.000000000000000000
+    Position.X = 16.000000000000000000
+    Position.Y = 8.000000000000000000
+    Text = 'Authentication for site:'
+    Width = 120.000000000000000000
+  end
+  object SiteLabel: TLabel
+    Height = 17.000000000000000000
+    Position.X = 144.000000000000000000
+    Position.Y = 8.000000000000000000
+    Text = 'SiteLabel'
+    Width = 120.000000000000000000
+  end
+  object URLEdit: TEdit
+    TabOrder = 3
+    Text = 'http://www.martincharvey.com/.....'
+    Position.X = 16.000000000000000000
+    Position.Y = 56.000000000000000000
+    Width = 361.000000000000000000
+    Height = 22.000000000000000000
+    KillFocusByReturn = False
+  end
+  object OkBtn: TButton
+    Height = 22.000000000000000000
+    ModalResult = 1
+    Position.X = 96.000000000000000000
+    Position.Y = 88.000000000000000000
+    TabOrder = 4
+    Text = 'OK'
+    Width = 80.000000000000000000
+  end
+  object CancelBtn: TButton
+    Height = 22.000000000000000000
+    ModalResult = 2
+    Position.X = 184.000000000000000000
+    Position.Y = 88.000000000000000000
+    TabOrder = 5
+    Text = 'Cancel'
+    Width = 80.000000000000000000
+  end
+end

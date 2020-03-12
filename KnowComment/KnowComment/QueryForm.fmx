@@ -1,0 +1,145 @@
+object QueryFrm: TQueryFrm
+  Left = 0
+  Top = 0
+  Caption = 'New Filter'
+  ClientHeight = 477
+  ClientWidth = 428
+  FormFactor.Width = 320
+  FormFactor.Height = 480
+  FormFactor.Devices = [dkDesktop, dkiPhone, dkiPad]
+  OnCreate = FormCreate
+  OnDestroy = FormDestroy
+  OnShow = FormShow
+  DesignerMobile = False
+  DesignerWidth = 0
+  DesignerHeight = 0
+  DesignerDeviceName = ''
+  DesignerOrientation = 0
+  object AllUsersLayout: TLayout
+    Height = 369.000000000000000000
+    Position.X = 16.000000000000000000
+    Position.Y = 40.000000000000000000
+    Width = 161.000000000000000000
+    object LoadMoreBtn: TButton
+      Align = alBottom
+      Height = 22.000000000000000000
+      Position.Y = 347.000000000000000000
+      TabOrder = 0
+      Text = 'LoadMoreBtn'
+      Width = 161.000000000000000000
+      OnClick = LoadMoreBtnClick
+    end
+    object AllUsersView: TListView
+      ItemAppearanceClassName = 'TImageListItemAppearance'
+      ItemEditAppearanceClassName = 'TImageListItemShowCheck'
+      HeaderAppearanceClassName = 'TListHeaderObjects'
+      FooterAppearanceClassName = 'TListHeaderObjects'
+      EditModeOptions = [DisallowSelection, HideSelection, ClearWhenStart]
+      EditMode = False
+      Align = alClient
+      Height = 347.000000000000000000
+      TabOrder = 1
+      Width = 161.000000000000000000
+      OnChange = AllUsersViewChange
+      object AddVerifiedBtn: TButton
+        Height = 22.000000000000000000
+        Position.X = 168.000000000000000000
+        Position.Y = 160.000000000000000000
+        TabOrder = 0
+        Text = '+ Verified'
+        Width = 72.000000000000000000
+        OnClick = AddVerifiedBtnClick
+      end
+    end
+  end
+  object AddedUsersLayout: TLayout
+    Height = 369.000000000000000000
+    Position.X = 264.000000000000000000
+    Position.Y = 40.000000000000000000
+    Width = 153.000000000000000000
+    object AddedUsersView: TListView
+      ItemAppearanceClassName = 'TImageListItemAppearance'
+      ItemEditAppearanceClassName = 'TImageListItemShowCheck'
+      HeaderAppearanceClassName = 'TListHeaderObjects'
+      FooterAppearanceClassName = 'TListHeaderObjects'
+      EditModeOptions = [DisallowSelection, HideSelection, ClearWhenStart]
+      EditMode = False
+      Align = alClient
+      Height = 369.000000000000000000
+      TabOrder = 0
+      Width = 153.000000000000000000
+      OnChange = AddedUsersViewChange
+    end
+  end
+  object AllUsersSearchEdit: TEdit
+    TabOrder = 2
+    Position.X = 56.000000000000000000
+    Position.Y = 8.000000000000000000
+    Width = 121.000000000000000000
+    Height = 22.000000000000000000
+    KillFocusByReturn = False
+    OnChange = AllUsersSearchEditChange
+    OnKeyUp = AllUsersSearchEditKeyUp
+  end
+  object SelectButton: TButton
+    Height = 22.000000000000000000
+    Position.X = 200.000000000000000000
+    Position.Y = 120.000000000000000000
+    TabOrder = 3
+    Text = '+'
+    Width = 41.000000000000000000
+    OnClick = SelectButtonClick
+  end
+  object UnselectButton: TButton
+    Height = 22.000000000000000000
+    Position.X = 200.000000000000000000
+    Position.Y = 152.000000000000000000
+    TabOrder = 4
+    Text = '-'
+    Width = 41.000000000000000000
+    OnClick = UnselectButtonClick
+  end
+  object RunFilterBtn: TButton
+    Height = 22.000000000000000000
+    Position.X = 104.000000000000000000
+    Position.Y = 432.000000000000000000
+    TabOrder = 5
+    Text = 'Run filter'
+    Width = 80.000000000000000000
+    OnClick = RunFilterBtnClick
+  end
+  object CloseBtn: TButton
+    Height = 22.000000000000000000
+    Position.X = 248.000000000000000000
+    Position.Y = 432.000000000000000000
+    TabOrder = 6
+    Text = 'Close'
+    Width = 80.000000000000000000
+    OnClick = CloseBtnClick
+  end
+  object AddInterestedBtn: TButton
+    Height = 22.000000000000000000
+    Position.X = 184.000000000000000000
+    Position.Y = 232.000000000000000000
+    TabOrder = 7
+    Text = '+ Interested'
+    Width = 73.000000000000000000
+    OnClick = AddInterestedBtnClick
+  end
+  object ClearBtn: TButton
+    Height = 22.000000000000000000
+    Position.X = 184.000000000000000000
+    Position.Y = 272.000000000000000000
+    TabOrder = 8
+    Text = 'Clear'
+    Width = 73.000000000000000000
+    OnClick = ClearBtnClick
+  end
+  object Label1: TLabel
+    Height = 17.000000000000000000
+    Position.X = 16.000000000000000000
+    Position.Y = 8.000000000000000000
+    Text = 'Search:'
+    Width = 41.000000000000000000
+  end
+end
