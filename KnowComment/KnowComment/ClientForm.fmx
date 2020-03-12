@@ -1,0 +1,188 @@
+object ClientFrm: TClientFrm
+  Left = 0
+  Top = 0
+  Caption = 'Form1'
+  ClientHeight = 525
+  ClientWidth = 914
+  FormFactor.Width = 320
+  FormFactor.Height = 480
+  FormFactor.Devices = [dkDesktop, dkiPhone, dkiPad]
+  OnCreate = FormCreate
+  OnDestroy = FormDestroy
+  DesignerMobile = False
+  DesignerWidth = 0
+  DesignerHeight = 0
+  DesignerDeviceName = ''
+  DesignerOrientation = 0
+  object MasterLayout: TLayout
+    Align = alClient
+    Height = 525.000000000000000000
+    Width = 914.000000000000000000
+    object ItemClientLayout: TLayout
+      Align = alClient
+      Height = 525.000000000000000000
+      Width = 660.000000000000000000
+      object DetailLayout: TLayout
+        Align = alTop
+        Height = 273.000000000000000000
+        Width = 660.000000000000000000
+        object DetailImage: TImage
+          Height = 273.000000000000000000
+          Width = 233.000000000000000000
+        end
+        object MediaDetailLayout: TLayout
+          Height = 249.000000000000000000
+          Position.X = 296.000000000000000000
+          Position.Y = 8.000000000000000000
+          Width = 353.000000000000000000
+          object MediaTypeImage: TImage
+            Height = 50.000000000000000000
+            Position.X = 296.000000000000000000
+            Position.Y = 8.000000000000000000
+            Width = 50.000000000000000000
+          end
+          object MediaDateLbl: TLabel
+            Height = 17.000000000000000000
+            Position.X = 8.000000000000000000
+            Position.Y = 8.000000000000000000
+            Text = 'MediaDateLbl'
+            Width = 105.000000000000000000
+          end
+          object MediaPosterLbl: TLabel
+            Height = 17.000000000000000000
+            Position.X = 120.000000000000000000
+            Position.Y = 8.000000000000000000
+            Text = 'MediaPosterLbl'
+            Width = 161.000000000000000000
+          end
+          object MediaTextIntroLabel: TLabel
+            Height = 177.000000000000000000
+            Position.X = 8.000000000000000000
+            Position.Y = 64.000000000000000000
+            Text = 'MediaTextIntroLabel'
+            Width = 337.000000000000000000
+          end
+        end
+        object UserDetailLayout: TLayout
+          Height = 249.000000000000000000
+          Position.X = 296.000000000000000000
+          Position.Y = 8.000000000000000000
+          Width = 353.000000000000000000
+          object UserLbl: TLabel
+            Height = 17.000000000000000000
+            Position.X = 8.000000000000000000
+            Position.Y = 8.000000000000000000
+            Text = 'User:'
+            Width = 113.000000000000000000
+          end
+          object UserFollowsLbl: TLabel
+            Height = 17.000000000000000000
+            Position.X = 8.000000000000000000
+            Position.Y = 32.000000000000000000
+            Text = 'Follows:'
+            Width = 113.000000000000000000
+          end
+          object UserTypeImage: TImage
+            Height = 50.000000000000000000
+            Position.X = 295.000000000000000000
+            Position.Y = 7.000000000000000000
+            Width = 50.000000000000000000
+          end
+          object UserVerifiedChk: TCheckBox
+            Height = 19.000000000000000000
+            Position.X = 128.000000000000000000
+            Position.Y = 8.000000000000000000
+            TabOrder = 3
+            Text = 'Verified'
+            Width = 65.000000000000000000
+          end
+          object UserFollowedLbl: TLabel
+            Height = 17.000000000000000000
+            Position.X = 128.000000000000000000
+            Position.Y = 32.000000000000000000
+            Text = 'Following:'
+            Width = 161.000000000000000000
+          end
+          object UserFullNameLbl: TLabel
+            Height = 17.000000000000000000
+            Position.X = 8.000000000000000000
+            Position.Y = 56.000000000000000000
+            Text = 'Full Name:'
+            Width = 273.000000000000000000
+          end
+          object UserBioLabel: TLabel
+            Height = 161.000000000000000000
+            Position.X = 8.000000000000000000
+            Position.Y = 80.000000000000000000
+            Text = 'UserBioLabel'
+            Width = 337.000000000000000000
+          end
+        end
+      end
+    end
+    object ListLayout: TLayout
+      Align = alLeft
+      Height = 525.000000000000000000
+      Width = 249.000000000000000000
+      object ItemListView: TListView
+        ItemAppearanceClassName = 'TImageListItemAppearance'
+        ItemEditAppearanceClassName = 'TImageListItemDeleteAppearance'
+        HeaderAppearanceClassName = 'TListHeaderObjects'
+        FooterAppearanceClassName = 'TListHeaderObjects'
+        EditModeOptions = [DisallowSelection, HideSelection, ClearWhenStart]
+        EditMode = False
+        Align = alClient
+        Height = 503.000000000000000000
+        PopupMenu = PopupMenu1
+        TabOrder = 0
+        Width = 249.000000000000000000
+        OnEnter = ItemListViewEnter
+        ItemAppearance.HeaderHeight = 10
+        ItemAppearance.FooterHeight = 10
+        OnChange = ItemListViewChange
+      end
+      object LoadMoreBtn: TButton
+        Align = alBottom
+        Height = 22.000000000000000000
+        Position.Y = 503.000000000000000000
+        TabOrder = 1
+        Text = 'LoadMoreBtn'
+        Width = 249.000000000000000000
+        OnClick = LoadMoreBtnClick
+      end
+    end
+    object Splitter1: TSplitter
+      Align = alLeft
+      Cursor = crHSplit
+      Height = 525.000000000000000000
+      MinSize = 20.000000000000000000
+      Position.X = 249.000000000000000000
+      Width = 5.000000000000000000
+    end
+  end
+  object PopupMenu1: TPopupMenu
+    Left = 40
+    Top = 16
+    object MenuItem1: TMenuItem
+      Action = MainFrm.RefreshUser
+    end
+    object MenuItem2: TMenuItem
+      Action = MainFrm.IncreaseUserInterest
+    end
+    object MenuItem3: TMenuItem
+      Action = MainFrm.DecreaseUserInterest
+    end
+    object MenuItem4: TMenuItem
+      Action = MainFrm.PurgeUserComments
+    end
+    object MenuItem5: TMenuItem
+      Action = MainFrm.PurgeUserMedia
+    end
+    object MenuItem6: TMenuItem
+      Action = MainFrm.DeleteUser
+    end
+    object MenuItem7: TMenuItem
+      Action = MainFrm.ExpireUser
+    end
+  end
+end

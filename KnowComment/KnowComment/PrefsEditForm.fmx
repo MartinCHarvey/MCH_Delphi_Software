@@ -1,0 +1,131 @@
+object PrefsEditFrm: TPrefsEditFrm
+  Left = 0
+  Top = 0
+  Caption = 'Edit preferences'
+  ClientHeight = 268
+  ClientWidth = 324
+  FormFactor.Width = 320
+  FormFactor.Height = 480
+  FormFactor.Devices = [dkDesktop, dkiPhone, dkiPad]
+  OnShow = FormShow
+  DesignerMobile = False
+  DesignerWidth = 0
+  DesignerHeight = 0
+  DesignerDeviceName = ''
+  DesignerOrientation = 0
+  object Label1: TLabel
+    Height = 17.000000000000000000
+    Position.X = 16.000000000000000000
+    Position.Y = 48.000000000000000000
+    Text = 'Expire old data after'
+    Width = 105.000000000000000000
+  end
+  object Label2: TLabel
+    Height = 17.000000000000000000
+    Position.X = 16.000000000000000000
+    Position.Y = 128.000000000000000000
+    Text = 'Expire old images after'
+    Width = 120.000000000000000000
+  end
+  object Label3: TLabel
+    Height = 17.000000000000000000
+    Position.X = 16.000000000000000000
+    Position.Y = 16.000000000000000000
+    Text = 'Load the past'
+    Width = 89.000000000000000000
+  end
+  object ExpireMediaChk: TCheckBox
+    Height = 19.000000000000000000
+    Position.X = 32.000000000000000000
+    Position.Y = 72.000000000000000000
+    TabOrder = 3
+    Text = 'Expire Media'
+    Width = 120.000000000000000000
+  end
+  object ExpireCommentsChk: TCheckBox
+    Height = 19.000000000000000000
+    Position.X = 32.000000000000000000
+    Position.Y = 96.000000000000000000
+    TabOrder = 4
+    Text = 'Expire comments'
+    Width = 120.000000000000000000
+  end
+  object LoadEdit: TEdit
+    TabOrder = 5
+    Position.X = 88.000000000000000000
+    Position.Y = 16.000000000000000000
+    Width = 41.000000000000000000
+    Height = 22.000000000000000000
+    KillFocusByReturn = False
+  end
+  object ExpireDataEdit: TEdit
+    TabOrder = 6
+    Position.X = 120.000000000000000000
+    Position.Y = 48.000000000000000000
+    Width = 41.000000000000000000
+    Height = 22.000000000000000000
+    KillFocusByReturn = False
+  end
+  object Label4: TLabel
+    Height = 17.000000000000000000
+    Position.X = 136.000000000000000000
+    Position.Y = 16.000000000000000000
+    Text = 'days of data'
+    Width = 65.000000000000000000
+  end
+  object Label5: TLabel
+    Height = 17.000000000000000000
+    Position.X = 168.000000000000000000
+    Position.Y = 48.000000000000000000
+    Text = 'days'
+    Width = 33.000000000000000000
+  end
+  object ExpireImagesEdit: TEdit
+    TabOrder = 9
+    Position.X = 136.000000000000000000
+    Position.Y = 128.000000000000000000
+    Width = 41.000000000000000000
+    Height = 22.000000000000000000
+    KillFocusByReturn = False
+  end
+  object Label6: TLabel
+    Height = 17.000000000000000000
+    Position.X = 184.000000000000000000
+    Position.Y = 128.000000000000000000
+    Text = 'days'
+    Width = 33.000000000000000000
+  end
+  object Label7: TLabel
+    Height = 17.000000000000000000
+    Position.X = 16.000000000000000000
+    Position.Y = 168.000000000000000000
+    Text = 'Data directory'
+    Width = 81.000000000000000000
+  end
+  object DataDirEdit: TEdit
+    TabOrder = 12
+    Position.X = 96.000000000000000000
+    Position.Y = 168.000000000000000000
+    Width = 209.000000000000000000
+    Height = 22.000000000000000000
+    KillFocusByReturn = False
+  end
+  object OkBtn: TButton
+    Height = 22.000000000000000000
+    Position.X = 56.000000000000000000
+    Position.Y = 216.000000000000000000
+    TabOrder = 13
+    Text = 'OK'
+    Width = 80.000000000000000000
+    OnClick = OkBtnClick
+  end
+  object CancelBtn: TButton
+    Height = 22.000000000000000000
+    Position.X = 160.000000000000000000
+    Position.Y = 216.000000000000000000
+    TabOrder = 14
+    Text = 'Cancel'
+    Width = 80.000000000000000000
+    OnClick = CancelBtnClick
+  end
+end

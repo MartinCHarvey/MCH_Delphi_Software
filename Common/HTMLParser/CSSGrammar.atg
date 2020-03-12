@@ -1,0 +1,1359 @@
+$W- //Don't treat space as whitespace.
+$Y+ //Use case insensitive compares when looking for reserved words.
+COMPILER CSSGrammar
+
+DELPHI
+  USES (INTERFACE) Trackables, CommonNodes, CSSNodes
+  USES (IMPLEMENTATION) HTMLParser, HTMLParseEvents, StrUtils, IOUtils, DLList, GlobalLog
+
+  PRIVATE
+    FParentObject: TObject;
+  PROTECTED
+{$IFDEF DEBUG_TOKENS}
+    procedure DebugLogToken(Sender : TObject; var CurrentInputSymbol : integer);
+{$ENDIF}
+    procedure AbortParse;
+    procedure InsertAtDeclInScript(S: TCSSScript; AtDecl: TCSSAtDecl);
+
+    procedure InsertFuncBodyIntoAtom(A: TCSSAtom; B: TCSSFuncBody);
+
+    procedure InsertExprIntoExpr(E1, E2: TCSSExpr);
+
+    procedure InsertFuncBodyIntoFuncBody(B1, B2: TCSSFuncBody);
+
+    procedure InsertFuncBodyIntoSelector(S: TCSSSelector; B: TCSSFuncBody);
+    procedure InsertSelectorIntoSelector(S1, S2: TCSSSelector);
+
+    procedure InsertValIntoDecl(D: TCSSDeclaration; V: TCSSExpr);
+    procedure InsertAtDeclIntoDecl(D:TCSSDeclaration; AD: TCSSAtDecl);
+
+    procedure InsertListIntoAtDecl(AD: TCSSAtDecl; L:TCSSList);
+    procedure InsertRulesetIntoAtDecl(AD: TCSSAtDecl; RS: TCSSAtDecl);
+    procedure InsertAtomIntoAtDecl(AD: TCSSAtDecl; A: TCSSAtom);
+
+    procedure InsertDeclIntoList(L: TCSSList; D: TCSSDeclaration);
+    procedure InsertSelectorIntoList(L: TCSSList; S: TCSSSelector);
+  PUBLIC
+    procedure SetLocation(N: TCSSNode);
+    procedure ParseWarning(Code: integer; S: string);
+    property ParentObject:TObject read FParentObject write FParentObject;
+  CREATE
+    FParseTracker := TTracker.Create;
+{$IFDEF DEBUG_TOKENS}
+    AfterGet := DebugLogToken;
+{$ENDIF}
+    FLangStr := 'CSS';
+  DESTROY
+    FParseTracker.Free;
+  ERRORS
+    1000: Result := 'Expected the "important" identifier here';
+    1001: Result := 'Unable to continue after previous errors, aborting.';
+END_DELPHI
+
+{ Arbitrary code }
+{
+
+Copyright © 2020 Martin Harvey <martin_c_harvey@hotmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the “Software”), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.
+
+}
+
+procedure T-->Grammar<--.ParseWarning(Code: integer; S: string);
+var
+  Sc: T-->Grammar<--Scanner;
+begin
+  Sc := (Scanner as T-->Grammar<--Scanner);
+  if Assigned(ParentObject) and (ParentObject is THTMLParseItem) then
+  begin
+    (ParentObject as THTMLParseItem).EventList.Add(
+      TParseEvent.CreateFromParseWarning(
+      Sc.NextSymbol.Col, Sc.NextSymbol.Line, Code, ErrorStr(Code, AnsiString(S)) + AnsiString(S), self));
+  end;
+end;
+
+procedure T-->Grammar<--.SetLocation(N: TCSSNode);
+begin
+  N.Line := (Scanner as T-->Grammar<--Scanner).CurrentSymbol.Line;
+  N.Col := (Scanner as T-->Grammar<--Scanner).CurrentSymbol.Col;
+end;
+
+{$IFDEF DEBUG_TOKENS}
+procedure T-->Grammar<--.DebugLogToken(Sender : TObject; var CurrentInputSymbol : integer);
+var
+  LogStr: AnsiString;
+  LexStr: AnsiString;
+  DbgLexChar: AnsiString;
+begin
+  LexStr := LexString;
+  if Length(LexStr) > 0 then
+    DbgLexChar := AnsiString(IntToStr(Byte(LexString[1])) + ' ')
+  else
+    DbgLexChar := '';
+
+  LogStr := AnsiString(IntToStr(CurrentInputSymbol) + ' : ' + DbgLexChar +  LexString + CHR(13) + CHR(10));
+  GLogLog(SV_TRACE, LogStr);
+end;
+
+{$ENDIF}
+
+procedure T-->Grammar<--.AbortParse;
+begin
+  raise EParseAbort.Create(ErrorStr(1001, ''),
+                (Scanner as T-->Grammar<--Scanner).NextSymbol.Line,
+                (Scanner as T-->Grammar<--Scanner).NextSymbol.Col);
+end;
+
+procedure T-->Grammar<--.InsertAtDeclInScript(S: TCSSScript; AtDecl: TCSSAtDecl);
+begin
+  if not Assigned(S) or not Assigned(AtDecl) then
+    AbortParse;
+  Assert(S is TCSSScript);
+  Assert(AtDecl is TCSSAtDecl);
+  DLListInsertTail(@S.ContainedListHead, @AtDecl.SiblingListEntry);
+end;
+
+procedure T-->Grammar<--.InsertFuncBodyIntoAtom(A: TCSSAtom; B: TCSSFuncBody);
+begin
+  if not Assigned(A) or not Assigned(B) then
+    AbortParse;
+  Assert(A is TCSSAtom);
+  Assert(B is TCSSFuncBody);
+  Assert(A.AtomType = atFunc);
+  DLListInsertTail(@A.ContainedListHead, @B.SiblingListEntry);
+end;
+
+procedure T-->Grammar<--.InsertExprIntoExpr(E1, E2: TCSSExpr);
+begin
+  if not Assigned(E1) or not Assigned(E2) then
+    AbortParse;
+  Assert(E1 is TCSSExpr);
+  Assert(E2 is TCSSExpr);
+  DLListInsertTail(@E1.ContainedListHead, @E2.SiblingListEntry);
+end;
+
+procedure T-->Grammar<--.InsertFuncBodyIntoFuncBody(B1, B2: TCSSFuncBody);
+begin
+  if not Assigned(B1) or not Assigned(B2) then
+    AbortParse;
+  Assert(B1 is TCSSFuncBody);
+  Assert(B2 is TCSSFuncBody);
+  DLListInsertTail(@B1.ContainedListHead, @B2.SiblingListEntry);
+end;
+
+procedure T-->Grammar<--.InsertFuncBodyIntoSelector(S: TCSSSelector; B: TCSSFuncBody);
+begin
+  if not Assigned(S) or not Assigned(B) then
+    AbortParse;
+  Assert(S is TCSSSelector);
+  Assert(B is TCSSFuncBody);
+  DLListInsertTail(@S.ContainedListHead, @B.SiblingListEntry);
+end;
+
+procedure T-->Grammar<--.InsertSelectorIntoSelector(S1, S2: TCSSSelector);
+begin
+  if not Assigned(S1) or not Assigned(S2) then
+    AbortParse;
+  Assert(S1 is TCSSSelector);
+  Assert(S2 is TCSSSelector);
+  DLListInsertTail(@S1.ContainedListHead, @S2.SiblingListEntry);
+end;
+
+procedure T-->Grammar<--.InsertValIntoDecl(D: TCSSDeclaration; V: TCSSExpr);
+begin
+  if not Assigned(D) or not Assigned(V) then
+    AbortParse;
+  Assert(D is TCSSDeclaration);
+  Assert(V is TCSSExpr);
+  DLListInsertTail(@D.ContainedListHead, @V.SiblingListEntry);
+end;
+
+procedure T-->Grammar<--.InsertAtDeclIntoDecl(D:TCSSDeclaration; AD: TCSSAtDecl);
+begin
+  if not Assigned(D) or not Assigned(AD) then
+    AbortParse;
+  Assert(D is TCSSDeclaration);
+  Assert(AD is TCSSAtDecl);
+  DLListInsertTail(@D.ContainedListHead, @AD.SiblingListEntry);
+end;
+
+procedure T-->Grammar<--.InsertListIntoAtDecl(AD: TCSSAtDecl; L:TCSSList);
+begin
+  if not Assigned(AD) or not Assigned(L) then
+    AbortParse;
+  Assert(AD is TCSSAtDecl);
+  Assert(L is TCSSList);
+  DLListInsertTail(@AD.ContainedListHead, @L.SiblingListEntry);
+end;
+
+procedure T-->Grammar<--.InsertRulesetIntoAtDecl(AD: TCSSAtDecl; RS: TCSSAtDecl);
+begin
+  if not Assigned(AD) or not Assigned(RS) then
+    AbortParse;
+  Assert(AD is TCSSAtDecl);
+  Assert(RS is TCSSAtDecl);
+  DLListInsertTail(@AD.ContainedListHead, @RS.SiblingListEntry);
+end;
+
+procedure T-->Grammar<--.InsertAtomIntoAtDecl(AD: TCSSAtDecl; A: TCSSAtom);
+begin
+  if not Assigned(AD) or not Assigned(A) then
+    AbortParse;
+  Assert(AD is TCSSAtDecl);
+  Assert(A is TCSSAtom);
+  DLListInsertTail(@AD.ContainedListHead, @A.SiblingListEntry);
+end;
+
+procedure T-->Grammar<--.InsertDeclIntoList(L: TCSSList; D: TCSSDeclaration);
+begin
+  if not Assigned(L) or not Assigned(D) then
+    AbortParse;
+  Assert(L is TCSSList);
+  Assert(D is TCSSDeclaration);
+  Assert((L.ListType = cltRulesetDeclList) or (L.ListType = cltMediaList));
+  DLListInsertTail(@L.ContainedListHead, @D.SiblingListEntry);
+end;
+
+procedure T-->Grammar<--.InsertSelectorIntoList(L: TCSSList; S: TCSSSelector);
+begin
+  if not Assigned(L) or not Assigned(S) then
+    AbortParse;
+  Assert(L is TCSSList);
+  Assert(S is TCSSSelector);
+  Assert(L.Listtype = cltSelectorList);
+  DLListInsertTail(@L.ContainedListHead, @S.SiblingListEntry);
+end;
+
+CHARACTERS
+
+  cr            = CHR(13) .
+  lf            = CHR(10) .
+  tab           = CHR(9) .
+  dquot         = CHR(34) .
+  squot         = "'" .
+  backslash     = "\" .
+  dqChar = ANY - dquot - lf - cr - backslash .
+  urldqChar = ANY - dquot - lf - cr .
+  urlsqChar = ANY - squot - lf - cr .
+  urlnqCharFirst = ANY - lf - cr - ")" - dquot - squot .
+  urlnqChar = ANY - lf - cr - ")" .
+  sqChar = ANY - squot - lf - cr - backslash .
+  nonascii      = CHR(128)..CHR(255) .
+  digit = "0123456789" .
+  hexDigit = "0123456789abcdefABCDEF" .
+  letter = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_" .
+  identNonLeader = "-" .
+  scEsc = ANY - cr - lf - hexDigit .
+  whitespace = cr + lf + tab + " " .
+
+TOKENS
+  CDO           = "<!--" .
+  CDC           = ["//"] "-->" .
+  INCLUDES      = "~=" .
+  DASHMATCH     = "|=" .
+
+  STRING        =
+      dquot
+      {
+        dqChar //String char.
+        |
+        (
+          "\" //Escape sequence.
+          (
+            (
+               hexDigit [ hexDigit [ hexDigit [ hexDigit [ hexDigit  [ hexDigit ] ] ] ] ]
+            )
+            |
+            scEsc
+          )
+        )
+      }
+      dquot
+      |
+      squot
+      {
+        sqChar //String char.
+        |
+        (
+          "\" //Escape sequence.
+          (
+            (
+               hexDigit [ hexDigit [ hexDigit [ hexDigit [ hexDigit  [ hexDigit ] ] ] ] ]
+            )
+            |
+            scEsc
+          )
+        )
+      }
+      squot
+      .
+
+  URI =
+      "url("
+      (
+      dquot
+      {
+        urldqChar //String char.
+        |
+        (
+          "\" //Escape sequence.
+          (
+            (
+               hexDigit [ hexDigit [ hexDigit [ hexDigit [ hexDigit  [ hexDigit ] ] ] ] ]
+            )
+            |
+            scEsc
+          )
+        )
+      }
+      dquot
+      |
+      squot
+      {
+        urlsqChar //String char.
+        |
+        (
+          "\" //Escape sequence.
+          (
+            (
+               hexDigit [ hexDigit [ hexDigit [ hexDigit [ hexDigit  [ hexDigit ] ] ] ] ]
+            )
+            |
+            scEsc
+          )
+        )
+      }
+      squot
+      |
+        urlnqCharFirst
+        { urlnqChar }
+      )
+      ")"
+      .
+
+
+  IDENT =
+        (
+          "--"
+          |
+          (
+            [ ("-" | "*") ]
+            (
+              (letter | nonascii)
+              |
+              "\" //Escape sequence.
+              (
+                (
+                  hexDigit [ hexDigit [ hexDigit [ hexDigit [ hexDigit  [ hexDigit ] ] ] ] ]
+                )
+                |
+                scEsc
+              )
+            )
+          )
+        )
+        {
+          (
+            (letter | digit | nonascii | identNonLeader)
+            |
+            "\" //Escape sequence.
+            (
+              (
+                hexDigit [ hexDigit [ hexDigit [ hexDigit [ hexDigit  [ hexDigit ] ] ] ] ]
+              )
+              |
+              scEsc
+            )
+          )
+        }
+        .
+
+  FUNC =
+        (
+          "--"
+          |
+          (
+            [ ("-" | "*") ]
+            (
+              (letter | nonascii)
+              |
+              "\" //Escape sequence.
+              (
+                (
+                  hexDigit [ hexDigit [ hexDigit [ hexDigit [ hexDigit  [ hexDigit ] ] ] ] ]
+                )
+                |
+                scEsc
+              )
+            )
+          )
+        )
+        {
+          (
+            (letter | digit | nonascii | identNonLeader)
+            |
+            "\" //Escape sequence.
+            (
+              (
+                hexDigit [ hexDigit [ hexDigit [ hexDigit [ hexDigit  [ hexDigit ] ] ] ] ]
+              )
+              |
+              scEsc
+            )
+          )
+        }
+        "("
+        .
+
+  EMS   =
+        (  //Decimal or real number.
+          ( ( digit { digit }
+            [ "." digit { digit } ] )
+            |
+            ( "." digit { digit } )
+          )
+          [ ( "e" | "E" ) [ "-" | "+" ] digit { digit } ]
+        )
+        //Followed by (need to do case sensitivity)
+        (
+          "em"
+          |"ems"
+          | "rem"
+        )
+        .
+
+  EXS   =
+        (  //Decimal or real number.
+          ( ( digit { digit }
+            [ "." digit { digit } ] )
+            |
+            ( "." digit { digit } )
+          )
+          [ ( "e" | "E" ) [ "-" | "+" ] digit { digit } ]
+        )
+        //Followed by (need to do case sensitivity)
+        (
+          "ex"
+          |"exs"
+        )
+        .
+
+  LENGTH =
+        (  //Decimal or real number.
+          ( ( digit { digit }
+            [ "." digit { digit } ] )
+            |
+            ( "." digit { digit } )
+          )
+          [ ( "e" | "E" ) [ "-" | "+" ] digit { digit } ]
+        )
+        //Followed by (need to do case sensitivity)
+        (
+          "px"
+          |
+          "cm"
+          |
+          "mm"
+          |
+          "pt"
+          |
+          "pc"
+          |
+          "in"
+        )
+        [ //TODO - work out what this is for.
+          "\0/"
+        ]
+        .
+
+  RESOLUTION =
+        (  //Decimal or real number.
+          ( ( digit { digit }
+            [ "." digit { digit } ] )
+            |
+            ( "." digit { digit } )
+          )
+          [ ( "e" | "E" ) [ "-" | "+" ] digit { digit } ]
+        )
+        //Followed by (need to do case sensitivity)
+        (
+          "dpi"
+          |
+          "dppx"
+        )
+        [ //TODO - work out what this is for.
+          "\0/"
+        ]
+        .
+
+
+  ANGLE =
+        (  //Decimal or real number.
+          ( ( digit { digit }
+            [ "." digit { digit } ] )
+            |
+            ( "." digit { digit } )
+          )
+          [ ( "e" | "E" ) [ "-" | "+" ] digit { digit } ]
+        )
+        //Followed by (need to do case sensitivity)
+        (
+          "deg"
+          |
+          "rad"
+          |
+          "grad"
+        )
+        .
+
+  TIME =
+        (  //Decimal or real number.
+          ( ( digit { digit }
+            [ "." digit { digit } ] )
+            |
+            ( "." digit { digit } )
+          )
+          [ ( "e" | "E" ) [ "-" | "+" ] digit { digit } ]
+        )
+        //Followed by (need to do case sensitivity)
+        (
+          "ms"
+          |
+          "s"
+        )
+        .
+
+  FREQ =
+        (  //Decimal or real number.
+          ( ( digit { digit }
+            [ "." digit { digit } ] )
+            |
+            ( "." digit { digit } )
+          )
+          [ ( "e" | "E" ) [ "-" | "+" ] digit { digit } ]
+        )
+        //Followed by (need to do case sensitivity)
+        (
+          "khz"
+          |
+          "hz"
+        )
+        .
+  PERCENTAGE =
+        (  //Decimal or real number.
+          ( ( digit { digit }
+            [ "." digit { digit } ] )
+            |
+            ( "." digit { digit } )
+          )
+          [ ( "e" | "E" ) [ "-" | "+" ] digit { digit } ]
+        )
+        //Followed by (need to do case sensitivity)
+        (
+          "%"
+        )
+        .
+
+  NUMBER =
+        (  //Decimal or real number.
+          ( ( digit { digit }
+            [ "." digit { digit } ] )
+            |
+            ( "." digit { digit } )
+          )
+          [ ( "e" | "E" ) [ "-" | "+" ] digit { digit } ]
+        )
+        [ //TODO - work out what this is for.
+          "\0/"
+        ]
+        .
+
+HASH =
+        "#"
+        {
+          (
+            (letter | digit | nonascii | identNonLeader)
+            |
+            "\" //Escape sequence.
+            (
+              (
+                hexDigit [ hexDigit [ hexDigit [ hexDigit [ hexDigit  [ hexDigit ] ] ] ] ]
+              )
+              |
+              scEsc
+            )
+          )
+        }
+        .
+
+  IMPORTANT_SYM = "!important" .
+  S = whitespace .
+  PAGE_SYM = "@page" .
+  MEDIA_SYM = "@media" .
+  IMPORT_SYM = "@import" .
+  CHARSET_SYM = "@charset" .
+  FONT_FACE_SYM = "@font-face" .
+  WEBKIT_KEYFRAMES_SYM = "@-webkit-keyframes" .
+  KEYFRAMES_SYM = "@keyframes" .
+
+COMMENTS FROM "/*" TO "*/"
+
+PRODUCTIONS
+
+CSSGrammar DESCRIPTION "CSSGrammar"
+                        (. var Sc: T-->Grammar<--Scanner; .)
+  =
+                        (. FParseResult := TCSSScript.CreateWithTracker(
+                             FParseTracker as TTracker); .)
+    stylesheet<FParseResult as TCSSScript>
+    (
+      "<"                 (. //Trailing HTML in inline script: </script>
+                             Sc := (Scanner as T-->Grammar<--Scanner);
+                             StreamPartRead := Sc.BufferPosition;
+                          .)
+      |
+      EOF                  //Actual end of file.
+    )
+  .
+
+stylesheet<S: TCSSScript>
+                                        (. var AtDecl: TCSSAtDecl; .)
+  =
+  [ CHARSET_SYM S STRING ";" ]
+    {S|CDO|CDC}
+    {
+      import<AtDecl>                    (. InsertAtDeclInScript(S, AtDecl); .)
+      { CDO {S} | CDC {S} }
+    }
+    {
+      (
+        ruleset<AtDecl>
+        |
+        media<AtDecl>
+        |
+        page<AtDecl>
+        |
+        font<AtDecl>
+      )
+                                        (. InsertAtDeclInScript(S, AtDecl); .)
+      { CDO {S} | CDC {S} }
+    }
+  .
+
+import<out AtDecl: TCSSAtDecl>
+                                        (. var List: TCSSList;
+                                           var Atom: TCSSAtom; .)
+  =
+                                        (. AtDecl := TCSSAtDecl.CreateWithTracker(ParseTracker as TTracker); .)
+                                        (. List := nil; Atom := nil; .)
+    IMPORT_SYM {S}                      (. AtDecl.AtDeclType := catImport; .)
+    (
+      _STRING<Atom>
+      |
+      _URI<Atom>
+    )
+                                        (. if Assigned(Atom) then InsertAtomIntoAtDecl(AtDecl, Atom); .)
+    {S}
+    [
+      media_list<List>
+                                        (. InsertListIntoAtDecl(AtDecl, List); .)
+    ]
+    ";" {S}
+  .
+
+media<out AtDecl: TCSSAtDecl>
+                                        (. var List: TCSSList;
+                                               Ruleset: TCSSAtDecl; .)
+  =
+                                        (. AtDecl := TCSSAtDecl.CreateWithTracker(ParseTracker as TTRacker); .)
+                                        (. List := nil; Ruleset := nil; .)
+    (
+      MEDIA_SYM                         (. AtDecl.AtDeclType := catMedia; .)
+      |
+      WEBKIT_KEYFRAMES_SYM              (. AtDecl.AtDeclType := catWebkitKeyframes; .)
+      |
+      KEYFRAMES_SYM                     (. AtDecl.AtDeclType := catKeyframes; .)
+    )
+    {S}
+    media_list<List>
+                                        (. InsertListIntoAtDecl(AtDecl, List); .)
+    "{"
+    {S}
+    {
+      ruleset<Ruleset>
+                                        (. InsertRulesetIntoAtDecl(AtDecl, Ruleset); .)
+    }
+    "}"
+    {S}
+  .
+
+inner_media_decl<out AtDecl: TCSSAtDecl>
+                                        (. var List: TCSSList;
+                                               Ruleset: TCSSAtDecl;
+                                               Decl: TCSSDeclaration; .)
+  =
+                                        (. AtDecl := TCSSAtDecl.CreateWithTracker(ParseTracker as TTRacker); .)
+                                        (. List := nil; Ruleset := nil; Decl := nil; .)
+    (
+      MEDIA_SYM                         (. AtDecl.AtDeclType := catMedia; .)
+      |
+      WEBKIT_KEYFRAMES_SYM              (. AtDecl.AtDeclType := catWebkitKeyframes; .)
+      |
+      KEYFRAMES_SYM                     (. AtDecl.AtDeclType := catKeyframes; .)
+    )
+    {S}
+    media_list<List>
+                                        (. InsertListIntoAtDecl(AtDecl, List); .)
+    "{"
+                                        (. Ruleset := TCSSAtDecl.CreateWithTracker(FParseTracker as TTracker);
+                                           Ruleset.AtDeclType := catRuleset;
+                                           List := TCSSList.CreateWithTracker(ParseTracker as TTRacker);
+                                           List.ListType := cltMediaList;
+                                           InsertListIntoAtDecl(Ruleset, List); .)
+      {S}
+      [
+        declaration<Decl>
+                                        (. InsertDeclIntoList(List, Decl); .)
+      ]
+      {
+        ";" {S}
+        [
+          declaration<Decl>
+                                        (. InsertDeclIntoList(List, Decl); .)
+        ]
+      }
+                                        (. InsertRulesetIntoAtDecl(AtDecl, Ruleset); .)
+    "}" {S}
+  .
+
+page<out AtDecl: TCSSAtDecl>
+                                        (. var  List: TCSSList;
+                                                Decl: TCSSDeclaration;
+                                                A: TCSSAtom; .)
+  =
+                                        (. AtDecl := TCSSAtDecl.CreateWithTracker(ParseTracker as TTRacker);
+                                           Decl := nil; A := nil;
+                                         .)
+    PAGE_SYM                            (. AtDecl.AtDeclType := catPage; .)
+    {S}
+    [
+      pseudo_page<A>                    (. InsertAtomIntoAtDecl(AtDecl, A); .)
+    ]
+                                        (. List := TCSSList.CreateWithTracker(ParseTracker as TTracker);
+                                           List.ListType := cltRulesetDeclList; .)
+    "{"
+      {S}
+      [
+        declaration<Decl>
+                                        (. InsertDeclIntoList(List, Decl); .)
+      ]
+      {
+        ";"
+        {S}
+        [
+          declaration<Decl>
+                                        (. InsertDeclIntoList(List, Decl); .)
+        ]
+      }
+    "}"
+    {S}
+  .
+
+font<out AtDecl: TCSSAtDecl>
+                                        (. var  List: TCSSList;
+                                                Decl: TCSSDeclaration; .)
+  =
+                                        (. AtDecl := TCSSAtDecl.CreateWithTracker(ParseTracker as TTRacker);
+                                           Decl := nil; .)
+    FONT_FACE_SYM                       (. AtDecl.AtDeclType := catFont; .)
+    {S}
+                                        (. List := TCSSList.CreateWithTracker(ParseTracker as TTracker);
+                                           List.ListType := cltRulesetDeclList; .)
+    "{"
+      {S}
+      [
+        declaration<Decl>
+                                        (. InsertDeclIntoList(List, Decl); .)
+      ]
+      {
+        ";"
+        {S}
+        [
+          declaration<Decl>
+                                        (. InsertDeclIntoList(List, Decl); .)
+        ]
+      }
+    "}"
+                                        (. InsertListIntoAtDecl(AtDecl, List); .)
+    {S}
+  .
+
+ruleset<out AtDecl: TCSSAtDecl>
+                                        (. var List: TCSSList;
+                                               Sel: TCSSSelector;
+                                               Atom: TCSSAtom;
+                                               Decl: TCSSDeclaration; .)
+  =
+                                        (. AtDecl := TCSSAtDecl.CreateWithTracker(ParseTracker as TTRacker);
+                                           AtDecl.AtDeclType := catRuleset;
+                                           Sel := nil; Atom := nil; Decl := nil; .)
+    (
+                                        (. List := TCSSList.CreateWithTracker(ParseTracker as TTracker);
+                                           List.ListType := cltSelectorList; .)
+      (
+        selector<Sel>
+                                        (. InsertSelectorIntoList(List, Sel); .)
+        {
+          "," {S}
+          selector<Sel>
+                                        (. InsertSelectorIntoList(List, Sel); .)
+        }
+      )
+                                        (. InsertListIntoAtDecl(AtDecl, List); .)
+      |
+      _NUMBER<Atom>
+                                        (. InsertAtomIntoAtDecl(AtDecl, Atom); .)
+      {S}
+      |
+      _PERCENTAGE<Atom>
+                                        (. InsertAtomIntoAtDecl(AtDecl, Atom); .)
+      {S}
+    )
+                                        (. List := TCSSList.CreateWithTracker(ParseTracker as TTracker);
+                                           List.ListType := cltRulesetDeclList; .)
+    "{"
+      {S}
+      [
+        declaration<Decl>
+                                        (. InsertDeclIntoList(List, Decl); .)
+      ]
+      {
+        ";" {S}
+        [
+          declaration<Decl>
+                                        (. InsertDeclIntoList(List, Decl); .)
+        ]
+      }
+    "}"
+                                        (. InsertListIntoAtDecl(AtDecl, List); .)
+    {S}
+  .
+
+media_list<out L: TCSSList>
+                                        (. var Decl: TCSSDeclaration; .)
+  =
+                                        (. L := TCSSList.CreateWithTracker(ParseTracker as TTracker);
+                                           Decl := nil; .)
+                                        (. L.ListType := cltMediaList; .)
+    medium<Decl>
+                                        (. InsertDeclIntoList(L, Decl); .)
+    {
+      [","] {S}
+      medium<Decl>                      (. InsertDeclIntoList(L, Decl); .)
+    }
+  .
+
+medium<out Decl: TCSSDeclaration>
+                                        (. var A: TCSSAtom; .)
+  =
+    IDENT
+                                        (.
+                                           Decl := TCSSDeclaration.CreateWithTracker(ParseTracker as TTracker);
+                                           Decl.DeclType := cdtDecl;
+                                           A := TCSSAtom.CreateWithTracker(ParseTracker as TTracker);
+                                           A.ExprType := cetAtom;
+                                           A.AtomType := atIdent;
+                                           A.StrData := LexString;
+                                           InsertValIntoDecl(Decl, A);
+                                        .)
+    {S}
+    |
+    "("
+      {S}
+      declaration<Decl>
+    ")"
+    {S}
+  .
+
+pseudo_page<out A: TCSSAtom>
+  =
+    ":" IDENT                           (. A := TCSSAtom.CreateWithTracker(ParseTracker as TTracker);
+                                           A.ExprType := cetAtom;
+                                           A.AtomType := atPseudoPage;
+                                           A.StrData := LexString; .)
+    {S}
+  .
+
+combinator<out S: TCSSSelector>
+  =
+                                        (. S := TCSSSelector.CreateWithTracker(ParseTracker as TTracker); .)
+  (
+      "+" {S}                           (. S.SelectorType := cstCombinatorPlus; .)
+    | ">" {S}                           (. S.SelectorType := cstCombinatorGreater; .)
+    | "~" {S}                           (. S.SelectorType := cstCombinatorTilde; .)
+  )
+  .
+
+selector<out S: TCSSSelector>
+                                        (. var S1, S2: TCSSSelector; .)
+  =
+                                        (. S1 := nil; S2 := nil; .)
+    simple_selector<S>
+    [
+      combinator<S1>
+      selector<S2>
+                                        (. InsertSelectorIntoSelector(S1, S);
+                                           InsertSelectorIntoSelector(S1, S2);
+                                           S := S1; .)
+
+      |
+      S{S}
+      [
+        [
+          combinator<S1>
+        ]
+        selector<S2>
+                                        (. if Assigned(S1) then
+                                           begin
+                                                InsertSelectorIntoSelector(S1, S);
+                                                InsertSelectorIntoSelector(S1, S2);
+                                                S := S1;
+                                           end
+                                           else
+                                           begin
+                                             S1 := TCSSSelector.CreateWithTracker(ParseTracker as TTracker);
+                                             S1.SelectorType := cstTrailing;
+                                             InsertSelectorIntoSelector(S1, S);
+                                             InsertSelectorIntoSelector(S1, S2);
+                                             S := S1;
+                                           end; .)
+      ]
+    ]
+  .
+
+simple_selector<out S: TCSSSelector>
+                                        (. var S1: TCSSSelector; ST: TCSSStringSelector;.)
+  =
+                                        (. S := nil; S1 := nil; ST := nil; .)
+    (
+      element_name<ST>                  (. S := ST; .)
+      |
+      (
+        HASH
+                                        (. S := TCSSStringSelector.CreateWithTracker(ParseTracker as TTracker);
+                                           S.SelectorType := cstStringSelector;
+                                           (S as TCSSStringSelector).StringSelectorType := sstHash;
+                                           (S as TCSSStringSelector).StrData := LexString;
+                                           .)
+        | class<ST>                     (. S := ST; .)
+        | attrib<S>
+        | pseudo<S>
+      )
+    )
+    {
+      HASH
+                                        (. S1 := TCSSStringSelector.CreateWithTracker(ParseTracker as TTracker);
+                                           S1.SelectorType := cstStringSelector;
+                                           (S1 as TCSSStringSelector).StringSelectorType := sstHash;
+                                           (S1 as TCSSStringSelector).StrData := LexString;
+                                           if Assigned(S) then
+                                             InsertSelectorIntoSelector(S1,S);
+                                           S := S1;
+                                        .)
+      | class<ST>                       (. S1 := ST; .)
+                                        (. if Assigned(S) then
+                                             InsertSelectorIntoSelector(S1,S);
+                                           S := S1; .)
+      | attrib<S1>
+                                        (. if Assigned(S) then
+                                             InsertSelectorIntoSelector(S1,S);
+                                           S := S1; .)
+      | pseudo<S1>
+                                        (. if Assigned(S) then
+                                             InsertSelectorIntoSelector(S1,S);
+                                           S := S1; .)
+    }
+  .
+
+class<out S: TCSSStringSelector>
+  =
+    "."
+    IDENT
+                                        (. S := TCSSStringSelector.CreateWithTracker(ParseTracker as TTracker);
+                                           S.SelectorType := cstStringSelector;
+                                           (S as TCSSStringSelector).StringSelectorType := sstClass; .)
+                                        (. (S as TCSSStringSelector).StrData := LexString; .)
+  .
+
+element_name<out S: TCSSStringSelector>
+  =
+                                        (. S := TCSSStringSelector.CreateWithTracker(ParseTracker as TTracker);
+                                           (S as TCSSStringSelector).SelectorType := cstStringSelector;
+                                           (S as TCSSStringSelector).StringSelectorType := sstIdent; .)
+    (
+     IDENT                              (. S.StrData := LexString; .)
+     |
+     "*"                                (. S.IdentStarred := true; .)
+    )
+  .
+
+attrib<out S: TCSSSelector>
+                                        (. var S2, S3, S4: TCSSSelector; .)
+  =
+                                        (. S := TCSSSelector.CreateWithTracker(ParseTracker as TTracker);
+                                           S.SelectorType := cstAttribSelector;
+                                           S2 := nil; S3 := nil; S4 := nil;
+                                        .)
+     "["
+     {S}
+     IDENT
+                                        (. S2 := TCSSStringSelector.CreateWithTracker(ParseTracker as TTracker);
+                                           S2.SelectorType := cstStringSelector;
+                                           (S2 as TCSSStringSelector).StringSelectorType := sstIdent;
+                                           (S2 as TCSSStringSelector).StrData := LexString; .)
+     [
+       "*"                              (. (S2 as TCSSStringSelector).IdentStarred := true; .)
+     ]
+     {S}
+     [
+                                        (. S3 := TCSSSelector.CreateWithTracker(ParseTracker as TTRacker); .)
+       (
+         "="                            (. S3.SelectorType := cstCombinatorEquals; .)
+         | INCLUDES                     (. S3.SelectorType := cstCombinatorIncludes; .)
+         | DASHMATCH                    (. S3.SelectorType := cstCombinatorDashmatch; .)
+       ) {S}
+                                        (. S4 := TCSSStringSelector.CreateWithTracker(ParseTracker as TTracker);
+                                           S4.SelectorType := cstStringSelector; .)
+       (
+         IDENT
+                                        (.   (S4 as TCSSStringSelector).StringSelectorType := sstIdent;
+                                             (S4 as TCSSStringSelector).StrData := LexString; .)
+         | STRING
+                                        (.   (S4 as TCSSStringSelector).StringSelectorType := sstString;
+                                             (S4 as TCSSStringSelector).StrData := LexString; .)
+       ) {S}
+                                        (. InsertSelectorIntoSelector(S3, S2);
+                                           InsertSelectorIntoSelector(S3, S4);
+                                           S2 := S3; .)
+     ]
+     "]"
+                                        (. InsertSelectorIntoSelector(S, S2); .)
+  .
+
+pseudo<out S: TCSSSelector>
+                                        (. var S2: TCSSStringSelector; B: TCSSFuncBody; .)
+  =
+                                        (. S := TCSSSelector.CreateWithTracker(ParseTracker as TTracker);
+                                           S.SelectorType := cstPseudo;
+                                           S2 := nil; B := nil;
+                                        .)
+    ":"
+    [
+      IDENT
+                                        (. S2 := TCSSStringSelector.CreateWithTracker(ParseTracker as TTracker);
+                                           S2.SelectorType := cstSimple;
+                                           (S2 as TCSSStringSelector).StringSelectorType := sstIdent;
+                                           (S2 as TCSSStringSelector).StrData := LexString; .)
+      |
+      (
+        FUNC
+                                        (. S2 := TCSSStringSelector.CreateWithTracker(ParseTracker as TTracker);
+                                           S2.SelectorType := cstSimple;
+                                           (S2 as TCSSStringSelector).StringSelectorType := sstFunc;
+                                           (S2 as TCSSStringSelector).StrData := LexString; .)
+        funcbody<B>                     (. InsertFuncBodyIntoSelector(S2,B); .)
+        ")"
+      )
+    ]
+                                        (. if Assigned(S2) then InsertSelectorIntoSelector(S,S2); .)
+  .
+
+declaration<out D: TCSSDeclaration>
+                                        (. var LBL, Val: TCSSExpr;
+                                               AtDecl: TCSSAtDecl; .)
+  =
+                                        (. LBL := nil; Val := nil; AtDecl := nil;
+                                           D := TCSSDeclaration.CreateWithTracker(ParseTracker as TTracker);
+                                         .)
+    (
+      (                                 (. D.DeclType := cdtDecl; .)
+        expr<Val>
+        {
+          ":"                             (. LBL := Val;
+                                           Val := nil;
+                                           InsertValIntoDecl(D, LBL);
+                                           //TODO: check preceding expr is bare ident.
+                                        .)
+          {S}
+          expr<Val>
+        }
+                                        (. if Assigned(Val) then
+                                             InsertValIntoDecl(D, Val); .)
+        [
+          IMPORTANT_SYM {S}               (. D.HasPriority := true; .)
+        ]
+      )
+      |
+      (                                 (. D.DeclType := cdtNestedMedia; .)
+        inner_media_decl<AtDecl>        (. InsertAtDeclIntoDecl(D, AtDecl); .)
+      )
+    )
+  .
+
+operator<out E: TCSSExpr>
+  =
+                                        (. E := TCSSExpr.CreateWithTracker(ParseTracker as TTracker); .)
+    (
+      "/" {S}                           (. E.ExprType := cetSlashOperator; .)
+      |
+      "," {S}                           (. E.ExprType := cetCommaOperator; .)
+    )
+  .
+
+unary_operator<out E: TCSSExpr>
+  =
+                                        (. E := TCSSExpr.CreateWithTracker(ParseTracker as TTracker); .)
+    (
+      "-"                               (. E.ExprType := cetPlusOperator; .)
+      |
+      "+"                               (. E.ExprType := cetMinusOperator; .)
+    )
+  .
+
+term<out E: TCSSExpr>
+                                        (. var E2: TCSSExpr; .)
+  =
+                                        (. E := nil; E2 := nil; .)
+    [
+      unary_operator<E2>
+    ]
+    bare_term_qualifiable<E>
+                                        (. if Assigned(E2) then
+                                           begin
+                                             InsertExprIntoExpr(E2, E);
+                                             E := E2;
+                                           end; .)
+  .
+
+expr<out E: TCSSExpr>
+                                        (. var E2, E3: TCSSExpr; .)
+  =
+                                        (. E := nil; E2 := nil; E3 := nil; .)
+  term<E>
+  {
+                                        (. E2 := nil; .)
+    [
+      operator<E2>
+    ]
+    term<E3>
+                                        (. if not Assigned(E2) then
+                                           begin
+                                             E2 := TCSSExpr.CreateWithTracker(ParseTracker as TTracker);
+                                             E2.ExprType := cetTrailing;
+                                           end;
+                                           InsertExprIntoExpr(E2, E);
+                                           InsertExprIntoExpr(E2, E3);
+                                           E := E2;
+                                        .)
+  }
+  .
+
+bare_term_qualifiable<out E: TCSSExpr>
+                                        (. var A: TCSSAtom; E2, E3: TCSSExpr;.)
+  =
+                                        (. E3 := nil; .)
+    (
+      IDENT                             (. A := TCSSAtom.CreateWithTracker(ParseTracker as TTracker);
+                                           A.ExprType := cetAtom;
+                                           A.AtomType := atIdent;
+                                           A.StrData := LexString; .)
+      (
+        "."                             (. E2 := TCSSExpr.CreateWithTracker(ParseTracker as TTracker);
+                                           E2.ExprType := cetDotOperator; .)
+        bare_term_qualifiable<E3>
+                                        (. InsertExprIntoExpr(E2, A);
+                                           InsertExprIntoExpr(E2, E3);
+                                           E := E2; .)
+        |
+        {S}                             (. E := A; .)
+      )
+    )
+    |
+    bare_term<A>                        (. E := A; .)
+  .
+
+bare_term<out A: TCSSAtom>
+  =
+  (
+                                        (. A := TCSSAtom.CreateWithTracker(ParseTracker as TTracker);
+                                           A.ExprType := cetAtom;
+                                           A.StrData := LexString;
+                                        .)
+    (
+      LENGTH
+                                        (. A.AtomType := atLength;
+                                           A.StrData := LexString;
+                                        .)
+      {S}
+    | EMS
+                                        (. A.AtomType := atEms;
+                                           A.StrData := LexString;
+                                        .)
+      {S}
+    | EXS
+                                        (. A.AtomType := atExs;
+                                           A.StrData := LexString;
+                                        .)
+      {S}
+    | ANGLE
+                                        (. A.AtomType := atAngle;
+                                           A.StrData := LexString;
+                                        .)
+      {S}
+    | TIME
+                                        (. A.AtomType := atTime;
+                                           A.StrData := LexString;
+                                        .)
+      {S}
+    | FREQ
+                                        (. A.AtomType := atFreq;
+                                           A.StrData := LexString;
+                                        .)
+      {S}
+    | RESOLUTION
+                                        (. A.AtomType := atResolution;
+                                           A.StrData := LexString;
+                                        .)
+      {S}
+    )
+  )
+  |
+                                        (. A := nil; .)
+  (
+    _PERCENTAGE<A> {S}
+    | _NUMBER<A> {S}
+    | _STRING<A> {S}
+    | _URI<A> {S}
+    | hexcolor<A>
+    |  _function<A>
+  )
+  .
+
+_function<out A: TCSSAtom>
+                                        (. var B: TCSSFuncBody; .)
+  =
+    FUNC                                (. A := TCSSAtom.CreateWithTracker(ParseTracker as TTracker);
+                                           A.ExprType := cetAtom;
+                                           A.AtomType := atFunc;
+                                           A.StrData := LexString;
+                                           B := nil;
+                                        .)
+    funcbody<B>                         (. InsertFuncBodyIntoAtom(A,B); .)
+    ")"
+    {S}
+  .
+
+funcbody<out B: TCSSFuncBody>
+                                        (. var SubB, SubB2: TCSSFuncBody; .)
+  =
+                                        (. B := TCSSFuncBody.CreateWithTracker(ParseTracker as TTracker);
+                                           B.FuncType := fbtFuncTop; .)
+    {
+      ANY                               (. SubB := TCSSFuncBody.CreateWithTracker(ParseTracker as TTracker);
+                                           SubB.FuncType := fbtFuncText;
+                                           SubB.BodyData := LexString;
+                                           InsertFuncBodyIntoFuncBody(B, SubB);
+                                         .)
+      |
+      FUNC                              (. SubB := TCSSFuncBody.CreateWithTracker(ParseTracker as TTracker);
+                                           SubB.FuncType := fbtSubFunc;
+                                           SubB.SubFuncName := LexString;
+                                           InsertFuncBodyIntoFuncBody(B, SubB);
+                                         .)
+      funcbody<SubB2>                   (. InsertFuncBodyIntoFuncBody(SubB, SubB2); .)
+      ")"
+      |
+                                        (. SubB := TCSSFuncBody.CreateWithTracker(ParseTracker as TTracker);
+                                           SubB.FuncType := fbtSubFunc;
+                                           InsertFuncBodyIntoFuncBody(B, SubB);
+                                         .)
+      "("
+      funcbody<SubB2>                   (. InsertFuncBodyIntoFuncBody(SubB, SubB2); .)
+      ")"
+    }
+  .
+
+/*
+ * There is a constraint on the color that it must
+ * have either 3 or 6 hex-digits (i.e., [0-9a-fA-F])
+ * after the "#"; e.g., "#000" is OK, but "#abcd" is not.
+ */
+hexcolor<out A: TCSSAtom>
+  =
+  HASH
+                                        (. A := TCSSAtom.CreateWithTracker(ParseTracker as TTracker);
+                                           A.ExprType := cetAtom;
+                                           A.AtomType := atHexColor;
+                                           A.StrData := LexString;
+                                        .)
+  {S}
+  .
+
+_STRING<out A: TCSSAtom>
+ =
+   STRING
+                                        (. A := TCSSAtom.CreateWithTracker(ParseTracker as TTracker);
+                                           A.ExprType := cetAtom;
+                                           A.AtomType := atString;
+                                           A.StrData := LexString;
+                                        .)
+ .
+
+_URI<out A: TCSSAtom>
+ =
+   URI
+                                        (. A := TCSSAtom.CreateWithTracker(ParseTracker as TTracker);
+                                           A.ExprType := cetAtom;
+                                           A.AtomType := atUrl;
+                                           A.StrData := LexString;
+                                        .)
+ .
+
+_NUMBER<out A: TCSSAtom>
+ =
+   NUMBER
+                                        (. A := TCSSAtom.CreateWithTracker(ParseTracker as TTracker);
+                                           A.ExprType := cetAtom;
+                                           A.AtomType := atNumber;
+                                           A.StrData := LexString;
+                                        .)
+ .
+
+_PERCENTAGE<out A: TCSSAtom>
+ =
+   PERCENTAGE
+                                        (. A := TCSSAtom.CreateWithTracker(ParseTracker as TTracker);
+                                           A.ExprType := cetAtom;
+                                           A.AtomType := atPercentage;
+                                           A.StrData := LexString;
+                                        .)
+ .
+
+END CSSGrammar.
+

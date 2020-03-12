@@ -1,0 +1,832 @@
+COMPILER TrivXML
+
+DELPHI
+  USES (INTERFACE) SSIntermediates, Trackables, TrivXMLDefs
+  USES (IMPLEMENTATION) IdCoderMIME
+  PRIVATE
+    function MakeIntVal(var Val: TVal): boolean;
+    function MakeIDVal(var Val: TVal): boolean;
+    function MakeRealVal(var Val: TVal): boolean;    
+    function ApplyAttrsToInstance(Inst: TSSIInstance; Attrs: TSSIList): boolean;
+    function ApplyAttrsToProp(Prop: TSSIProperty; Attrs: TSSIList): boolean;
+    function ApplyValToProp(Prop: TSSIProperty; const ValDat: TVal): boolean;
+    function ApplyPListToProp(Prop:TSSIProperty; PList: TSSIList): boolean;
+    function CheckNullPropAllowed(Prop: TSSIProperty):boolean;
+    function UnHashString(InString:AnsiString; var ResString:string):boolean;
+    function StripQuotes(InString: AnsiString): AnsiString;
+    function UnEscapeString(InString:AnsiString):string;
+    function UnMimeBlob(InString:AnsiString): TStream;
+    procedure CheckTG(HeadLen, TrailLen: integer; TagName: AnsiString);
+    procedure CheckTagStart(TagName: AnsiString);
+    procedure CheckTagEnd(TagName: AnsiString);
+    procedure CheckTagPartStart(TagName: AnsiString);
+    procedure SynErrorEx(const errNo : integer; Data: AnsiString);           
+  CREATE
+    FParseTracker := TTracker.Create;
+  DESTROY                                         
+    FParseTracker.Free;
+  ERRORS
+    1000: Result := 'Expected ClassType=<string>, ObjId=<integer>';
+    1001: Result := 'Expected ObjId=<integer>';
+    1002: Result := 'Expected PropName=<name>, Type=<type> [, SubType=<subtype>] [MinVal=<minval>, MaxVal=<maxval>] [MaxStrLen=<maxlen>] [Encoding=<encoding>]';
+    1003: Result := 'This type of property must contain some data.';
+    1004: Result := 'The property data read from the stream does not match its type or is badly encoded.';
+    1005: Result := 'This type of property cannot contain a property list.';
+    1006: Result := 'Conversion error converting string to numeric quantity';
+    1007: Result := 'Expected tag name: ' + Data;
+    1008: Result := 'Bad string quotes';
+END_DELPHI
+
+(* TODO - Get this stuff to work with int64's *)
+
+(* Arbitrary Code *)
+
+{
+
+Copyright © 2020 Martin Harvey <martin_c_harvey@hotmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the “Software”), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.
+
+}
+
+{$WARNINGS OFF}
+
+const
+  S_CTYPE_STR = 'ClassType';
+  S_OBJ_ID = 'ObjId';
+  S_PROP_NAME = 'Name';
+  S_PROP_TYPE = 'Type';
+  S_PROP_SUBTYPE = 'Subtype';
+  S_MIN_VAL = 'MinVal';
+  S_MAX_VAL = 'MaxVal';
+  S_MAX_STRLEN = 'MaxStrLen';
+  S_STR_ENCODE = 'Encoding';
+  S_HASH = '#';
+
+function T-->Grammar<--.MakeIntVal(var Val: TVal): boolean;
+begin
+  if vtInt in Val.ValTypes then
+    result := true
+  else if vtStr in Val.ValTypes then
+  begin
+    try
+      Val.IntVal := StrToInt(String(Val.StrVal));
+      Val.ValTypes := Val.ValTypes + [vtInt];
+      result := true;
+    except
+      on EConvertError do result := false;
+    end;
+  end
+  else
+    result := false;
+end;
+
+//MakeInt64Val not required until we have object ID's
+//over 2^31, or Int64 types with subranges (minval, maxval
+
+function T-->Grammar<--.MakeIDVal(var Val: TVal): boolean;
+var
+  Idx: integer;
+begin
+  if vtID in Val.ValTypes then
+    result := true
+  else if vtStr in Val.ValTypes then
+  begin
+    //Now need to check string follows rules for ID.
+    //ID DESCRIPTION "Identifier" = letter { (letter | digit) } .
+    result := false;
+    for Idx := 1 to Length(Val.StrVal) do
+    begin
+      if (Idx = 1) then
+      begin
+        if not (Val.StrVal[Idx] in ['a'..'z', 'A'..'Z']) then
+          exit;
+      end
+      else
+      begin
+        if not (Val.StrVal[Idx] in ['a'..'z', 'A'..'Z', '0'..'9']) then
+          exit;
+      end;
+    end;
+    result := true;
+    Val.ValTypes := Val.ValTypes + [vtID];
+  end
+  else
+    result := false;
+end;
+
+function T-->Grammar<--.MakeRealVal(var Val: TVal): boolean;
+begin
+  if vtReal in Val.ValTypes then
+    result := true
+  else if (vtInt in Val.ValTypes) or (vtInt64 in Val.ValTypes) then
+  begin
+    Val.ValTypes := Val.ValTypes + [vtReal];
+    Val.RealVal := Val.IntVal;
+    result := true;
+  end
+  else
+    result := false;
+end;
+
+function T-->Grammar<--.ApplyAttrsToInstance(Inst: TSSIInstance; Attrs: TSSIList): boolean;
+var
+  FoundCType: boolean;
+  Idx: integer;
+  Attr: TAttr;
+begin
+  result := false;
+  FoundCType := false;
+  try
+    if not (Assigned(Inst) and Assigned(Attrs)) then exit;
+    for Idx := 0 to Pred(Attrs.Count) do
+    begin
+      Attr := TAttr(Attrs.Items[Idx]);
+      if not Assigned(Attr) then exit;
+      if CompareStr(String(Attr.IdStr), S_CTYPE_STR) = 0 then
+      begin
+        if FoundCType then exit;
+        if not (vtStr in Attr.ValDat.ValTypes) then exit;
+        if Length(Attr.ValDat.StrVal) = 0 then exit;
+        Inst.ClassTypeString := String(Attr.ValDat.StrVal);
+        FoundCType := true;
+      end
+      else if CompareStr(String(Attr.IdStr), S_OBJ_ID) = 0 then
+      begin
+        //Ignore object ID's.
+      end
+      else
+        exit;
+    end;
+  finally
+    Attrs.Free;
+  end;
+  result := FoundCType;
+end;
+
+function T-->Grammar<--.ApplyAttrsToProp(Prop: TSSIProperty; Attrs: TSSIList): boolean;
+var
+  Idx: integer;
+  Attr: TAttr;
+  FoundName, FoundType, FoundSubType,
+  FoundMinVal, FoundMaxVal, FoundMaxLen, FoundStrEncode: boolean;
+  Name: AnsiString;
+  MType, MTIdx: TSSIMajorType;
+  SType, STIdx: TSSIMinorType;
+  StrEnc, SEIdx: TSSIStringEncode;
+  MinVal, MaxVal: Int64; 
+  MaxLen: integer;
+begin
+  result := false;
+  FoundName := false;
+  FoundType := false;
+  FoundSubType := false;
+  FoundMinVal := false;
+  FoundMaxVal := false;
+  FoundMaxLen := false;
+  FoundStrEncode := false;
+  MType := Low(MType);
+  SType := Low(SType);
+  MinVal := 0;
+  MaxVal := 0;
+  MaxLen := 0;
+  try
+    if not (Assigned(Prop) and Assigned(Attrs)) then
+      exit;
+      
+    //First, go though all attrs, and convert to values.
+    for Idx := 0 to Pred(Attrs.Count) do
+    begin
+      Attr := TAttr(Attrs.Items[Idx]);
+      if not Assigned(Attr) then
+        exit;
+      if CompareStr(String(Attr.IdStr), S_PROP_NAME) = 0 then
+      begin
+        if FoundName then exit; 
+        if not (vtStr in Attr.ValDat.ValTypes) then exit;
+        if Length(Attr.ValDat.StrVal) = 0 then exit;
+        Name := Attr.ValDat.StrVal;
+        FoundName := true;  
+      end
+      else if CompareStr(String(Attr.IdStr), S_PROP_TYPE) = 0 then
+      begin
+        if FoundType then exit;
+        if not MakeIDVal(Attr.ValDat) then exit;
+        for MTIdx := Low(MTIdx) to High(MTIdx) do
+        begin
+          if CompareStr(TSSIMajorTypeNames[MTIdx], String(Attr.ValDat.StrVal)) = 0 then
+          begin
+            FoundType := true;
+            MType := MTIdx;
+            break;
+          end;
+        end;
+        if not FoundType then exit;      
+      end
+      else if CompareStr(String(Attr.IdStr), S_PROP_SUBTYPE) = 0 then
+      begin
+        if FoundSubType then exit;
+        if not MakeIDVal(Attr.ValDat) then exit;
+        for STIdx := Low(STIdx) to High(STIdx) do
+        begin
+          if CompareStr(TSSIMinorTypeNames[StIdx], String(Attr.ValDat.StrVal)) = 0 then
+          begin
+            FoundSubtype := true;
+            SType := STIdx;
+            break;
+          end;
+        end;
+        if not FoundSubtype then exit;
+      end
+      else if CompareStr(String(Attr.IdStr), S_MIN_VAL) = 0 then
+      begin
+        if FoundMinVal then exit;
+        if not MakeIntVal(Attr.ValDat) then exit;
+        MinVal := Attr.ValDat.IntVal;
+        FoundMinVal := true; 
+      end
+      else if CompareStr(String(Attr.IdStr), S_MAX_VAL) = 0 then
+      begin
+        if FoundMaxVal then exit;
+        if not MakeIntVal(Attr.ValDat) then exit;
+        MaxVal := Attr.ValDat.IntVal;
+        FoundMaxVal := true;
+      end                   
+      else if CompareStr(String(Attr.IdStr), S_MAX_STRLEN) = 0 then
+      begin
+        if FoundMaxLen then exit;
+        if not MakeIntVal(Attr.ValDat) then exit;
+        if (Attr.ValDat.IntVal < Low(MaxLen)) or (Attr.ValDat.IntVal > High(MaxLen)) then exit;
+        MaxLen := Attr.ValDat.IntVal;
+        FoundMaxLen := true;
+      end
+      else if CompareStr(String(Attr.IdStr), S_STR_ENCODE) = 0 then
+      begin
+        if FoundStrEncode then exit;
+        for SEIdx := Low(SEIdx) to High(SEIdx) do
+        begin
+          if CompareStr(TSSIStringEncodeNames[SEIdx], String(Attr.ValDat.StrVal)) = 0 then
+          begin
+            FoundStrEncode := true;
+            StrEnc := SEIdx;
+            break;
+          end;
+        end;
+        if not FoundStrEncode then exit;                
+      end
+      else exit;
+    end;
+    
+    //Second, take all of those values, consistency check, and apply
+    //to property.
+    if not FoundName then exit;
+    if Length(Name) = 0 then exit;
+    Prop.PropData.PropName := String(Name);
+    //Check that types and subtypes are in order.
+    if not FoundType then exit;
+    //Require a subtype for Ord, Float and string - streaming system checks
+    //the actual subtype in more detail.
+    //However, for other types (int64, rec, array, class) expect no subtype,
+    //or subtype = mitNone. 
+    if MType in [sMajOrd, sMajFloat, sMajStr] then
+    begin
+      if not FoundSubType then exit;
+    end
+    else
+    begin
+      if SType <> mitNone then exit;
+    end;
+    Prop.PropData.PropType := MType;
+    Prop.PropData.PropSubType := SType; 
+    //MaxVal and MinVal ... are optional for ordinals, but if one exists, then
+    //both must exist. Not allowed for other types. Not required for Int64.
+    
+    if MType = sMajOrd then
+    begin
+      if FoundMinVal <> FoundMaxVal then exit;
+      Prop.PropData.LimsApply := FoundMinVal;
+      if FoundMinVal then
+      begin
+        Prop.PropData.MinVal := MinVal;
+        Prop.PropData.MaxVal := MaxVal;
+      end;
+    end
+    else
+    begin
+      if FoundMinVal or FoundMaxVal then exit;
+    end;                                        
+    
+    if MType = sMajStr then
+    begin
+      if (SType = mitShortString) <> FoundMaxLen then
+        exit;
+      if FoundMaxLen then
+        Prop.PropData.MaxStrLen := MaxLen;
+      if FoundStrEncode then
+        Prop.PropData.StrRequiredEncode := StrEnc
+      else
+        Prop.PropData.StrRequiredEncode := scAscii;
+    end
+    else
+    begin
+      if FoundMaxLen or FoundStrEncode then exit;
+    end;
+        
+    //All done!
+    result := true;
+  finally
+    Attrs.Free;
+  end; 
+end;
+
+function T-->Grammar<--.ApplyValToProp(Prop: TSSIProperty; const ValDat: TVal): boolean;
+var
+  ValDatCopy: TVal;
+begin
+  result := false;
+  if not Assigned(Prop) then exit;
+  //Range checking elsewhere, just need to check value is correct basic type.
+  case Prop.PropData.PropType of
+  sMajOrd:
+  begin
+    if not ((vtInt in ValDat.ValTypes) or (vtInt64 in ValDat.ValTypes)) then exit;
+    Prop.PropData.OrdData := ValDat.IntVal;
+  end;
+  sMajStr:
+  begin
+    if not (vtStr in ValDat.ValTypes) then exit;
+    if Prop.PropData.StrRequiredEncode = scHashEnc then
+    begin
+      if not UnHashString(ValDat.StrVal, Prop.PropData.StrData) then
+        exit;
+    end
+    else if Prop.PropData.StrRequiredEncode = scAscii then
+      Prop.PropData.StrData := UnEscapeString(ValDat.StrVal)
+    else
+      exit;
+  end;
+  sMajBlob:
+  begin
+    if not (vtStr in ValDat.ValTypes) then exit;
+    Assert(not Assigned(Prop.PropData.BlobData));
+    Prop.PropData.BlobData := UnMimeBlob(ValDat.StrVal);
+    if not Assigned(Prop.PropData.BlobData) then
+      exit;
+  end;
+  sMajFloat:
+  begin
+    ValDatCopy := ValDat;
+    if not MakeRealVal(ValDatCopy) then exit;
+    Prop.PropData.FloatData := ValDatCopy.RealVal;
+  end;
+  sMajClass:
+  begin
+    if not (vtInt in ValDat.ValTypes) then exit;
+    if (ValDat.IntVal < Low(Prop.PropData.ObjId)) or
+      (ValDat.IntVal > High(Prop.PropData.ObjId)) then exit;
+    Prop.PropData.ObjId := ValDat.IntVal;
+  end;
+  else
+    //Unknown property type.
+    //Records and arrays not dealt with here.
+    exit;
+  end;
+  result := true;    
+end;
+
+function T-->Grammar<--.ApplyPListToProp(Prop:TSSIProperty; PList: TSSIList): boolean;
+begin
+  result := false;
+  if not (Assigned(Prop) and Assigned(PList)) then exit;
+  if not (Prop.PropData.PropType in [sMajRec, sMajArray]) then exit;
+  Prop.PropData.Items := PList;
+  PList.Parent := Prop;
+  result := true;
+end;
+
+function T-->Grammar<--.CheckNullPropAllowed(Prop: TSSIProperty):boolean;
+begin
+  result := Assigned(Prop) and (Prop.PropData.PropType in [sMajRec, sMajArray]);
+  if result and not Assigned(Prop.PropData.Items) then
+  begin
+    Prop.PropData.Items := TSSIList.CreateWithTracker(FParseTracker as TTracker);
+    Prop.PropData.Items.Parent := Prop;
+  end;
+end;
+    
+function T-->Grammar<--.UnHashString(InString:AnsiString; var ResString:string):boolean;
+var
+  idx: cardinal;
+  Digits: string;
+  WC: WideChar;
+  NumVal: integer;  
+begin
+  result := false;  
+  ResString := '';               
+  idx := 1;
+  try
+    repeat
+      if InString[idx] <> S_HASH then exit; //We need a hash char.
+      Inc(Idx);
+      Digits := '';
+      while (idx <= Length(InString)) and (InString[idx] in ['0'..'9']) do
+      begin
+        Digits := Digits + InString[idx];
+        Inc(Idx);    
+      end;
+      if Length(Digits) = 0 then exit; //Expect at least one digit.
+      NumVal := StrToInt(Digits);
+      Assert(SizeOf(WC) = SizeOf(Word));      
+      if not ((NumVal >= Low(Word)) and (NumVal <= High(Word))) then exit;
+      WC := WideChar(NumVal);
+      ResString := ResString + WC;                      
+    until idx > Length(InString);
+  except
+    on EConvertError do exit; 
+  end;
+  result := true;
+end;
+
+function T-->Grammar<--.StripQuotes(InString:AnsiString):AnsiString;
+begin
+ if (InString[1] in ['''', '"']) then
+   Delete(InString, 1 ,1)
+ else
+   SynError(1008);
+ if (InString[Length(InString)] in ['''', '"']) then
+   Delete(InString, Length(InString), 1)
+ else
+   SynError(1008);
+ result := InString;
+end;
+
+function T-->Grammar<--.UnEscapeString(InString:AnsiString):string;
+var
+  TempStr: AnsiString;
+begin
+ TempStr := InString;
+ TempStr := AnsiString(StringReplace(String(TempStr), '&apos;', '''', [rfReplaceAll]));
+ TempStr := AnsiString(StringReplace(String(TempStr), '&quot;', '"', [rfReplaceAll]));
+ TempStr := AnsiString(StringReplace(String(TempStr), '&cr;', #13, [rfReplaceAll]));
+ TempStr := AnsiString(StringReplace(String(TempStr), '&lf;', #10, [rfReplaceAll]));
+ TempStr := AnsiString(StringReplace(String(TempStr), '&lt;', '<',  [rfReplaceAll]));
+ TempStr := AnsiString(StringReplace(String(TempStr), '&gt;', '>',  [rfReplaceAll]));
+ result := AnsiString(StringReplace(String(TempStr), '&amp;', '&', [rfReplaceAll]));
+end;
+
+function T-->Grammar<--.UnMimeBlob(InString:AnsiString): TStream;
+var
+  Decoder: TIdDecoderMIME;
+begin
+  Decoder := TIdDecoderMime.Create(nil);
+  try
+    result := TMemoryStream.Create;
+    try
+      Decoder.DecodeStream(InString, result);
+    except
+      on E: Exception do
+      begin
+        result.Free;
+        result := nil;
+      end;
+    end;
+  finally
+    Decoder.Free;
+  end;
+end;
+
+procedure T-->Grammar<--.SynErrorEx(const errNo : integer; Data: AnsiString);
+begin
+  if errDist >= minErrDist then
+    GetScanner.ScannerError(errNo, GetScanner.NextSymbol, Data, etSyntax);
+  errDist := 0;
+end; {SynError}
+
+procedure T-->Grammar<--.CheckTG(HeadLen, TrailLen: integer; TagName: AnsiString);
+var
+  ActualTag: AnsiString;
+  OK: boolean;
+begin
+  OK := false;
+  ActualTag := LexString;
+  if Length(ActualTag) = Length(TagName) + HeadLen + TrailLen then
+  begin
+    ActualTag := Copy(ActualTag, Succ(HeadLen), Length(TagName));
+    if TagName = ActualTag then
+      OK := true; 
+  end;
+  if not OK then
+    SynErrorEx(1007, TagName);
+end;
+
+procedure T-->Grammar<--.CheckTagStart(TagName: AnsiString);
+begin
+  CheckTG(1, 1, TagName);
+end;
+
+procedure T-->Grammar<--.CheckTagEnd(TagName: AnsiString);
+begin
+  CheckTG(2, 1, TagName);
+end;
+
+procedure T-->Grammar<--.CheckTagPartStart(TagName: AnsiString);           
+begin
+  CheckTG(1, 0, TagName);
+end;
+
+(* End of Arbitrary Code *)
+
+CHARACTERS
+    digit = "0123456789" .
+    letter  = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" .  
+    cr = CHR(13) .
+    lf = CHR(10) .
+    tab = CHR(9) .
+    space = " " .
+    plus = "+" .
+    minus = "-" .
+    stop = "." .
+    Exp = "E" .
+    Apos = "'" .
+    Quot = CHR(34) .
+    Amp = "&" .
+    lt = "<" .
+    gt = ">" .
+    semicolon = ";" .
+    slash = "/" .
+    NoUnesc = ANY - Apos - Quot - cr - lf - Amp - lt - gt .  
+  
+TOKENS
+  TagOpen DESCRIPTION "<" = lt .
+  TagClose DESCRIPTION ">" = gt .
+  TagShortClose DESCRIPTION "/>" = slash gt .
+  TagStart DESCRIPTION "start tag <tag>" = lt letter {letter} gt .
+  TagEnd DESCRIPTION "end tag </tag>" = lt slash letter { letter } gt .
+  TagPartStart DESCRIPTION "partial start tag <tag" = lt letter {letter} .  
+  ID DESCRIPTION "Identifier" = letter { (letter | digit) } .
+  IntVal DESCRIPTION "Integer value" = [ plus | minus ] digit { digit } .   
+  QuotStrVal DESCRIPTION "string value" = Quot { NoUnesc | ( Amp letter {letter} semicolon )} Quot.
+  AposStrVal DESCRIPTION "string value" = Apos { NoUnesc | ( Amp letter {letter} semicolon )} Apos.
+  RealVal DESCRIPTION "Floating point value, no decimal point" = [ plus | minus ] digit { digit } 
+                                                                 Exp [ plus | minus ] digit { digit } .  
+  RealVal2 DESCRIPTION "Floating point value, with decimal point" = [ plus | minus ] digit { digit } 
+                                                                  stop digit {digit }
+                                                                 [ Exp [ plus | minus ] digit { digit } ] .  
+  eq = "=" .
+  comma = "," .
+
+COMMENTS FROM "<!" TO "!>"
+
+IGNORE  cr + lf + tab + space         
+
+PRODUCTIONS
+  TrivXML DESCRIPTION "Transaction"
+    (. var Trans: TSSITransaction; .)
+  =
+    TXmlStart
+    TransStart
+    TransContents<Trans> (. FParseResult := Trans; .)
+    TransEnd
+    TXmlEnd
+    EOF
+  .
+
+  TransContents <var Trans: TSSITransaction> DESCRIPTION "Transaction contents"
+                (. var Insts, InstsData: TSSIList; .)
+    = 
+                (. Trans := TSSITransaction.CreateWithTracker(FParseTracker as TTracker);
+                   Insts := Trans.Instances;
+                   InstsData := Trans.InstancesData;
+                .) 
+    InstancesStart 
+    InstancesContents<Insts> 
+    InstancesEnd 
+    InstsDataStart 
+    InstDataContents<InstsData> 
+    InstsDataEnd 
+  .
+  
+  InstancesContents <Insts: TSSIList> DESCRIPTION "Instances list" 
+                    (. var Inst: TSSIInstance; .)  
+  = 
+    Instance<Inst>          (. Insts.Add(Inst); .)  
+    { Instance<Inst>        (. Insts.Add(Inst); .) } 
+  . 
+
+  (* AttrList should consist of Class type string and ObjId *)
+  Instance <var Inst: TSSIInstance> DESCRIPTION "Instance" 
+           (. var AttrListDat: TSSIList; .) 
+  =
+                            (. Inst := TSSIInstance.CreateWithTracker(FParseTracker as TTracker); .)
+  InstTagStart 
+  AttrList<AttrListDat>     (. if not ApplyAttrsToInstance(Inst, AttrListDat) then
+                                  SynError(1000); .)  
+  TagShortClose.
+
+  AttrList <var AttrList: TSSIList> DESCRIPTION "Attribute list"
+           (. var AttrDat: TAttr; .)
+  =
+           (. AttrList := TSSIList.CreateWithTracker(FParseTracker as TTracker); .)
+    Attr<AttrDat>            (. AttrList.Add(AttrDat); .)
+    { Attr<AttrDat>    (. AttrList.Add(AttrDat); .) }
+  .
+
+  Attr <var AttrDat: TAttr> DESCRIPTION "Attribute"
+  =
+         (. AttrDat := TAttr.CreateWithTracker(FParseTracker as TTracker); .)
+    ID   (. AttrDat.IdStr := LexString; .)
+    eq
+    ValStrOnly<AttrDat.ValDat>
+  .
+
+  Val<var ValDat: TVal> DESCRIPTION "value, expected string, int, real or ID"
+  =
+    IntVal        (. ValDat.ValTypes := [];
+                     try
+                       ValDat.IntVal := StrToInt(String(LexString));
+                       ValDat.ValTypes := ValDat.ValTypes + [VTInt];
+                       ValDat.ValTypes := ValDat.ValTypes + [VTInt64];
+                     except
+                       on EConvertError do
+                       begin
+                         try
+                           ValDat.RealVal := StrToFloat(String(LexString));
+                           ValDat.ValTypes := ValDat.ValTypes + [vtReal];
+                         except
+                         end;
+                         try
+                           ValDat.IntVal := StrToInt64(String(LexString));
+                           ValDat.ValTypes := ValDat.ValTypes + [VTInt64];
+                         except
+                         end;
+                       end;
+                     end;
+                     if ValDat.ValTypes = [] then
+                       SynError(1006);
+                  .)
+    | ValStrOnly<ValDat>
+    | RealVal     (. ValDat.ValTypes := [vtReal];
+                     try
+                       ValDat.RealVal := StrToFloat(String(LexString));
+                     except
+                       on EConvertError do SynError(1006);
+                     end;
+                  .)
+    | RealVal2     (. ValDat.ValTypes := [vtReal];
+                     try
+                       ValDat.RealVal := StrToFloat(String(LexString));
+                     except
+                       on EConvertError do SynError(1006);
+                     end;
+                  .)
+    | ID          (. ValDat.Valtypes := [vtID]; .)
+                  (. ValDat.StrVal := LexString; .)
+  .
+
+  ValStrOnly<var ValDat: TVal> DESCRIPTION "escaped string value"
+  =
+    QuotStrVal      (. ValDat.ValTypes := [vtStr];
+                   ValDat.StrVal := StripQuotes(LexString); .)
+    | AposStrVal      (. ValDat.ValTypes := [vtStr];
+                   ValDat.StrVal := StripQuotes(LexString); .)
+  .
+
+  InstDataContents <InstsData: TSSIList>  DESCRIPTION "Instance data list"
+                   (. var InstData: TSSIInstanceData; .)
+  =
+    InstanceData<InstData>     (. InstsData.Add(InstData); .)
+    { InstanceData<InstData>   (. InstsData.Add(InstData); .) }
+  .
+
+  InstanceDataTagStart <var InstData: TSSIInstanceData> DESCRIPTION "Instance data simple start tag"
+  =
+    IDatTagStart
+    InstanceProperties<InstData>
+  .
+
+  InstanceDataWithAttrList <var InstData: TSSIInstanceData> DESCRIPTION "Instance data with attribute list"
+            (. var AttrListDat: TSSIList; .)
+  =
+    AttrList<AttrListDat>  (. AttrListDat.Free; (* Attribute checking code removed. *) .)
+    (
+       TagClose
+       InstanceProperties<InstData>
+       |
+       TagShortClose
+    )
+  .
+
+  InstanceDataTagPartStart <var InstData: TSSIInstanceData> DESCRIPTION "Instance data complicatedstart tag"
+  =
+    IDatTagPartStart
+    (
+      InstanceDataWithAttrList<InstData>
+      |
+      TagShortClose
+    )
+  .
+
+  InstanceData <var InstData: TSSIInstanceData> DESCRIPTION "Instance data"
+  =
+        (. InstData := TSSIInstanceData.CreateWithTracker(FParseTracker as TTracker); .)
+    (
+      InstanceDataTagStart<InstData>
+      |
+      InstanceDataTagPartStart<InstData>
+    )
+  .
+
+  InstanceProperties <InstData: TSSIInstanceData> DESCRIPTION "Instance properties and closing tag"
+            (. var InstProps: TSSIList; .)
+  =
+            (. InstProps := InstData.Properties; .)
+    PropList<InstProps> IDatTagEnd
+    | IDatTagEnd
+  .
+
+  (* N.B. This has to be used in two different ways:
+     1. When list is child of instance, list is passed in, no need to create.
+     2. When list is child of property, no list passed in, create. *)
+
+  PropList <var PList: TSSIList> DESCRIPTION "Property List"
+           (. var Prop: TSSIProperty; .)
+  =
+           (. if not Assigned(PList) then
+                PList := TSSIList.CreateWithTracker(FParseTracker as TTracker); .)
+    PropData<Prop> (. PList.Add(Prop); .)
+    { PropData<Prop> (. PList.Add(Prop); .)}
+  .
+
+  PropData<var Prop: TSSIProperty> DESCRIPTION "Property data"
+  =
+    PropStart<Prop>
+    PropTrail<Prop>
+  .
+
+  (* AttrList should consist of PropName, PropType, [PropSubType] *)
+  PropStart <var Prop: TSSIProperty> DESCRIPTION "Property tag"
+            (. var AttrListDat: TSSIList; .)
+  =
+            (. Prop := TSSIProperty.CreateWithTracker(FParseTracker as TTracker); .)
+    PropTagStart
+    AttrList<AttrListDat> (. if not ApplyAttrsToProp(Prop, AttrListDat) then
+                               SynError(1002); .)
+  .
+
+  (* Tag short close only allowed for arrays and records where *)
+  (* The array or record contains no items *)
+  PropTrail<Prop: TSSIProperty> DESCRIPTION "Property closing tag"
+  =
+    TagClose PropLongTrail<Prop>
+  | TagShortClose         (. if not CheckNullPropAllowed(Prop) then
+                                SynError(1003); .)
+  .
+
+  PropLongTrail<Prop: TSSIProperty> DESCRIPTION "Property closing tag"
+  =
+    PropContents<Prop> PropTagEnd
+    | PropTagEnd          (. if not CheckNullPropAllowed(Prop) then
+                                SynError(1003); .)
+  .
+
+  (* Normally expect a val, except when arrays or records *)
+  PropContents <Prop: TSSIProperty> DESCRIPTION "Property contents"
+               (. var ValDat: TVal; PList: TSSIList; .)
+  =
+    Val<ValDat>       (. if not ApplyValToProp(Prop, ValDat) then SynError(1004); .)
+    | (. PList := nil; .) PropList<PList> (. if not ApplyPListToProp(Prop, PList) then SynError(1005); .)
+  .
+
+  TXmlStart DESCRIPTION "<TrivXML>" = TagStart (. CheckTagStart('TrivXML'); .) .
+  TXmlEnd DESCRIPTION "</TrivXML>" = TagEnd (. CheckTagEnd('TrivXML'); .) .
+  TransStart DESCRIPTION "<Transaction>" = TagStart (. CheckTagStart('Transaction'); .) .
+  TransEnd DESCRIPTION "</Transaction>" = TagEnd (. CheckTagEnd('Transaction'); .) .
+  InstancesStart DESCRIPTION "<Instances>" = TagStart (. CheckTagStart('Instances'); .) .
+  InstancesEnd DESCRIPTION "</Instances>" = TagEnd (. CheckTagEnd('Instances'); .) .
+  InstsDataStart DESCRIPTION "<InstancesData>" = TagStart (. CheckTagStart('InstancesData'); .) .
+  InstsDataEnd DESCRIPTION "</InstancesData>" = TagEnd (. CheckTagEnd('InstancesData'); .) .
+  InstTagStart DESCRIPTION "<Instance" = TagPartStart (. CheckTagPartStart('Instance'); .) .
+
+  IDatTagPartStart DESCRIPTION "<InstData" = TagPartStart (. CheckTagPartStart('InstData'); .) .
+  IDatTagStart DESCRIPTION "<InstData>" = TagStart (. CheckTagStart('InstData'); .) .
+  IDatTagEnd DESCRIPTION "</InstData>" = TagEnd (. CheckTagEnd('InstData'); .) .
+  PropTagStart DESCRIPTION "<Property" = TagPartStart (. CheckTagPartStart('Property'); .) .
+  PropTagEnd DESCRIPTION "</Property>" = TagEnd (. CheckTagEnd('Property'); .) .
+
+END TrivXML.

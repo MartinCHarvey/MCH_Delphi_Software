@@ -1,0 +1,25 @@
+Bugs to Fix.
+
+
+    1. Twitter importer. Retweets not detected correctly, end up being assigned to the wrong username?
+    2. I need a “refresh single media” operation to re-get all the comments on a single media item in cases where default since means no comments have appeared. Also need to find out why….
+    3. Cancelling a refresh with things in progress sometimes doesn’t stop properly: No completion sent back to batch loader, and so app can’t be closed (needs to be killed). If can fix, do, otherwise give the user option to force close (memdb will still write last few xactions properly).
+    4. Do the import without a separate bailout tree(low priority).
+    5. Memory leak: TKDataObjects leaked whilst stopping somewhere in refresh all op. Batch loader stop completion path?? (Not sure). Considering bug 32, may be somewhere in fetcher/parser or importers (not sending completion back in error case).
+    6. Memory leaks during the filter process. Not sure where.
+    7. Instagram: After very large load process, load task hung, using 0.5%CPU, stop button does not stop it, suspect hung HTTP operation, or throttling, but not sure exactly what, server has probably given us the boot. Try loading kimkardashians comments...
+    8. Glyph on the right of listviews – always appears if window resized. 
+    9. Some images don’t load – and attempt to click on listview produces AV.
+    10. (High) EImportError:Media importer followed retweet redirection - original tweets only please.
+    11. Looks like twitter importer is not detecting retweets like it used to.
+    12. (Medium) Batch Loader:User import rec. We now merge tree fragments back to the store, but because of multiple site types, need to fixup from DB first. We currently keep a copy of entire user tree locally. See if we can optimise to refer back to the datastore copy instead of keeping info locally.
+    13. (Medium) There’s a memory leak somewhere on the delete user / purge users path. No idea where…
+    14. (Low)  HTML Parse performance. We’re currently doing the error recovery path by default. Might want to make how grown lexer faster (Don’t allocate multi-list of results as a class – have a small array with fixed maximum).
+    15. (Low) Instagram importers: Very occasionally, Media items have no owner field. At the moment I just say bollocks to it, and put them in the bin.
+    16. (Low) Investigate turning Auth back on for instagram.
+    17. (High) Mem and DB pruning, need to remove unreferenced users from user table.
+    18. (Low) HTMLParser: Feed a unicode string in where the initial string fed to the opening tag is "<"#0"name", then it generates a tag with name length 0. The parser has probably aborted anyway .…
+    19. (Medium?) Parsers All object creation calls need a set location call after them..
+    20. (Low)  Unicode handling is currently wrong. We deal with input streams as ASCII, and then convert the strings. We should deal with unicode code points at the lexer stage for all parsers - theoretically this means we need separate lexers for each encoding scheme, but currently, stick with UTF-8.
+    21. MemDB: Some operations require more than one transaction. We need to be able to daisy-chain changesets in a transation and commit and rollback multi-changesets.
+
