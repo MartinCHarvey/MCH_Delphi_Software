@@ -1,0 +1,94 @@
+Tasks TODO:
+
+General.
+
+User / Media / Comment lists should be made generic children of TKKeyedObject.
+
+Do Nop DB opts currently schedules workitems etc when it doesn’t need to – check that we can make it tail recursive, and optimise.
+
+Login.
+
+I really need to get my app to Login properly. Need to revisit how Auth works. I suspect it can’t be that difficult, and I have probably made some silly error. Even if its only for instagram at first that would be a huge improvement.
+
+Update: The lovely people at instagram have written this, which may be useful.
+
+https://developers.facebook.com/docs/facebook-login/for-devices
+
+
+Auth.
+
+If If don’t want the app to login, then would be good to review $IFDEF, and cleanly remove AuthForm, CreditialManager, OAuth2.
+
+
+Export functionality.
+
+Export entire tables / media and comments for one user / anything else by CSV.
+
+Whatever filtering and analysis ops provide, also allow export to CSV.
+
+User interface TODO.
+
+
+    1. Delete context menu for media list. New context menu allowing user commands for comment list.
+    2. Delete single media command – have DB commands, need datastore / batch loader command.
+    3. Hashtags etc possibly offline scanning wizard of some sort.
+    4. Investigate and fix twitter bug (import retweets wrong).
+    5. Import tweets into DB and run with mixed DB.
+    6. Tweet display, and tweets which are referenced in other timelines (retweets). HTML handling.
+    7. List views don’t allow fancy colours, so I have to put detail text in there. Investigate whether suitable replacement.
+
+
+More nebulous TODO.
+
+- Chit-chat between two users on each others profiles (particularly if loaded zillions of comments).
+
+- Searching / sorting collection of similar posts:
+  - Twitter does RT'S (need to think about that in DB)
+    Maybe trace retweet chain?
+
+  - Instagram image matching may be beyond me.
+
+- Cross referencing URL's between insta / twitter
+- Trace link chain? Similar to retweets?
+
+MemDB TODO.
+       
+Some operations require more than one transaction. We need to be able to daisy-chain changesets in a transation and commit and rollback multi-changesets.
+
+Optimisation tasks.
+
+Things still to optimise:
+
+- Copying. We definitely do DeepClone’s of things where we don’t need to. Possibilities include DB Ops to Op sequences, and Op Sequences to batch loader.
+
+- Datastore op sequences. These happen in the main thread. Perhaps farm out to a separate thread, and perform only the very final mergeback in the main thread.
+- Iteration through indexes store items by pointer when we can get an item, get another item.
+
+- Load user tree – invoked on refresh. Push all the logic down below the list handling and do it all in the DB layer to make it faster.
+
+- Media refresh. At some point, it’s not worth rescanning old posts. To be considered along with other optimisations to refresh user tasks.
+
+
+
+Other developments required:
+
+
+Some of the trickier bits of code of DBM / Datastore code involve involve OP sequencing. It might be possible to remove a lot of this by performing composite operations serially in threads, instead of having Op sequences. For future consideration.
+
+
+- Data scanning / analysis ops.
+- Possibly implement away / apart from existing batch loader code (already complicated).
+
+- Scan for and resolve Twitter meta-link ops.
+
+- Support for a feedback table: Likes and hearts etc, including counts and who has liked.
+  May need importer work.
+
+- Facebook importers and management (haven't even started looking at this).
+
+- Reddit importers and management.
+
+- One for long term research: other social media sites
+  & a more generic way of parsing them:
+  https://www.commonsensemedia.org/blog/16-apps-and-websites-kids-are-heading-to-after-facebook
+  http://www.techadvisor.co.uk/feature/social-networks/7-new-social-media-apps-that-could-be-big-in-2016-3587091/
