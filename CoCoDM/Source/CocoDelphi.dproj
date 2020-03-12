@@ -1,0 +1,199 @@
+﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+    <PropertyGroup>
+        <ProjectGuid>{544BE0F1-45EA-41DF-82F8-87A144D7A410}</ProjectGuid>
+        <MainSource>CocoDelphi.dpr</MainSource>
+        <Base>True</Base>
+        <Config Condition="'$(Config)'==''">Release</Config>
+        <TargetedPlatforms>3</TargetedPlatforms>
+        <AppType>Console</AppType>
+        <FrameworkType>VCL</FrameworkType>
+        <ProjectVersion>14.6</ProjectVersion>
+        <Platform Condition="'$(Platform)'==''">Win64</Platform>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Config)'=='Base' or '$(Base)'!=''">
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="('$(Platform)'=='Win32' and '$(Base)'=='true') or '$(Base_Win32)'!=''">
+        <Base_Win32>true</Base_Win32>
+        <CfgParent>Base</CfgParent>
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="('$(Platform)'=='Win64' and '$(Base)'=='true') or '$(Base_Win64)'!=''">
+        <Base_Win64>true</Base_Win64>
+        <CfgParent>Base</CfgParent>
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Config)'=='Release' or '$(Cfg_1)'!=''">
+        <Cfg_1>true</Cfg_1>
+        <CfgParent>Base</CfgParent>
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Config)'=='Debug' or '$(Cfg_2)'!=''">
+        <Cfg_2>true</Cfg_2>
+        <CfgParent>Base</CfgParent>
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="('$(Platform)'=='Win32' and '$(Cfg_2)'=='true') or '$(Cfg_2_Win32)'!=''">
+        <Cfg_2_Win32>true</Cfg_2_Win32>
+        <CfgParent>Cfg_2</CfgParent>
+        <Cfg_2>true</Cfg_2>
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="('$(Platform)'=='Win64' and '$(Cfg_2)'=='true') or '$(Cfg_2_Win64)'!=''">
+        <Cfg_2_Win64>true</Cfg_2_Win64>
+        <CfgParent>Cfg_2</CfgParent>
+        <Cfg_2>true</Cfg_2>
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Base)'!=''">
+        <DCC_IMPLICIT_STRING_CAST>false</DCC_IMPLICIT_STRING_CAST>
+        <DCC_DcuOutput>.\$(Platform)\$(Config)</DCC_DcuOutput>
+        <DCC_ExeOutput>.\$(Platform)\$(Config)</DCC_ExeOutput>
+        <DCC_DcpOutput>.\$(Platform)\$(Config)</DCC_DcpOutput>
+        <DCC_BplOutput>.\$(Platform)\$(Config)</DCC_BplOutput>
+        <DCC_Namespace>System;Xml;Data;Datasnap;Web;Soap;Winapi;Vcl;Vcl.Imaging;Vcl.Touch;Vcl.Samples;Vcl.Shell;$(DCC_Namespace)</DCC_Namespace>
+        <DCC_ImageBase>00400000</DCC_ImageBase>
+        <DCC_SymbolReferenceInfo>1</DCC_SymbolReferenceInfo>
+        <DCC_E>false</DCC_E>
+        <DCC_Define>COMMANDLINE;$(DCC_Define)</DCC_Define>
+        <DCC_K>false</DCC_K>
+        <DCC_UsePackage>VCL50;VCLX50;VCLSMP50;QRPT50;VCLDB50;VCLBDE50;ibevnt50;VCLDBX50;TEEUI50;TEEDB50;TEE50;TEEQR50;VCLIB50;VCLIE50;INETDB50;INET50;NMFAST50;dclocx50;dclaxserver50;$(DCC_UsePackage)</DCC_UsePackage>
+        <Manifest_File>None</Manifest_File>
+        <DCC_F>false</DCC_F>
+        <VerInfo_Keys>CompanyName=;FileDescription=;FileVersion=1.0.0.0;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=;ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
+        <ImageDebugInfo>true</ImageDebugInfo>
+        <DCC_N>true</DCC_N>
+        <DCC_S>false</DCC_S>
+        <DCC_DebugInfoInExe>true</DCC_DebugInfoInExe>
+        <DCC_WriteableConstants>true</DCC_WriteableConstants>
+        <VerInfo_Locale>1033</VerInfo_Locale>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Base_Win32)'!=''">
+        <DCC_Namespace>System.Win;Data.Win;Datasnap.Win;Web.Win;Soap.Win;Xml.Win;Bde;$(DCC_Namespace)</DCC_Namespace>
+        <VerInfo_Locale>1033</VerInfo_Locale>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Base_Win64)'!=''">
+        <DCC_Namespace>System.Win;Data.Win;Datasnap.Win;Web.Win;Soap.Win;Xml.Win;$(DCC_Namespace)</DCC_Namespace>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Cfg_1)'!=''">
+        <DCC_SymbolReferenceInfo>0</DCC_SymbolReferenceInfo>
+        <DCC_Define>RELEASE;$(DCC_Define)</DCC_Define>
+        <DCC_LocalDebugSymbols>false</DCC_LocalDebugSymbols>
+        <DCC_DebugInformation>false</DCC_DebugInformation>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Cfg_2)'!=''">
+        <DCC_IntegerOverflowCheck>true</DCC_IntegerOverflowCheck>
+        <DCC_RangeChecking>true</DCC_RangeChecking>
+        <DCC_Define>DEBUG;$(DCC_Define)</DCC_Define>
+        <DCC_GenerateStackFrames>true</DCC_GenerateStackFrames>
+        <DCC_Optimize>false</DCC_Optimize>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Cfg_2_Win32)'!=''">
+        <Debugger_RunParams>&quot;c:\MCH stuff\Delphi XE Progs\Common\HTMLParser\CSSGrammar.ATG&quot;</Debugger_RunParams>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Cfg_2_Win64)'!=''">
+        <Debugger_RunParams>&quot;c:\MCH stuff\Delphi XE Progs\Common\HTMLParser\CSSGrammar.ATG&quot;</Debugger_RunParams>
+    </PropertyGroup>
+    <ItemGroup>
+        <DelphiCompile Include="$(MainSource)">
+            <MainSource>MainSource</MainSource>
+        </DelphiCompile>
+        <DCCReference Include="..\Distributable\Frames\mwStringHashList.pas"/>
+        <DCCReference Include="..\Distributable\Frames\CocoBase.pas"/>
+        <DCCReference Include="Coco.pas"/>
+        <DCCReference Include="CocoAGI.pas"/>
+        <DCCReference Include="CocoComment.pas"/>
+        <DCCReference Include="CocoCompiler.pas"/>
+        <DCCReference Include="CocoDat.pas"/>
+        <DCCReference Include="CocoOptions.pas"/>
+        <DCCReference Include="CocoRegistry.pas"/>
+        <DCCReference Include="CocoSwitch.pas"/>
+        <DCCReference Include="CocoTools.PAS"/>
+        <DCCReference Include="CRA.pas"/>
+        <DCCReference Include="CRC.pas"/>
+        <DCCReference Include="Crg.pas"/>
+        <DCCReference Include="CRS.pas"/>
+        <DCCReference Include="CRT.pas"/>
+        <DCCReference Include="CRTypes.pas"/>
+        <DCCReference Include="CRX.pas"/>
+        <DCCReference Include="Frame.pas"/>
+        <DCCReference Include="FrameTools.pas"/>
+        <DCCReference Include="Sets.pas"/>
+        <DCCReference Include="StreamTools.pas"/>
+        <DCCReference Include="StringTools.pas"/>
+        <DCCReference Include="TZRegistry.pas"/>
+        <None Include="..\Coco ATG\Coco.AGI"/>
+        <None Include="..\Coco ATG\Coco.atg"/>
+        <None Include="..\Coco ATG\Frame.AGI"/>
+        <None Include="..\Coco ATG\Frame.ATG"/>
+        <None Include="..\Distributable\Frames\component.frm"/>
+        <None Include="..\Distributable\Frames\console.dpr.frm"/>
+        <None Include="..\Distributable\Frames\Test.dfm.frm"/>
+        <None Include="..\Distributable\Frames\Test.dpr.frm"/>
+        <None Include="..\Distributable\Frames\Test.pas.frm"/>
+        <BuildConfiguration Include="Debug">
+            <Key>Cfg_2</Key>
+            <CfgParent>Base</CfgParent>
+        </BuildConfiguration>
+        <BuildConfiguration Include="Base">
+            <Key>Base</Key>
+        </BuildConfiguration>
+        <BuildConfiguration Include="Release">
+            <Key>Cfg_1</Key>
+            <CfgParent>Base</CfgParent>
+        </BuildConfiguration>
+    </ItemGroup>
+    <ProjectExtensions>
+        <Borland.Personality>Delphi.Personality.12</Borland.Personality>
+        <Borland.ProjectType/>
+        <BorlandProject>
+            <Delphi.Personality>
+                <Source>
+                    <Source Name="MainSource">CocoDelphi.dpr</Source>
+                </Source>
+                <Language>
+                    <Language Name="ProjectLang">$00000409</Language>
+                </Language>
+                <VersionInfo>
+                    <VersionInfo Name="IncludeVerInfo">False</VersionInfo>
+                    <VersionInfo Name="AutoIncBuild">False</VersionInfo>
+                    <VersionInfo Name="MajorVer">1</VersionInfo>
+                    <VersionInfo Name="MinorVer">0</VersionInfo>
+                    <VersionInfo Name="Release">0</VersionInfo>
+                    <VersionInfo Name="Build">0</VersionInfo>
+                    <VersionInfo Name="Debug">False</VersionInfo>
+                    <VersionInfo Name="PreRelease">False</VersionInfo>
+                    <VersionInfo Name="Special">False</VersionInfo>
+                    <VersionInfo Name="Private">False</VersionInfo>
+                    <VersionInfo Name="DLL">False</VersionInfo>
+                    <VersionInfo Name="Locale">1033</VersionInfo>
+                    <VersionInfo Name="CodePage">1252</VersionInfo>
+                </VersionInfo>
+                <VersionInfoKeys>
+                    <VersionInfoKeys Name="CompanyName"/>
+                    <VersionInfoKeys Name="FileDescription"/>
+                    <VersionInfoKeys Name="FileVersion">1.0.0.0</VersionInfoKeys>
+                    <VersionInfoKeys Name="InternalName"/>
+                    <VersionInfoKeys Name="LegalCopyright"/>
+                    <VersionInfoKeys Name="LegalTrademarks"/>
+                    <VersionInfoKeys Name="OriginalFilename"/>
+                    <VersionInfoKeys Name="ProductName"/>
+                    <VersionInfoKeys Name="ProductVersion">1.0.0.0</VersionInfoKeys>
+                    <VersionInfoKeys Name="Comments"/>
+                </VersionInfoKeys>
+                <Excluded_Packages>
+                    <Excluded_Packages Name="$(BDSBIN)\dcloffice2k180.bpl">Microsoft Office 2000 Sample Automation Server Wrapper Components</Excluded_Packages>
+                    <Excluded_Packages Name="$(BDSBIN)\dclofficexp180.bpl">Microsoft Office XP Sample Automation Server Wrapper Components</Excluded_Packages>
+                </Excluded_Packages>
+            </Delphi.Personality>
+            <Platforms>
+                <Platform value="OSX32">False</Platform>
+                <Platform value="Win32">True</Platform>
+                <Platform value="Win64">True</Platform>
+            </Platforms>
+        </BorlandProject>
+        <ProjectFileVersion>12</ProjectFileVersion>
+    </ProjectExtensions>
+    <Import Project="$(BDS)\Bin\CodeGear.Delphi.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Delphi.Targets')"/>
+    <Import Project="$(APPDATA)\Embarcadero\$(BDSAPPDATABASEDIR)\$(PRODUCTVERSION)\UserTools.proj" Condition="Exists('$(APPDATA)\Embarcadero\$(BDSAPPDATABASEDIR)\$(PRODUCTVERSION)\UserTools.proj')"/>
+</Project>
