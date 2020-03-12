@@ -287,11 +287,12 @@ begin
   DprFileExts[2] := '.dsk';
   DprFileExts[3] := '.res';
 
-  SetLength(PasFileExts, 4);
+  SetLength(PasFileExts, 5);
   PasFileExts[0] := '.pas';
   PasFileExts[1] := '.dfm';
   PasFileExts[2] := '.agi';
   PasFileExts[3] := '.atg';
+  PasFileExts[4] := '.fmx';
 
   try
     if ParamCount <>  2 then
