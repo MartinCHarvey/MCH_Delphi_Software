@@ -1,0 +1,319 @@
+$W- //Don't treat space as whitespace.
+COMPILER JSONGrammar
+
+DELPHI
+  USES (INTERFACE) Trackables, JSONNodes, DLList
+  USES (IMPLEMENTATION) HTMLParser, HTMLParseEvents, CommonNodes
+
+  PRIVATE
+    FParentObject: TObject;
+  PROTECTED
+    procedure AbortParse();
+    procedure InsertMemberIntoObject(O: TJSONCOntainer; M: TJSONMember);
+    procedure InsertValueIntoArray(A: TJSONContainer; V: TJSONValue);
+    procedure InsertValueIntoMember(M: TJSONMember; V: TJSONValue);
+    procedure InsertContainerIntoDocument(D: TJSONDocument; C: TJSONContainer);
+  PUBLIC
+    procedure SetLocation(N: TJSONNode);
+    procedure ParseWarning(Code: integer; S: string);
+    property ParentObject:TObject read FParentObject write FParentObject;
+  CREATE
+    FParseTracker := TTracker.Create;
+    FLangStr := 'JSON';
+  DESTROY
+    FParseTracker.Free;
+  ERRORS
+    1000: Result := 'Unable to continue after previous errors, aborting.';
+    1001: Result := 'Missing or malformed value, skipping.';
+END_DELPHI
+
+{ Arbitrary code }
+{
+
+Copyright © 2020 Martin Harvey <martin_c_harvey@hotmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the “Software”), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.
+
+}
+
+procedure T-->Grammar<--.SetLocation(N: TJSONNode);
+begin
+  N.Line := (Scanner as T-->Grammar<--Scanner).CurrentSymbol.Line;
+  N.Col := (Scanner as T-->Grammar<--Scanner).CurrentSymbol.Col;
+end;
+
+procedure T-->Grammar<--.ParseWarning(Code: integer; S: string);
+var
+  Sc: T-->Grammar<--Scanner;
+begin
+  Sc := (Scanner as T-->Grammar<--Scanner);
+  if Assigned(ParentObject) and (ParentObject is THTMLParseItem) then
+  begin
+    (ParentObject as THTMLParseItem).EventList.Add(
+      TParseEvent.CreateFromParseWarning(
+      Sc.NextSymbol.Col, Sc.NextSymbol.Line, Code, ErrorStr(Code, AnsiString(S)) + AnsiString(S), self));
+  end;
+end;
+
+procedure T-->Grammar<--.AbortParse();
+begin
+  raise EParseAbort.Create(ErrorStr(1000, ''),
+                (Scanner as T-->Grammar<--Scanner).NextSymbol.Line,
+                (Scanner as T-->Grammar<--Scanner).NextSymbol.Col);
+end;
+
+procedure T-->Grammar<--.InsertMemberIntoObject(O: TJSONCOntainer; M: TJSONMember);
+begin
+  if not Assigned(O) or not Assigned(M) then
+    AbortParse;
+  Assert(O is TJSONContainer);
+  Assert(O.ContainerType = jctObject);
+  Assert(M is TJSONMember);
+  DLListInsertTail(@O.COntainedListHead, @M.SiblingListEntry);
+end;
+
+procedure T-->Grammar<--.InsertValueIntoArray(A: TJSONContainer; V: TJSONValue);
+begin
+  if not Assigned(A) or not Assigned(V) then
+  begin
+    ParseWarning(1001, '');
+    exit;
+  end;
+  Assert(A is TJSONContainer);
+  Assert(A.ContainerType = jctArray);
+  Assert(V is TJSONValue);
+  DLListInsertTail(@A.ContainedListHead, @V.SiblingListEntry);
+end;
+
+procedure T-->Grammar<--.InsertValueIntoMember(M: TJSONMember; V: TJSONValue);
+begin
+  if not Assigned(M) or not Assigned(V) then
+  begin
+    ParseWarning(1001, '');
+    exit;
+  end;
+  Assert(M is TJSONMember);
+  Assert(V is TJSONValue);
+  DLListInsertTail(@M.ContainedListHead, @V.SiblingListEntry);
+end;
+
+procedure T-->Grammar<--.InsertContainerIntoDocument(D: TJSONDocument; C: TJSONContainer);
+begin
+  if not Assigned(D) or not Assigned(C) then
+    AbortParse;
+  Assert(D is TJSONDocument);
+  Assert(C is TJSONContainer);
+  DLListInsertTail(@D.ContainedListHead, @C.SiblingListEntry);
+end;
+
+CHARACTERS
+
+    cr = CHR(13) .
+    lf = CHR(10) .
+    tab = CHR(9) .
+    space = " " .
+    quot = CHR(34) .
+    dqchar = ANY - quot - "\" - lf - cr.
+    digit = "0123456789" .
+    hexDigit = "0123456789abcdefABCDEF" .
+    singleEsc = ANY - cr - lf .
+
+TOKENS
+        NumberToken = [ "-" ] digit { digit }
+                        [ "." digit { digit } ]
+                        [ "e" | "E" [ "-" | "+" ] digit { digit } ] .
+    DQuotString =
+      quot
+      {
+        dqchar //String char.
+        |
+        (
+          "\" //Escape sequence.
+          (
+            ( //Zero escape
+              "0"
+            )
+            |
+            ( //Unicode escape
+              "u" hexDigit hexDigit hexDigit hexDigit
+            )
+            |
+            ( //Unicode escape (variant 2)
+              "u{"
+                hexDigit hexDigit hexDigit hexDigit
+              "}"
+            )
+            |
+            ( //Hex escape
+              "x" hexDigit hexDigit
+            )
+            |
+            (
+              (cr [lf])
+              |
+              (lf [cr])
+            )
+            |
+            ( //Single char escape sequence.
+              singleEsc
+            )
+          )
+        )
+      }
+      quot .
+
+IGNORE  cr + lf + tab + space
+
+PRODUCTIONS
+
+  JSONGrammar DESCRIPTION "JSON data block"
+                        (. var
+                                C: TJSONCOntainer;
+                                Sc: T-->Grammar<--Scanner;
+                         .)
+  =
+                        (. C := nil;
+                           FParseResult := TJSONDocument.CreateWithTracker(FParseTracker as TTracker);
+                           SetLocation(FParseResult as TJSONDocument); .)
+  [
+    Object<C>           (. InsertContainerIntoDocument(FParseResult as TJSONDocument, C); .)
+    |
+    Array<C>            (. InsertContainerIntoDocument(FParseResult as TJSONDocument, C); .)
+  ]
+  (
+    "<"                 (. //Trailing HTML in inline script: </script>
+                           Sc := (Scanner as T-->Grammar<--Scanner);
+                           StreamPartRead := Sc.BufferPosition;
+                        .)
+    |
+    EOF                  //Actual end of file.
+  )
+  .
+
+  Object<out O:TJSONContainer> DESCRIPTION "JSON Object"
+                                (. var M:TJSONMember; .)
+  =
+                                (. M := nil;
+                                   O := TJSONContainer.CreateWithTracker(FParseTracker as TTracker);
+                                   SetLocation(O);
+                                   O.ContainerType := jctObject;
+                                   .)
+  "{"
+    (
+      [
+        Member<M>       (. InsertMemberIntoObject(O,M); .)
+        { ","
+          Member<M>     (. InsertMemberIntoObject(O,M); .)
+        }
+      ]
+    )
+  (
+    "}"
+  |
+    (. ParseWarning(_rBraceSym, ''); .)
+  )
+  .
+
+  Array<out A:TJSONContainer> DESCRIPTION "JSON Array"
+                                (. var V: TJSONValue; .)
+  =
+                                (. V := nil;
+                                   A := TJSONContainer.CreateWithTracker(FParseTracker as TTracker);
+                                   SetLocation(A);
+                                   A.ContainerType := jctArray;
+                                 .)
+  "["
+    (
+      [
+        Value<V>        (. InsertValueIntoArray(A, V); .)
+        { ","
+          Value<V>      (. InsertValueIntoArray(A, V); .)
+        }
+      ]
+    )
+  (
+    "]"
+  |
+    (. ParseWarning(_rBrackSym, ''); .)
+  )
+  .
+
+  Member<out M:TJSONMember> DESCRIPTION "JSON Object member variable"
+                                (. var S: string;
+                                       V: TJSONValue; .)
+  =
+                                (. V:= nil;
+                                   M := TJSONMember.CreateWithTracker(FParseTracker as TTracker);
+                                   SetLocation(M); .)
+        String<S>               (. M.Name := S; .)
+        ":"
+        Value<V>                (. InsertValueIntoMember(M, V); .)
+  .
+
+  Value<out V:TJSONValue> DESCRIPTION "JSON Value"
+                                (. var VR: TJSONContainer;
+                                       VS: TJSONSImpleValue;
+                                       S:string; .)
+  =
+                                (. V := nil;
+                                   VR := nil;
+                                   VS := TJSONSimpleValue.CreateWithTracker(FParseTracker as TTracker);
+                                   SetLocation(VS);
+                                 .)
+        (
+                "false"         (. VS.ValType := svtFalse; V:= VS;
+                                .)
+                |
+                "null"          (. VS.ValType := svtNull; V:= VS;
+                                .)
+                |
+                "true"          (. VS.ValType := svtTrue; V:= VS;
+                                .)
+                |
+                Object<VR>       (. VS.Free; V := VR;
+                                 .)
+                |
+                Array<VR>        (. VS.Free; V := VR;
+                                 .)
+                |
+                Number<S>       (. VS.ValType := svtNumber;
+                                   VS.StrData := S;
+                                   V := VS;
+                                .)
+                |
+                String<S>       (. VS.ValType := svtString;
+                                   VS.StrData := S;
+                                   V := VS;
+                                .)
+        )
+                                (. if not Assigned(V) then VS.Free; { SynError case } .)
+  .
+
+  Number<out S:String> DESCRIPTION "JSON literal number"
+  =
+        NumberToken             (. S := LexString; .)
+  .
+
+  String<out S:String> DESCRIPTION "JSON quoted string value"
+  =
+        DQuotString             (. S := LexString;
+                                   S := S.SubString(1, Length(S) - 2); .)
+  .
+
+END JSONGrammar.

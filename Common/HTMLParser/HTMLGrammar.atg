@@ -1,0 +1,835 @@
+$W- //Don't treat space as whitespace.
+COMPILER HTMLGrammar
+
+DELPHI
+  USES (INTERFACE) Trackables, HTMLNodes, HTMLEscapeHelper, DLList
+  USES (IMPLEMENTATION) HTMLParser, HTMLParseEvents, StrUtils, CommonNodes,
+    ErrorRecovery
+
+  TYPE
+    TScriptNestMode = (snmNone, snmScript,snmStyle);
+
+  PRIVATE
+    FScriptMode: TScriptNestMode;
+    FDocType: THTMLDocType;
+    FScriptStartLine, FScriptStartCol: integer;
+    FParentObject: TObject;
+  PROTECTED
+    procedure ParseScript(Block: THTMLBlock);
+    function CheckStartScriptTag(T: THTMLTag):boolean;
+    procedure CheckEndScriptTag(T: THTMLTag);
+    procedure RewindLexer(i: integer);
+    procedure AdvanceLexer(i: integer);
+    procedure MoveLexer(i: integer);
+    procedure InsertBlockToListTail(var TempHead: TDLEntry; Block: THTMLBlock);
+    procedure InsertDocToListHead(var TempHead: TDLEntry; Doc: THTMLDocument);
+    procedure RemoveTempHead(var TempHead: TDLEntry);
+    procedure AbortParse();
+  PUBLIC
+    procedure SetLocation(N: THTMLNode);
+    procedure ParseWarning(Code: integer; S:string);
+
+    property ParentObject:TObject read FParentObject write FParentObject;
+  CREATE
+    FParseTracker := TTracker.Create;
+    FLangStr := 'HTML';
+  DESTROY
+    FParseTracker.Free;
+  ERRORS
+    1000: Result := 'Tag start and end types do not match.';
+    1001: Result := 'Cannot add <name, value> pair to tag. Duplicate name?';
+    1004: Result := 'Unterminated or badly formed script at EOF';
+    1005: Result := 'Too many </script> tags - not well formed.';
+    1006: Result := 'Resync after script parse failed. Document likely garbage.';
+    1007: Result := 'Unknown HTML escape code.';
+    1008: Result := 'Unmatched quotes in script: ';
+    1009: Result := 'Unmatched comments in script: ';
+    1010: Result := 'Unmatched <![CDATA[]]> tags in script: ';
+    1011: Result := 'Internal error, expected </script> but got char data.';
+    1012: Result := 'Merged two tag value pairs together - whitespace around "="';
+    1013: Result := 'Unable to continue after previous errors, aborting.';
+    8888: Result := 'Internal error';
+    9999: Result := '';
+END_DELPHI
+
+{ Arbitrary code }
+{
+
+Copyright © 2020 Martin Harvey <martin_c_harvey@hotmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the “Software”), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.
+
+}
+
+procedure T-->Grammar<--.ParseWarning(Code: integer; S: string);
+var
+  Sc: THTMLGrammarScanner;
+begin
+  Sc := (Scanner as T-->Grammar<--Scanner);
+  if Assigned(ParentObject) and (ParentObject is THTMLParseItem) then
+  begin
+    (ParentObject as THTMLParseItem).EventList.Add(
+      TParseEvent.CreateFromParseWarning(
+      Sc.NextSymbol.Col, Sc.NextSymbol.Line, Code, ErrorStr(Code, AnsiString(S)) + AnsiString(S), self));
+  end;
+end;
+
+procedure T-->Grammar<--.MoveLexer(i: integer);
+var
+  Sc: T-->Grammar<--Scanner;
+
+begin
+  Sc := (Scanner as T-->Grammar<--Scanner);
+  //Assumes we do not rewind / advance over cr/lf etc.
+  Sc.BufferPosition := Sc.BufferPosition + i;
+
+  if Sc.BufferPosition > 0 then
+    Sc.LastInputCh := Sc.CurrentCh(Pred(Sc.BufferPosition))
+  else
+    Sc.LastInputCh := _EF;
+
+  Sc.SrcStream.Seek(Sc.BufferPosition, soFromBeginning);
+  Sc.CurrInputCh := Sc.CurrentCh(Sc.BufferPosition);
+end;
+
+procedure T-->Grammar<--.RewindLexer(i: integer);
+begin
+  MoveLexer(-i);
+end;
+
+procedure T-->Grammar<--.AdvanceLexer(i: integer);
+begin
+  MoveLexer(i);
+end;
+
+procedure T-->Grammar<--.ParseScript(Block: THTMLBlock);
+var
+  Sc: T-->Grammar<--Scanner;
+  StreamPos: Int64;
+  HTMLParseItem: THTMLParseItem;
+  Tag: THTMLScriptTag;
+  TagHasSrcLink: boolean;
+  ParseOK: boolean;
+  BytesConsumed: int64;
+  ParseSuccessful: boolean;
+  ParseResult: TCommonNode;
+  ErrRecover: THTMLErrorRecovery;
+begin
+  Sc := (Scanner as T-->Grammar<--Scanner);
+  Tag := Block.Tag as THTMLScriptTag;
+  Assert(Assigned(Block));
+  Assert(Assigned(Tag));
+  TagHasSrcLink := Assigned(Tag.FindValuePairByName('src'));
+  Assert(Assigned(Tag.ScriptData));
+  Assert(not Tag.FailedParse);
+  Assert(DLItemIsEmpty(@Block.ContainedListHead));
+  Assert(Tag.DocType = FDocType);
+  Assert(Tag.DocType <> tdtHTML);
+
+  //Create a copy of current input stream, from current position to end,
+  //put that in the script data.
+  StreamPos := Sc.SrcStream.Position;
+  Tag.ScriptData.Seek(0, soFromBeginning);
+  Tag.ScriptData.CopyFrom(Sc.SrcStream, Sc.SrcStream.Size - Sc.SrcStream.Position);
+  Tag.ScriptData.Seek(0, soFromBeginning);
+  Sc.SrcStream.Seek(StreamPos, soFromBeginning); //Don't disturb input stream.
+
+  //Parse the script data.
+  HTMLParseItem := ParentObject as THTMLParseItem;
+  ParseSuccessful := HTMLParseItem.ParseCommon(Tag.DocType, Tag.ScriptData, ParseResult
+{$IFDEF DEBUG_PARSERS}
+                          , Tag.Line, Tag.Col
+{$ENDIF}
+                          , BytesConsumed);
+  //BytesConsumed includes either a #0 (EOF) tacked on by the parser,
+  //or alternatively, the "<" of the next "</script>" or "</style>",
+  //and hence is one more char than the actual script data.
+
+  if BytesConsumed > 0 then //All but most pathalogical of error cases.
+    Dec(BytesConsumed);
+
+  Tag.FailedParse := not (ParseSuccessful and Assigned(ParseResult));
+  //Unnecessary Block.FixupChildContainedPtrsRec (done at end of HTML parse).
+  //Unnecessary FixNodeStrings (done at end of HTML parse)
+  if Tag.FailedParse then
+  begin
+    ErrRecover := THTMLErrorRecovery.Create;
+    try
+      if not ErrRecover.FindScriptEnd(Tag.ScriptData,
+                                      BytesConsumed,
+                                      Tag.DocType,
+                                      BytesConsumed) then
+        SynError(1006);
+        //Things really are likely well and truly stuffed, not warning, but error.
+        //TODO - AbortParse if we think script data will end up in the document?
+    finally
+      ErrRecover.Free;
+    end;
+  end;
+
+  if not TagHasSrcLink then
+  begin
+    //If no source link then connect what we have.
+    if Assigned(ParseResult) then
+    begin
+      Assert(DLItemIsEmpty(@Block.ContainedListHead));
+      DLListInsertHead(@Block.ContainedListHead, @ParseResult.SiblingListEntry);
+    end;
+  end
+  else
+  begin
+    //If we do have a source link, then check it's not utterly trivial (NULL).
+    //If it is, then remove both the parse result, and the script data.
+    //Prefer inline data to src links, but inline data shouldn't be NULL.
+    //See also THTMLScriptTag.GenUnresolvedRef
+    if Assigned(ParseResult) then
+    begin
+      if DlItemIsEmpty(@ParseResult.ContainedListHead) then
+      begin
+        //NULL document, free both result and source stream,
+        //and code will later fetch src link.
+        ParseResult.Free;
+        ParseResult := nil;
+      end
+      else
+      begin
+        //Add result as usual.
+        Assert(DLItemIsEmpty(@Block.ContainedListHead));
+        DLListInsertHead(@Block.ContainedListHead, @ParseResult.SiblingListEntry);
+      end;
+    end;
+    //And if for any reason no parse result, free the script data, rely
+    //on later fetch from src link.
+    if not Assigned(ParseResult) then
+    begin
+      Tag.ScriptData.Free;
+      Tag.ScriptData := nil;
+    end;
+  end;
+
+  if Assigned(Tag.ScriptData) then
+    Tag.ScriptData.Size := BytesConsumed; //Trim script data if we still retain it.
+
+  //Advance lexer to just after script data.
+  AdvanceLexer(BytesConsumed);
+end;
+
+procedure T-->Grammar<--.SetLocation(N: THTMLNode);
+begin
+  N.Line := (Scanner as T-->Grammar<--Scanner).CurrentSymbol.Line;
+  N.Col := (Scanner as T-->Grammar<--Scanner).CurrentSymbol.Col;
+end;
+
+//Returns whether tag is opening script tag
+function T-->Grammar<--.CheckStartScriptTag(T: THTMLTag):boolean;
+var
+  ScriptType, ScriptSrc: THTMLValuePair;
+begin
+  result := false;
+  if ((AnsiCompareText(T.Name, 'script') = 0)
+    or (AnsiCompareText(T.Name,'style') = 0))
+    and ((T.TagType  = ttOpen) or (T.TagType = ttComplete)) then
+  begin
+    Assert(T is THTMLScriptTag);
+    result := (T.TagType = ttOpen);
+    FScriptStartLine := (Scanner as T-->Grammar<--Scanner).CurrentSymbol.Line;
+    FScriptStartCol := (Scanner as T-->Grammar<--Scanner).CurrentSymbol.Col;
+    if (AnsiCompareText(T.Name, 'script') = 0) then
+    begin
+      FScriptMode := snmScript;
+      FDocType := tdtHTML;
+
+      //Work out what sort of script this is.
+      ScriptType := T.FindValuePairByName('type');
+      if Assigned(ScriptType) then
+      begin
+        if ContainsStr(ScriptType.ValData, 'javascript') then
+          FDocType := tdtJScript
+        else if ContainsStr(ScriptType.ValData, 'json') then
+          FDocType := tdtJSon;
+      end;
+
+      //No luck working out script type? try src link...
+      ScriptSrc := T.FIndValuePairByName('src');
+      if (FDocType = tdtHTML) and Assigned(ScriptSrc) then
+        FDocType := GetDocTypeFromURL(ScriptSrc.ValData); //Might set to unknown
+
+      //Still no luck? Assume javascript.
+      if (FDocType = tdtHTML) or (FDocType = tdtUnknown) then
+        FDocType := tdtJScript;
+    end
+    else
+    begin
+      FScriptMode := snmStyle;
+      FDocType := tdtCSS;
+    end;
+
+    (T as THTMLScriptTag).DocType := FDocType;
+    if result then
+    begin
+      (T as THTMLScriptTag).ScriptData := TTrackedMemoryStream.Create;
+      (T as THTMLScriptTag).ScriptData.Seek(0, soFromBeginning);
+    end;
+  end;
+end;
+
+procedure T-->Grammar<--.CheckEndScriptTag(T:THTMLTag);
+begin
+  if ((AnsiCompareText(T.Name, 'script') = 0) and (FScriptMode = snmScript))
+  or ((AnsiCompareText(T.Name, 'style') = 0) and (FScriptMode = snmStyle))
+  and (T.TagType = ttClose) then
+  begin
+    if FScriptMode <> snmNone then
+    begin
+      FScriptMode := snmNone;
+      FScriptStartLine := 0;
+      FScriptStartCol := 0;
+    end
+    else
+        ParseWarning(1005, '');
+  end;
+end;
+
+procedure T-->Grammar<--.InsertBlockToListTail(var TempHead: TDLEntry; Block: THTMLBlock);
+begin
+  if not Assigned(Block) then
+    AbortParse;
+  Assert(Block is THTMLBlock);
+  Assert(DLItemIsEmpty(@Block.SiblingListEntry));
+  DLListInsertTail(@TempHead, @Block.SiblingListEntry);
+end;
+
+procedure T-->Grammar<--.InsertDocToListHead(var TempHead: TDLEntry; Doc: THTMLDocument);
+begin
+  if not Assigned(Doc) then
+    AbortParse;
+  Assert(Doc is THTMLDocument);
+  Assert(DLItemIsEmpty(@Doc.ContainedListHead));
+  DLListInsertHead(@TempHead, @Doc.ContainedListHead);
+end;
+
+procedure T-->Grammar<--.RemoveTempHead(var TempHead: TDLEntry);
+begin
+  Assert(DLItemIsList(@TempHead));
+  Assert(not DLItemIsEmpty(@TempHead));
+  DLListRemoveList(@TempHead);
+end;
+
+procedure T-->Grammar<--.AbortParse();
+begin
+  raise EParseAbort.Create(ErrorStr(1013, ''),
+                (Scanner as T-->Grammar<--Scanner).NextSymbol.Line,
+                (Scanner as T-->Grammar<--Scanner).NextSymbol.Col);
+end;
+
+CHARACTERS
+    digit = "0123456789" .
+    letter  = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" .
+    quot = CHR(34) .
+    apos = CHR(39) .
+    linebreak = CHR(13) + CHR(10) .
+    whitespace = CHR(9) + " " .
+
+    other = ANY
+    - digit
+    - letter
+    - quot
+    - apos
+    - "="
+    - "&"
+    - "<"
+    - ">"
+    - ";"
+    - "/"
+    - "!"
+    - "?"
+    - linebreak
+    - whitespace
+    - "-"
+    - "_"
+     .
+
+TOKENS
+    TokOther =  other .
+    TokDigit = digit .
+    TokLetter = letter .
+    TokLinebreak = linebreak .
+    TokWhitespace = whitespace .
+    TokQuot = quot .
+    TokApos = apos .
+
+PRODUCTIONS
+
+  HTMLGrammar DESCRIPTION "Well formed HTML page"
+                                (. var TempHead: TDLEntry; .)
+  =
+                                (. DLItemInitList(@TempHead); .)
+    HTMLBlocks<TempHead>     (.
+                                   FParseResult := THTMLDocument.CreateWithTracker(FParseTracker as TTracker);
+                                   SetLocation(FParseResult as THTMLDocument);
+                                   InsertDocToListHead(TempHead, FParseResult as THTMLDocument);
+                                   RemoveTempHead(TempHead);
+                                   (FParseResult as THTMLDocument).FixupChildContainedPtrs;
+                                .)
+  EOF                           (.
+                                   if not (FScriptMode = snmNone) then
+                                   begin
+                                     ParseWarning(1004, '');
+                                     ParseWarning(9999, 'Script start line: ' +IntToStr(FScriptStartLine));
+                                     ParseWarning(9999, 'Script start column: '+IntToStr(FScriptStartCol));
+                                   end;
+                                .)
+  .
+
+  //For ease of parsing, create a linear block list,
+  //and then fix up the tree structure later.
+
+  HTMLBlocks<var TempHead: TDLEntry> DESCRIPTION "HTML text with embedded tags"
+                                (. var
+                                        B: THTMLBlock;
+                                        NextTagEndScript: boolean;
+                                .)
+  =
+                                        (. NextTagEndScript := false; .)
+    HTMLBlock<B, NextTagEndScript>      (. InsertBlockToListTail(TempHead, B); .)
+    {
+      HTMLBlock<B, NextTagEndScript>    (. InsertBlockToListTail(TempHead, B); .)
+    }
+  .
+
+  Script<var B: THTMLBlock; ExpectScript: boolean> DESCRIPTION "Optional java or other script or embedded text."
+  =
+                                (. if not ExpectScript then
+                                     exit;
+                                   RewindLexer(2);
+                                   ParseScript(B);
+                                .)
+        ANY                      //Makes parser do a get from lexer, to update cur input symbol.
+  .
+
+  HTMLBlock<out B: THTMLBlock; var NextTagEndScript: boolean> DESCRIPTION "one tag or contiguous section of text"
+                                (. var
+                                        S: string;
+                                        T: THTMLTag;
+                                        ExpectScript: boolean;
+                                .)
+  =
+                                (. B := THTMLBlock.CreateWithTracker(FParseTracker as TTracker);
+                                   SetLocation(B);
+                                   B.Line := (Scanner as T-->Scanner<--).NextSymbol.Line;
+                                   B.Col := (Scanner as T-->Scanner<--).NextSymbol.Col;
+                                .)
+      (
+        HTMLTag<T>                (. B.Tag := T;
+                                     T.ContainerNode := B;
+                                     if NextTagEndScript then
+                                       CheckEndScriptTag(T);
+                                     ExpectScript := CheckStartScriptTag(T);
+                                  .)
+        Script<B, ExpectScript>      (. NextTagEndScript := ExpectScript; .)
+        |
+        HTMLCleanText<S>          (.
+                                      if NextTagEndScript then
+                                      begin
+                                        ParseWarning(1011,'');
+                                        NextTagEndScript := false;
+                                      end;
+                                      B.Text := S;
+                                  .)
+      )
+  .
+
+  HTMLTag<out T:THtmlTag> DESCRIPTION "HTML opening or closing tag"
+  (.
+    var Tmp: THTMLTag;
+
+    procedure CreateSpecificScriptTag;
+    begin
+      if (AnsiCompareText(T.Name, 'script') = 0)
+        or (AnsiCompareText(T.Name, 'style') = 0) then
+      begin
+        Tmp := THTMLScriptTag.CreateWithTracker(FParseTracker as TTracker);
+        SetLocation(Tmp);
+        Tmp.TagType := T.TagType;
+        Tmp.Name := T.Name;
+        T.Free;
+        T := Tmp;
+      end;
+    end;
+  .)
+  =
+                                (. T := THTMLTag.CreateWithTracker(FParseTracker as TTracker);
+                                   SetLocation(T); .)
+  "<"                         (. T.TagType := ttOpen; .)
+  (
+    (
+      "!"                (. T.TagType := ttPling; .)
+      SGMLContents<T>
+    )
+    |
+    (
+      "/"                (. T.TagType := ttClose; .)
+      TagName<T>              (. CreateSpecificScriptTag; .)
+    )
+    |
+    (
+      "?"                (. T.tagType := ttQuery; .)
+      QueryContents<T>
+      "?"
+    )
+    |
+    (
+      TagName<T>              (. CreateSpecificScriptTag; .)
+      [ Whitespace ]
+      TagContents<T>
+      [ Whitespace ]
+      [
+        "/"                (. if T.TagType <> ttOpen then
+                                     SynError(1000)
+                                   else
+                                     T.TagType := ttComplete; .)
+      ]
+    )
+  )
+  ">"
+  .
+
+  TagContents<var Tag:THTMLTag> DESCRIPTION "Contents of an HTML Tag"
+  =
+    [ TagValuePairs<Tag> ]
+  .
+
+  TagName<var Tag:THTMLTag> DESCRIPTION "HTML Tag Name"
+                                (. var S:string; .)
+  =
+    Identifier<S>               (. Tag.Name := S; .)
+  .
+
+  TagValuePairs<var Tag: THTMLTag> DESCRIPTION "HTML Tag Value pairs"
+                                (. var VP: THTMLValuePair;
+                                       OK: boolean;
+                                       Merged: boolean;
+                                .)
+  =
+    TagValuePair<VP>   (.
+                          Tag.AddValuePair(VP, OK, Merged);
+                          if not OK then
+                          begin
+                            ParseWarning(1001, '');
+                            VP.Free;
+                          end;
+                          Assert(not Merged);
+                       .)
+    [ Whitespace ]
+    {
+      TagValuePair<VP> (.
+                          Tag.AddValuePair(VP, OK, Merged);
+                          if not OK then
+                          begin
+                            ParseWarning(1001, '');
+                            VP.Free;
+                          end
+                          else if Merged then
+                          begin
+                            ParseWarning(1012, '');
+                            VP.Free;
+                          end;
+                       .)
+      [ Whitespace ]
+    }
+  .
+
+  Whitespace DESCRIPTION "Whitespace to be skipped in HTML tag"
+  =
+        (TokWhitespace | TokLinebreak)
+        { (TokWhitespace | TokLinebreak) }
+  .
+
+
+  TagValuePair<out VP: THTMLValuePair> DESCRIPTION "HTML Tag Value pair"
+                                (. var Name: string; .)
+  =
+                                (. VP := nil; .)
+    (
+      (
+        Identifier<Name>          (.
+                                   VP := THTMLValuePair.CreateWithTracker(FParseTracker as TTracker);
+                                   SetLocation(VP);
+                                   Name.Trim;
+                                   VP.ValName := Name;
+                                  .)
+        [
+          "="
+          TagRVal<VP>
+        ]
+      )
+      |
+      "="                         (.
+                                   VP := THTMLValuePair.CreateWithTracker(FParseTracker as TTracker);
+                                   SetLocation(VP);
+                                  .)
+      TagRVal<VP>
+    )
+  .
+
+  TagRVal<var VP: THTMLValuePair> DESCRIPTION "HTML Tag value pair RVAL"
+                                (. var Val: string; .)
+  =
+    (
+      (
+        TokQuot
+        [ HTMLQuotValueText<Val>]
+        TokQuot
+      )
+      |
+      (
+        TokApos
+        [ HTMLAposValueText<Val>]
+        TokApos
+      )
+    )                         (. VP.ValData := Val; VP.ValType := tvtString; .)
+    |
+    HTMLTokenisedText<Val>    (.
+                                 Val.Trim;
+                                 VP.ValData := Val; VP.ValType := tvtTokenSequence; .)
+  .
+
+  SGMLContents<var Tag:THTMLTag> DESCRIPTION "Contents of an SGML Tag"
+                                (. var S:string; VP: THTMLValuePair; OK, M: boolean; .)
+  =
+    SGMLText<S>                 (. VP := THTMLValuePair.CreateWithTracker(FParseTracker as TTracker);
+                                   VP.ValName := 'TagContents';
+                                   VP.ValData := S;
+                                   VP.ValType := tvtString;
+                                   Tag.AddValuePair(VP, OK, M);
+                                   Assert(OK);
+                                   Assert(not M);
+                                .)
+  .
+
+  QueryContents<var Tag:THTMLTag> DESCRIPTION "Contents of a query tag"
+                                (. var S:string; VP: THTMLValuePair; OK, M: boolean; .)
+  =
+    QueryText<S>                (. VP := THTMLValuePair.CreateWithTracker(FParseTracker as TTracker);
+                                   VP.ValName := 'TagContents';
+                                   VP.ValData := S;
+                                   VP.ValType := tvtString;
+                                   Tag.AddValuePair(VP, OK, M);
+                                   Assert(OK);
+                                   Assert(not M);
+                                .)
+  .
+
+  HTMLCleanText<out StringLiteral: string> DESCRIPTION "Uninterrupted text with no embedded tags"
+                                (. var S1, S2: string; .)
+  =
+    HTMLEscapedChar<S1>
+    HTMLCleanText<S2>           (. StringLiteral := S1 + S2; .)
+    |
+    HTMLLiteralText<StringLiteral>
+  .
+
+  HTMLTokenisedText<out StringLiteral: string> DESCRIPTION "HTML tag-value text representing a JS function call"
+                                            (. var T:string; .)
+  =
+    HTMLTokenChar<StringLiteral>
+    { HTMLTokenChar<T>                      (. StringLiteral := StringLiteral + T; .)
+    }
+  .
+
+
+  //Bit hacky - deal with the fact that some people don't understand the meaning of & in HTML.
+  HTMLEscapedChar <out StringLiteral: string> DESCRIPTION "Escape sequence for HTML reserved characters"
+                                (. var IdStr: string; FailStr: string;
+                                       GoodTerminator: boolean; .)
+  =
+    (. StringLiteral := '';
+       GoodTerminator := false;
+       FailStr := '&'; .)
+    "&"
+    [ //Matching optional for following sequence.
+      (
+        "#"
+        (
+          ( NumericSequence<IdStr>
+           |
+            BaseNSequence<IdStr>
+          )
+                                    (. StringLiteral := LookupNumericEscape(self, IdStr);
+                                       FailStr := FailStr + '#' + IdStr; .)
+        )
+        |
+        Identifier<IdStr>         (. StringLiteral := LookupIDEscape(self, IdStr);
+                                     FailStr := FailStr + IdStr; .)
+      )
+      [
+        ";"                       (. FailStr := FailStr + ';';
+                                     GoodTerminator := true; .)
+      ]
+    ]
+    (. if (Length(StringLiteral) = 0) or not GoodTerminator then
+       begin
+         ParseWarning(1007, '');
+         StringLiteral := FailStr;
+       end;
+    .)
+  .
+
+  Identifier<out S: string> DESCRIPTION "Textual identifier, possibly with numbers"
+                                        (. var T:string; .)
+  =
+    IdentifierChar<S>
+    { IdentifierChar<T>                       (. S := S + T; .)
+    }
+  .
+
+  NumericSequence<out S:string> DESCRIPTION "Numeric sequence"
+  =
+    TokDigit                    (. S := LexString; .)
+    { TokDigit                  (. S := S + LexString; .)
+    }
+  .
+
+  BaseNSequence<out S: string> DESCRIPTION "Hex sequence"
+  =
+    TokLetter                   (. S := LexString;     .)
+    { (TokLetter | TokDigit)    (. S := S + LexString; .)
+    }
+  .
+
+  SGMLText<out S:string> DESCRIPTION "Text suitable for insertion in an SGML tag"
+                                            (. var T:string; .)
+  =
+    SGMLChar<S>
+    { SGMLChar<T>                           (. S := S + T; .)
+    }
+  .
+
+  QueryText<out S:string> DESCRIPTION "Text suitable for insertion in a query tag"
+                                            (. var T:string; .)
+  =
+    QueryChar<S>
+    { QueryChar<T>                           (. S := S + T; .)
+    }
+  .
+
+
+  HTMLQuotValueText<out S:string> DESCRIPTION"Text suitable for insertion in a name-value pair"
+                                            (. var T:string; .)
+  =
+    HTMLQuotValueChar<S>
+    { HTMLQuotValueChar<T>                      (. S := S + T; .)
+    }
+  .
+
+  HTMLAposValueText<out S:string> DESCRIPTION"Text suitable for insertion in a name-value pair"
+                                            (. var T:string; .)
+  =
+    HTMLAposValueChar<S>
+    { HTMLAposValueChar<T>                      (. S := S + T; .)
+    }
+  .
+
+  HTMLLiteralText<out S: string> DESCRIPTION "Uninterrupted text with no embedded escapes"
+                                            (. var T:string; .)
+  =
+    HTMLLiteralChar<S>
+    { HTMLLiteralChar<T>                    (. S := S + T; .)
+    }
+  .
+
+  SGMLChar<out S:string> DESCRIPTION "SGML character in <!SGMLTag>"
+  =
+  //Just exclude ">"
+    (TokOther | "&" | "<" | ";" | "/" | "!" | "?" | TokLetter | TokDigit | "#"
+                | "=" | TokWhitespace | TokQuot | TokApos | "-" | "_" | ":" )
+        (. S := LexString; .)
+    |
+    TokLinebreak
+  .
+
+  QueryChar<out S:string> DESCRIPTION "Query tag character in <?query?>"
+  =
+  //Just exclude "?"
+    (TokOther | "&" | "<" | ">" | ";" | "/" | "!" | TokLetter | TokDigit | "#"
+                | "=" | TokWhitespace | TokQuot | TokApos | "-" | "_" |  ":" )
+        (. S := LexString; .)
+    |
+    TokLinebreak
+  .
+
+  HTMLTokenChar<out S:string> DESCRIPTION "Character in tag=token in HTMLtag"
+  =
+  //Just exclude whitespace and ">" and "="
+    (TokOther | "&" | "<" | ";" | "/" | "!" | "?" | TokLetter | TokDigit | "#"
+                | TokQuot | TokApos | "-" | "_" |  ":")
+        (. S := LexString; .)
+    |
+    (
+    TokQuot
+    HTMLQuotValueText<S>
+    TokQuot
+    )
+    |
+    (
+    TokApos
+    HTMLAposValueText<S>
+    TokApos
+    )
+    |
+    TokLinebreak
+  .
+
+
+  IdentifierChar<out S: string> DESCRIPTION "Character in textual identifier"
+  =
+    ( TokLetter | TokDigit | "-" | "_" | "!" | "?" | "#" | ":" )
+                                           (. S := LexString; .)
+  .
+
+  HTMLQuotValueChar<out S:string> DESCRIPTION "Value character in tag=&quot;value&quot; in HTML tag"
+  =
+  //Just exclude """
+    (TokOther | "&" | "<" | ">" | ";" | "/" | "!" | "?" | TokLetter | TokDigit | "#"
+                | "=" | TokWhitespace | "-" | "_" | TokApos | ":")
+        (. S := LexString; .)
+    |
+    TokLinebreak        (. S := LexString; .)
+  .
+
+  HTMLAposValueChar<out S:string> DESCRIPTION "Value character in tag=&quot;value&quot; in HTML tag"
+  =
+  //Just exclude "'"
+    (TokOther | "&" | "<" | ">" | ";" | "/" | "!" | "?" | TokLetter | TokDigit | "#"
+                | "=" | TokWhitespace | "-" | "_" | TokQuot | ":" )
+        (. S := LexString; .)
+    |
+    TokLinebreak        (. S := LexString; .)
+  .
+
+  HTMLLiteralChar<out S:string> DESCRIPTION "HTML character in freeform text"
+  =
+  //Just exclude "<"and "&"
+    (TokOther | ">" | ";" | "/" | "!" | "?" | TokLetter | TokDigit | "#" | "=" | TokQuot
+      | TokApos | TokWhitespace | TokLinebreak | "-" | "_" | ":" )
+        (. S := LexString; .)
+    |
+  .
+
+END HTMLGrammar.
