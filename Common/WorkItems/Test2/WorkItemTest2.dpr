@@ -9,7 +9,8 @@ uses
   IndexedStore in '..\..\Indexed Store\IndexedStore.pas',
   BinaryTree in '..\..\Balanced Tree\BinaryTree.pas',
   Vcl.Themes,
-  Vcl.Styles;
+  Vcl.Styles,
+  Trackables in '..\..\Tracking\Trackables.pas';
 
 {$R *.res}
 

@@ -145,7 +145,7 @@ type
     FNodeIsSearchVal: boolean;
     FSearchLow: boolean;
     FSearchVal: cardinal;
-    function CompareItems(OwnItem, OtherItem: TObject): integer; override;
+    function CompareItems(OwnItem, OtherItem: TObject;IndexTag: Int64; OtherNode: TIndexNode): integer; override;
   public
     property NodeIsSearchVal: boolean read FNodeIsSearchVal write FNodeIsSearchVal;
     property SearchVal: cardinal read FSearchVal write FSearchVal;
@@ -1060,7 +1060,7 @@ end;
 
 { TPrimeWorkItemIndex }
 
-function TPrimeWorkItemIndex.CompareItems(OwnItem: TObject; OtherItem: TObject): integer;
+function TPrimeWorkItemIndex.CompareItems(OwnItem: TObject; OtherItem: TObject;IndexTag: Int64; OtherNode: TIndexNode): integer;
 var
   OwnVal: cardinal;
   OtherVal: cardinal;
