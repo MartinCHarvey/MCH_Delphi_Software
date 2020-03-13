@@ -3,11 +3,11 @@ GitHub repo for open sourced MCH Software
 
 Files / Folders:
 
-KnowComment: A Delphi client for Instagram (and eventually Twitter too, but needs a few fixes).
+- KnowComment: A Delphi client for Instagram (and eventually Twitter too, but needs a few fixes).
 
-CoCoDM: A Delphi port of the CoCo/R parser generator.
+- CoCoDM: A Delphi port of the CoCo/R parser generator.
 
-ProjectXPlant: A handly utility which parses delphi project files and copies projects from one location to another.
+- ProjectXPlant: A handly utility which parses delphi project files and copies projects from one location to another.
 
 Common: Common utility code, including:
 
@@ -26,6 +26,15 @@ Common: Common utility code, including:
 - Debug object tracking.
 - Custom threadpool implementation.
 
+Additional testapps and utility code.
+
+- MemDB testapp: Common/MemDB/Test/
+- Lexer testapp: Common/SoftLexer/Test/
+- Streaming system testapp: Common/StreamingSystem/Test/
+- Threadpool testapp: Common/WorkItems/Test/
+- Threadpool testapp: Common/WorkItems/Test2/
+- Threadpool testapp: Common/WorkItems/Test3/
+- Instagram / Twitter importer testapp MMapper/
+- FetchParse library testapp: PageMapper/
+
 Comments / queries to martin_c_harvey@hotmail.com
-
-
