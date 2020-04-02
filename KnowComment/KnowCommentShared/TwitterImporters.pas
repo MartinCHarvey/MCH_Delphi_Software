@@ -401,6 +401,13 @@ begin
     // Currently similar to part of PopulateUserTweetFromProfileHTML, but might change.
     if FNav.PushChild(Node, '<div class="tweet js-stream-tweet"/>') then
     begin
+      if FNav.PushChild(Node, '<div class="context"/>') then
+      begin
+        // Retweets not expected here.
+        if FNav.PushChildRec(Node, '<span class="js-retweet-text"/>') then
+          raise EImportError.Create('');
+        FNav.Pop(Node);
+      end;
       if FNav.PushChild(Node, '<div class="content"/>') then
       begin
         if FNav.PushChild(Node, '<div class="stream-item-header"/>') then
@@ -449,6 +456,7 @@ begin
         else
           raise EImportError.Create(FNav.LastSearch);
         // Don't need original tweet text.
+        // Don't need QuoteTweet details.
         FNav.Pop(Node);
       end
       else if FNav.FindChild(Node, '<div class="StreamItemContent--withheld"/>') then
@@ -1329,6 +1337,7 @@ begin
         end;
         FNav.Pop(Node);
       end
+      //TODO - Check if withheld is in both context and content nodes.
       else if FNav.FindChild(Node, '<div class="StreamItemContent--withheld"/>') then
       begin
         FNav.Pop(Node);
@@ -1378,6 +1387,7 @@ begin
         end
         else
           raise EImportError.Create(FNav.LastSearch);
+        //TODO - Handle "<div class="QuoteTweet" />"
         if FNav.PushChild(Node, '<div class="js-tweet-text-container"/>') then
         begin
           TweetData := Node.ReconstructedHTML(trhOmitTopTag);

@@ -128,7 +128,11 @@ end;
 constructor TUserPrefs.Create;
 begin
   inherited;
+{$IFNDEF DEBUG_FIXED_DB_PATH}
   FDataRootDir:= DBDir;
+{$ELSE}
+  FDataRootDir := 'D:\Knowcomment_Debug';
+{$ENDIF}
   FLoadBackDays := 7;
   FImageExpireDays := 7;
   FDataExpireDays := 3650;
@@ -163,6 +167,7 @@ initialization
     TDirectory.CreateDirectory(DBDir);
   ConfFileName := RootDir + DEFAULT_PREFS_FILENAME;
   SetupHeirarchy(Heirarchy);
+{$IFNDEF DEBUG_FIXED_DB_PATH}
   try
     try
       XMLStream := TStreamSysXML.Create;
@@ -177,9 +182,11 @@ initialization
     FreeAndNil(FileStream);
     FreeAndNil(XMLStream);
   end;
+{$ENDIF}
   if not Assigned(CurSessUserPrefs) then
     CurSessUserPrefs := TUserPrefs.Create;
 finalization
+{$IFNDEF DEBUG_FIXED_DB_PATH}
   try
     try
       XMLStream := TStreamSysXML.Create;
@@ -194,5 +201,6 @@ finalization
     FreeAndNil(FileStream);
     FreeAndNil(XMLStream);
   end;
+{$ENDIF}
   CurSessUserPrefs.Free;
 end.

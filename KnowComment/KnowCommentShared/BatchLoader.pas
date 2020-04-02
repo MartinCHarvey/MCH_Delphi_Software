@@ -714,7 +714,7 @@ end;
 function TDBInitMultiOp.InitForLoadAllUserTrees: boolean;
 begin
   FType := motDbLoadUserTrees;
-  result := MakeInterestedUserKeyListFromDB and (FUserKeysRemaining.Count > 0);
+  result := MakeInterestedUserKeyListFromDB;
   if result then
     FPresentationUserKeysRemaining := TKList.CloneListAndItemsOnly(FUserKeysRemaining) as TKUserList;
 end;
@@ -1088,7 +1088,7 @@ begin
   FPurgeLevel := Level;
   FPurgeType := PurgeType;
   FPurgePhase := pmoDoPurge;
-  result := MakeInterestedUserKeyListFromDB and (FUserKeysRemaining.Count > 0);
+  result := MakeInterestedUserKeyListFromDB;
   if result then
     FPresentationUserKeysRemaining := TKList.CloneListAndItemsOnly(FUserKeysRemaining)  as TKUserList;
 end;
@@ -1143,9 +1143,11 @@ begin
   FExpireBefore := ExpireBefore;
   FExpiryType := ExpiryType;
   FLevelSet := LevelSet;
-  result := MakeInterestedUserKeyListFromDB and (FUserKeysRemaining.Count > 0);
-  if result then
-    FPresentationUserKeysRemaining := TKList.CloneListAndItemsOnly(FUserKeysRemaining)  as TKUserList;
+  //With ExpireAll, we need to run the expiration phase even if no
+  //user trees directly affected, or no users being mornitored.
+  MakeInterestedUserKeyListFromDB;
+  FPresentationUserKeysRemaining := TKList.CloneListAndItemsOnly(FUserKeysRemaining)  as TKUserList;
+  result := true;
 end;
 
 procedure TDBExpireMultiOp.HandleDataStoreCompletion(Sender: TObject);
@@ -1958,6 +1960,8 @@ begin
       ((FLocation.LocationObj is TKUserProfile) and not Assigned(FTreeFragment))
       or ((FLocation.LocationObj is TKMediaItem)
            and (FLocation.MediaPhase = mlpInitialFetch)
+           and (not ((FLocation.LocationObj as TKMediaItem).MediaType
+            in [mitMetaLink])) //TODO - HTMLWithQuote? - Skip retweets.
            and (not Assigned(FTreeFragment)));
     DoDBWrite :=
       ((FLocation.LocationObj is TKUSerProfile) and Assigned(FTreeFragment))
@@ -2045,7 +2049,7 @@ begin
     begin
       Assert(Assigned(FLocation.LocationObj));
       //We can end up skipping because of failed user fetch,
-      //failed media fetch,
+      //failed media fetch, media is metalink,
       //or comment owner does not need updating.
       ItemSkipped := true;
     end;
