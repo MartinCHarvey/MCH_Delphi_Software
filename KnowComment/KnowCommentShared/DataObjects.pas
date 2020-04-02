@@ -346,7 +346,11 @@ type
 
   TKMediaBlockArray = array [TKSiteType] of TKSiteMediaBlock;
 
-  TKMediaItemType = (mitPlainText, mitHTML, mitMetaLink);
+  //Plain text - instagram.
+  //HTML - twitter tweet
+  //mitMetaLink - twitter retweet
+  //mitHTMLWithQuote - quoted tweet (TODO).
+  TKMediaItemType = (mitPlainText, mitHTML, mitMetaLink, mitHTMLWithQuote);
 
   TKMediaItem = class(TKKeyedObject)
   private
