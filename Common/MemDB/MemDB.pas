@@ -104,10 +104,6 @@ type
       GetTempStorageMode write SetTempStorageMode;
   end;
 
-  TMemDBPhase = (mdbNull, mdbInit, mdbRunning,
-    mdbClosingWaitClients, mdbClosingWaitPersist, mdbClosed,
-    mdbError);
-
 {$IFDEF USE_TRACKABLES}
   TMemDB = class(TTrackable)
 {$ELSE}
@@ -119,7 +115,7 @@ type
     // Synchronize access to database state.
     FRWLock: TMultiReadExclusiveWriteSynchronizer;
     FSessionList: TList;
-    FCheckpointRefs: integer;
+    FCheckpointRefs: integer; //Also used to reference number of oustanding stats calls.
     FTransactionList: TList;
     FInitWait: TEvent;
     FClientWait: TEvent;
@@ -154,6 +150,7 @@ type
                     JournalType: TMemDBJournalType = jtV2;
                     Async: boolean = false): boolean;
     procedure StopDB;
+    function GetDBStats: TMemDBStats;
     function Checkpoint: boolean;
     function StartSession: TMemDBSession;
 
@@ -732,6 +729,42 @@ begin
     T.FlushFinishedEvent.SetEvent;
   end;
 end;
+
+function TMemDB.GetDBStats: TMemDBStats;
+var
+  DoEntityStats: boolean;
+  MemStats: TMemStats;
+begin
+  result := TMemDBStats.Create;
+  FSessionLock.Acquire;
+  try
+    DoEntityStats := FPhase = mdbRunning;
+    result.Phase := FPhase;
+    if DoEntityStats then
+      Inc(FCheckpointRefs);
+  finally
+    FSessionLock.Release;
+  end;
+  if DoEntityStats then
+  begin
+    FRWLock.BeginRead;
+    try
+      MemStats := result;
+      FDatabase.GetStats(MemStats);
+    finally
+      FRWLock.EndRead;
+      FSessionLock.Acquire;
+      try
+        Assert(FCheckpointRefs >= 0);
+        Dec(FCheckpointRefs);
+        CheckClientsDone;
+      finally
+        FSessionLock.Release;
+      end;
+    end;
+  end;
+end;
+
 
 function TMemDB.Checkpoint: boolean;
 var

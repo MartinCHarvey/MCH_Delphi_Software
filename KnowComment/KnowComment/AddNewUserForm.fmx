@@ -44,12 +44,11 @@ object AddNewUserFrm: TAddNewUserFrm
       Width = 120.000000000000000000
     end
     object TwitterRadio: TRadioButton
-      Enabled = False
       Height = 19.000000000000000000
       Position.X = 24.000000000000000000
       Position.Y = 56.000000000000000000
       TabOrder = 1
-      Text = 'Twitter - pending fixes'
+      Text = 'Twitter'
       Width = 153.000000000000000000
     end
   end

@@ -671,11 +671,11 @@ PRODUCTIONS
            |
             BaseNSequence<IdStr>
           )
-                                    (. StringLiteral := LookupNumericEscape(self, IdStr);
+                                    (. StringLiteral := LookupNumericEscape(IdStr);
                                        FailStr := FailStr + '#' + IdStr; .)
         )
         |
-        Identifier<IdStr>         (. StringLiteral := LookupIDEscape(self, IdStr);
+        Identifier<IdStr>         (. StringLiteral := LookupIDEscape(IdStr);
                                      FailStr := FailStr + IdStr; .)
       )
       [

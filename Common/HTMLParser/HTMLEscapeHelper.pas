@@ -27,7 +27,7 @@ IN THE SOFTWARE.
 
 interface
 
-uses CoCoBase, Classes, IdGlobal, IdCoderMIME;
+uses Classes, IdGlobal, IdCoderMIME;
 
 type
   THTMLDocType = (tdtUnknown, tdtHTML, tdtCSS, tdtJSON, tdtJScript);
@@ -37,11 +37,14 @@ function EscapeToHTML(const Str: string): string;
 function NeedsEscape(WChar: WideChar; var Escape: string): boolean;
 
 //Functions for HTML parser to unescape HTML string.
-function LookupNumericEscape(Grammar: TCoCORGrammar; NumEsc: string): string;
-function LookupIdEscape(Grammar: TCoCORGrammar; IdEsc:string): string;
+function LookupNumericEscape(NumEsc: string): string;
+function LookupIdEscape(IdEsc:string): string;
 
 //NB. Does not deal with query URL's (Get / Post with "?params=" etc)
 //Use ParseURLEx for that.
+
+//TODO TODO - Build  a really really proper URL parsing routine at some point
+//to replace both this and code elsewhere.
 procedure ParseURL(BaseUrl: string;
                   out ProtoStr: string;
                   out SiteStr: string;
@@ -49,6 +52,8 @@ procedure ParseURL(BaseUrl: string;
                   out NameStr: string;
                   out ExtStr: string);
 
+//TODO TODO - Build  a really really proper URL parsing routine at some point
+//to replace both this and code elsewhere.
 procedure ParseURLEx(BaseUrl: string;
                   out ProtoStr: string;
                   out SiteStr: string;
@@ -114,7 +119,7 @@ function Base64StringToIdBytes(Str:string; var Bytes: TIdBytes): boolean;
 implementation
 
 uses
-  SysUtils, HTMLGrammar, Data.Cloud.CloudAPI;
+  SysUtils{, Data.Cloud.CloudAPI};
 
 function BuildURL(ProtoStr: string;
                       SiteStr: string;
@@ -699,7 +704,7 @@ begin
   end;
 end;
 
-function LookupNumericEscape(Grammar: TCoCORGrammar; NumEsc: string): string;
+function LookupNumericEscape(NumEsc: string): string;
 var
   CharNum: integer;
 begin
@@ -716,7 +721,7 @@ begin
   result := '';
 end;
 
-function LookupIdEscape(Grammar: TCoCORGrammar; IdEsc:string): string;
+function LookupIdEscape(IdEsc:string): string;
 var
   cand, replace: string;
   i:integer;
@@ -747,6 +752,8 @@ begin
   result := '';
 end;
 
+//TODO TODO - Build  a really really proper URL parsing routine at some point
+//to replace both this and code elsewhere.
 procedure ParseURLEx(BaseUrl: string;
                   out ProtoStr: string;
                   out SiteStr: string;
@@ -784,6 +791,11 @@ end;
 
 //NB. Does not deal with query URL's (Get / Post with "?params=" etc)
 //Use ParseURLEx for that.
+//NB NB. If it's possible to have a site, with a server and port name,
+//but no proto, and subsequent path, then this function will fail.
+
+//TODO TODO - Build  a really really proper URL parsing routine at some point
+//to replace both this and code elsewhere.
 procedure ParseURL(BaseUrl: string;
                   out ProtoStr: string;
                   out SiteStr: string;

@@ -2,7 +2,7 @@ object StatsFrm: TStatsFrm
   Left = 0
   Top = 0
   Caption = 'Status'
-  ClientHeight = 467
+  ClientHeight = 520
   ClientWidth = 499
   FormFactor.Width = 320
   FormFactor.Height = 480
@@ -53,14 +53,14 @@ object StatsFrm: TStatsFrm
   object Label6: TLabel
     Height = 17.000000000000000000
     Position.X = 16.000000000000000000
-    Position.Y = 128.000000000000000000
+    Position.Y = 160.000000000000000000
     Text = 'Other tasks queued...'
     Width = 120.000000000000000000
   end
   object QueueMemo: TMemo
     Height = 89.000000000000000000
     Position.X = 16.000000000000000000
-    Position.Y = 152.000000000000000000
+    Position.Y = 184.000000000000000000
     TabOrder = 6
     Width = 465.000000000000000000
     ReadOnly = True
@@ -68,7 +68,7 @@ object StatsFrm: TStatsFrm
   object StopBtn: TButton
     Height = 30.000000000000000000
     Position.X = 312.000000000000000000
-    Position.Y = 112.000000000000000000
+    Position.Y = 144.000000000000000000
     TabOrder = 7
     Text = 'Stop all current tasks'
     Width = 168.000000000000000000
@@ -77,7 +77,7 @@ object StatsFrm: TStatsFrm
   object CloseBtn: TButton
     Height = 22.000000000000000000
     Position.X = 208.000000000000000000
-    Position.Y = 432.000000000000000000
+    Position.Y = 464.000000000000000000
     TabOrder = 8
     Text = 'Close'
     Width = 80.000000000000000000
@@ -140,7 +140,7 @@ object StatsFrm: TStatsFrm
   object ErrLstMemo: TMemo
     Height = 137.000000000000000000
     Position.X = 16.000000000000000000
-    Position.Y = 288.000000000000000000
+    Position.Y = 320.000000000000000000
     TabOrder = 16
     Width = 465.000000000000000000
     ReadOnly = True
@@ -148,14 +148,14 @@ object StatsFrm: TStatsFrm
   object Label8: TLabel
     Height = 17.000000000000000000
     Position.X = 16.000000000000000000
-    Position.Y = 264.000000000000000000
+    Position.Y = 296.000000000000000000
     Text = 'Error list.'
     Width = 120.000000000000000000
   end
   object ErrClearBtn: TButton
     Height = 30.000000000000000000
     Position.X = 312.000000000000000000
-    Position.Y = 248.000000000000000000
+    Position.Y = 280.000000000000000000
     TabOrder = 18
     Text = 'Clear error list'
     Width = 169.000000000000000000
@@ -164,10 +164,24 @@ object StatsFrm: TStatsFrm
   object DumpDbgBtn: TButton
     Height = 30.000000000000000000
     Position.X = 192.000000000000000000
-    Position.Y = 248.000000000000000000
+    Position.Y = 280.000000000000000000
     TabOrder = 19
     Text = 'Debug info'
     Width = 113.000000000000000000
     OnClick = DumpDbgBtnClick
+  end
+  object Label9: TLabel
+    Height = 17.000000000000000000
+    Position.X = 16.000000000000000000
+    Position.Y = 112.000000000000000000
+    Text = 'DB status:'
+    Width = 49.000000000000000000
+  end
+  object DBStatsLbl: TLabel
+    Height = 17.000000000000000000
+    Position.X = 64.000000000000000000
+    Position.Y = 112.000000000000000000
+    Text = 'DBStatsLbl'
+    Width = 409.000000000000000000
   end
 end

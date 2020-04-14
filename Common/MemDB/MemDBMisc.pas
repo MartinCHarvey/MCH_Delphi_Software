@@ -30,9 +30,16 @@ IN THE SOFTWARE.
 
 interface
 
+{$IFOPT C+}
+{$DEFINE USE_TRACKABLES_LOCAL_MEMDBMISC}
+{$ENDIF}
+{$IFDEF USE_TRACKABLES}
+{$DEFINE USE_TRACKABLES_LOCAL_MEMDBMISC}
+{$ENDIF}
+
 uses
   SysUtils, Classes, BufferedFileStream
-{$IFOPT C+}
+{$IFDEF USE_TRACKABLES_LOCAL_MEMDBMISC}
   , Trackables
 {$ENDIF}
   ;
@@ -118,11 +125,58 @@ type
 {$IFOPT C+}
     FProxy: TTrackable;
 {$ENDIF}
-
   public
     constructor Create(const FileName: string);
     destructor Destroy; override;
     property FileName:string read FFileName;
+  end;
+
+  TMemDBPhase = (mdbNull, mdbInit, mdbRunning,
+    mdbClosingWaitClients, mdbClosingWaitPersist, mdbClosed,
+    mdbError);
+
+const
+  TMemDBPhaseStrings: array[TMemDBPhase] of string =
+    ('Null', 'Initialising', 'Running',
+    'Closing (WaitClients)', 'Closing (WaitPersist)', 'Closed',
+    'Error');
+
+type
+{$IFDEF USE_TRACKABLES}
+  TMemStats = class(TTrackable)
+{$ELSE}
+  TMemStats = class
+{$ENDIF}
+  //TODO - Possibly "to-string" or other serialization.
+  end;
+
+  TMemDBStats = class(TMemStats)
+  private
+    FEntityStatsList: TList;
+    FPhase: TMemDBPhase;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    property EntityStatsList: TList read FEntityStatsList;
+    property Phase: TMemDBPhase read FPhase write FPhase;
+  end;
+
+  TMemDBEntityStats = class(TMemStats)
+  private
+    FAName: string;
+  public
+    property AName:string read FAName write FAName;
+  end;
+
+  TMemDBTableStats = class(TMemDBEntityStats)
+  private
+    FFieldCount: Int64;
+    FIndexCount: Int64;
+    FRowCount: Int64;
+  public
+    property FieldCount: Int64 read FFieldCount write FFieldCount;
+    property IndexCount: Int64 read FIndexCount write FIndexCount;
+    property RowCount: Int64 read FRowCount write FRowCount;
   end;
 
 const
@@ -317,6 +371,25 @@ begin
     end;
   end
 end;
+
+{ TMemDBStats }
+
+constructor TMemDBStats.Create;
+begin
+  inherited;
+  FEntityStatsList := TList.Create;
+end;
+
+destructor TMemDBStats.Destroy;
+var
+  i: integer;
+begin
+  for i := 0 to Pred(FEntityStatsList.Count) do
+    TObject(FEntityStatsList.Items[i]).Free;
+  FEntityStatsList.Free;
+  inherited;
+end;
+
 
 
 initialization

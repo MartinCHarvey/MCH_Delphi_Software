@@ -78,8 +78,8 @@ type
     function DeRegisterClientInternalLocked(ClientRec: TClientRec;
                                             var MyThreadFrees: Boolean): boolean;
   public
-    function AddWorkItem(ClientRec: TClientRec; Item: TCommonPoolWorkItem): boolean;
-    function AddWorkItemBatch(ClientRec: TClientRec; PItem0: PCommonPoolWorkItem; Count: integer): boolean;
+    function AddWorkItem(ClientRec: TClientRec; Item: TCommonPoolWorkItem; QLim: integer = -1): boolean;
+    function AddWorkItemBatch(ClientRec: TClientRec; PItem0: PCommonPoolWorkItem; Count: integer; QLim: integer = -1): boolean;
     constructor Create;
     destructor Destroy; override;
     //Register client checks for no duplicate addition only in debug mode.
@@ -147,7 +147,7 @@ end;
 
 { TCommonPool }
 
-function TCommonPool.AddWorkItem(ClientRec: TClientRec; Item: TCommonPoolWorkItem): boolean;
+function TCommonPool.AddWorkItem(ClientRec: TClientRec; Item: TCommonPoolWorkItem; QLim: integer): boolean;
 begin
   result := false;
   Assert(Assigned(ClientRec));
@@ -157,7 +157,7 @@ begin
     begin
       Item.FParentPool := self;
       Item.FClientRec := ClientRec;
-      result := FFarm.AddWorkItem(Item);
+      result := FFarm.AddWorkItem(Item, QLim);
       if result then Inc(ClientRec.ClientRefCount);
     end;
   finally
@@ -165,7 +165,7 @@ begin
   end;
 end;
 
-function TCommonPool.AddWorkItemBatch(ClientRec: TClientRec; PItem0: PCommonPoolWorkItem; Count: integer): boolean;
+function TCommonPool.AddWorkItemBatch(ClientRec: TClientRec; PItem0: PCommonPoolWorkItem; Count: integer; QLim: integer): boolean;
 begin
   result := false;
   Assert(Assigned(ClientRec));
@@ -173,7 +173,7 @@ begin
   try
     if not ClientRec.ClientQuitting then
     begin
-      result := FFarm.AddWorkItemBatch(PWorkItem(PItem0), Count);
+      result := FFarm.AddWorkItemBatch(PWorkItem(PItem0), Count, QLim);
       if result then Inc(ClientRec.ClientRefCount, Count);
     end;
   finally

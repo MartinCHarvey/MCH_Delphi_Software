@@ -387,6 +387,8 @@ type
     procedure Commit(Reason: TMemDbTransReason); override;
     procedure Rollback(Reason: TMemDbTransReason); override;
 
+    procedure GetStats(var Stats: TMemStats); virtual;
+
     property Metadata: TMemDBEntityMetadata read FMetadata;
     property HasMetaData[Sel: TAbSelection]:boolean read HasAbMetadata;
     property Name[AB: TABSelection]:string read GetName;
@@ -531,6 +533,8 @@ type
     procedure Commit(Reason: TMemDbTransReason); override;
     procedure Rollback(Reason: TMemDbTransReason); override;
 
+    procedure GetStats(var Stats: TMemStats); override;
+
     property DataChanged: boolean read GetDataChanged;
     property LayoutChangeRequired: boolean read FDataChangeRequired;
     property IndexHelper: TMemDblBufListHelper read FIndexHelper;
@@ -602,6 +606,8 @@ type
     procedure CheckAPIIndexDelete(Iso: TMDBIsolationLevel; IsoDeterminedTableName, IndexName: string);
     function HandleAPITableRename(Iso: TMDBIsolationLevel; OldName, NewName: string): boolean;
     function HandleAPIIndexRename(Iso: TMDBIsolationLevel; IsoDeterminedTableName, OldName, NewName: string): boolean;
+
+    procedure GetStats(var Stats: TMemStats);
 
     property Interfaced: TMemDBAPIInterfacedObject read FInterfaced;
   end;
@@ -2001,6 +2007,15 @@ begin
   FMetadata.Init(Context, Name);
 end;
 
+procedure TMemDBEntity.GetStats(var Stats: TMemStats);
+begin
+  if not Assigned(Stats) then
+    Stats := TMemDBEntityStats.Create;
+  if AssignedNotSentinel(FMetadata.ABData[abLatest]) then
+    (Stats as TMemDBEntityStats).AName := FMetadata.GetName(abLatest)
+  else if AssignedNotSentinel(FMetadata.ABData[abCurrent]) then
+    (Stats as TMemDBEntityStats).AName := FMetadata.GetName(abCurrent);
+end;
 
 { TMemDBTablePersistent }
 
@@ -3261,6 +3276,45 @@ begin
   FDataChangeRequired := false;
   UpdateListHelpers; //Rollback may have changed A-B, don't need to re-gen changesets.
 end;
+
+procedure TMemDBTablePersistent.GetStats(var Stats: TMemStats);
+var
+  TableMeta: TMemTableMetadataItem;
+begin
+  if not Assigned(Stats) then
+    Stats := TMemDBTableStats.Create;
+  inherited;
+  if AssignedNotSentinel(FMetadata.ABData[abLatest]) then
+    TableMeta := FMetadata.ABData[abLatest] as TMemTableMetadataItem
+  else if AssignedNotSentinel(FMetadata.ABData[abCurrent]) then
+    TableMeta := FMetadata.ABData[abCurrent] as TMemTableMetadataItem
+  else
+    TableMeta := nil;
+  with Stats as TMemDBTableStats do
+  begin
+    if Assigned(TableMeta) then
+    begin
+      with TableMeta do
+      begin
+        FieldCount := FieldDefs.Count;
+        IndexCount := IndexDefs.Count;
+      end;
+    end;
+    RowCount := Data.Store.Count;
+  end;
+end;
+
+{
+procedure TMemDBEntity.GetStats(var Stats: TMemStats);
+begin
+  if not Assigned(Stats) then
+    Stats := TMemDBEntityStats.Create;
+  if AssignedNotSentinel(FMetadata.ABData[abLatest]) then
+    (Stats as TMemDBEntityStats).AName := FMetadata.GetName(abLatest)
+  else if AssignedNotSentinel(FMetadata.ABData[abCurrent]) then
+    (Stats as TMemDBEntityStats).AName := FMetadata.GetName(abCurrent);
+end;
+}
 
 { TMemDBForeignKeyPersistent }
 
@@ -4991,6 +5045,21 @@ begin
   end;
 end;
 
+procedure TMemDBDatabasePersistent.GetStats(var Stats: TMemStats);
+var
+  EntityStats: TMemStats;
+  i: integer;
+begin
+  Assert(Assigned(Stats));
+  Assert(Stats is TMemDBStats);
+  for i := 0 to Pred(FUserObjs.Count) do
+  begin
+    EntityStats := nil;
+    FUserObjs.Items[i].GetStats(EntityStats);
+    Assert(Assigned(EntityStats));
+    (Stats as TMemDBStats).EntityStatsList.Add(EntityStats);
+  end;
+end;
 
 { TMemDblBufListHelper}
 

@@ -6,7 +6,7 @@ unit HTMLGrammar;
 {==============================================================================
 HTMLGrammar
 0.0.0.0
-Date of Generation: 07/03/2020 19:18
+Date of Generation: 13/04/2020 20:32
 Comment: Parses generalised HTML. XML strict matching or nesting not required.
 Author: Martin Harvey
 Copyright: (c) Martin Harvey
@@ -1331,11 +1331,11 @@ end else if (fCurrentInputSymbol = TokLetterSym) then begin
 _BaseNSequence(IdStr);
 end else begin SynError(28);
 end;
-StringLiteral  :=  LookupNumericEscape(self,  IdStr);
+StringLiteral  :=  LookupNumericEscape(IdStr);
 FailStr  :=  FailStr  +  '#'  +  IdStr;
 end else begin
 _Identifier(IdStr);
-StringLiteral  :=  LookupIDEscape(self,  IdStr);
+StringLiteral  :=  LookupIDEscape(IdStr);
 FailStr  :=  FailStr  +  IdStr;
 end;
 if (fCurrentInputSymbol = _semicolonSym) then begin

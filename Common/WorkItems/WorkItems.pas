@@ -169,8 +169,8 @@ type
     procedure StartFlushInternal(CancelWork: boolean); override;
     function EvalFlushFinished: boolean; override;
   public
-    function AddWorkItem(Item: TWorkItem): boolean;
-    function AddWorkItemBatch(PItem0: PworkItem; Count: integer): boolean;
+    function AddWorkItem(Item: TWorkItem; QLim: integer = -1): boolean;
+    function AddWorkItemBatch(PItem0: PworkItem; Count: integer; QLim: integer = -1): boolean;
     function RemoveWorkItem: TWorkItem;
     constructor Create;
     destructor Destroy; override;
@@ -236,8 +236,8 @@ type
     procedure SetThreadPriority(NewPriority: integer);
 {$ENDIF}
   public
-    function AddWorkItem(Item: TWorkItem): boolean;
-    function AddWorkItemBatch(PItem0: PWorkItem; Count: integer): boolean;
+    function AddWorkItem(Item: TWorkItem; QLim: integer = -1): boolean;
+    function AddWorkItemBatch(PItem0: PWorkItem; Count: integer; QLim: integer = -1): boolean;
     constructor Create;
     destructor Destroy; override;
     property ThreadCount: integer read GetThreadCount write SetThreadCount;
@@ -597,10 +597,11 @@ begin
   result := FEntryCount;
 end;
 
-function TWorkQueue.AddWorkItem(Item: TWorkItem): boolean;
+function TWorkQueue.AddWorkItem(Item: TWorkItem; QLim: integer): boolean;
 begin
   AcquireLock;
-  result := GetFlushStateLocked = wcsNormal;
+  result := (GetFlushStateLocked = wcsNormal)
+    and ((QLim < 0) or (FEntryCount <= QLim));
   if result then
   begin
     Inc(FEntryCount);
@@ -610,14 +611,15 @@ begin
   ReleaseLock;
 end;
 
-function TWorkQueue.AddWorkItemBatch(PItem0: PworkItem; Count: integer):
+function TWorkQueue.AddWorkItemBatch(PItem0: PworkItem; Count: integer; QLim: integer):
   boolean;
 var
   Idx: integer;
   PItem: PWorkItem;
 begin
   AcquireLock;
-  result := GetFlushStateLocked = wcsNormal;
+  result := (GetFlushStateLocked = wcsNormal)
+    and ((QLim < 0) or (FEntryCount <= QLim));
   if result then
   begin
     Idx := 0;
@@ -887,18 +889,18 @@ begin
   end;
 end;
 
-function TWorkFarm.AddWorkItem(Item: TWorkItem): boolean;
+function TWorkFarm.AddWorkItem(Item: TWorkItem; QLim: integer): boolean;
 begin
   AcquireLock;
-  result := FQueue.AddWorkItem(Item);
+  result := FQueue.AddWorkItem(Item, QLim);
   CheckWorkAvail;
   ReleaseLock;
 end;
 
-function TWorkFarm.AddWorkItemBatch(PItem0: PWorkItem; Count: integer): boolean;
+function TWorkFarm.AddWorkItemBatch(PItem0: PWorkItem; Count: integer; QLim: integer): boolean;
 begin
   AcquireLock;
-  result := FQueue.AddWorkItemBatch(PItem0, Count);
+  result := FQueue.AddWorkItemBatch(PItem0, Count, QLim);
   CheckWorkAvail;
   ReleaseLock;
 end;
