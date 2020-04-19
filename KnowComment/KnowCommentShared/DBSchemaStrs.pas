@@ -179,6 +179,8 @@ type
   TMediaBlockIndexNames = array[TKSiteType] of TSiteMediaBlockIndexes;
 
 
+  //TODO TODO TODO - should definitely be able to trim some indexes,
+  //get the thing to load quicker - some may be redundant or unnecessary.
 
 const
   MediaBlockFieldNames:TMediaBlockFieldNames =

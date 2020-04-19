@@ -14,37 +14,41 @@ File_11=TSourceModule,'c:\program files (x86)\embarcadero\rad studio\11.0\source
 File_12=TSourceModule,'C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowComment\ImageCache.pas',0,1,1,1,24,0,0,,
 
 [Modules]
-Module0=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowComment\UserPrefs.pas
-Module1=C:\Users\marti\AppData\Roaming\KnowComment\Knowcomment.prefs
+Module0=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowCommentShared\DBSchemaStrs.pas
+Module1=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowComment\UserPrefs.pas
 Module2=default.htm
-Module3=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowComment\StatsForm.pas
-Module4=C:\MCH Stuff\Delphi XE Progs\Common\HTMLParser\HTMLEscapeHelper.pas
-Module5=C:\MCH Stuff\Delphi XE Progs\Common\HTMLParser\HTMLParser.pas
-Module6=C:\MCH Stuff\Delphi XE Progs\Common\HTTPFetcher\HTTPDocFetcher.pas
-Module7=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowCommentShared\TwitterImporters.pas
-Module8=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowCommentShared\InstagramImporters.pas
-Module9=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowCommentShared\BatchLoader.pas
-Module10=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowCommentShared\DataObjects.pas
-Module11=C:\temp\KnowCommentDebug_redirect_bug.txt
-Module12=C:\temp\twitter importer work.txt
-Module13=C:\MCH Stuff\Delphi XE Progs\Common\HTMLParser\HTMLNodes.pas
-Module14=C:\MCH Stuff\Delphi XE Progs\Common\HTMLParser\CommonNodes.pas
-Module15=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowComment\AddNewUserForm.pas
-Module16=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowCommentShared\DataStore.pas
-Module17=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowComment\MainForm.pas
-Count=18
+Module3=C:\Users\marti\AppData\Roaming\KnowComment\Knowcomment.prefs
+Module4=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowComment\StatsForm.pas
+Module5=C:\MCH Stuff\Delphi XE Progs\Common\HTMLParser\HTMLEscapeHelper.pas
+Module6=C:\MCH Stuff\Delphi XE Progs\Common\HTMLParser\HTMLParser.pas
+Module7=C:\MCH Stuff\Delphi XE Progs\Common\HTTPFetcher\HTTPDocFetcher.pas
+Module8=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowCommentShared\TwitterImporters.pas
+Module9=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowCommentShared\InstagramImporters.pas
+Module10=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowCommentShared\BatchLoader.pas
+Module11=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowCommentShared\DataObjects.pas
+Module12=C:\MCH Stuff\Delphi XE Progs\Common\HTMLParser\HTMLNodes.pas
+Module13=C:\MCH Stuff\Delphi XE Progs\Common\HTMLParser\CommonNodes.pas
+Module14=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowComment\AddNewUserForm.pas
+Module15=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowCommentShared\DataStore.pas
+Module16=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowComment\MainForm.pas
+Count=17
 EditWindowCount=1
+
+[C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowCommentShared\DBSchemaStrs.pas]
+ModuleType=TSourceModule
+FormState=0
+FormOnTop=0
 
 [C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowComment\UserPrefs.pas]
 ModuleType=TSourceModule
 FormState=0
 FormOnTop=0
 
-[C:\Users\marti\AppData\Roaming\KnowComment\Knowcomment.prefs]
-ModuleType=TSourceModule
-
 [default.htm]
 ModuleType=TURLModule
+
+[C:\Users\marti\AppData\Roaming\KnowComment\Knowcomment.prefs]
+ModuleType=TSourceModule
 
 [C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowComment\StatsForm.pas]
 ModuleType=TSourceModule
@@ -86,12 +90,6 @@ ModuleType=TSourceModule
 FormState=0
 FormOnTop=0
 
-[C:\temp\KnowCommentDebug_redirect_bug.txt]
-ModuleType=TSourceModule
-
-[C:\temp\twitter importer work.txt]
-ModuleType=TSourceModule
-
 [C:\MCH Stuff\Delphi XE Progs\Common\HTMLParser\HTMLNodes.pas]
 ModuleType=TSourceModule
 FormState=0
@@ -118,8 +116,8 @@ FormState=1
 FormOnTop=0
 
 [EditWindow0]
-ViewCount=18
-CurrentEditView=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowComment\UserPrefs.pas
+ViewCount=17
+CurrentEditView=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowCommentShared\DBSchemaStrs.pas
 View0=0
 View1=1
 View2=2
@@ -137,7 +135,6 @@ View13=13
 View14=14
 View15=15
 View16=16
-View17=17
 PercentageSizes=1
 Create=1
 Visible=1
@@ -156,13 +153,13 @@ BorlandEditorCodeExplorer=BorlandEditorCodeExplorer@EditWindow0
 TopPanelSize=0
 LeftPanelSize=1894
 LeftPanelClients=PropertyInspector,DockSite3
-LeftPanelData=00000800010100000000AC0F0000000000000166070000000000000100000000530E000009000000446F636B53697465330100000000DD1B00001100000050726F7065727479496E73706563746F72FFFFFFFF
+LeftPanelData=000008000101000000003C0F0000000000000166070000000000000100000000530E000009000000446F636B53697465330100000000151B00001100000050726F7065727479496E73706563746F72FFFFFFFF
 RightPanelSize=2000
 RightPanelClients=DockSite2,DockSite4
-RightPanelData=00000800010100000000AC0F00000000000001D00700000000000001000000004612000009000000446F636B53697465320100000000DD1B000009000000446F636B5369746534FFFFFFFF
-BottomPanelSize=1533
+RightPanelData=000008000101000000003C0F00000000000001D00700000000000001000000004612000009000000446F636B53697465320100000000151B000009000000446F636B5369746534FFFFFFFF
+BottomPanelSize=1733
 BottomPanelClients=DockSite1,MessageView
-BottomPanelData=0000080001020100000009000000446F636B5369746531724500000000000002FD050000000000000100000000724500000F0000004D65737361676556696577466F726DFFFFFFFF
+BottomPanelData=0000080001020100000009000000446F636B5369746531724500000000000002C5060000000000000100000000724500000F0000004D65737361676556696577466F726DFFFFFFFF
 BottomMiddlePanelSize=0
 BottomMiddlePanelClients=DockSite0,GraphDrawingModel
 BottomMiddelPanelData=0000080001020200000009000000446F636B536974653010000000477261706844726177696E67566965779A1D00000000000002F206000000000000FFFFFFFF
@@ -261,28 +258,6 @@ EditViewName=C:\MCH Stuff\Delphi XE Progs\Common\HTTPFetcher\HTTPDocFetcher.pas
 
 [View9]
 CustomEditViewType=TEditView
-Module=C:\temp\twitter importer work.txt
-CursorX=46
-CursorY=40
-TopLine=1
-LeftCol=1
-Elisions=
-Bookmarks=
-EditViewName=C:\temp\twitter importer work.txt
-
-[View10]
-CustomEditViewType=TEditView
-Module=C:\temp\KnowCommentDebug_redirect_bug.txt
-CursorX=48
-CursorY=13
-TopLine=1
-LeftCol=1
-Elisions=
-Bookmarks=
-EditViewName=C:\temp\KnowCommentDebug_redirect_bug.txt
-
-[View11]
-CustomEditViewType=TEditView
 Module=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowComment\UserPrefs.pas
 CursorX=18
 CursorY=203
@@ -292,7 +267,18 @@ Elisions=
 Bookmarks=
 EditViewName=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowComment\UserPrefs.pas
 
-[View12]
+[View10]
+CustomEditViewType=TEditView
+Module=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowCommentShared\DBSchemaStrs.pas
+CursorX=1
+CursorY=182
+TopLine=156
+LeftCol=1
+Elisions=
+Bookmarks=
+EditViewName=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowCommentShared\DBSchemaStrs.pas
+
+[View11]
 CustomEditViewType=TEditView
 Module=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowCommentShared\BatchLoader.pas
 CursorX=33
@@ -303,7 +289,7 @@ Elisions=
 Bookmarks=
 EditViewName=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowCommentShared\BatchLoader.pas
 
-[View13]
+[View12]
 CustomEditViewType=TEditView
 Module=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowComment\AddNewUserForm.pas
 CursorX=1
@@ -314,7 +300,7 @@ Elisions=
 Bookmarks=
 EditViewName=Borland.FormDesignerView
 
-[View14]
+[View13]
 CustomEditViewType=TEditView
 Module=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowComment\MainForm.pas
 CursorX=58
@@ -325,7 +311,7 @@ Elisions=
 Bookmarks=
 EditViewName=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowComment\MainForm.pas
 
-[View15]
+[View14]
 CustomEditViewType=TEditView
 Module=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowCommentShared\DataStore.pas
 CursorX=1
@@ -336,7 +322,7 @@ Elisions=
 Bookmarks=
 EditViewName=C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowCommentShared\DataStore.pas
 
-[View16]
+[View15]
 CustomEditViewType=TEditView
 Module=C:\MCH Stuff\Delphi XE Progs\Common\HTMLParser\HTMLNodes.pas
 CursorX=1
@@ -347,7 +333,7 @@ Elisions=
 Bookmarks=
 EditViewName=C:\MCH Stuff\Delphi XE Progs\Common\HTMLParser\HTMLNodes.pas
 
-[View17]
+[View16]
 CustomEditViewType=TEditView
 Module=C:\MCH Stuff\Delphi XE Progs\Common\HTMLParser\CommonNodes.pas
 CursorX=1
@@ -372,11 +358,11 @@ State=0
 Left=0
 Top=0
 Width=3825
-Height=1128
+Height=1047
 MaxLeft=-1
 MaxTop=-1
 ClientWidth=3825
-ClientHeight=1128
+ClientHeight=1047
 TBDockHeight=209
 LRDockWidth=13600
 Dockable=1
@@ -442,12 +428,12 @@ State=0
 Left=0
 Top=23
 Width=10000
-Height=1337
+Height=1547
 MaxLeft=-1
 MaxTop=-1
 ClientWidth=10000
-ClientHeight=1337
-TBDockHeight=1337
+ClientHeight=1547
+TBDockHeight=1547
 LRDockWidth=2769
 Dockable=1
 StayOnTop=0
@@ -461,11 +447,11 @@ State=0
 Left=0
 Top=0
 Width=2000
-Height=2302
+Height=2093
 MaxLeft=-1
 MaxTop=-1
 ClientWidth=2000
-ClientHeight=2302
+ClientHeight=2093
 TBDockHeight=7151
 LRDockWidth=2000
 Dockable=1
@@ -480,11 +466,11 @@ State=0
 Left=0
 Top=353
 Width=1894
-Height=3360
+Height=3151
 MaxLeft=-1
 MaxTop=-1
 ClientWidth=1894
-ClientHeight=3360
+ClientHeight=3151
 TBDockHeight=6791
 LRDockWidth=1894
 Dockable=1
@@ -541,11 +527,11 @@ State=0
 Left=0
 Top=0
 Width=3825
-Height=1128
+Height=1047
 MaxLeft=-1
 MaxTop=-1
 ClientWidth=3825
-ClientHeight=1128
+ClientHeight=1047
 TBDockHeight=407
 LRDockWidth=4950
 Dockable=1
@@ -560,11 +546,11 @@ State=0
 Left=0
 Top=0
 Width=3825
-Height=1128
+Height=1047
 MaxLeft=-1
 MaxTop=-1
 ClientWidth=3825
-ClientHeight=1128
+ClientHeight=1047
 TBDockHeight=209
 LRDockWidth=7406
 Dockable=1
@@ -583,11 +569,11 @@ State=0
 Left=0
 Top=0
 Width=3825
-Height=1128
+Height=1047
 MaxLeft=-1
 MaxTop=-1
 ClientWidth=3825
-ClientHeight=1128
+ClientHeight=1047
 TBDockHeight=1535
 LRDockWidth=3481
 Dockable=1
@@ -602,11 +588,11 @@ State=0
 Left=0
 Top=0
 Width=3825
-Height=1128
+Height=1047
 MaxLeft=-1
 MaxTop=-1
 ClientWidth=3825
-ClientHeight=1128
+ClientHeight=1047
 TBDockHeight=2058
 LRDockWidth=3481
 Dockable=1
@@ -800,11 +786,11 @@ State=0
 Left=0
 Top=0
 Width=3825
-Height=1128
+Height=1047
 MaxLeft=-1
 MaxTop=-1
 ClientWidth=3825
-ClientHeight=1128
+ClientHeight=1047
 TBDockHeight=1547
 LRDockWidth=8744
 Dockable=1
@@ -893,12 +879,12 @@ State=0
 Left=0
 Top=23
 Width=3825
-Height=1419
+Height=1337
 MaxLeft=-1
 MaxTop=-1
 ClientWidth=3825
-ClientHeight=1419
-TBDockHeight=1419
+ClientHeight=1337
+TBDockHeight=1337
 LRDockWidth=3825
 Dockable=1
 StayOnTop=0
@@ -965,11 +951,11 @@ State=0
 Left=0
 Top=444
 Width=2000
-Height=2302
+Height=2093
 MaxLeft=-1
 MaxTop=-1
 ClientWidth=2000
-ClientHeight=2302
+ClientHeight=2093
 TBDockHeight=6791
 LRDockWidth=2000
 Dockable=1

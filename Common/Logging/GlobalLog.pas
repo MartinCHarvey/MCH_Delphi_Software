@@ -716,7 +716,9 @@ initialization
   AppGlobalLog := TGlobalLog.Create;
   AppGlobalLog.SetSeveritySet([SV_TRACE, SV_INFO, SV_WARN, SV_FAIL, SV_CRIT]);
   TmpName := TPath.GetTempFileName;
+{$IFOPT C+}
   AppGlobalLog.OpenFileLog(TmpName + Application.Title + '.log');
+{$ENDIF}
   SyncToMainThread := TQueueThread.Create;
 finalization
 {$IFOPT C+}
