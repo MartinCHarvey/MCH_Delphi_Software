@@ -9,6 +9,9 @@ Files / Folders:
 
 - ProjectXPlant: A handly utility which parses delphi project files and copies projects from one location to another.
 
+- CheckIn: A test web application, allowing users to check-in online. Will send e-mail notifications if they don't.
+           Work in progress, unfinished.
+
 Common: Common utility code, including:
 
 - Raw AVL tree.
@@ -22,7 +25,7 @@ Common: Common utility code, including:
 - Lightweight in memory database engine.
 - Ordinal set handling.
 - Reconfigurable lexer.
-- Custom object streamin system.
+- Custom object streaming system.
 - Debug object tracking.
 - Custom threadpool implementation.
 
