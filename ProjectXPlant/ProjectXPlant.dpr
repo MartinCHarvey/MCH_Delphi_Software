@@ -281,11 +281,10 @@ begin
 end;
 
 begin
-  SetLength(DprFileExts, 4);
+  SetLength(DprFileExts, 3);
   DprFileExts[0] := '.dpr';
   DprFileExts[1] := '.dproj';
-  DprFileExts[2] := '.dsk';
-  DprFileExts[3] := '.res';
+  DprFileExts[2] := '.res';
 
   SetLength(PasFileExts, 5);
   PasFileExts[0] := '.pas';
