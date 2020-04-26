@@ -33,7 +33,9 @@ uses
   StreamSysXML in '..\..\Common\StreamingSystem\StreamSysXML.pas',
   TrivXML in '..\..\Common\StreamingSystem\TrivXML.PAS',
   TrivXMLDefs in '..\..\Common\StreamingSystem\TrivXMLDefs.pas',
-  CocoBase in '..\..\CoCoDM\Distributable\Frames\CocoBase.pas';
+  CocoBase in '..\..\CoCoDM\Distributable\Frames\CocoBase.pas',
+  CheckInMailer in '..\..\CheckIn\CheckInMailer.pas',
+  QueuedMailer in '..\..\Common\QueuedMailer\QueuedMailer.pas';
 
 {$R *.res}
 

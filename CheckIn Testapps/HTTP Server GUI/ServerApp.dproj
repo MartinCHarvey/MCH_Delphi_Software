@@ -131,6 +131,8 @@
         <DCCReference Include="..\..\Common\StreamingSystem\TrivXML.PAS"/>
         <DCCReference Include="..\..\Common\StreamingSystem\TrivXMLDefs.pas"/>
         <DCCReference Include="..\..\CoCoDM\Distributable\Frames\CocoBase.pas"/>
+        <DCCReference Include="..\..\CheckIn\CheckInMailer.pas"/>
+        <DCCReference Include="..\..\Common\QueuedMailer\QueuedMailer.pas"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>

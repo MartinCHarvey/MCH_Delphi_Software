@@ -28,6 +28,8 @@ interface
 
 //TODO - This all uses table tags, when it should prob use div's and CSS.
 
+//TODO - "Reset my password" link.
+
 uses
   HTTPServerDispatcher, IdCustomHTTPServer, IdContext,
   Classes;
@@ -152,6 +154,8 @@ type
     function DoValidateRequestLoggedOn(const ParsedParams: TParsedParameters;
                                       Session: THTTPDispatcherSession;
                                       var Validate: TValidate): boolean; virtual;
+
+    procedure ChildSetLastErr(LastErr: string);
   public
     function DoValidateRequest(const ParsedParams: TParsedParameters;
                                var Validate: TValidate):boolean; override;
@@ -166,6 +170,9 @@ type
 
   //TODO - TTemplatedPageProducer - for moe complicated site handling,
   //creation of pages from generic templates.
+
+  function HTMLSafeString(Str: string): string;
+  function URLSafeString(Str: string): string;
 
 const
   S_MAIN_PAGE = 'main';
@@ -199,7 +206,6 @@ begin
   begin
     FPageProducer := Container.PageProducerClass.Create;
     FPageProducer.Session := self;
-    FPageProducer.MachineAndPort := Container.MachineAndPort;
   end;
   //For the moment, synchronize requests on both a per-session
   //and per-logon basis, so don't need to write any explicit sync code
@@ -534,6 +540,12 @@ begin
   //Not vouching for anythign past login and register pages once we're logged in.
 end;
 
+procedure TLoginPageProducer.ChildSetLastErr(LastErr: string);
+begin
+  if (Length(FLastErrMsg) = 0) and (Length(LastErr) > 0) then
+    FLastErrMsg := LastErr;
+end;
+
 function TLoginPageProducer.DoValidateRequest(const ParsedParams: TParsedParameters;
                            var Validate: TValidate):boolean;
 var
@@ -723,12 +735,12 @@ begin
   begin
     ContentText := ContentText + '<table><tr><td><align=left>';
     if Length(FLastErrMsg) > 0 then
-      ContentText := ContentText + FLastErrMsg
+      ContentText := ContentText + HTMLSafeString(FLastErrMsg)
     else
     begin
       if Assigned((Session as THTTPDispatcherSession).LogonInfo) then
         ContentText := ContentText + 'Logged in as: ' +
-          (Session as THTTPDispatcherSession).LogonInfo.LogonId;
+          HTMLSafeString((Session as THTTPDispatcherSession).LogonInfo.LogonId);
     end;
     ContentText := ContentText + '</align></td>'
                                + '<td><align=right>';
@@ -908,6 +920,16 @@ begin
   end
   else
     result := false;
+end;
+
+function HTMLSafeString(Str: string): string;
+begin
+  result := EscapeToHTML(Str);
+end;
+
+function URLSafeString(Str: string): string;
+begin
+  result := URLEncode(Str);
 end;
 
 initialization

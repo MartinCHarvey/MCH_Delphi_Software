@@ -42,6 +42,8 @@ type
 
   //TODO - Some basic DB transaction context stuff to take the drudgery away.
 
+  TEmailType = (tetOwn, tetContact);
+
   //Should not be any state in this class - this just does app logic.
 {$IFDEF USE_TRACKABLES}
   TCheckInApp = class(TTrackable)
@@ -52,21 +54,27 @@ type
   protected
     procedure DBStart;
     procedure DBStop;
+    function GenPad: string;
   public
     constructor Create;
     destructor Destroy; override;
     function HandleRegisterRequest(Sender: TObject; Username, CryptKey, CryptPassword:string):boolean;
     function HandleCryptKeyRequest(Sender: TObject; Username: string; var CryptKey, CryptPassword: string): boolean;
     procedure HandleLoginRequest(Sender: TObject; Username: string; ValidateOk: boolean);
+    function SetEmail(Username: string; NewEmail: string; EmailType: TEmailType): boolean;
+    function SetQuickCheckin(Username: string; Enable: boolean): boolean;
     function ReadUserRecord(Username: string): TUserRecord;
+    function HandleQuickCheckInRequest(PageProducer:TPageProducer; Pad: string; var ResInfo: string): boolean;
   end;
 
   TCheckInAppConfig = class(TObjStreamable)
   private
     FDBRootDir: string;
+    FEndpointName: string;
   public
     constructor Create; override;
     property DBRootDir:string read FDBRootDir write FDBRootDir;
+    property EndpointName: string read FEndpointName write FEndpointName;
   end;
 
   TVerifyPadState = (vpsUnverifiedPadForVerify, vpsVerifiedPadForUnsub);
@@ -129,7 +137,8 @@ implementation
 
 uses
   MemDB, StreamingSystem, StreamSysXML, Classes, IOUtils,
-  MemDBMisc, GlobalLog, CheckInPageProducer, HTTPServerDispatcher;
+  MemDBMisc, GlobalLog, CheckInPageProducer, HTTPServerDispatcher,
+  IdHMACSha1, IdGlobal, IdCoderMIME;
 
 const
   DEFAULT_DATA_ROOT_LOCATION = 'MemDB';
@@ -169,7 +178,7 @@ const
   //S_IDX_CONTACT_EMAIL_PAD = 'IdxContactEmailPad';
 
   S_LOGLESS_CHECKIN_PAD = 'LoglessCheckInPad';
-  //S_IDX_LOGLESS_CHECKIN_PAD = 'LoglessCheckInPad';
+  S_IDX_LOGLESS_CHECKIN_PAD = 'LoglessCheckInPad';
 
   //Hopefully only need to index NextPeriodic - that shd be all.
   S_EXPIRE_AFTER = 'ExpireAfter';
@@ -199,6 +208,15 @@ const
   S_INTERNAL_CRYPT = 'Internal error reading crypto from database.';
   S_LOGIN = 'Login attempt for username: ';
   S_REGISTER = 'Register request for username: ';
+  S_CRYPT_KEY_REQUEST = 'Crypt key request for username: ';
+  S_NO_CHECK_IN_KEY = 'No check-in key.';
+  S_CHECK_IN_KEY_NOT_FOUND = 'Check-in key not found.';
+  S_CHECKIN_REQUEST = 'Checkin request: ';
+  S_INTERNAL_ERROR = 'Internal error.';
+  S_SET_EMAIL = 'Set e-mail:';
+  S_SET_QUICK_CHECKIN = 'Set quick checkin: ';
+
+  S_LOCALHOST = 'localhost';
 
 var
   MemDB: TMemDB;
@@ -329,7 +347,7 @@ begin
     on E: Exception do
     begin
       result := false;
-      GLogLog(SV_FAIL, E.ClassName + ' ' + E.Message);
+      GLogLog(SV_FAIL, S_CRYPT_KEY_REQUEST + E.ClassName + ' ' + E.Message);
     end;
   end;
 end;
@@ -511,6 +529,264 @@ begin
   end;
 end;
 
+function TCheckInApp.HandleQuickCheckInRequest(PageProducer:TPageProducer; Pad: string; var ResInfo: string): boolean;
+var
+  S: TMemDBSession;
+  T: TMemDBTransaction;
+  DB: TMemAPIDatabase;
+  H: TMemDBHandle;
+  TD: TMemAPITableData;
+  Data: TMemDbFieldDataRec;
+  CheckInUserId: string;
+  Session: THTTPDispatcherSession;
+  LogonInfo: TCheckInLogonInfo;
+  CheckInTime: TDateTime;
+begin
+  SetLength(ResInfo, 0);
+  if Length(Pad) = 0 then
+  begin
+    ResInfo := S_NO_CHECK_IN_KEY;
+    result := false;
+  end
+  else
+  begin
+    try
+      S := MemDB.StartSession;
+      try
+        T := S.StartTransaction(amReadWrite);
+        try
+          DB := T.GetAPI;
+          try
+            H := DB.OpenTableOrKey(S_USERTABLE);
+            TD := DB.GetApiObjectFromHandle(H, APITableData) as TMemAPITableData;
+            try
+              Data.FieldType := ftUnicodeString;
+              Data.sVal := Pad;
+              result := TD.FindByIndex(S_IDX_LOGLESS_CHECKIN_PAD, Data);
+              if result then
+              begin
+                TD.ReadField(S_USERID, Data);
+                Assert(Data.FieldType = ftUnicodeString);
+                CheckInUserId := Data.sVal;
+                Data.FieldType := ftDouble;
+                CheckInTime := Now;
+                Data.dVal := CheckInTime;
+                TD.WriteField(S_LAST_CHECKIN, Data);
+                TD.Post;
+              end
+              else
+                ResInfo := S_CHECK_IN_KEY_NOT_FOUND;
+            finally
+              TD.Free;
+            end;
+          finally
+            DB.Free;
+          end;
+          if result then
+            T.CommitAndFree
+          else
+            T.RollbackAndFree;
+        except
+          T.RollbackAndFree;
+          raise;
+        end;
+      finally
+        S.Free;
+      end;
+      if Result then
+      begin
+        Session := PageProducer.Session;
+        if Assigned(Session) and Assigned(Session.LogonInfo) then
+        begin
+          LogonInfo := Session.LogonInfo as TCheckInLogonInfo;
+          if LogonInfo.LogonId = CheckInUserId then
+            LogonInfo.FLastCheckinBeforeNow := CheckInTime;
+        end;
+      end;
+    except
+      on E: Exception do
+      begin
+        GLogLog(SV_FAIL, S_CHECKIN_REQUEST + ' ' + E.ClassName + ' ' + E.Message);
+        ResInfo := S_INTERNAL_ERROR;
+        result := false;
+      end;
+    end;
+  end;
+end;
+
+
+function TCheckInApp.SetEmail(Username: string; NewEmail: string; EmailType: TEmailType): boolean;
+var
+  S: TMemDBSession;
+  T: TMemDBTransaction;
+  DB: TMemAPIDatabase;
+  H: TMemDBHandle;
+  TD: TMemAPITableData;
+  Data: TMemDbFieldDataRec;
+  FieldName: string;
+begin
+  result := false;
+  try
+    if (Length(NewEmail) = 0) or (Pos('@', NewEmail) <= 0) then
+      exit;
+
+    S := MemDB.StartSession;
+    try
+      T := S.StartTransaction(amReadWrite);
+      try
+        DB := T.GetAPI;
+        try
+          H := DB.OpenTableOrKey(S_USERTABLE);
+          TD := DB.GetApiObjectFromHandle(H, APITableData) as TMemAPITableData;
+          try
+            Data.FieldType := ftUnicodeString;
+            Data.sVal := Username;
+            result := TD.FindByIndex(S_IDX_USERID, Data);
+            if result then
+            begin
+              if not (EMailType in [tetOwn, tetContact]) then
+              begin
+                Assert(false);
+                result := false;
+                exit;
+              end;
+
+              case EmailType of
+                tetOwn: FieldName := S_OWN_EMAIL;
+                tetContact: FieldName := S_CONTACT_EMAIL;
+              end;
+              Data.sVal := NewEmail;
+              TD.WriteField(FieldName, Data);
+
+              case EmailType of
+                tetOwn: FieldName := S_OWN_EMAIL_PAD;
+                tetContact: FieldName := S_CONTACT_EMAIL_PAD;
+              end;
+              Data.sVal := GenPad;
+              TD.WriteField(FieldName, Data);
+
+              case EmailType of
+                tetOwn: FieldName := S_OWN_VERIFY_STATE;
+                tetContact: FieldName := S_CONTACT_VERIFY_STATE;
+              end;
+              Data.FieldType := ftInteger;
+              Data.i32Val := Ord(vpsUnverifiedPadForVerify);
+              TD.WriteField(FieldName, Data);
+
+              TD.Post;
+            end;
+          finally
+            TD.Free;
+          end;
+        finally
+          DB.Free;
+        end;
+        if result then
+          T.CommitAndFree
+        else
+          T.RollbackAndFree;
+      except
+        T.RollbackAndFree;
+        raise;
+      end;
+    finally
+      S.Free;
+    end;
+  except
+    on E: Exception do
+    begin
+      GLogLog(SV_FAIL, S_SET_EMAIL + Username + ' ' + E.ClassName + ' ' + E.Message);
+      result := false;
+    end;
+  end;
+end;
+
+function TCheckInApp.SetQuickCheckin(Username: string; Enable: boolean): boolean;
+var
+  S: TMemDBSession;
+  T: TMemDBTransaction;
+  DB: TMemAPIDatabase;
+  H: TMemDBHandle;
+  TD: TMemAPITableData;
+  Data: TMemDbFieldDataRec;
+  FieldName: string;
+begin
+  result := false;
+  try
+    S := MemDB.StartSession;
+    try
+      T := S.StartTransaction(amReadWrite);
+      try
+        DB := T.GetAPI;
+        try
+          H := DB.OpenTableOrKey(S_USERTABLE);
+          TD := DB.GetApiObjectFromHandle(H, APITableData) as TMemAPITableData;
+          try
+            Data.FieldType := ftUnicodeString;
+            Data.sVal := Username;
+            result := TD.FindByIndex(S_IDX_USERID, Data);
+            if result then
+            begin
+              if Enable then
+                Data.sVal := GenPad
+              else
+                SetLength(Data.sVal, 0);
+              TD.WriteField(S_LOGLESS_CHECKIN_PAD, Data);
+
+              TD.Post;
+            end;
+          finally
+            TD.Free;
+          end;
+        finally
+          DB.Free;
+        end;
+        if result then
+          T.CommitAndFree
+        else
+          T.RollbackAndFree;
+      except
+        T.RollbackAndFree;
+        raise;
+      end;
+    finally
+      S.Free;
+    end;
+  except
+    on E: Exception do
+    begin
+      GLogLog(SV_FAIL, S_SET_QUICK_CHECKIN + Username + ' ' + E.ClassName + ' ' + E.Message);
+      result := false;
+    end;
+  end;
+end;
+
+function TCheckInApp.GenPad: string;
+var
+  KeyBytes, DataBytes, CryptBytes: TIdBytes;
+  HMAC: TIdHMACSha256;
+  IdMime: TIdEncoderMime;
+  i: integer;
+begin
+  HMAC := TIdHMACSHA256.Create;
+  IdMime := TIdEncoderMime.Create;
+  try
+    SetLength(KeyBytes, HMAC.HashSize);
+    for i := 0 to Pred(Length(KeyBytes)) do
+      KeyBytes[i] := Random(High(byte));
+    SetLength(DataBytes, HMAC.BlockSize);
+    for i := 0 to Pred(Length(DataBytes)) do
+      DataBytes[i] := Random(High(byte));
+    HMAC.Key := KeyBytes;
+    CryptBytes := HMAC.HashValue(DataBytes);
+    result := IdMime.EncodeBytes(CryptBytes);
+  finally
+    HMAC.Free;
+    IdMime.Free;
+  end;
+end;
+
+
 //TODO - Any specific blacklist table handling.
 
 //TODO - Remove recent history to older history and file.
@@ -618,6 +894,11 @@ begin
                 ApiTblMeta.CreateField(S_LOGLESS_CHECKIN_PAD,ftUnicodeString);
                 MadeChanges := true;
               end;
+              if IndexList.IndexOf(S_IDX_LOGLESS_CHECKIN_PAD) < 0 then
+              begin
+                ApiTblMeta.CreateIndex(S_IDX_LOGLESS_CHECKIN_PAD, S_LOGLESS_CHECKIN_PAD, []);
+                MadeChanges := true;
+              end;
               if FieldList.IndexOf(S_EXPIRE_AFTER) < 0 then
               begin
                 ApiTblMeta.CreateField(S_EXPIRE_AFTER, ftDouble);
@@ -688,6 +969,7 @@ constructor TCheckInAppConfig.Create;
 begin
   inherited;
   FDBRootDir:= DBDir;
+  FEndpointName :=  S_LOCALHOST;
 end;
 
 procedure SetupHeirarchy(var H: THeirarchyInfo);

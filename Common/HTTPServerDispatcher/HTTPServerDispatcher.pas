@@ -68,12 +68,10 @@ type
 {$ENDIF}
   private
     FSession: THTTPDispatcherSession;
-    FMachineAndPort: string;
   public
     constructor Create; virtual;
     destructor Destroy; override;
     property Session: THTTPDispatcherSession read FSession write FSession;
-    property MachineAndPort:string read FMachineAndPort write FMachineAndPort;
   end;
 
   TPageProducerClass = class of TCustomPageProducer;
@@ -206,7 +204,6 @@ type
     FSessionClass: THTTPDispatcherSessionClass;
     FLogonInfoClass: THTTPLogonInfoClass;
     FPageProducerClass: TPageProducerClass;
-    FMachineAndPort: string;
   protected
     procedure ClearSessions;
     procedure ClearLogons;
@@ -242,7 +239,6 @@ type
     property PageProducerClass: TPageProducerClass read FPageProducerClass write FPageProducerClass;
     //String to be given to page producers if they need to create absolute link URL's
     //(not recommended...)
-    property MachineAndPort: string read FMachineAndPort write FMachineAndPort;
   end;
 
 implementation
