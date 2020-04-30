@@ -7,7 +7,7 @@ Files / Folders:
 
 - CoCoDM: A Delphi port of the CoCo/R parser generator.
 
-- ProjectXPlant: A handly utility which parses delphi project files and copies projects from one location to another.
+- ProjectXPlant: A handy utility which parses delphi project files and copies projects from one location to another.
 
 - CheckIn: A test web application, allowing users to check-in online. Will send e-mail notifications if they don't.
            Work in progress, unfinished.
@@ -17,7 +17,7 @@ Common: Common utility code, including:
 - Raw AVL tree.
 - Read and Write cached memory streams.
 - Doubly linked lists.
-- HTML / JSON / Javascript parsers.
+- HTML / JSON / CSS / Javascript parsers.
 - HTTP fetcher.
 - Combined HTTP fetch and document parse.
 - Indexed store (see http://www.martincharvey.net/ for more info).
