@@ -35,7 +35,8 @@ uses
 {$IFDEF USE_TRACKABLES}
   Trackables,
 {$ENDIF}
-  SysUtils, SSStreamables, MemDBAPI, HTTPServerPageProducer;
+  SysUtils, SSStreamables, MemDBAPI, HTTPServerPageProducer,
+  IdExplicitTLSClientServerBase;
 
 type
   TUserRecord = class;
@@ -71,10 +72,25 @@ type
   private
     FDBRootDir: string;
     FEndpointName: string;
+    FMailerServer:string;
+    FMailerUName:string;
+    FMailerPasswd:string;
+    FMailerPort: integer;
+    FMailerUseTLS: TIdUseTLS;
+    FMailerSenderEmailName: string;
+    FMailerSenderEmailAddress: string;
   public
     constructor Create; override;
+  published
     property DBRootDir:string read FDBRootDir write FDBRootDir;
     property EndpointName: string read FEndpointName write FEndpointName;
+    property MailerServer:string read FMailerServer write FMailerServer;
+    property MailerUName:string read FMailerUName write FMailerUName;
+    property MailerPasswd:string read FMailerPasswd write FMailerPasswd;
+    property MailerPort:integer read FMailerPort write FMailerPort;
+    property MailerUseTLS: TIdUseTLS read FMailerUseTLS write FMailerUseTLS;
+    property MailerSenderEmailName: string read FMailerSenderEmailName write FMailerSenderEmailName;
+    property MailerSenderEmailAddress: string read FMailerSenderEmailAddress write FMailerSenderEmailAddress;
   end;
 
   TVerifyPadState = (vpsUnverifiedPadForVerify, vpsVerifiedPadForUnsub);
@@ -970,6 +986,7 @@ begin
   inherited;
   FDBRootDir:= DBDir;
   FEndpointName :=  S_LOCALHOST;
+  FMailerUseTLS := TIdUseTLS.utUseRequireTLS;
 end;
 
 procedure SetupHeirarchy(var H: THeirarchyInfo);

@@ -29,8 +29,17 @@ uses
   QueuedMailer;
 
 type
+  TAdminMsgType = (amtServerUp, amtServerDown);
+
   TCheckInMailer = class(TQueuedMailer)
-    //TODO - Routines to automatically format some form mails.
+  private
+    FEmailName:string;
+    FEmailAddress: string;
+  public
+    function SendAdminMessage(MsgType: TAdminMsgType): boolean;
+
+    property SenderEmailName: string read FEmailName write FEmailName;
+    property SenderEmailAddress: string read FEmailAddress write FEmailAddress;
   end;
 
 var
@@ -38,8 +47,54 @@ var
 
 implementation
 
+uses
+  SysUtils, CheckInAppLogic, IdMessage, IdEmailAddress;
+
+const
+  S_ADMIN_MSG = 'CHECKIN: Admin message: ';
+  S_SERVER_UP = 'Server up';
+  S_SERVER_DOWN = 'Server down';
+
+{ TCheckInMailer }
+
+function TCheckInMailer.SendAdminMessage(MsgType: TAdminMsgType): boolean;
+var
+  Msg: TIdMessage;
+  Recipient: TIdEmailAddressItem;
+begin
+  Msg := TIdMessage.Create(nil);
+  //TODO - properties for these.
+  Msg.From.Name := FEmailName;
+  Msg.From.Address := FEmailAddress;
+  Recipient := Msg.Recipients.Add;
+  Recipient.Assign(Msg.From);
+  //TODO - Fancy HTML messages for one-click / register / deregister.
+  Msg.Encoding := TIdMessageEncoding.mePlainText;
+  case MsgType of
+    amtServerUp: Msg.Subject := S_ADMIN_MSG + S_SERVER_UP;
+    amtServerDown: Msg.Subject := S_ADMIN_MSG + S_SERVER_DOWN;
+  else
+    Assert(false);
+  end;
+  Msg.Body.Add(Msg.Subject);
+  Msg.Body.Add(DateTimeToStr(Now));
+  result := Self.QueueEmail(Msg);
+  if not result then
+    Msg.Free;
+end;
+
 initialization
   GCheckInMailer := TCheckinMailer.Create;
+  with GCheckInMailer do
+  begin
+    Server := GAppConfig.MailerServer;
+    Port := GAppConfig.MailerPort;
+    Username := GAppConfig.MailerUName;
+    Password := GAppConfig.MailerPasswd;
+    UseTLS := GAppConfig.MailerUseTLS;
+    SenderEmailName := GAppConfig.MailerSenderEmailName;
+    SenderEmailAddress := GAppConfig.MailerSenderEmailAddress;
+  end;
 finalization
   GCheckInMailer.Free;
 end.
