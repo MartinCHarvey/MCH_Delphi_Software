@@ -24,6 +24,7 @@ type
     { Private declarations }
     Dispatcher: THTTPServerDispatcher;
     procedure UpdateCtrls;
+    procedure SetDispatcherState(Active: boolean);
   public
     { Public declarations }
   end;
@@ -37,7 +38,29 @@ implementation
 
 uses
   IdSchedulerOfThreadpool, HTTPServerPageProducer,
-  CheckInPageProducer, CheckInAppLogic;
+  CheckInPageProducer, CheckInAppLogic, CheckInMailer;
+
+procedure TServerFrm.SetDispatcherState(Active: boolean);
+var
+  PrevState: boolean;
+begin
+  PrevState := Dispatcher.Active;
+  Dispatcher.Active := Active;
+  if Active <> PrevState then
+  begin
+    if Active then
+      GCheckInMailer.SendAdminMessage(amtServerUp)
+    else
+    begin
+      GCheckInMailer.SendAdminMessage(amtServerDown);
+      //Give the mailer thread 5 seconds to send any remaining messages including
+      //this one.
+      Sleep(5000);
+    end;
+    UpdateCtrls;
+  end;
+end;
+
 
 procedure TServerFrm.UpdateCtrls;
 begin
@@ -47,7 +70,7 @@ end;
 
 procedure TServerFrm.FormClose(Sender: TObject; var Action: TCloseAction);
 begin
-  Dispatcher.Active := false;
+  SetDispatcherState(False);
 end;
 
 procedure TServerFrm.FormCreate(Sender: TObject);
@@ -70,14 +93,12 @@ end;
 
 procedure TServerFrm.StartBtnClick(Sender: TObject);
 begin
-  Dispatcher.Active := true;
-  UpdateCtrls;
+  SetDispatcherState(true);
 end;
 
 procedure TServerFrm.StopBtnClick(Sender: TObject);
 begin
-  Dispatcher.Active := false;
-  UpdateCtrls;
+  SetDispatcherState(false);
 end;
 
 end.
