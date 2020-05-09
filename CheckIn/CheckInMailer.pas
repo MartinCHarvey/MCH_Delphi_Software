@@ -124,7 +124,7 @@ begin
     end;
     rrtContactRegister:
     begin
-      Msg.Body.Add(UsrName + ' ' + UsrEmail + 'has asked you to register as a point of contact');
+      Msg.Body.Add(UsrName + ' ' + UsrEmail + ' has asked you to register as a point of contact');
       Msg.Body.Add('if they become unwell and are unable to check-in on this system periodically.');
       Msg.Body.Add('If you agree with this, please follow the link below.');
       Msg.Body.Add('You will be notified by e-mail if they fail to respond to check-in requests.');
@@ -154,8 +154,8 @@ begin
     end;
     rrtContactCheckIn:
     begin
-      Msg.Body.Add(UsrName + ' ' + UsrEmail + 'has not checked in recently,');
-      Msg.Body.Add('it might be a good idea to check up on them, see if they are OK.');
+      Msg.Body.Add(UsrName + ' ' + UsrEmail + ' has not checked in recently,');
+      Msg.Body.Add('it might be a good idea to contact them, see if they are OK.');
       Msg.Body.Add('');
       Msg.Body.Add('');
       Msg.Body.Add('If you do not wish to receive these e-mails,');

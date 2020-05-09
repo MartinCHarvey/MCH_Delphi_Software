@@ -153,18 +153,39 @@ type
 
   THTTPDispatcherSessionClass = class of THTTPDispatcherSession;
 
-  //TODO - Rename these INode types.
-  //TODO - Which indexes can be duplicate, and which don't need to be?
-  //Session strings .... logon ID's.
+  //For the moment, we shove sessions in one list,
+  //expect unique session ID's and potentially duplicate logon id's.
 
-  //TODO Unique versus duplicate in code or in class types?
+  //Logon ID's are in another list, we expect unqiue logon id's.
 
-  TDispatcherINode = class(TIndexNode)
+  //However, if Indy ends up giving us several sessions with the same session ID,
+  //then might add an extra level of indirection:
+  //Indy sessions
+  //Our really unique sessions
+  //Logon ID's.
+  //Might have to do this if the client does nasty things with cookies,
+  //but hopefully indy code should protect against this.
+
+  TUniqueDispatcherINode = class(TIndexNode)
   protected
     function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer; override;
   end;
 
-  TDispatcherSearchINode = class(TDispatcherINode)
+  TDuplicateDispatcherINode = class(TDuplicateValIndexNode)
+  protected
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer; override;
+  end;
+
+  TUniqueDispatcherSearchINode = class(TUniqueDispatcherINode)
+  private
+    FSearchString: string;
+  protected
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer; override;
+  public
+    property SearchString: string read FSearchString write FSearchString;
+  end;
+
+  TDuplicateDispatcherSearchINode = class(TDuplicateDispatcherINode)
   private
     FSearchString: string;
   protected
@@ -354,11 +375,18 @@ end;
 constructor THTTPDispatcherSession.Create(AOwner: TIdHTTPCustomSessionList);
 begin
   inherited;
+{$IFDEF DEBUG_SESSION_LIFETIME}
+  GLogLog(SV_INFO, 'THTTPDispatcherSession.Create' + IntToHex(Int64(self), 16)
+    + ' AOwner: ' + IntToHex(Int64(AOwner), 16));
+{$ENDIF}
   FSync := TCriticalSection.Create;
 end;
 
 destructor THTTPDispatcherSession.Destroy;
 begin
+{$IFDEF DEBUG_SESSION_LIFETIME}
+  GLogLog(SV_INFO, 'THTTPDispatcherSession.Destroy' + IntToHex(Int64(self), 16));
+{$ENDIF}
   //LogonId should have been cleared elsewhere.
   FSync.Free;
   inherited;
@@ -369,6 +397,12 @@ constructor THTTPDispatcherSession.CreateInitialized(AOwner: TIdHTTPCustomSessio
                               RemoteIP: string);
 begin
   inherited;
+{$IFDEF DEBUG_SESSION_LIFETIME}
+  GLogLog(SV_INFO, 'THTTPDispatcherSession.Create' + IntToHex(Int64(self), 16)
+    + ' AOwner: ' + IntToHex(Int64(AOwner), 16)
+    + ' SessionId: ' + SessionId
+    + ' RemoteIP: ' + RemoteIp);
+{$ENDIF}
   FSync := TCriticalSection.Create;
 end;
 
@@ -378,12 +412,16 @@ var
   IRec: TItemRec;
   RV: TIsRetVal;
   PtrSearch: TSearchPointerINode;
-  StrSearch: TDispatcherSearchINode;
+  StrSearch: TUniqueDispatcherSearchINode;
   OldLogon: THTTPLogonInfo;
   NewLogon: THTTPLogonInfo;
 begin
+{$IFDEF DEBUG_SESSION_LIFETIME}
+  GLogLog(SV_INFO, 'THTTPDispatcherSession.SetLogonId' + IntToHex(Int64(self), 16)
+    + ' NewId: ' + NewId);
+{$ENDIF}
   PtrSearch := TSearchPointerINode.Create;
-  StrSearch := TDispatcherSearchINode.Create;
+  StrSearch := TUniqueDispatcherSearchINode.Create;
   FContainer.FStateLock.Acquire;
   try
     OldId := FLogonId;
@@ -453,10 +491,16 @@ end;
 
 procedure THTTPDispatcherSession.AfterSessionStart;
 begin
+{$IFDEF DEBUG_SESSION_LIFETIME}
+  GLogLog(SV_INFO, 'THTTPDispatcherSession.AfterSessionStart' + IntToHex(Int64(self), 16));
+{$ENDIF}
 end;
 
 procedure THTTPDispatcherSession.BeforeSessionEnd;
 begin
+{$IFDEF DEBUG_SESSION_LIFETIME}
+  GLogLog(SV_INFO, 'THTTPDispatcherSession.BeforeSessionEnd' + IntToHex(Int64(self), 16));
+{$ENDIF}
 end;
 
 procedure THTTPDispatcherSession.DoCommandIndyThread(AContext: TIdContext; ARequestInfo: TIdHTTPRequestInfo; AResponseInfo: TIdHTTPResponseInfo);
@@ -557,9 +601,9 @@ begin
     FSync.Release;
 end;
 
-{ TDispatcherINode }
+{ TUniqueDispatcherINode, TDuplicateDispatcherINode }
 
-function TDispatcherINode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
+function DispatcherCompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
 begin
   case IndexTag of
     Ord(idtSessionString):
@@ -591,27 +635,37 @@ begin
   end;
 end;
 
-{ TDispatcherSearchINode }
+function TUniqueDispatcherINode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
+begin
+  result := DispatcherCompareItems(OwnItem, OtherItem, IndexTag, OtherNode);
+end;
 
-function TDispatcherSearchINode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
+function TDuplicateDispatcherINode.CompareItems(OwnItem: TObject; OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
+begin
+  result := DispatcherCompareItems(OwnItem, OtherItem, IndexTag, OtherNode);
+end;
+
+{ TUniqueDispatcherSearchINode, TDuplicateDispatcherSearchINode }
+
+function DispatcherSearchCompareItems(SearchString: string; OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
 begin
   case IndexTag of
     Ord(idtSessionString):
     begin
       result := CompareText((OtherItem as THTTPDispatcherSession).SessionID,
-                            FSearchString);
+                            SearchString);
     end;
     Ord(idtLogonId):
     begin
       if OtherItem is THTTPDispatcherSession then
       begin
         result := CompareText((OtherItem as THTTPDispatcherSession).LogonId,
-                              FSearchString);
+                              SearchString);
       end
       else if OtherItem is THTTPLogonInfo then
       begin
         result := CompareText((OtherItem as THTTPLogonInfo).LogonId,
-                              FSearchString);
+                              SearchString);
       end
       else
       begin
@@ -623,6 +677,16 @@ begin
     Assert(false);
     result := 0;
   end;
+end;
+
+function TUniqueDispatcherSearchINode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
+begin
+  result := DispatcherSearchCompareItems(FSearchString, OtherItem, IndexTag, OtherNode);
+end;
+
+function TDuplicateDispatcherSearchINode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
+begin
+  result := DispatcherSearchCompareItems(FSearchString, OtherItem, IndexTag, OtherNode);
 end;
 
 { TIdHTTPConfigurableSessionList }
@@ -654,6 +718,10 @@ var
   RV: TIsRetVal;
   IRec: TItemRec;
 begin
+{$IFDEF DEBUG_SESSION_LIFETIME}
+  GLogLog(SV_INFO, 'THTTPServerDispatcher.HandleIdSessionStart ' + IntToHex(Int64(self), 16)
+    + ' Session: ' + IntToHex(Int64(Sender), 16));
+{$ENDIF}
   Assert((Sender as THTTPDispatcherSession).SessionID <> '');
   FStateLock.Acquire;
   try
@@ -672,6 +740,10 @@ var
   Search: TSearchPointerINode;
   IRec: TItemRec;
 begin
+{$IFDEF DEBUG_SESSION_LIFETIME}
+  GLogLog(SV_INFO, 'THTTPServerDispatcher.HandleIdSessionEnd ' + IntToHex(Int64(self), 16)
+    + ' Session: ' + IntToHex(Int64(Sender), 16));
+{$ENDIF}
   try
     (Sender as THTTPDispatcherSession).BeforeSessionEnd;
     (Sender as THTTPDispatcherSession).LogonId := '';
@@ -750,6 +822,10 @@ begin
   GLogLog(SV_INFO, '---');
 {$ENDIF}
 
+{$IFDEF DEBUG_SESSION_LIFETIME}
+  GLogLog(SV_INFO, 'THTTPServerDispatcher.HandleIdCommandGet ' + IntToHex(Int64(self), 16)
+    + ' Session: ' + IntToHex(Int64(ARequestInfo.Session), 16));
+{$ENDIF}
   FStateLock.Acquire;
   try
     Search := TSearchPointerINode.Create;
@@ -777,11 +853,11 @@ begin
   FStateLock := TCriticalSection.Create;
   FServerSessions := TIndexedStore.Create;
   FServerSessions.AddIndex(TPointerINode, Ord(idtPointer));
-  FServerSessions.AddIndex(TDispatcherINode, Ord(idtSessionString));
-  FServerSessions.AddIndex(TDispatcherINode, Ord(idtLogonId));
+  FServerSessions.AddIndex(TUniqueDispatcherINode, Ord(idtSessionString));
+  FServerSessions.AddIndex(TDuplicateDispatcherINode, Ord(idtLogonId));
   FServerLogons := TIndexedStore.Create;
   FServerLogons.AddIndex(TPointerINode, Ord(idtPointer));
-  FServerLogons.AddIndex(TDispatcherINode, Ord(idtLogonId));
+  FServerLogons.AddIndex(TUniqueDispatcherINode, Ord(idtLogonId));
 
   FIdHTTPServer := TIdHTTPServer.Create(nil);
   FIdHTTPServerSessionList := TIdHTTPConfigurableSessionList.Create;
