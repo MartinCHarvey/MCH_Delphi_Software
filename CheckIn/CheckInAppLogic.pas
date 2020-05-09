@@ -62,7 +62,7 @@ type
     procedure DBStop;
     function GenPad: string;
 
-    procedure UpdateRegistrationTimers(UTable: TMemAPITableData);
+    procedure UpdateRegistrationTimers(UTable: TMemAPITableData; Initial: boolean);
     procedure UpdateCheckInTimers(UTable: TMemAPITableData);
 
     function UserPeriodicActions(UTable: TMemAPITableData): boolean;
@@ -278,6 +278,7 @@ const
   USER_INACTIVE_EXPIRE_INTERVAL = 31;
 {$ENDIF}
   CONTACT_CHECKIN_NOTIFY_INTERVAL = USER_CHECKIN_NOTIFY_INTERVAL * 2;
+  USER_REGISTER_INITIAL_NOTIFY_INTERVAL = ONE_MINUTE;
 
 
 var
@@ -662,14 +663,17 @@ begin
   UTable.WriteField(S_STOP_CHECKIN_REMIND, DataRec);
 end;
 
-procedure TCheckInApp.UpdateRegistrationTimers(UTable: TMemAPITableData);
+procedure TCheckInApp.UpdateRegistrationTimers(UTable: TMemAPITableData; Initial: boolean);
 var
   DataRec: TMemDbFieldDataRec;
   RightNow: TDateTime;
 begin
   DataRec.FieldType := ftDouble;
   RightNow := Now;
-  DataRec.dVal := RightNow + USER_REGISTER_NOTIFY_INTERVAL;
+  if Initial then
+    DataRec.dVal := RightNow + USER_REGISTER_INITIAL_NOTIFY_INTERVAL
+  else
+    DataRec.dVal := RightNow + USER_REGISTER_NOTIFY_INTERVAL;
   UTable.WriteField(S_NEXT_REGISTER_REMIND, DataRec);
   DataRec.dVal := RightNow + USER_REGISTER_EXPIRE_INTERVAL;
   UTable.WriteField(S_EXPIRE_AFTER, DataRec);
@@ -706,7 +710,7 @@ begin
             DataRec.sVal := CryptPassword;
             ApiData.WriteField(S_PASS_CRYPT, DataRec);
 
-            UpdateRegistrationTimers(ApiData);
+            UpdateRegistrationTimers(ApiData, false);
             //S_NEXT_CHECKIN_REMIND, S_STOP_CHECKIN_REMIND not needed yet.
             //S_LAST_LOGIN, S_LAST_CHECKIN both zero.
             ApiData.Post;
@@ -883,7 +887,12 @@ begin
                 Data.FieldType := ftInteger;
                 Data.i32Val := Ord(vpsVerifiedPadForUnsub);
                 TD.WriteField(S_OWN_VERIFY_STATE, Data);
-                UpdateRegistrationTimers(TD);
+
+                Data.FieldType := ftUnicodeString;
+                Data.sVal := GenPad;
+                TD.WriteField(S_OWN_EMAIL_PAD, Data);
+
+                UpdateRegistrationTimers(TD, false);
                 UpdateCheckInTimers(TD);
                 TD.Post;
               end
@@ -915,9 +924,15 @@ begin
                 if Action = S_ACTION_MAIL_CONFIRM then
                 begin
                   Data.FieldType := ftInteger;
+
                   Data.i32Val := Ord(vpsVerifiedPadForUnsub);
-                  TD.WriteField(S_OWN_VERIFY_STATE, Data);
-                  UpdateRegistrationTimers(TD);
+                  TD.WriteField(S_CONTACT_VERIFY_STATE, Data);
+
+                  Data.FieldType := ftUnicodeString;
+                  Data.sVal := GenPad;
+                  TD.WriteField(S_CONTACT_EMAIL_PAD, Data);
+
+                  UpdateRegistrationTimers(TD, false);
                   TD.Post;
                 end
                 else if Action = S_ACTION_BLACKLIST then
@@ -947,6 +962,7 @@ begin
         T.CommitAndFree;
       except
         T.RollbackAndFree;
+        result := false;
         raise;
       end;
     finally
@@ -1117,7 +1133,7 @@ begin
               Data.i32Val := Ord(vpsUnverifiedPadForVerify);
               TD.WriteField(FieldName, Data);
               //Reset expiry timers.
-              UpdateRegistrationTimers(TD);
+              UpdateRegistrationTimers(TD, true);
               TD.Post;
             end;
           finally

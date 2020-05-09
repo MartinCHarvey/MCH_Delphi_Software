@@ -74,7 +74,7 @@
         <VerInfo_Keys>CompanyName=;FileDescription=;FileVersion=1.0.0.0;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=;ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
         <VerInfo_Locale>2057</VerInfo_Locale>
         <Manifest_File>None</Manifest_File>
-        <DCC_Define>DEBUG;USE_TRACKABLES;DEBUG_HTTP_REQUESTS;$(DCC_Define)</DCC_Define>
+        <DCC_Define>DEBUG;USE_TRACKABLES;DEBUG_SESSION_LIFETIME;$(DCC_Define)</DCC_Define>
         <DCC_DebugDCUs>true</DCC_DebugDCUs>
         <DCC_Optimize>false</DCC_Optimize>
         <DCC_GenerateStackFrames>true</DCC_GenerateStackFrames>
