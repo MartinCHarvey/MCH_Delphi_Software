@@ -15,6 +15,7 @@ uses
   HTTPServerPageProducer in '..\..\Common\HTTPServerDispatcher\HTTPServerPageProducer.pas',
   HTMLEscapeHelper in '..\..\Common\HTMLParser\HTMLEscapeHelper.pas',
   CheckInPageProducer in '..\..\CheckIn\CheckInPageProducer.pas',
+  CheckInMailer in '..\..\CheckIn\CheckInMailer.pas',
   CheckInAppLogic in '..\..\CheckIn\CheckInAppLogic.pas',
   MemDB in '..\..\Common\MemDB\MemDB.pas',
   MemDBApi in '..\..\Common\MemDB\MemDBApi.pas',
@@ -34,8 +35,8 @@ uses
   TrivXML in '..\..\Common\StreamingSystem\TrivXML.PAS',
   TrivXMLDefs in '..\..\Common\StreamingSystem\TrivXMLDefs.pas',
   CocoBase in '..\..\CoCoDM\Distributable\Frames\CocoBase.pas',
-  CheckInMailer in '..\..\CheckIn\CheckInMailer.pas',
-  QueuedMailer in '..\..\Common\QueuedMailer\QueuedMailer.pas';
+  QueuedMailer in '..\..\Common\QueuedMailer\QueuedMailer.pas',
+  CheckInAppConfig in '..\..\CheckIn\CheckInAppConfig.pas';
 
 {$R *.res}
 

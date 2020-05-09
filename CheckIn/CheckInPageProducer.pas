@@ -48,6 +48,9 @@ type
                                       Session: THTTPDispatcherSession;
                                       var Validate: TValidate): boolean; override;
 
+    procedure WriteMailActionResult(ParsedParams: TParsedParameters;
+                                    OK: boolean; ResponseHint: string);
+
     procedure WriteEmailChangeForm(const ParsedParams: TParsedParameters;
                                    var R: string; UpdateTag: string);
     procedure WriteQuickCheckInToggle(const ParsedParams: TParsedParameters;
@@ -64,17 +67,27 @@ type
   public
     constructor Create; override;
     function ProcessIdCommand(const ParsedParams: TParsedParameters): boolean; override;
+    property OnEndpointRequest: TEndpointRequestEvent read FOnEndpointRequest write FOnEndpointRequest;
   end;
+
+const
+  S_LOGLESS_CHECKIN = 'CheckIn';
+  S_MAIL_ACTION = 'MailAction';
+  S_PAD_PARAM = '?Pad=';
+  S_ACTION_PARAM = '&Action=';
+  S_PAD = 'Pad';
+  S_ACTION = 'Action';
 
 
 implementation
 
 uses
-  IdCustomHTTPServer, CheckInAppLogic, SysUtils, HTMLEscapeHelper;
+  IdCustomHTTPServer, SysUtils, HTMLEscapeHelper, CheckInAppLogic;
 
 const
   S_UPDATE_OWN_EMAIL = 'UpdateOwnEmail';
   S_UPDATE_CONTACT_EMAIL = 'UpdateContactEmail';
+  S_DELETE_ACCOUNT = 'DeleteAccount';
   S_NEW_EMAIL = 'NewEmail';
   S_DISABLE_QUICK_CHECKIN = 'DisableQuickCheckin';
   S_DISABLE_BTN = 'Disable';
@@ -87,9 +100,6 @@ const
   S_LOCALHOST = 'localhost';
   S_CX_LINK_PREFIX = 'http://';
 
-  S_LOGLESS_CHECKIN = 'CheckIn';
-  S_PAD_PARAM = '?Pad=';
-  S_PAD = 'Pad';
 
 constructor TCheckInPageProducer.Create;
 begin
@@ -97,6 +107,7 @@ begin
   OnLoginRequest := GCheckInApp.HandleLoginRequest;
   OnRegisterRequest := GCheckInApp.HandleRegisterRequest;
   OnCryptKeyRequest := GCheckInApp.HandleCryptKeyRequest;
+  OnEndpointRequest := GCheckInApp.HandleEndpointRequest;
 end;
 
 function TCheckInPageProducer.DoValidateRequest(const ParsedParams: TParsedParameters;
@@ -120,8 +131,18 @@ begin
             Validate.Action := vaAllow;
             result := true;
           end;
+        end
+        else if S = S_MAIL_ACTION then
+        begin
+          if (ParsedParams.PageQueryParams.Params.Count = 2)
+          and GetRequestParam(ParsedParams.PageQueryParams, S_PAD, Tmp)
+          and GetRequestParam(ParsedParams.PageQueryParams, S_ACTION, Tmp) then
+          begin
+            Validate.Action := vaAllow;
+            result := true;
+          end;
         end;
-      end;
+      end
     end;
   end;
   //Standard handling for the rest.
@@ -195,10 +216,10 @@ end;
 
 function TCheckInPageProducer.ProcessIdCommand(const ParsedParams: TParsedParameters): boolean;
 var
-  S, Tmp, ResponseHint: string;
+  S, Param1, Param2, ResponseHint: string;
   LogonInfo: TCheckInLogonInfo;
   EmailType: TEmailType;
-  DecodeOK: boolean;
+  OK: boolean;
 begin
   result := inherited;
   if result then
@@ -220,17 +241,44 @@ begin
         else if S = S_LOGLESS_CHECKIN then
         begin
           if (ParsedParams.PageQueryParams.Params.Count = 1)
-          and GetRequestParam(ParsedParams.PageQueryParams, S_PAD, Tmp) then
+          and GetRequestParam(ParsedParams.PageQueryParams, S_PAD, Param1) then
           begin
             try
-              Tmp := URLDecode(Tmp);
-              DecodeOK := true;
+              Param1 := URLDecode(Param1);
+              OK := true;
             except
-              DecodeOK := false;
+              OK := false;
             end;
-            if DecodeOK then
-              DecodeOK := GCheckInApp.HandleQuickCheckInRequest(Self, Tmp, ResponseHint);
-            WriteCheckInResult(ParsedParams, DecodeOK, ResponseHint);
+            if OK then
+              OK := GCheckInApp.HandleQuickCheckInRequest(Self, Param1, ResponseHint);
+            WriteCheckInResult(ParsedParams, OK, ResponseHint);
+            result := true;
+          end;
+        end
+        else if S = S_MAIL_ACTION then
+        begin
+          if (ParsedParams.PageQueryParams.Params.Count = 2)
+          and GetRequestParam(ParsedParams.PageQueryParams, S_PAD, Param1)
+          and GetRequestParam(ParsedParams.PageQueryParams, S_ACTION, Param2) then
+          begin
+            try
+              Param1 := URLDecode(Param1);
+              OK := true;
+            except
+              OK := false;
+            end;
+            if OK then
+            begin
+              try
+                Param2 := URLDecode(Param2);
+                OK := true;
+              except
+                OK := false;
+              end;
+            end;
+            if OK then
+              OK := GCheckInApp.HandleMailAction(Self, Param1, Param2, ResponseHint);
+            WriteMailActionResult(ParsedParams, OK, ResponseHint);
             result := true;
           end;
         end;
@@ -245,14 +293,14 @@ begin
         if (S = S_UPDATE_OWN_EMAIL) or (S = S_UPDATE_CONTACT_EMAIL) then
         begin
           if (ParsedParams.PageQueryParams.Params.Count = 1)
-          and GetRequestParam(ParsedParams.PageQueryParams, S_NEW_EMAIL, Tmp) then
+          and GetRequestParam(ParsedParams.PageQueryParams, S_NEW_EMAIL, Param1) then
           begin
             if S = S_UPDATE_OWN_EMAIL then
               EmailType := tetOwn
             else
               EMailType := tetContact;
 
-            if not GCheckInApp.SetEmail(LogonInfo.LogonId, Tmp, EmailType) then
+            if not GCheckInApp.SetEmail(LogonInfo.LogonId, Param1, EmailType) then
               ChildSetLastErr(S_EMAIL_CHANGE_FAILED);
 
             WriteMainPage(ParsedParams);
@@ -402,14 +450,46 @@ begin
     ContentText := ContentText + R;
 end;
 
-procedure TCheckInPageProducer.WriteUpdateLinks(const ParsedParams: TParsedParameters);
-begin
 
+procedure TCheckInPageProducer.WriteUpdateLinks(const ParsedParams: TParsedParameters);
+var
+  R: string;
+begin
+  R := R + '<tr><td></td><td>' +
+      '<form action="/'+ S_DELETE_ACCOUNT +'" method="post">' +
+      '<input type="submit" value="Delete account">' +
+      '</form>'
+  + '</td></tr>';
+  with ParsedParams.IndyParams.AResponseInfo do
+    ContentText := ContentText + R;
 end;
 
 procedure TCheckInPageProducer.WriteHistory(const ParsedParams: TParsedParameters);
 begin
+  //TODO.
+end;
 
+procedure TCheckInPageProducer.WriteMailActionResult(ParsedParams: TParsedParameters;
+                                                     OK: boolean; ResponseHint: string);
+var
+  S: string;
+begin
+  with ParsedParams.IndyParams.AResponseInfo do
+  begin
+    WritePagePreamble(ParsedParams);
+    WritePageHeader(ParsedParams);
+    S := '<center><h3>';
+    if OK then
+      S := S + 'Email action successful. ' + HTMLSafeString(ResponseHint)
+    else
+      S := S + 'EMail action failed. ' + HTMLSafeString(ResponseHint);
+    S := S + '<br> <a href="' + S_CX_LINK_PREFIX
+          + DoEndpointRequest + '/'
+          + '">Home</a></h3></center>';
+    ContentText := ContentText + S;
+    WritePageFooter(ParsedParams);
+    WritePagePostamble(ParsedParams);
+  end;
 end;
 
 procedure TCheckInPageProducer.WriteMainPage(const ParsedParams: TParsedParameters);

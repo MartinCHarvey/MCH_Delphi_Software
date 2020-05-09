@@ -112,6 +112,7 @@
         <DCCReference Include="..\..\Common\HTTPServerDispatcher\HTTPServerPageProducer.pas"/>
         <DCCReference Include="..\..\Common\HTMLParser\HTMLEscapeHelper.pas"/>
         <DCCReference Include="..\..\CheckIn\CheckInPageProducer.pas"/>
+        <DCCReference Include="..\..\CheckIn\CheckInMailer.pas"/>
         <DCCReference Include="..\..\CheckIn\CheckInAppLogic.pas"/>
         <DCCReference Include="..\..\Common\MemDB\MemDB.pas"/>
         <DCCReference Include="..\..\Common\MemDB\MemDBApi.pas"/>
@@ -131,8 +132,8 @@
         <DCCReference Include="..\..\Common\StreamingSystem\TrivXML.PAS"/>
         <DCCReference Include="..\..\Common\StreamingSystem\TrivXMLDefs.pas"/>
         <DCCReference Include="..\..\CoCoDM\Distributable\Frames\CocoBase.pas"/>
-        <DCCReference Include="..\..\CheckIn\CheckInMailer.pas"/>
         <DCCReference Include="..\..\Common\QueuedMailer\QueuedMailer.pas"/>
+        <DCCReference Include="..\..\CheckIn\CheckInAppConfig.pas"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>
