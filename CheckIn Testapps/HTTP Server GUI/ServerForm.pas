@@ -14,12 +14,14 @@ type
     StartBtn: TButton;
     StopBtn: TButton;
     LogMemo: TMemo;
+    Timer1: TTimer;
     procedure FormShow(Sender: TObject);
     procedure StartBtnClick(Sender: TObject);
     procedure StopBtnClick(Sender: TObject);
     procedure FormClose(Sender: TObject; var Action: TCloseAction);
     procedure FormDestroy(Sender: TObject);
     procedure FormCreate(Sender: TObject);
+    procedure Timer1Timer(Sender: TObject);
   private
     { Private declarations }
     Dispatcher: THTTPServerDispatcher;
@@ -99,6 +101,11 @@ end;
 procedure TServerFrm.StopBtnClick(Sender: TObject);
 begin
   SetDispatcherState(false);
+end;
+
+procedure TServerFrm.Timer1Timer(Sender: TObject);
+begin
+  GCheckInApp.DoPeriodic;
 end;
 
 end.

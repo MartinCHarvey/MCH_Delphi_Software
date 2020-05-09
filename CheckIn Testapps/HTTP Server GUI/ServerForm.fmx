@@ -41,4 +41,9 @@ object ServerFrm: TServerFrm
     TabOrder = 2
     Width = 609.000000000000000000
   end
+  object Timer1: TTimer
+    OnTimer = Timer1Timer
+    Left = 232
+    Top = 16
+  end
 end

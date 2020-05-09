@@ -35,13 +35,17 @@ uses
 {$IFDEF USE_TRACKABLES}
   Trackables,
 {$ENDIF}
-  SysUtils, SSStreamables, MemDBAPI, HTTPServerPageProducer,
-  IdExplicitTLSClientServerBase;
+  SysUtils, MemDBAPI, HTTPServerPageProducer;
 
 type
   TUserRecord = class;
 
   //TODO - Some basic DB transaction context stuff to take the drudgery away.
+  //TODO - A blacklist table, and suitable handling,
+  //incl e-mail to the accoutns listing the blacklisted,
+  //and unblacklisting if re-adding e-mail.
+
+  //TODO - Auditing.
 
   TEmailType = (tetOwn, tetContact);
 
@@ -52,13 +56,22 @@ type
   TCheckInApp = class
 {$ENDIF}
   private
+    FLastPeriodicAllTasks: TDateTime;
   protected
     procedure DBStart;
     procedure DBStop;
     function GenPad: string;
+
+    procedure UpdateRegistrationTimers(UTable: TMemAPITableData);
+    procedure UpdateCheckInTimers(UTable: TMemAPITableData);
+
+    function UserPeriodicActions(UTable: TMemAPITableData): boolean;
+    function UserVerificationActions(UTable: TMemAPITableData; StartUserRecord: TUserRecord): boolean;
+    function UserCheckInActions(UTable: TMemAPITableData;StartUserRecord: TUserRecord): boolean;
   public
     constructor Create;
     destructor Destroy; override;
+    function HandleEndpointRequest(Sender: TObject):string;
     function HandleRegisterRequest(Sender: TObject; Username, CryptKey, CryptPassword:string):boolean;
     function HandleCryptKeyRequest(Sender: TObject; Username: string; var CryptKey, CryptPassword: string): boolean;
     procedure HandleLoginRequest(Sender: TObject; Username: string; ValidateOk: boolean);
@@ -66,34 +79,20 @@ type
     function SetQuickCheckin(Username: string; Enable: boolean): boolean;
     function ReadUserRecord(Username: string): TUserRecord;
     function HandleQuickCheckInRequest(PageProducer:TPageProducer; Pad: string; var ResInfo: string): boolean;
+    function HandleMailAction(PageProducer: TPageProducer; Pad: string; Action: string; var ResInfo: string): boolean;
+
+    procedure DoPeriodic;
   end;
 
-  TCheckInAppConfig = class(TObjStreamable)
-  private
-    FDBRootDir: string;
-    FEndpointName: string;
-    FMailerServer:string;
-    FMailerUName:string;
-    FMailerPasswd:string;
-    FMailerPort: integer;
-    FMailerUseTLS: TIdUseTLS;
-    FMailerSenderEmailName: string;
-    FMailerSenderEmailAddress: string;
-  public
-    constructor Create; override;
-  published
-    property DBRootDir:string read FDBRootDir write FDBRootDir;
-    property EndpointName: string read FEndpointName write FEndpointName;
-    property MailerServer:string read FMailerServer write FMailerServer;
-    property MailerUName:string read FMailerUName write FMailerUName;
-    property MailerPasswd:string read FMailerPasswd write FMailerPasswd;
-    property MailerPort:integer read FMailerPort write FMailerPort;
-    property MailerUseTLS: TIdUseTLS read FMailerUseTLS write FMailerUseTLS;
-    property MailerSenderEmailName: string read FMailerSenderEmailName write FMailerSenderEmailName;
-    property MailerSenderEmailAddress: string read FMailerSenderEmailAddress write FMailerSenderEmailAddress;
-  end;
 
   TVerifyPadState = (vpsUnverifiedPadForVerify, vpsVerifiedPadForUnsub);
+
+  //Can check in either with mail pad, or alternatively,
+  //logless check-in pad. One requires action field, other does not.
+  TLinkActionType = (latMailConfirm,
+                     latAccountDelete,
+                     latMailBlacklist,
+                     latCheckIn);
 
   //Eveything but the password crypts.
 {$IFDEF USE_TRACKABLES}
@@ -115,9 +114,14 @@ type
 
     FLoglessCheckInPad: string;
 
-    //TODO - Think a bit about expiry times.
-    FNextPeriodic, FExpireAfter, FLastLogin, FLastCheckin: TDateTime;
+    FNextPeriodic: TDateTime;
+    FLastLogin, FLastCheckin: TDateTime;
+    FExpireAfter, FNextRegisterRemind, FNextCheckinRemind, FStopCheckinRemind,
+    FNextContactCheckinRemind: TDateTime;
   public
+    function GenLink(EmailPadSelect: TEmailType;
+                     LinkAction: TLinkActionType): string;
+
     procedure FromUTable(UTable: TMemAPITableData);
     property UserId: string read FUserId;
     property OwnEmail: string read FOwnEmail;
@@ -129,9 +133,15 @@ type
     property LoglessCheckInPad: string read FLoglessCheckInPad;
 
     property NextPeriodic: TDateTime read FNextPeriodic;
-    property ExpireAfter: TDateTime read FExpireAfter;
+
     property LastLogin: TDateTime read FLastLogin;
     property LastCheckin: TDateTime read FLastCheckin;
+
+    property ExpireAfter: TDateTime read FExpireAfter;
+    property NextRegisterRemind: TDateTime read FNextRegisterRemind write FNextRegisterRemind;
+    property NextCheckinRemind: TDateTime read FNextCheckinRemind write FNextCheckinRemind;
+    property NextContactCheckinRemind: TDateTime read FNextContactCheckinRemind write FNextContactCheckinRemind;
+    property StopCheckinRemind: TDateTime read FStopCheckinRemind write FStopCheckinRemind;
   end;
 
   TCheckInLogonInfo = class(TPageProducerLogonInfo)
@@ -144,7 +154,6 @@ type
   end;
 
 var
-  GAppConfig: TCheckInAppConfig;
   GCheckInApp: TCheckInApp;
 
 //TODO - case handling for email addresses and user ID's.
@@ -152,19 +161,13 @@ var
 implementation
 
 uses
-  MemDB, StreamingSystem, StreamSysXML, Classes, IOUtils,
+  MemDB, Classes, IOUtils,
   MemDBMisc, GlobalLog, CheckInPageProducer, HTTPServerDispatcher,
-  IdHMACSha1, IdGlobal, IdCoderMIME;
-
-const
-  DEFAULT_DATA_ROOT_LOCATION = 'MemDB';
-  DEFAULT_APP_DATA_DIR = 'CheckIn';
-  DEFAULT_PREFS_FILENAME = 'CheckIn.prefs';
-  PERIODIC_CHECK_INTERVAL = 1; //Day
-  EXPIRE_INTERVAL = 7; //Days.
+  IdHMACSha1, IdGlobal, IdCoderMIME, CheckInMailer, CheckInAppConfig;
 
 { ---------------- Config / DB init and finalization ------------- }
 
+const
   S_DB_INIT_FATAL = 'DB init failed. Throw in unit init: fatal.';
 
   { ------------------ User table }
@@ -185,21 +188,27 @@ const
   //S_IDX_OWN_EMAIL = 'IdxOwnEmail';
   S_OWN_VERIFY_STATE = 'OwnVerifyState';
   S_OWN_EMAIL_PAD = 'OwnEmailPad';
+  S_IDX_OWN_EMAIL_PAD = 'IdxOwnEmailPad';
   //S_IDX_OWN_EMAIL_PAD = 'IdxOwnEmailPad';
 
   S_CONTACT_EMAIL = 'ContactEmail';
   //S_IDX_CONTACT_EMAIL = 'IdxContactEmail';
   S_CONTACT_VERIFY_STATE = 'ContactVerifyState';
   S_CONTACT_EMAIL_PAD = 'ContactEmailPad';
+  S_IDX_CONTACT_EMAIL_PAD = 'IdxContactEmailPad';
   //S_IDX_CONTACT_EMAIL_PAD = 'IdxContactEmailPad';
 
   S_LOGLESS_CHECKIN_PAD = 'LoglessCheckInPad';
   S_IDX_LOGLESS_CHECKIN_PAD = 'LoglessCheckInPad';
 
-  //Hopefully only need to index NextPeriodic - that shd be all.
-  S_EXPIRE_AFTER = 'ExpireAfter';
   S_LAST_LOGIN = 'LastLogin';
   S_LAST_CHECKIN = 'LastCheckin';
+
+  S_EXPIRE_AFTER = 'ExpireAfter';
+  S_NEXT_REGISTER_REMIND = 'NextRegisterRemind';
+  S_NEXT_CHECKIN_REMIND = 'NextCheckinRemind';
+  S_NEXT_CONTACT_CHECKIN_REMIND = 'NextContactCheckinRemind';
+  S_STOP_CHECKIN_REMIND = 'StopCheckinRemind';
 
   //TODO on the audit tables.
 
@@ -231,18 +240,81 @@ const
   S_INTERNAL_ERROR = 'Internal error.';
   S_SET_EMAIL = 'Set e-mail:';
   S_SET_QUICK_CHECKIN = 'Set quick checkin: ';
+  S_EXCEPTION_IN_PERIODIC_HANDLING = 'Exception in periodic handling: ';
+  S_OWNER_REGISTER_REMIND_FAILED = 'Owner registration reminder failed: ';
+  S_CONTACT_REGISTER_REMIND_FAILED = 'Contact registration reminder failed: ';
+  S_OWN_CHECKIN_REMIND_FAILED = 'Checkin reminder failed: ';
+  S_CONTACT_CHECKIN_REMIND_FAILED = 'Contact checkin reminder failed: ';
+
+  S_ACTION_MAIL_CONFIRM = 'MailConfirm';
+  S_ACTION_ACCOUNT_DELETE = 'AccountDelete';
+  S_ACTION_BLACKLIST = 'Blacklist';
+  S_ACTION_CHECK_IN = 'CheckIn';
+
+  S_ACTION_NOT_SUPPORTED = 'Action not supported';
+  S_NOT_YET_IMPLEMENTED = 'Not yet implemented';
 
   S_LOCALHOST = 'localhost';
 
+
+
+const
+  ONE_MINUTE = (1 / (24 * 60));
+{$IFDEF DEBUG}
+  SYSTEM_PERIODIC_CHECK_INTERVAL = ONE_MINUTE;
+  USER_PERIODIC_CHECK_INTERVAL = 3 * ONE_MINUTE;
+  USER_REGISTER_NOTIFY_INTERVAL = 15 * ONE_MINUTE;
+  USER_REGISTER_EXPIRE_INTERVAL =  60 * ONE_MINUTE;
+  USER_CHECKIN_NOTIFY_INTERVAL = 60 * ONE_MINUTE;
+  USER_CHECKIN_STOP_INTERVAL = 1;
+  USER_INACTIVE_EXPIRE_INTERVAL = 7;
+{$ELSE}
+  SYSTEM_PERIODIC_CHECK_INTERVAL = 15 * ONE_MINUTE;
+  USER_PERIODIC_CHECK_INTERVAL = 0.5;
+  USER_REGISTER_NOTIFY_INTERVAL = 2;
+  USER_REGISTER_EXPIRE_INTERVAL =  7;
+  USER_CHECKIN_NOTIFY_INTERVAL = 1;
+  USER_CHECKIN_STOP_INTERVAL = 7;
+  USER_INACTIVE_EXPIRE_INTERVAL = 31;
+{$ENDIF}
+  CONTACT_CHECKIN_NOTIFY_INTERVAL = USER_CHECKIN_NOTIFY_INTERVAL * 2;
+
+
 var
   MemDB: TMemDB;
-  ConfFilename: string;
-  Heirarchy: THeirarchyInfo;
-  RootDir, DBDir: string;
 
 { ---------------- Proper app logic  ------------- }
 
 { TUserRecord }
+
+function TUserRecord.GenLink(EmailPadSelect: TEmailType;
+                             LinkAction: TLinkActionType):string;
+var
+  Host: string;
+  Pad: string;
+  Action: string;
+begin
+  Host := GCheckInApp.HandleEndpointRequest(self);
+  case EmailPadSelect of
+    tetOwn: Pad := OwnEmailPad;
+    tetContact: Pad := ContactPad;
+  else
+    Assert(false);
+  end;
+  case LinkAction of
+    latMailConfirm: Action := S_ACTION_MAIL_CONFIRM;
+    latAccountDelete: Action := S_ACTION_ACCOUNT_DELETE;
+    latMailBlacklist: Action := S_ACTION_BLACKLIST;
+    latCheckIn: Action := S_ACTION_CHECK_IN;
+  else
+    Assert(false);
+  end;
+  Pad := URLSafeString(Pad);
+  Action := URLSafeString(Action);
+  //TODO - Deal with HTTPS.
+  result := 'http://' + Host + '/' + S_MAIL_ACTION + S_PAD_PARAM
+    + Pad + S_ACTION_PARAM + Action;
+end;
 
 procedure TUserRecord.FromUTable(UTable: TMemAPITableData);
 var
@@ -295,9 +367,205 @@ begin
   UTable.ReadField(S_LAST_CHECKIN, DataRec);
   Assert(DataRec.FieldType = ftDouble);
   FLastCheckin := DataRec.dVal;
+
+  UTable.ReadField(S_NEXT_REGISTER_REMIND, DataRec);
+  Assert(DataRec.FieldType = ftDouble);
+  FNextRegisterRemind := DataRec.dVal;
+
+  UTable.ReadField(S_NEXT_CHECKIN_REMIND, DataRec);
+  Assert(DataRec.FieldType = ftDouble);
+  FNextCheckinRemind := DataRec.dVal;
+
+  UTable.ReadField(S_NEXT_CONTACT_CHECKIN_REMIND, DataRec);
+  Assert(DataRec.FieldType = ftDouble);
+  FNextContactCheckinRemind := DataRec.dVal;
+
+  UTable.ReadField(S_STOP_CHECKIN_REMIND, DataRec);
+  Assert(DataRec.FieldType = ftDouble);
+  FStopCheckinRemind := DataRec.dVal;
 end;
 
 { TCheckInApp }
+
+function TCheckInApp.UserCheckInActions(UTable: TMemAPITableData; StartUserRecord: TUserRecord): boolean;
+var
+  RightNow: TDateTime;
+  DataRec: TMemDbFieldDataRec;
+begin
+  RightNow := Now;
+  result := (RightNow > StartUserRecord.LastLogin + USER_INACTIVE_EXPIRE_INTERVAL)
+   and (RightNow > StartUserRecord.LastCheckin + USER_INACTIVE_EXPIRE_INTERVAL);
+  if result then
+  begin
+    UTable.Discard;
+    UTable.Delete;
+  end
+  else
+  begin
+    if not (RightNow > StartUserRecord.StopCheckinRemind) then
+    begin
+      if RightNow > StartUserRecord.NextCheckInRemind then
+      begin
+        if not GCheckInMailer.SendReminder(rrtCheckIn,
+                                           StartUserRecord.UserId,
+                                           StartUserRecord.OwnEmail,
+                                           StartUserRecord.ContactEmail,
+                                           StartUserRecord.GenLink(tetOwn, latCheckIn),
+                                           StartUserRecord.GenLink(tetOwn, latAccountDelete)) then
+          GLogLog(SV_WARN, S_OWN_CHECKIN_REMIND_FAILED + StartUserRecord.UserId);
+
+        DataRec.FieldType := ftDouble;
+        DataRec.dVal := RightNow + USER_CHECKIN_NOTIFY_INTERVAL;
+        UTable.WriteField(S_NEXT_CHECKIN_REMIND, DataRec);
+      end;
+      if RightNow > StartUserRecord.NextContactCheckinRemind then
+      begin
+        if not GCheckInMailer.SendReminder(rrtContactCheckIn,
+                                           StartUserRecord.UserId,
+                                           StartUserRecord.OwnEmail,
+                                           StartUserRecord.ContactEmail,
+                                           '',
+                                           StartUserRecord.GenLink(tetContact, latMailBlacklist)) then
+          GLogLog(SV_WARN, S_CONTACT_CHECKIN_REMIND_FAILED + StartUserRecord.UserId);
+
+        DataRec.FieldType := ftDouble;
+        //This is not a bug: initial wait is CONTACT_CHECKIN_NOTIFY, subsequent
+        //reminders delayed by USER_CHECKIN_NOTIFY
+        DataRec.dVal := RightNow + USER_CHECKIN_NOTIFY_INTERVAL;
+        UTable.WriteField(S_NEXT_CONTACT_CHECKIN_REMIND, DataRec);
+      end;
+    end;
+  end;
+end;
+
+
+function TCheckInApp.UserVerificationActions(UTable: TMemAPITableData; StartUserRecord: TUserRecord): boolean;
+var
+  RightNow: TDateTime;
+  DataRec: TMemDbFieldDataRec;
+begin
+  RightNow := Now;
+  result := StartUserRecord.ExpireAfter < RightNow;
+  if result then
+  begin
+    UTable.Discard;
+    UTable.Delete;
+  end
+  else
+  begin
+    if StartUserRecord.NextRegisterRemind < RightNow then
+    begin
+      if StartUserRecord.OwnVerifyState = vpsUnverifiedPadForVerify then
+      begin
+        if not GCheckInMailer.SendReminder(rrtOwnerRegister,
+                                           StartUserRecord.UserId,
+                                           StartUserRecord.OwnEmail,
+                                           StartUserRecord.ContactEmail,
+                                           StartUserRecord.GenLink(tetOwn, latMailConfirm),
+                                           StartUserRecord.GenLink(tetOwn, latAccountDelete)) then
+          GLogLog(SV_WARN, S_OWNER_REGISTER_REMIND_FAILED + StartUserRecord.UserId);
+      end;
+      if StartUserRecord.ContactVerifySTate = vpsUnverifiedPadForVerify then
+      begin
+        if not GCheckInMailer.SendReminder(rrtContactRegister,
+                                           StartUserRecord.UserId,
+                                           StartUserRecord.OwnEmail,
+                                           StartUserRecord.ContactEmail,
+                                           StartUserRecord.GenLink(tetContact, latMailConfirm),
+                                           StartUserRecord.GenLink(tetContact, latMailBlacklist)) then
+          GLogLog(SV_WARN, S_CONTACT_REGISTER_REMIND_FAILED + StartUserRecord.UserId);
+      end;
+      //Now just increment the registration, don't change the expiry.
+      DataRec.FieldType := ftDouble;
+      DataRec.dVal := RightNow + USER_REGISTER_NOTIFY_INTERVAL;
+      UTable.WriteField(S_NEXT_REGISTER_REMIND, DataRec);
+    end;
+  end;
+end;
+
+
+function TCheckInApp.UserPeriodicActions(UTable: TMemAPITableData): boolean;
+var
+  StartUserRecord: TUserRecord;
+begin
+  StartUserRecord := TUSerRecord.Create;
+  try
+    StartUserRecord.FromUTable(UTable);
+    if (StartUserRecord.OwnVerifyState = vpsUnverifiedPadForVerify)
+      or (StartUserRecord.ContactVerifySTate = vpsUnverifiedPadForVerify) then
+      result := UserVerificationActions(UTable, StartUserRecord)
+    else
+      result := UserCheckInActions(UTable, StartUserRecord);
+  finally
+    StartUserRecord.Free;
+  end;
+end;
+
+procedure TCheckInApp.DoPeriodic;
+var
+  S: TMemDBSession;
+  T: TMemDBTransaction;
+  ApiDB: TMemAPIDatabase;
+  ApiData: TMemAPITableData;
+  DataRec: TMemDBFieldDataRec;
+  UsrTblHandle: TMemDBHandle;
+  Located, Deleted: boolean;
+begin
+  try
+    if FLastPeriodicAllTasks + SYSTEM_PERIODIC_CHECK_INTERVAL < Now then
+    begin
+      FLastPeriodicAllTasks := Now;
+      S := MemDB.StartSession;
+      try
+        T := S.StartTransaction(amReadWrite, amLazyWrite, ilCommittedRead);
+        try
+          ApiDB := T.GetAPI;
+          try
+            UsrTblHandle := ApiDB.OpenTableOrKey(S_USERTABLE);
+            ApiData := APIDB.GetApiObjectFromHandle(UsrTblHandle, APITableData) as TMemAPITableData;
+            try
+              Located := ApiData.Locate(ptFirst, S_IDX_NEXT_PERIODIC);
+              if Located then
+              begin
+                ApiData.ReadField(S_NEXT_PERIODIC, DataRec);
+                Assert(DataRec.FieldType = ftDouble);
+              end;
+              while Located and (DataRec.dVal < Now)  do
+              begin
+                DataRec.dVal := Now + USER_PERIODIC_CHECK_INTERVAL;
+                ApiData.WriteField(S_NEXT_PERIODIC, DataRec);
+                Deleted := UserPeriodicActions(ApiData);
+                if not Deleted then
+                  ApiData.Post;
+                Located := ApiData.Locate(ptNext, S_IDX_NEXT_PERIODIC);
+                if Located then
+                begin
+                  ApiData.ReadField(S_NEXT_PERIODIC, DataRec);
+                  Assert(DataRec.FieldType = ftDouble);
+                end;
+              end;
+            finally
+              ApiData.Free;
+            end;
+          finally
+            ApiDB.Free;
+          end;
+          T.CommitAndFree;
+        except
+          T.RollbackAndFree;
+          raise;
+        end;
+      finally
+        S.Free;
+      end;
+    end;
+  except
+    on E: Exception do
+    begin
+      GLogLog(SV_FAIL, S_EXCEPTION_IN_PERIODIC_HANDLING + E.ClassName + ' ' + E.Message);
+    end;
+  end;
+end;
 
 constructor TCheckInApp.Create;
 begin
@@ -309,6 +577,17 @@ destructor TCheckInApp.Destroy;
 begin
   DBStop;
   inherited;
+end;
+
+function TCheckInApp.HandleEndpointRequest(Sender: TObject):string;
+begin
+  if Length(GAppConfig.EndpointName) > 0 then
+    result := GAppConfig.EndpointName
+  else
+  begin
+    //TODO - Dynamically look-up if possible.
+    result := S_LOCALHOST;
+  end;
 end;
 
 function TCheckInApp.HandleCryptKeyRequest(Sender: TObject; Username: string; var CryptKey, CryptPassword: string): boolean;
@@ -368,6 +647,34 @@ begin
   end;
 end;
 
+procedure TCheckInApp.UpdateCheckInTimers(UTable: TMemAPITableData);
+var
+  DataRec: TMemDbFieldDataRec;
+  RightNow: TDateTime;
+begin
+  DataRec.FieldType := ftDouble;
+  RightNow := Now;
+  DataRec.dVal := RightNow + USER_CHECKIN_NOTIFY_INTERVAL;
+  UTable.WriteField(S_NEXT_CHECKIN_REMIND, DataRec);
+  DataRec.dVal := RightNow + CONTACT_CHECKIN_NOTIFY_INTERVAL;
+  UTable.WriteField(S_NEXT_CONTACT_CHECKIN_REMIND, DataRec);
+  DataRec.dVal := RightNow + USER_CHECKIN_STOP_INTERVAL;
+  UTable.WriteField(S_STOP_CHECKIN_REMIND, DataRec);
+end;
+
+procedure TCheckInApp.UpdateRegistrationTimers(UTable: TMemAPITableData);
+var
+  DataRec: TMemDbFieldDataRec;
+  RightNow: TDateTime;
+begin
+  DataRec.FieldType := ftDouble;
+  RightNow := Now;
+  DataRec.dVal := RightNow + USER_REGISTER_NOTIFY_INTERVAL;
+  UTable.WriteField(S_NEXT_REGISTER_REMIND, DataRec);
+  DataRec.dVal := RightNow + USER_REGISTER_EXPIRE_INTERVAL;
+  UTable.WriteField(S_EXPIRE_AFTER, DataRec);
+end;
+
 function TCheckInApp.HandleRegisterRequest(Sender: TObject; Username, CryptKey, CryptPassword:string):boolean;
 var
   S: TMemDBSession;
@@ -376,7 +683,6 @@ var
   ApiDB: TMemAPIDatabase;
   ApiData: TMemAPITableData;
   DataRec: TMemDBFieldDataRec;
-  RightNow: TDateTime;
 begin
   result := false;
   try
@@ -399,13 +705,10 @@ begin
             ApiData.WriteField(S_PASS_HMAC_KEY, DataRec);
             DataRec.sVal := CryptPassword;
             ApiData.WriteField(S_PASS_CRYPT, DataRec);
-            DataRec.FieldType := ftDouble;
-            RightNow := Now;
-            DataRec.dVal := RightNow + PERIODIC_CHECK_INTERVAL;
-            ApiData.WriteField(S_NEXT_PERIODIC, DataRec);
-            DataRec.dVal := RightNow + EXPIRE_INTERVAL;
-            ApiData.WriteField(S_EXPIRE_AFTER, DataRec);
-            //Last login, last checkin both 0.
+
+            UpdateRegistrationTimers(ApiData);
+            //S_NEXT_CHECKIN_REMIND, S_STOP_CHECKIN_REMIND not needed yet.
+            //S_LAST_LOGIN, S_LAST_CHECKIN both zero.
             ApiData.Post;
           finally
             APIData.Free;
@@ -545,6 +848,130 @@ begin
   end;
 end;
 
+function TCheckInApp.HandleMailAction(PageProducer: TPageProducer; Pad: string; Action: string; var ResInfo: string): boolean;
+var
+  S: TMemDBSession;
+  T: TMemDBTransaction;
+  DB: TMemAPIDatabase;
+  H: TMemDBHandle;
+  TD: TMemAPITableData;
+  Data: TMemDBFieldDataRec;
+  CheckInUserId: string;
+  CheckInTime: TDateTime;
+  Session: THTTPDispatcherSession;
+  LogonInfo: TCheckInLogonInfo;
+begin
+  SetLength(CheckInUserId, 0);
+  CheckInTime := Now;
+  try
+    S := MemDB.StartSession;
+    try
+      T := S.StartTransaction(amReadWrite);
+      try
+        DB := T.GetAPI;
+        try
+          H := DB.OpenTableOrKey(S_USERTABLE);
+          TD := DB.GetApiObjectFromHandle(H, APITableData) as TMemAPITableData;
+          try
+            Data.FieldType := ftUnicodeString;
+            Data.sVal := Pad;
+            result := TD.FindByIndex(S_IDX_OWN_EMAIL_PAD, Data);
+            if result then
+            begin
+              if Action = S_ACTION_MAIL_CONFIRM then
+              begin
+                Data.FieldType := ftInteger;
+                Data.i32Val := Ord(vpsVerifiedPadForUnsub);
+                TD.WriteField(S_OWN_VERIFY_STATE, Data);
+                UpdateRegistrationTimers(TD);
+                UpdateCheckInTimers(TD);
+                TD.Post;
+              end
+              else if Action = S_ACTION_ACCOUNT_DELETE then
+              begin
+                TD.Delete;
+              end
+              else if Action = S_ACTION_CHECK_IN then
+              begin
+                TD.ReadField(S_USERID, Data);
+                Assert(Data.FieldType = ftUnicodeString);
+                CheckInUserId := Data.sVal;
+                Data.FieldType := ftDouble;
+                Data.dVal := CheckInTime;
+                TD.WriteField(S_LAST_CHECKIN, Data);
+                UpdateCheckInTimers(TD);
+                TD.Post;
+              end
+              else
+              begin
+                ResInfo := S_ACTION_NOT_SUPPORTED;
+              end;
+            end
+            else
+            begin
+              result := TD.FindByIndex(S_IDX_CONTACT_EMAIL_PAD, Data);
+              if result then
+              begin
+                if Action = S_ACTION_MAIL_CONFIRM then
+                begin
+                  Data.FieldType := ftInteger;
+                  Data.i32Val := Ord(vpsVerifiedPadForUnsub);
+                  TD.WriteField(S_OWN_VERIFY_STATE, Data);
+                  UpdateRegistrationTimers(TD);
+                  TD.Post;
+                end
+                else if Action = S_ACTION_BLACKLIST then
+                begin
+                  //TODO - Write this.
+                  result := false;
+                  ResInfo := S_NOT_YET_IMPLEMENTED;
+                end
+                else
+                begin
+                  result := false;
+                  ResInfo := S_ACTION_NOT_SUPPORTED;
+                end;
+              end
+              else
+              begin
+                result := false;
+                ResInfo := S_CHECK_IN_KEY_NOT_FOUND;
+              end;
+            end;
+          finally
+            TD.Free;
+          end;
+        finally
+          DB.Free;
+        end;
+        T.CommitAndFree;
+      except
+        T.RollbackAndFree;
+        raise;
+      end;
+    finally
+      S.Free;
+    end;
+    if Result and (Length(CheckInUserId) > 0) then
+    begin
+      Session := PageProducer.Session;
+      if Assigned(Session) and Assigned(Session.LogonInfo) then
+      begin
+        LogonInfo := Session.LogonInfo as TCheckInLogonInfo;
+        if LogonInfo.LogonId = CheckInUserId then
+          LogonInfo.FLastCheckinBeforeNow := CheckInTime;
+      end;
+    end;
+  except
+    on E: Exception do
+    begin
+      GLogLog(SV_FAIL, S_CHECKIN_REQUEST + ' ' + E.ClassName + ' ' + E.Message);
+      ResInfo := S_INTERNAL_ERROR;
+      result := false;
+    end;
+  end;
+end;
+
 function TCheckInApp.HandleQuickCheckInRequest(PageProducer:TPageProducer; Pad: string; var ResInfo: string): boolean;
 var
   S: TMemDBSession;
@@ -559,13 +986,14 @@ var
   CheckInTime: TDateTime;
 begin
   SetLength(ResInfo, 0);
+  result := false;
   if Length(Pad) = 0 then
   begin
     ResInfo := S_NO_CHECK_IN_KEY;
-    result := false;
   end
   else
   begin
+    CheckInTime := Now;
     try
       S := MemDB.StartSession;
       try
@@ -585,9 +1013,9 @@ begin
                 Assert(Data.FieldType = ftUnicodeString);
                 CheckInUserId := Data.sVal;
                 Data.FieldType := ftDouble;
-                CheckInTime := Now;
                 Data.dVal := CheckInTime;
                 TD.WriteField(S_LAST_CHECKIN, Data);
+                UpdateCheckInTimers(TD);
                 TD.Post;
               end
               else
@@ -609,7 +1037,7 @@ begin
       finally
         S.Free;
       end;
-      if Result then
+      if Result and (Length(CheckInUserId) > 0)then
       begin
         Session := PageProducer.Session;
         if Assigned(Session) and Assigned(Session.LogonInfo) then
@@ -688,7 +1116,8 @@ begin
               Data.FieldType := ftInteger;
               Data.i32Val := Ord(vpsUnverifiedPadForVerify);
               TD.WriteField(FieldName, Data);
-
+              //Reset expiry timers.
+              UpdateRegistrationTimers(TD);
               TD.Post;
             end;
           finally
@@ -725,7 +1154,6 @@ var
   H: TMemDBHandle;
   TD: TMemAPITableData;
   Data: TMemDbFieldDataRec;
-  FieldName: string;
 begin
   result := false;
   try
@@ -890,6 +1318,11 @@ begin
                 ApiTblMeta.CreateField(S_OWN_EMAIL_PAD, ftUnicodeString);
                 MadeChanges := true;
               end;
+              if IndexList.IndexOf(S_IDX_OWN_EMAIL_PAD) < 0 then
+              begin
+                ApiTblMeta.CreateIndex(S_IDX_OWN_EMAIL_PAD, S_OWN_EMAIL_PAD, []);
+                MadeChanges := true;
+              end;
               if FieldList.IndexOf(S_CONTACT_EMAIL) < 0 then
               begin
                 ApiTblMeta.CreateField(S_CONTACT_EMAIL,ftUnicodeString);
@@ -905,6 +1338,11 @@ begin
                 ApiTblMeta.CreateField(S_CONTACT_EMAIL_PAD,ftUnicodeString);
                 MadeChanges := true;
               end;
+              if IndexList.IndexOf(S_IDX_CONTACT_EMAIL_PAD) < 0 then
+              begin
+                ApiTblMeta.CreateIndex(S_IDX_CONTACT_EMAIL_PAD, S_CONTACT_EMAIL_PAD, []);
+                MadeChanges := true;
+              end;
               if FieldList.IndexOf(S_LOGLESS_CHECKIN_PAD) < 0 then
               begin
                 ApiTblMeta.CreateField(S_LOGLESS_CHECKIN_PAD,ftUnicodeString);
@@ -918,6 +1356,26 @@ begin
               if FieldList.IndexOf(S_EXPIRE_AFTER) < 0 then
               begin
                 ApiTblMeta.CreateField(S_EXPIRE_AFTER, ftDouble);
+                MadeChanges := true;
+              end;
+              if FieldList.IndexOf(S_NEXT_REGISTER_REMIND) < 0 then
+              begin
+                ApiTblMeta.CreateField(S_NEXT_REGISTER_REMIND, ftDouble);
+                MadeChanges := true;
+              end;
+              if FieldList.IndexOf(S_NEXT_CHECKIN_REMIND) < 0 then
+              begin
+                ApiTblMeta.CreateField(S_NEXT_CHECKIN_REMIND, ftDouble);
+                MadeChanges := true;
+              end;
+              if FieldList.IndexOf(S_NEXT_CONTACT_CHECKIN_REMIND) < 0 then
+              begin
+                ApiTblMeta.CreateField(S_NEXT_CONTACT_CHECKIN_REMIND, ftDouble);
+                MadeChanges := true;
+              end;
+              if FieldList.IndexOf(S_STOP_CHECKIN_REMIND) < 0 then
+              begin
+                ApiTblMeta.CreateField(S_STOP_CHECKIN_REMIND, ftDouble);
                 MadeChanges := true;
               end;
               if FieldList.IndexOf(S_LAST_LOGIN) < 0 then
@@ -964,105 +1422,6 @@ begin
   GLogLog(SV_INFO, 'DB teardown.');
 end;
 
-{$IFDEF MSWINDOWS}
-const
-  PathSep = '\';
-{$ELSE}
-const
-  PathSep = '/';
-{$ENDIF}
-
-procedure AppendTrailingDirSlash(var Path: string);
-begin
-  if Length(Path) > 0 then
-  begin
-    if (Path[Length(Path)] <> PathSep) then
-      Path := Path + PathSep;
-  end;
-end;
-
-constructor TCheckInAppConfig.Create;
-begin
-  inherited;
-  FDBRootDir:= DBDir;
-  FEndpointName :=  S_LOCALHOST;
-  FMailerUseTLS := TIdUseTLS.utUseRequireTLS;
-end;
-
-procedure SetupHeirarchy(var H: THeirarchyInfo);
-begin
-  H := TObjDefaultHeirarchy;
-  with H do
-  begin
-    SetLength(MemberClasses, 1);
-    MemberClasses[0] :=  TCheckInAppConfig;
-  end;
-end;
-
-procedure SetupPrefs;
-var
-  XMLStream: TStreamSysXML;
-  FileStream: TFileStream;
-begin
-  RootDir := TPath.GetHomePath;
-  AppendTrailingDirSlash(RootDir);
-  if not DirectoryExists(RootDir) then
-    TDirectory.CreateDirectory(RootDir);
-  RootDir := RootDir + DEFAULT_APP_DATA_DIR;
-  AppendTrailingDirSlash(RootDir);
-  if not DirectoryExists(RootDir) then
-    TDirectory.CreateDirectory(RootDir);
-  DBDir := RootDir + DEFAULT_DATA_ROOT_LOCATION;
-  AppendTrailingDirSlash(DBDir);
-  if not DirectoryExists(DBDir) then
-    TDirectory.CreateDirectory(DBDir);
-  ConfFileName := RootDir + DEFAULT_PREFS_FILENAME;
-  SetupHeirarchy(Heirarchy);
-
-  FileStream := nil;
-  XMLStream := nil;
-  try
-    try
-      XMLStream := TStreamSysXML.Create;
-      //Don't fail on no class / no property.
-      XMLStream.RegisterHeirarchy(Heirarchy);
-      FileStream := TFileStream.Create(ConfFileName, fmOpenRead);
-      GAppConfig := XMLStream.ReadStructureFromStream(FileStream) as TCheckInAppConfig;
-    except
-      on Exception do ;
-    end;
-  finally
-    FreeAndNil(FileStream);
-    FreeAndNil(XMLStream);
-  end;
-  if not Assigned(GAppConfig) then
-    GAppConfig := TCheckInAppConfig.Create;
-end;
-
-procedure FinishPrefs;
-var
-  XMLStream: TStreamSysXML;
-  FileStream: TFileStream;
-begin
-  FileStream := nil;
-  XMLStream := nil;
-  try
-    try
-      XMLStream := TStreamSysXML.Create;
-      //Don't fail on no class / no property.
-      XMLStream.RegisterHeirarchy(Heirarchy);
-      FileStream := TFileStream.Create(ConfFileName, fmCreate);
-      XMLStream.WriteStructureToStream(GAppConfig, FileStream);
-    except
-      on Exception do ;
-    end;
-  finally
-    FreeAndNil(FileStream);
-    FreeAndNil(XMLStream);
-  end;
-  GAppConfig.Free;
-end;
-
 procedure SetupDB;
 begin
   MemDB := TMemDB.Create;
@@ -1078,12 +1437,10 @@ end;
 
 initialization
   Randomize;
-  SetupPrefs;
   SetupDB;
   GCheckInApp := TCheckInApp.Create;
 finalization
   GCheckInApp.Free;
   FiniDB;
-  FinishPrefs;
 end.
 
