@@ -112,11 +112,11 @@ type
   TSimpleSitePageProducer = class(TPageProducer)
   private
   protected
+    function DoValidateRequest(const ParsedParams: TParsedParameters;
+                               var Validate: TValidate):boolean; virtual;
   public
     //Boolean functions all indicate whether request completely handled.
     function ProcessIdCommand(const ParsedParams: TParsedParameters): boolean; override;
-    function DoValidateRequest(const ParsedParams: TParsedParameters;
-                               var Validate: TValidate):boolean; virtual;
     function GetRequestParam(const PageParams: TPageParams;
                              ParamName: string; var Value: string): boolean;
   end;
@@ -151,14 +151,15 @@ type
     function IsWellKnownPageType(const ParsedParams: TParsedParameters;
                                  var WellKnownType: TWellKnownPageType): boolean;
 
+    function DoValidateRequest(const ParsedParams: TParsedParameters;
+                               var Validate: TValidate):boolean; override;
+
     function DoValidateRequestLoggedOn(const ParsedParams: TParsedParameters;
                                       Session: THTTPDispatcherSession;
                                       var Validate: TValidate): boolean; virtual;
 
     procedure ChildSetLastErr(LastErr: string);
   public
-    function DoValidateRequest(const ParsedParams: TParsedParameters;
-                               var Validate: TValidate):boolean; override;
     function ProcessIdCommand(const ParsedParams: TParsedParameters): boolean; override;
 
     function VerifyPasswordForApp(Password: string): boolean;
@@ -176,6 +177,7 @@ type
 
 const
   S_MAIN_PAGE = 'main';
+  S_LOGIN_PAGE = 'login';
 
 implementation
 
@@ -494,7 +496,6 @@ const
   S_USERNAME = 'USERNAME';
   S_PASSWORD = 'PASSWORD';
   S_PASSWORD_CONFIRM = 'PASSWORD_CONFIRM';
-  S_LOGIN_PAGE = 'login';
   S_REGISTER_PAGE = 'register';
   S_LOGOUT_PAGE = 'logout';
   FAILED_LOGIN_DELAY = 1000;

@@ -57,6 +57,7 @@ type
 
 var
   GAppConfig: TCheckInAppConfig;
+  RootDir: string;
 
 implementation
 
@@ -69,7 +70,7 @@ const
   DEFAULT_PREFS_FILENAME = 'CheckIn.prefs';
 
 var
-  RootDir, DBDir: string;
+  DBDir: string;
   ConfFilename: string;
   Heirarchy: THeirarchyInfo;
 

@@ -40,11 +40,17 @@ implementation
 
 uses
   IdSchedulerOfThreadpool, HTTPServerPageProducer,
-  CheckInPageProducer, CheckInAppLogic, CheckInMailer;
+  CheckInPageProducer, CheckInAppLogic, CheckInMailer, CheckInAudit;
 
 procedure TServerFrm.SetDispatcherState(Active: boolean);
 var
   PrevState: boolean;
+  i: integer;
+
+const
+  RetryMs = 100;
+  RetryTimes = 50;
+
 begin
   PrevState := Dispatcher.Active;
   Dispatcher.Active := Active;
@@ -57,7 +63,12 @@ begin
       GCheckInMailer.SendAdminMessage(amtServerDown);
       //Give the mailer thread 5 seconds to send any remaining messages including
       //this one.
-      Sleep(5000);
+      i := RetryTimes;
+      while GCheckInMailer.MailsInQueue and (i > 0) do
+      begin
+        Sleep(RetryMs);
+        Dec(i);
+      end;
     end;
     UpdateCtrls;
   end;
@@ -106,6 +117,7 @@ end;
 procedure TServerFrm.Timer1Timer(Sender: TObject);
 begin
   GCheckInApp.DoPeriodic;
+  GAuditLog.DoPeriodic;
 end;
 
 end.
