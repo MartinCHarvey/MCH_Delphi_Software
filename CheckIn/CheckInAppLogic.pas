@@ -35,12 +35,11 @@ uses
 {$IFDEF USE_TRACKABLES}
   Trackables,
 {$ENDIF}
-  SysUtils, MemDBAPI, HTTPServerPageProducer, Classes;
+  SysUtils, MemDBAPI, HTTPServerPageProducer, Classes, MemDB;
 
 type
   TUserRecord = class;
 
-  //TODO - Blacklist table
   TEmailType = (tetOwn, tetContact);
 
   //Should not be any state in this class - this just does app logic.
@@ -59,13 +58,16 @@ type
     procedure UpdateRegistrationTimers(UTable: TMemAPITableData; Initial: boolean);
     procedure UpdateCheckInTimers(UTable: TMemAPITableData);
 
-    function UserPeriodicActions(UTable: TMemAPITableData): boolean;
-    function UserVerificationActions(UTable: TMemAPITableData; StartUserRecord: TUserRecord): boolean;
-    function UserCheckInActions(UTable: TMemAPITableData;StartUserRecord: TUserRecord): boolean;
+    function UserPeriodicActions(T: TMemDBTransaction; UTable: TMemAPITableData): boolean;
+    function UserVerificationActions(T: TMemDBTransaction; UTable: TMemAPITableData; StartUserRecord: TUserRecord): boolean;
+    function UserCheckInActions(T: TMemDBTransaction; UTable: TMemAPITableData;StartUserRecord: TUserRecord): boolean;
 
     procedure AuditPersistRecentToDB(Sender: TObject; const LogEntries: TList);
     procedure AuditGetItemsForPrune(Sender: TObject; const LogEntries: TList; Before: TDateTime);
     procedure AuditGetLastPruneTime(Sender: TObject; var LastPrune: TDateTime);
+
+    function AddToBlackListInTrans(T: TMemDBTransaction; Address: string): boolean;
+    function EmailBlackListedInTrans(T: TMemDBTransaction; Address: string): boolean;
   public
     constructor Create;
     destructor Destroy; override;
@@ -81,6 +83,7 @@ type
     function HandleMailAction(PageProducer: TPageProducer; Pad: string; Action: string; var ResInfo: string): boolean;
     procedure ReadAuditLog(Username: string; LogList: TList);
 
+    function ClearBlacklist: boolean;
     procedure DoPeriodic;
   end;
 
@@ -159,7 +162,7 @@ var
 implementation
 
 uses
-  MemDB, IOUtils, MemDBMisc, GlobalLog, CheckInPageProducer,
+  IOUtils, MemDBMisc, GlobalLog, CheckInPageProducer,
   HTTPServerDispatcher, IdHMACSha1, IdGlobal, IdCoderMIME, CheckInMailer,
   CheckInAppConfig, CheckInAudit;
 
@@ -210,17 +213,17 @@ const
 
   S_AUDIT_USERID = 'AuditUserid';
   S_IDX_AUDIT_USERID = 'IdxAuditUserId';
-  //S_IDX_AUDIT_USERID = 'IdxAuditUserid';
   S_AUDIT_DATETIME = 'AuditDateTime';
   S_IDX_AUDIT_DATETIME = 'IdxAuditDateTime';
-  //S_IDX_AUDIT_DATETIME = 'IdxAuditDateTime';
   S_AUDIT_DETAILS = 'AuditDetails';
 
   { ------------------ Blacklist table }
   S_BLACKLIST_TABLE = 'BlacklistTable';
-  S_BLACKLIST_ENTRY = 'BlacklistEntry';
-  //S_IDX_BLACKLIST_ENTRY = 'IdxBlacklistEntry';
+  S_BLACKLIST_DATETIME = 'BlacklistDateTime';
+  S_BLACKLIST_EMAIL = 'BlacklistEmail';
+  S_IDX_BLACKLIST_EMAIL = 'IdxBlacklistEmail';
 
+  { ------------------ Assorted user messages. }
 
   S_USERPASS_TOO_SIMPLE = 'Username or password too simple';
   S_USER_ALREADY_REG = 'User already registered.';
@@ -283,11 +286,19 @@ const
   S_AUDIT_SET_QUICK_CHECKIN_EXCEPTION = 'Exception in quick checkin';
   S_AUDIT_ACCOUNT_DELETE_EXCEPTION = 'Account delete exception.';
 
+  S_MAIL_AUDIT = '__Email: ';
+  S_AUDIT_EMAIL_BLACKLISTED = 'Email added to blacklist';
+  S_AUDIT_EMAIL_BLACKLIST_FAILED = 'Unable to add email to blacklist.';
+  S_AUDIT_SET_MAIL_FAILED_BLACKLISTED = 'Cannot set email; it has been blacklisted.';
+  S_AUDIT_SEND_MAIL_FAILED_BLACKLISTED = 'Cannot send to email; it has been blacklisted.';
+  S_AUDIT_READ_AUDIT_LOG_FAILED = 'Read audit log failed.';
 
+  S_BLACKLIST_ADD_FAILED = 'Failed to add e-mail to blacklist table.';
+  S_BLACKLIST_CHECK_FAILED = 'Failed to check e-mail in blacklist table.';
+  S_CLEARING_BLACKLIST = 'Clearing blacklist';
+  S_BLACKLIST_CLEAR_FAILED = 'Failed to clear blacklist: ';
 
   S_LOCALHOST = 'localhost';
-
-
 
 const
   ONE_MINUTE = (1 / (24 * 60));
@@ -296,7 +307,7 @@ const
   USER_PERIODIC_CHECK_INTERVAL = 3 * ONE_MINUTE;
   USER_REGISTER_NOTIFY_INTERVAL = 15 * ONE_MINUTE;
   USER_REGISTER_EXPIRE_INTERVAL =  60 * ONE_MINUTE;
-  USER_CHECKIN_NOTIFY_INTERVAL = 60 * ONE_MINUTE;
+  USER_CHECKIN_NOTIFY_INTERVAL = 15 * ONE_MINUTE;
   USER_CHECKIN_STOP_INTERVAL = 1;
   USER_INACTIVE_EXPIRE_INTERVAL = 7;
 {$ELSE}
@@ -419,10 +430,11 @@ end;
 
 { TCheckInApp }
 
-function TCheckInApp.UserCheckInActions(UTable: TMemAPITableData; StartUserRecord: TUserRecord): boolean;
+function TCheckInApp.UserCheckInActions(T: TMemDBTransaction; UTable: TMemAPITableData; StartUserRecord: TUserRecord): boolean;
 var
   RightNow: TDateTime;
   DataRec: TMemDbFieldDataRec;
+  Blacklisted: boolean;
 begin
   RightNow := Now;
   result := (RightNow > StartUserRecord.LastLogin + USER_INACTIVE_EXPIRE_INTERVAL)
@@ -439,7 +451,10 @@ begin
     begin
       if RightNow > StartUserRecord.NextCheckInRemind then
       begin
-        if not GCheckInMailer.SendReminder(rrtCheckIn,
+        BlackListed := EmailBlackListedInTrans(T, StartUserRecord.OwnEmail);
+        if Blacklisted then
+          AudLog(StartUserRecord.UserId, S_AUDIT_SEND_MAIL_FAILED_BLACKLISTED);
+        if Blacklisted or not GCheckInMailer.SendReminder(rrtCheckIn,
                                            StartUserRecord.UserId,
                                            StartUserRecord.OwnEmail,
                                            StartUserRecord.ContactEmail,
@@ -458,7 +473,10 @@ begin
       end;
       if RightNow > StartUserRecord.NextContactCheckinRemind then
       begin
-        if not GCheckInMailer.SendReminder(rrtContactCheckIn,
+        BlackListed := EmailBlackListedInTrans(T, StartUserRecord.ContactEmail);
+        if Blacklisted then
+          AudLog(StartUserRecord.UserId, S_AUDIT_SEND_MAIL_FAILED_BLACKLISTED);
+        if Blacklisted or not GCheckInMailer.SendReminder(rrtContactCheckIn,
                                            StartUserRecord.UserId,
                                            StartUserRecord.OwnEmail,
                                            StartUserRecord.ContactEmail,
@@ -482,10 +500,11 @@ begin
 end;
 
 
-function TCheckInApp.UserVerificationActions(UTable: TMemAPITableData; StartUserRecord: TUserRecord): boolean;
+function TCheckInApp.UserVerificationActions(T: TMemDBTransaction; UTable: TMemAPITableData; StartUserRecord: TUserRecord): boolean;
 var
   RightNow: TDateTime;
   DataRec: TMemDbFieldDataRec;
+  Blacklisted: boolean;
 begin
   RightNow := Now;
   result := StartUserRecord.ExpireAfter < RightNow;
@@ -501,7 +520,11 @@ begin
     begin
       if StartUserRecord.OwnVerifyState = vpsUnverifiedPadForVerify then
       begin
-        if not GCheckInMailer.SendReminder(rrtOwnerRegister,
+        BlackListed := EmailBlackListedInTrans(T, StartUserRecord.OwnEmail);
+        if Blacklisted then
+          AudLog(StartUserRecord.UserId, S_AUDIT_SEND_MAIL_FAILED_BLACKLISTED);
+        //Sends to own email.
+        if Blacklisted or not GCheckInMailer.SendReminder(rrtOwnerRegister,
                                            StartUserRecord.UserId,
                                            StartUserRecord.OwnEmail,
                                            StartUserRecord.ContactEmail,
@@ -516,7 +539,11 @@ begin
       end;
       if StartUserRecord.ContactVerifySTate = vpsUnverifiedPadForVerify then
       begin
-        if not GCheckInMailer.SendReminder(rrtContactRegister,
+        BlackListed := EmailBlackListedInTrans(T, StartUserRecord.ContactEmail);
+        if Blacklisted then
+          AudLog(StartUserRecord.UserId, S_AUDIT_SEND_MAIL_FAILED_BLACKLISTED);
+        //Sends to contact email
+        if Blacklisted or not GCheckInMailer.SendReminder(rrtContactRegister,
                                            StartUserRecord.UserId,
                                            StartUserRecord.OwnEmail,
                                            StartUserRecord.ContactEmail,
@@ -538,7 +565,7 @@ begin
 end;
 
 
-function TCheckInApp.UserPeriodicActions(UTable: TMemAPITableData): boolean;
+function TCheckInApp.UserPeriodicActions(T: TMemDBTransaction; UTable: TMemAPITableData): boolean;
 var
   StartUserRecord: TUserRecord;
 begin
@@ -547,9 +574,9 @@ begin
     StartUserRecord.FromUTable(UTable);
     if (StartUserRecord.OwnVerifyState = vpsUnverifiedPadForVerify)
       or (StartUserRecord.ContactVerifySTate = vpsUnverifiedPadForVerify) then
-      result := UserVerificationActions(UTable, StartUserRecord)
+      result := UserVerificationActions(T, UTable, StartUserRecord)
     else
-      result := UserCheckInActions(UTable, StartUserRecord);
+      result := UserCheckInActions(T, UTable, StartUserRecord);
   finally
     StartUserRecord.Free;
   end;
@@ -588,7 +615,7 @@ begin
               begin
                 DataRec.dVal := Now + USER_PERIODIC_CHECK_INTERVAL;
                 ApiData.WriteField(S_NEXT_PERIODIC, DataRec);
-                Deleted := UserPeriodicActions(ApiData);
+                Deleted := UserPeriodicActions(T, ApiData);
                 if not Deleted then
                   ApiData.Post;
                 Located := ApiData.Locate(ptNext, S_IDX_NEXT_PERIODIC);
@@ -1015,9 +1042,12 @@ begin
                 end
                 else if Action = S_ACTION_BLACKLIST then
                 begin
-                  //TODO - Write this.
-                  result := false;
-                  ResInfo := S_NOT_YET_IMPLEMENTED;
+                  TD.ReadField(S_CONTACT_EMAIL, Data);
+                  result := AddToBlackListInTrans(T, Data.sVal);
+                  if result then
+                    AudLog(S_MAIL_AUDIT + Data.sVal, S_AUDIT_EMAIL_BLACKLISTED)
+                  else
+                    AudLog(S_MAIL_AUDIT + Data.sVal, S_AUDIT_EMAIL_BLACKLIST_FAILED);
                 end
                 else
                 begin
@@ -1167,6 +1197,7 @@ var
 begin
   result := false;
   try
+    NewEmail := NewEmail.Trim;
     if (Length(NewEmail) = 0) or (Pos('@', NewEmail) <= 0) then
       exit;
 
@@ -1190,35 +1221,42 @@ begin
                 result := false;
                 exit;
               end;
+              if EmailBlacklistedInTrans(T, NewEmail) then
+              begin
+                result := false;
+                AudLog(Username, S_AUDIT_SET_MAIL_FAILED_BLACKLISTED);
+              end
+              else
+              begin
+                case EmailType of
+                  tetOwn: FieldName := S_OWN_EMAIL;
+                  tetContact: FieldName := S_CONTACT_EMAIL;
+                end;
+                Data.sVal := NewEmail;
+                TD.WriteField(FieldName, Data);
 
-              case EmailType of
-                tetOwn: FieldName := S_OWN_EMAIL;
-                tetContact: FieldName := S_CONTACT_EMAIL;
-              end;
-              Data.sVal := NewEmail;
-              TD.WriteField(FieldName, Data);
+                case EmailType of
+                  tetOwn: FieldName := S_OWN_EMAIL_PAD;
+                  tetContact: FieldName := S_CONTACT_EMAIL_PAD;
+                end;
+                Data.sVal := GenPad;
+                TD.WriteField(FieldName, Data);
 
-              case EmailType of
-                tetOwn: FieldName := S_OWN_EMAIL_PAD;
-                tetContact: FieldName := S_CONTACT_EMAIL_PAD;
+                case EmailType of
+                  tetOwn: FieldName := S_OWN_VERIFY_STATE;
+                  tetContact: FieldName := S_CONTACT_VERIFY_STATE;
+                end;
+                Data.FieldType := ftInteger;
+                Data.i32Val := Ord(vpsUnverifiedPadForVerify);
+                TD.WriteField(FieldName, Data);
+                //Reset expiry timers.
+                UpdateRegistrationTimers(TD, true);
+                case EmailType of
+                  tetOwn: AudLog(Username, S_AUDIT_CHANGED_OWN_EMAIL);
+                  tetContact: AudLog(Username, S_AUDIT_CHANGED_CONTACT_EMAIL);
+                end;
+                TD.Post;
               end;
-              Data.sVal := GenPad;
-              TD.WriteField(FieldName, Data);
-
-              case EmailType of
-                tetOwn: FieldName := S_OWN_VERIFY_STATE;
-                tetContact: FieldName := S_CONTACT_VERIFY_STATE;
-              end;
-              Data.FieldType := ftInteger;
-              Data.i32Val := Ord(vpsUnverifiedPadForVerify);
-              TD.WriteField(FieldName, Data);
-              //Reset expiry timers.
-              UpdateRegistrationTimers(TD, true);
-              case EmailType of
-                tetOwn: AudLog(Username, S_AUDIT_CHANGED_OWN_EMAIL);
-                tetContact: AudLog(Username, S_AUDIT_CHANGED_CONTACT_EMAIL);
-              end;
-              TD.Post;
             end;
           finally
             TD.Free;
@@ -1623,12 +1661,136 @@ begin
     end;
   except
     on E: Exception do
+      GLogLog(SV_FAIL, S_AUDIT_READ_AUDIT_LOG_FAILED + E.ClassName + ' ' + E.Message);
+  end;
+end;
+
+function TCheckInApp.AddToBlackListInTrans(T: TMemDBTransaction; Address: string): boolean;
+var
+  DB: TMemAPIDatabase;
+  TD: TMemAPITableData;
+  H: TMemDBHandle;
+  Data: TMemDbFieldDataRec;
+  Located: boolean;
+begin
+  Address := Address.Trim.ToLower;
+  try
+    DB := T.GetAPI;
+    try
+      H := DB.OpenTableOrKey(S_BLACKLIST_TABLE);
+      TD := DB.GetApiObjectFromHandle(H, APITableData) as TMemAPITableData;
+      try
+        Data.FieldType := ftUnicodeString;
+        Data.sVal := Address;
+        Located := TD.FindByIndex(S_IDX_BLACKLIST_EMAIL, Data);
+        if not Located then
+        begin
+          TD.Append;
+          TD.WriteField(S_BLACKLIST_EMAIL, Data);
+          Data.FieldType := ftDouble;
+          Data.dVal := Now;
+          TD.WriteField(S_BLACKLIST_DATETIME, Data);
+          TD.Post;
+        end;
+        result := true;
+      finally
+        TD.Free;
+      end;
+    finally
+      DB.Free;
+    end;
+  except
+    on E: Exception do
     begin
-      GLogLog(SV_FAIL, S_AUDIT_LOG_QUERY_PRUNE_TIME_FAILED + E.ClassName + ' ' + E.Message);
+      GLogLog(SV_FAIL, S_BLACKLIST_ADD_FAILED + E.ClassName + ' ' + E.Message);
+      result := false;
     end;
   end;
 end;
 
+function TCheckInApp.EmailBlackListedInTrans(T: TMemDBTransaction; Address: string): boolean;
+var
+  DB: TMemAPIDatabase;
+  TD: TMemAPITableData;
+  H: TMemDBHandle;
+  Data: TMemDbFieldDataRec;
+begin
+  Address := Address.Trim.ToLower;
+  try
+    DB := T.GetAPI;
+    try
+      H := DB.OpenTableOrKey(S_BLACKLIST_TABLE);
+      TD := DB.GetApiObjectFromHandle(H, APITableData) as TMemAPITableData;
+      try
+        Data.FieldType := ftUnicodeString;
+        Data.sVal := Address;
+        result := TD.FindByIndex(S_IDX_BLACKLIST_EMAIL, Data);
+      finally
+        TD.Free;
+      end;
+    finally
+      DB.Free;
+    end;
+  except
+    on E: Exception do
+    begin
+      GLogLog(SV_FAIL, S_BLACKLIST_CHECK_FAILED + E.ClassName + ' ' + E.Message);
+      result := false;
+    end;
+  end;
+end;
+
+function TCheckInApp.ClearBlacklist;
+var
+  S: TMemDbSession;
+  T: TMemDBTransaction;
+  H: TMemDBHandle;
+  DB: TMemAPIDatabase;
+  TD: TMemAPITableData;
+  Changed: boolean;
+begin
+  Changed := false;
+  GLogLog(SV_INFO, S_CLEARING_BLACKLIST);
+  try
+    S := MemDB.StartSession;
+    try
+      T := S.StartTransaction(amReadWrite);
+      try
+        DB:= T.GetAPI;
+        try
+          H := DB.OpenTableOrKey(S_BLACKLIST_TABLE);
+          TD := DB.GetApiObjectFromHandle(H, APITableData) as TMemAPITableData;
+          try
+            TD.Locate(ptFirst);
+            while TD.RowSelected do
+            begin
+              Changed := true;
+              TD.Delete;
+            end;
+          finally
+            TD.Free;
+          end;
+        finally
+          DB.Free;
+        end;
+        if Changed then
+          T.CommitAndFree
+        else
+          T.RollbackAndFree;
+        result := true;
+      except
+        result := false;
+        T.RollbackAndFree;
+        raise;
+      end;
+    finally
+      S.Free;
+    end;
+  except
+    on E: Exception do
+      GLogLog(SV_FAIL, S_BLACKLIST_CLEAR_FAILED + E.ClassName + ' ' + E.Message);
+  end;
+end;
 
 { ---------------- Config / DB init and finalization ------------- }
 
@@ -1836,7 +1998,42 @@ begin
           finally
              ApiTblMeta.Free;
           end;
-          //TODO - Blacklist table (unsubscribe...)
+          //Blacklist table creation.
+          if EntList.IndexOf(S_BLACKLIST_TABLE) < 0 then
+          begin
+            TblHandle := APIDB.CreateTable(S_BLACKLIST_TABLE);
+            MadeChanges := true;
+          end
+          else
+            TblHandle := APIDB.OpenTableOrKey(S_BLACKLIST_TABLE);
+          //Blacklist table metadata.
+          APITblMeta := APIDB.GetApiObjectFromHandle(TblHandle, APITableMetadata) as TMemAPITableMetadata;
+          try
+            FieldList := ApiTblMeta.GetFieldNames;
+            IndexList := APiTblMeta.GetIndexNames;
+            try
+              if FieldList.IndexOf(S_BLACKLIST_EMAIL) < 0 then
+              begin
+                ApiTblMeta.CreateField(S_BLACKLIST_EMAIL, ftUnicodeString);
+                MadeChanges := true;
+              end;
+              if IndexList.IndexOf(S_IDX_BLACKLIST_EMAIL) < 0 then
+              begin
+                ApiTblMeta.CreateIndex(S_IDX_BLACKLIST_EMAIL, S_BLACKLIST_EMAIL, [iaUnique, iaNotEmpty]);
+                MadeChanges := true;
+              end;
+              if FieldList.IndexOf(S_BLACKLIST_DATETIME) < 0 then
+              begin
+                ApiTblMeta.CreateField(S_BLACKLIST_DATETIME, ftDouble);
+                MadeChanges := true;
+              end;
+            finally
+              FieldList.Free;
+              IndexList.Free;
+            end;
+          finally
+             ApiTblMeta.Free;
+          end;
         finally
           EntList.Free;
         end;

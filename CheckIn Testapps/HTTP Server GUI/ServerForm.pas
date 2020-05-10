@@ -15,6 +15,7 @@ type
     StopBtn: TButton;
     LogMemo: TMemo;
     Timer1: TTimer;
+    ClearBlacklistBtn: TButton;
     procedure FormShow(Sender: TObject);
     procedure StartBtnClick(Sender: TObject);
     procedure StopBtnClick(Sender: TObject);
@@ -22,6 +23,7 @@ type
     procedure FormDestroy(Sender: TObject);
     procedure FormCreate(Sender: TObject);
     procedure Timer1Timer(Sender: TObject);
+    procedure ClearBlacklistBtnClick(Sender: TObject);
   private
     { Private declarations }
     Dispatcher: THTTPServerDispatcher;
@@ -71,6 +73,10 @@ begin
       end;
     end;
     UpdateCtrls;
+    if Active then
+      LogMemo.Lines.Add('Server now active.')
+    else
+      LogMemo.Lines.Add('Server stopped.');
   end;
 end;
 
@@ -79,6 +85,14 @@ procedure TServerFrm.UpdateCtrls;
 begin
   StartBtn.Enabled := not Dispatcher.Active;
   StopBtn.Enabled := Dispatcher.Active;
+end;
+
+procedure TServerFrm.ClearBlacklistBtnClick(Sender: TObject);
+begin
+  if GCheckInApp.ClearBlacklist then
+    LogMemo.Lines.Add('Blacklist cleared.')
+  else
+    LogMemo.Lines.Add('Could not clear blacklist.');
 end;
 
 procedure TServerFrm.FormClose(Sender: TObject; var Action: TCloseAction);

@@ -43,7 +43,16 @@ object ServerFrm: TServerFrm
   end
   object Timer1: TTimer
     OnTimer = Timer1Timer
-    Left = 232
+    Left = 432
     Top = 16
+  end
+  object ClearBlacklistBtn: TButton
+    Height = 22.000000000000000000
+    Position.X = 208.000000000000000000
+    Position.Y = 16.000000000000000000
+    TabOrder = 3
+    Text = 'ClearBlacklistBtn'
+    Width = 105.000000000000000000
+    OnClick = ClearBlacklistBtnClick
   end
 end
