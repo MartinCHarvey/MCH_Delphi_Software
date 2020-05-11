@@ -114,7 +114,6 @@ begin
       Msg.Body.Add(PositiveAction);
       Msg.Body.Add('');
       Msg.Body.Add('');
-      //TODO - Proper password resets.
       Msg.Body.Add('If you''ve forgotten your password, you can delete your account');
       Msg.Body.Add('and start over by following this link.');
       Msg.Body.Add('');
@@ -179,12 +178,10 @@ var
   Recipient: TIdEmailAddressItem;
 begin
   Msg := TIdMessage.Create(nil);
-  //TODO - properties for these.
   Msg.From.Name := FEmailName;
   Msg.From.Address := FEmailAddress;
   Recipient := Msg.Recipients.Add;
   Recipient.Assign(Msg.From);
-  //TODO - Fancy HTML messages for one-click / register / deregister.
   Msg.Encoding := TIdMessageEncoding.mePlainText;
   case MsgType of
     amtServerUp: Msg.Subject := S_ADMIN_MSG + S_SERVER_UP;

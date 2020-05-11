@@ -57,7 +57,7 @@ type
     FPassword: string;
     FUseTLS: TIdUseTLS;
   protected
-
+    function GetMailQueueOccupancy: boolean;
     function QueueEmail(Mail: TIdMessage): boolean;
     procedure CondStartWorkItemLocked;
     procedure PoolOKCompletion(Sender: TObject);
@@ -72,6 +72,7 @@ type
     property Username: string read FUsername write FUserName;
     property Password: string read FPassword write FPassword;
     property UseTLS: TIdUseTLS read FUseTLS write FUseTLS;
+    property MailsInQueue: boolean read GetMailQueueOccupancy;
   end;
 
   TQueuedMailerWorkItem = class(TCommonPoolWorkItem)
@@ -106,6 +107,16 @@ begin
   end
   else
     result := false;
+end;
+
+function TQueuedMailer.GetMailQueueOccupancy: boolean;
+begin
+  FMailQueue.AcquireLock;
+  try
+    result := FMailQueue.Count > 0;
+  finally
+    FMailQueue.ReleaseLock;
+  end;
 end;
 
 procedure TQueuedMailer.CondStartWorkItemLocked;

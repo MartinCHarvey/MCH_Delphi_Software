@@ -28,9 +28,6 @@ interface
 
 //TODO - This all uses table tags, when it should prob use div's and CSS.
 
-//TODO TODO TODO - Make data strings HTML safe when displayed on page.
-//TODO - Make generated links properly URL-encoded.
-
 uses
   HTTPServerPageProducer, HTTPServerDispatcher;
 
@@ -78,11 +75,15 @@ const
   S_PAD = 'Pad';
   S_ACTION = 'Action';
 
+  //TODO - Deal with HTTPS, and forwarding of HTTP to HTTPS.
+  S_PROTO_LINK_PREFIX = 'http://';
+
 
 implementation
 
 uses
-  IdCustomHTTPServer, SysUtils, HTMLEscapeHelper, CheckInAppLogic;
+  IdCustomHTTPServer, SysUtils, HTMLEscapeHelper, CheckInAppLogic, Classes,
+  CheckInAudit;
 
 const
   S_UPDATE_OWN_EMAIL = 'UpdateOwnEmail';
@@ -96,10 +97,9 @@ const
 
   S_EMAIL_CHANGE_FAILED = 'Email address change failed.';
   S_QUICK_CHECKIN_FAILED = 'Set quick check in failed.';
+  S_DELETE_ACCOUNT_FAILED = 'Delete account failed.';
 
   S_LOCALHOST = 'localhost';
-  S_CX_LINK_PREFIX = 'http://';
-
 
 constructor TCheckInPageProducer.Create;
 begin
@@ -160,9 +160,6 @@ begin
   if result then
     exit; //All done.
 
-  //TODO - This handles all requests, maybe allow subclasses by not handling
-  //all requests in future.
-
   case ParsedParams.ParsedURI.Method of
     hcGET:
     begin
@@ -200,12 +197,13 @@ begin
           and GetRequestParam(ParsedParams.PageQueryParams, S_NEW_EMAIL, Tmp) then
             Validate.Action := vaAllow;
         end
-        else if (S = S_DISABLE_QUICK_CHECKIN) or (S = S_ENABLE_QUICK_CHECKIN) then
+        else if (S = S_DISABLE_QUICK_CHECKIN)
+             or (S = S_ENABLE_QUICK_CHECKIN)
+             or (S = S_DELETE_ACCOUNT) then
         begin
           if ParsedParams.PageQueryParams.Params.Count = 0 then
             Validate.Action := vaAllow;
-        end;
-        //TODO - S_DELETE_ACCOUNT etc in future.
+        end
       end;
     end;
   else
@@ -225,8 +223,6 @@ begin
   if result then
     exit; //All done.
 
-  //TODO - This handles all requests, maybe allow subclasses by not handling
-  //all requests in future.
   case ParsedParams.ParsedURI.Method of
     hcGET:
     begin
@@ -317,8 +313,25 @@ begin
             WriteMainPage(ParsedParams);
             result := true;
           end;
+        end
+        else if (S = S_DELETE_ACCOUNT) then
+        begin
+          if ParsedParams.PageQueryParams.Params.Count = 0 then
+          begin
+            if GCheckInApp.DeleteAccount(LogonInfo.LogonId) then
+            begin
+              //Implicit logout.
+              Session.LogonId := '';
+              ParsedParams.IndyParams.AResponseInfo.Redirect('/'+ S_LOGIN_PAGE);
+            end
+            else
+            begin
+              ChildSetLastErr(S_DELETE_ACCOUNT_FAILED);
+              WriteMainPage(ParsedParams);
+            end;
+            result := true;
+          end;
         end;
-        //TODO - S_DELETE_ACCOUNT etc in future.
       end;
     end;
   end;
@@ -406,8 +419,7 @@ begin
       if Length(UserRec.LoglessCheckInPad) > 0 then
       begin
         R := R + 'Enabled: ';
-        //TODO - HTTP versus HTTPS on logless check-in.
-        CxLink := S_CX_LINK_PREFIX
+        CxLink := S_PROTO_LINK_PREFIX
           + DoEndpointRequest + '/'
           + S_LOGLESS_CHECKIN + S_PAD_PARAM
           + URLSafeString(UserRec.LoglessCheckInPad);
@@ -455,18 +467,67 @@ procedure TCheckInPageProducer.WriteUpdateLinks(const ParsedParams: TParsedParam
 var
   R: string;
 begin
-  R := R + '<tr><td></td><td>' +
+  R := R + '<table><tr><td>Account actions:</td><td>' +
       '<form action="/'+ S_DELETE_ACCOUNT +'" method="post">' +
       '<input type="submit" value="Delete account">' +
       '</form>'
-  + '</td></tr>';
+  + '</td></tr></table>';
   with ParsedParams.IndyParams.AResponseInfo do
     ContentText := ContentText + R;
 end;
 
-procedure TCheckInPageProducer.WriteHistory(const ParsedParams: TParsedParameters);
+function CompareLogs(Item1, Item2: Pointer): integer;
+var
+  L1, L2: TAuditLogEntry;
+  X: double;
 begin
-  //TODO.
+  L1 := TObject(Item1) as TAuditLogEntry;
+  L2 := TObject(Item2) as TAuditLogEntry;
+  X := L2.Timestamp - L1.Timestamp;
+  if X > 0 then
+    result := 1
+  else if X < 0 then
+    result := -1
+  else
+    result := 0;
+end;
+
+procedure TCheckInPageProducer.WriteHistory(const ParsedParams: TParsedParameters);
+
+var
+  R: string;
+  LogList: TList;
+  LogonInfo: TCheckInLogonInfo;
+  AuditLog: TAuditLogEntry;
+  i: integer;
+
+begin
+  LogonInfo := Session.LogonInfo as TCheckInLogonInfo;
+  R := '<table><tr><td>Account History:</td><td></td></tr>';
+  R := R + '<tr><td></td><td>';
+  R := R + '<table>';
+  R := R + '<tr><td>Time</td><td>Username</td><td>Info</td></tr>';
+  LogList := TList.Create;
+  try
+    GCheckInApp.ReadAuditLog(LogonInfo.LogonId, LogList);
+    LogList.Sort(CompareLogs);
+    for i := 0 to Pred(LogList.Count) do
+    begin
+      AuditLog := TObject(LogList[i]) as TAuditLogEntry;
+      R := R + '<tr><td>'
+        + DateTimeToStr(AuditLog.Timestamp) +'</td><td>'
+        + AuditLog.UserName + '</td><td>'
+        + AuditLog.Details + '</td></tr>';
+    end;
+  finally
+    for i := 0 to Pred(LogList.Count) do
+      TObject(LogList[i]).Free;
+    LogList.Free;
+  end;
+  R := R + '</table>';
+  R := R + '</td></tr></table>';
+  with ParsedParams.IndyParams.AResponseInfo do
+    ContentText := ContentText + R;
 end;
 
 procedure TCheckInPageProducer.WriteMailActionResult(ParsedParams: TParsedParameters;
@@ -483,7 +544,7 @@ begin
       S := S + 'Email action successful. ' + HTMLSafeString(ResponseHint)
     else
       S := S + 'EMail action failed. ' + HTMLSafeString(ResponseHint);
-    S := S + '<br> <a href="' + S_CX_LINK_PREFIX
+    S := S + '<br> <a href="' + S_PROTO_LINK_PREFIX
           + DoEndpointRequest + '/'
           + '">Home</a></h3></center>';
     ContentText := ContentText + S;
@@ -524,7 +585,7 @@ begin
       S := S + 'Check in successful. ' + HTMLSafeString(ResponseHint)
     else
       S := S + 'Check in failed. ' + HTMLSafeString(ResponseHint);
-    S := S + '<br> <a href="' + S_CX_LINK_PREFIX
+    S := S + '<br> <a href="' + S_PROTO_LINK_PREFIX
           + DoEndpointRequest + '/'
           + '">Home</a></h3></center>';
     ContentText := ContentText + S;

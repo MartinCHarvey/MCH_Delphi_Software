@@ -962,10 +962,4 @@ begin
   FIdHTTPServerSessionList.SessionClass := NewClass;
 end;
 
-initialization
-{$IFOPT C+}
-  AppGlobalLog.OpenFileLog('C:\temp\httpserver.log');
-{$ELSE}
-  raise Exception.Create('Need to remove some appgloballog code');
-{$ENDIF}
 end.

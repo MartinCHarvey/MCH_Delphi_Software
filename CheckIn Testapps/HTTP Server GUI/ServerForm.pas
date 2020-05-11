@@ -15,6 +15,7 @@ type
     StopBtn: TButton;
     LogMemo: TMemo;
     Timer1: TTimer;
+    ClearBlacklistBtn: TButton;
     procedure FormShow(Sender: TObject);
     procedure StartBtnClick(Sender: TObject);
     procedure StopBtnClick(Sender: TObject);
@@ -22,6 +23,7 @@ type
     procedure FormDestroy(Sender: TObject);
     procedure FormCreate(Sender: TObject);
     procedure Timer1Timer(Sender: TObject);
+    procedure ClearBlacklistBtnClick(Sender: TObject);
   private
     { Private declarations }
     Dispatcher: THTTPServerDispatcher;
@@ -40,11 +42,17 @@ implementation
 
 uses
   IdSchedulerOfThreadpool, HTTPServerPageProducer,
-  CheckInPageProducer, CheckInAppLogic, CheckInMailer;
+  CheckInPageProducer, CheckInAppLogic, CheckInMailer, CheckInAudit;
 
 procedure TServerFrm.SetDispatcherState(Active: boolean);
 var
   PrevState: boolean;
+  i: integer;
+
+const
+  RetryMs = 100;
+  RetryTimes = 50;
+
 begin
   PrevState := Dispatcher.Active;
   Dispatcher.Active := Active;
@@ -57,9 +65,18 @@ begin
       GCheckInMailer.SendAdminMessage(amtServerDown);
       //Give the mailer thread 5 seconds to send any remaining messages including
       //this one.
-      Sleep(5000);
+      i := RetryTimes;
+      while GCheckInMailer.MailsInQueue and (i > 0) do
+      begin
+        Sleep(RetryMs);
+        Dec(i);
+      end;
     end;
     UpdateCtrls;
+    if Active then
+      LogMemo.Lines.Add('Server now active.')
+    else
+      LogMemo.Lines.Add('Server stopped.');
   end;
 end;
 
@@ -68,6 +85,14 @@ procedure TServerFrm.UpdateCtrls;
 begin
   StartBtn.Enabled := not Dispatcher.Active;
   StopBtn.Enabled := Dispatcher.Active;
+end;
+
+procedure TServerFrm.ClearBlacklistBtnClick(Sender: TObject);
+begin
+  if GCheckInApp.ClearBlacklist then
+    LogMemo.Lines.Add('Blacklist cleared.')
+  else
+    LogMemo.Lines.Add('Could not clear blacklist.');
 end;
 
 procedure TServerFrm.FormClose(Sender: TObject; var Action: TCloseAction);
@@ -106,6 +131,7 @@ end;
 procedure TServerFrm.Timer1Timer(Sender: TObject);
 begin
   GCheckInApp.DoPeriodic;
+  GAuditLog.DoPeriodic;
 end;
 
 end.

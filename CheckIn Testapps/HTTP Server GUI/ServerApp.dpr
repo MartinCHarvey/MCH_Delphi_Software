@@ -25,7 +25,6 @@ uses
   MemDBMisc in '..\..\Common\MemDB\MemDBMisc.pas',
   MemDbStreamable in '..\..\Common\MemDB\MemDbStreamable.pas',
   MemDBUtils in '..\..\Common\MemDB\MemDBUtils.pas',
-  BufferedFileStream in '..\..\Common\CachedStream\BufferedFileStream.pas',
   SSAbstracts in '..\..\Common\StreamingSystem\SSAbstracts.pas',
   SSIntermediates in '..\..\Common\StreamingSystem\SSIntermediates.pas',
   SSStreamables in '..\..\Common\StreamingSystem\SSStreamables.pas',
@@ -36,7 +35,9 @@ uses
   TrivXMLDefs in '..\..\Common\StreamingSystem\TrivXMLDefs.pas',
   CocoBase in '..\..\CoCoDM\Distributable\Frames\CocoBase.pas',
   QueuedMailer in '..\..\Common\QueuedMailer\QueuedMailer.pas',
-  CheckInAppConfig in '..\..\CheckIn\CheckInAppConfig.pas';
+  CheckInAppConfig in '..\..\CheckIn\CheckInAppConfig.pas',
+  CheckInAudit in '..\..\CheckIn\CheckInAudit.pas',
+  BufferedFileStream in '..\..\Common\CachedStream\BufferedFileStream.pas';
 
 {$R *.res}
 
