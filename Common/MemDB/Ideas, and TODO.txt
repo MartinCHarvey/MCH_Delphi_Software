@@ -1,0 +1,29 @@
+
+MemDB: TODO and notes.
+
+Potential improvements:
+
+1. Would be nice / a good idea to be able to index on multiple fields.
+   Quite likely that current index tag strategy will go in the bin.
+
+2. Removing data / metadata conflicts. Transactions need to be able to consist of
+   multiple changesets. Auto-commit of intermediate changesets OK....
+   but then rollback needs to be able to replay multiple transactions in reverse.
+   However, would be good to do to make the DB fully transactional.
+
+   Given always updating from one consistent state to another, might be able to get
+   rid of quite a lot of checking.
+
+3. Start-up time can be considerably improved if we do somewhat less checking than we do now.
+   - for journal replay, if we really trust the journal then we can skip all the pre-commit checks.
+   - additionally, we could do all the data commits first, and then add indices and referential integrity
+     as the last step, which would save a great deal of time.
+   - various options need to be considered.
+
+
+4. Once we've got the hang of doing multiple changesets forward and backwards
+   then could consider a distributed database.
+   - Sets of changesets then need to be labelled (poss by location / clock),
+     and we're then into voting algorithms - consistency constraints etc.
+
+
