@@ -2071,9 +2071,17 @@ begin
   MemDB := nil;
 end;
 
+procedure SetupCrypto;
+begin
+  HTTPServerDispatcher.DefaultRootCertFile := RootDir + 'cert.pem';
+  HTTPServerDispatcher.DefaultCertFile := RootDir + 'cert.pem';
+  HTTPServerDispatcher.DefaultKeyFile := RootDir + 'key.pem';
+end;
+
 initialization
   Randomize;
   SetupDB;
+  SetupCrypto;
   GCheckInApp := TCheckInApp.Create;
   Assert(Assigned(GAuditLog));
   GAuditLog.OnPersistRecentToDb := GCheckInApp.AuditPersistRecentToDb;
