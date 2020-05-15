@@ -75,8 +75,8 @@ const
   S_PAD = 'Pad';
   S_ACTION = 'Action';
 
-  //TODO - Deal with HTTPS, and forwarding of HTTP to HTTPS.
-  S_PROTO_LINK_PREFIX = 'http://';
+  //TODO - Deal with forwarding of HTTP to HTTPS.
+  S_PROTO_LINK_PREFIX = 'https://';
 
 
 implementation

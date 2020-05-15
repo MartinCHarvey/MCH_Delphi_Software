@@ -53,7 +53,8 @@ interface
 uses
   GlobalLog, WorkItems, Trackables, IndexedStore, SyncObjs,
   IdHTTPServer, IdCustomHTTPServer, IdContext, IdGlobal, CommonPool,
-  SysUtils;
+  SysUtils, IdSSL, IdSSLOpenSSL, IdIOHandler, IdIOHandlerStack,
+  IdSocketHandle, IdThread, IdYarn, Classes, IdSSLOpenSSLHeaders;
 
 const
   MAX_SIMUL_REQUESTS = 128;
@@ -236,6 +237,7 @@ type
     procedure HandleIdSessionStart(Sender: TIdHTTPSession);
     procedure HandleIdSessionEnd(Sender: TIdHTTPSession);
     procedure HandleIdCommandGet(AContext: TIdContext; ARequestInfo: TIdHTTPRequestInfo; AResponseInfo: TIdHTTPResponseInfo);
+    procedure HandleIdQuerySSL(APort: TIdPort; var VUseSSL: Boolean);
 
     procedure HandleNormalWIComplete(Sender: TObject);
     procedure HandleCancelledWIComplete(Sender: TObject);
@@ -262,10 +264,26 @@ type
     //(not recommended...)
   end;
 
+  TIdServerIOHandlerSSLOpenSSLLatestTLS = class(TIdServerIOHandlerSSLOpenSSL)
+  public
+    function MakeClientIOHandler: TIdSSLIOHandlerSocketBase; override;
+    constructor Create(AOwner: TComponent);
+  end;
+
+  TIdSSLContextRawHandleHack = class(TIdSSLContext)
+  public
+    property Context: PSSL_CTX read fContext;
+  end;
+
+var
+  DefaultRootCertFile: string;
+  DefaultCertFile: string;
+  DefaultKeyFile:string;
+
 implementation
 
 uses
-  IdSchedulerOfThreadPool, Classes;
+  IdSchedulerOfThreadPool, IdTCpConnection, IdAssignedNumbers;
 
 const
   S_NOT_IMPLEMENTED = 'Not implemented.';
@@ -274,6 +292,31 @@ const
   S_TOO_MANY_REQUESTS = 'Too many requests.';
   S_INTERNAL_SERVER_ERROR = 'Internal server error.';
   S_SESSION_NOT_FOUND = 'Session not found.';
+
+  DefaultCipherList = 'ECDHE-RSA-AES256-GCM-SHA384:'+
+  'ECDHE-RSA-AES128-GCM-SHA256:'+
+  'ECDHE-RSA-AES256-SHA384:'+
+  'ECDHE-RSA-AES128-SHA256:'+
+  'ECDHE-RSA-AES256-SHA:'+
+  'ECDHE-RSA-AES128-SHA:'+
+  'DHE-RSA-AES256-GCM-SHA384:'+
+  'DHE-RSA-AES256-SHA256:'+
+  'DHE-RSA-AES256-SHA:'+
+  'DHE-RSA-AES128-GCM-SHA256:'+
+  'DHE-RSA-AES128-SHA256:'+
+  'DHE-RSA-AES128-SHA:'+
+  'DES-CBC3-SHA:'+
+  '!ADH:!EXP:!RC4:!eNULL@STRENGTH';
+
+procedure SetupSSLOptions(SSLOptions: TIdSSLOptions);
+begin
+  SSLOptions.Method := sslvSSLv23;
+  SSLOptions.SSLVersions := [sslvSSLv3, sslvSSLv23, sslvTLSv1,sslvTLSv1_1,sslvTLSv1_2];
+  SSLOptions.CipherList := DefaultCipherList;
+  SSLOptions.RootCertFile := DefaultRootCertFile;
+  SSLOptions.CertFile := DefaultCertFile;
+  SSLOptions.KeyFile := DefaultKeyFile;
+end;
 
 { TSrvPageProducer }
 
@@ -863,20 +906,22 @@ begin
   FIdHTTPServerSessionList := TIdHTTPConfigurableSessionList.Create;
   FIdHTTPServer.SessionList := FIdHTTPServerSessionList;
   FIdHTTPServer.OnCommandGet := HandleIdCommandGet;
-  // TODO FIdHTTPServer.OnCommandError
-  // TODO FIdHTTPServer.OnCommandOther
   FIdHTTPServer.OnInvalidSession := HandleIdInvalidSession;
   FIdHTTPServer.OnSessionStart := HandleIdSessionStart;
   FIdHTTPServer.OnSessionEnd := HandleIdSessionEnd;
+
   FIdHTTPServer.SessionState := true;
   FIdHTTPServer.AutoStartSession := true;
   FIdHTTPServer.SessionTimeOut := 600 * 1000; //Millisecs.
   FIdHTTPServer.KeepAlive := true;
   FIdHTTPServer.Scheduler := TIdSchedulerOfThreadPool.Create(FIdHTTPServer);
+  //SSL changes.
+  FIdHTTPServer.DefaultPort := IdPORT_https;
+  FIdHTTPServer.IOHandler := TIdServerIOHandlerSSLOpenSSLLatestTLS.Create(FIdHTTPServer);
+  FIdHTTPServer.OnQuerySSLPort := HandleIdQuerySSL;
 
   FSessionClass := THTTPDispatcherSession;
   FLogonInfoClass := THTTPLogonInfo;
-
   FPoolRec := GCommonPool.RegisterClient(self, HandleNormalWIComplete, HandleCancelledWIComplete);
 end;
 
@@ -962,4 +1007,28 @@ begin
   FIdHTTPServerSessionList.SessionClass := NewClass;
 end;
 
+procedure THTTPServerDispatcher.HandleIdQuerySSL(APort: TIdPort; var VUseSSL: Boolean);
+begin
+  VUseSSL := APort = IdPORT_https;
+end;
+
+{ TIdServerIOHandlerSSLOpenSSLLatestTLS }
+
+constructor TIdServerIOHandlerSSLOpenSSLLatestTLS.Create(AOwner: TComponent);
+begin
+  inherited;
+  if Assigned(SSLOptions) then
+    SetupSSLOptions(SSLOptions)
+end;
+
+function TIdServerIOHandlerSSLOpenSSLLatestTLS.MakeClientIOHandler: TIdSSLIOHandlerSocketBase;
+begin
+  result := inherited;
+  with result as TIdSSLIOHandlerSocketOpenSSL do
+    SetupSSLOptions(SSLOptions);
+end;
+
+initialization
+  TIdSSLIOHandlerSocketOpenSSL.SetDefaultClass;
+  TIdIOHandlerStack.SetDefaultClass;
 end.

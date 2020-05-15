@@ -36,7 +36,7 @@ type
 {$IFDEF USE_TRACKABLES}
   TAuditLogEntry = class(TTrackable)
 {$ELSE}
-  TAuditLog = class
+  TAuditLogEntry = class
 {$ENDIF}
   public
     Timestamp: TDateTime;
