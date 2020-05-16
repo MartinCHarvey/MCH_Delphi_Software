@@ -156,6 +156,9 @@ type
     property LastCheckinBeforeNow: TDateTime read FLastCheckinBeforeNow;
   end;
 
+procedure UnitInit;
+procedure UnitFini;
+
 var
   GCheckInApp: TCheckInApp;
 
@@ -164,7 +167,7 @@ implementation
 uses
   IOUtils, MemDBMisc, GlobalLog, CheckInPageProducer,
   HTTPServerDispatcher, IdHMACSha1, IdGlobal, IdCoderMIME, CheckInMailer,
-  CheckInAppConfig, CheckInAudit;
+  CheckInAppConfig, CheckInAudit, HTTPMisc, HTTPForwarder;
 
 { ---------------- Config / DB init and finalization ------------- }
 
@@ -354,8 +357,7 @@ begin
   end;
   Pad := URLSafeString(Pad);
   Action := URLSafeString(Action);
-  //TODO - Deal with HTTPS.
-  result := S_PROTO_LINK_PREFIX + Host + '/' + S_MAIL_ACTION + S_PAD_PARAM
+  result := S_HTTPS_PREFIX + Host + '/' + S_MAIL_ACTION + S_PAD_PARAM
     + Pad + S_ACTION_PARAM + Action;
 end;
 
@@ -881,6 +883,8 @@ begin
                 DataRec.dVal := Now;
                 ApiData.WriteField(S_LAST_LOGIN, DataRec);
                 ApiData.WriteField(S_LAST_CHECKIN, DataRec);
+                UpdateCheckInTimers(ApiData);
+
                 ApiData.Post;
               end;
             finally
@@ -1750,6 +1754,7 @@ var
   Changed: boolean;
 begin
   Changed := false;
+  result := false;
   GLogLog(SV_INFO, S_CLEARING_BLACKLIST);
   try
     S := MemDB.StartSession;
@@ -2078,21 +2083,51 @@ begin
   HTTPServerDispatcher.DefaultKeyFile := RootDir + 'key.pem';
 end;
 
+procedure UnitInit;
+begin
+  try
+    Randomize;
+    SetupDB;
+    SetupCrypto;
+    GCheckInApp := TCheckInApp.Create;
+    Assert(Assigned(GAuditLog));
+    GAuditLog.OnPersistRecentToDb := GCheckInApp.AuditPersistRecentToDb;
+    GAuditLog.OnPruneDBToFile := GCheckInApp.AuditGetItemsForPrune;
+    GAuditLog.OnGetLastPrune := GCheckInApp.AuditGetLastPruneTime;
+    GHTTPForwarder.OnEndpointRequest := GCheckInApp.HandleEndpointRequest;
+  except
+    on E: Exception do
+    begin
+      GLogLog(SV_CRIT, E.ClassName + ' ' + E.Message);
+      raise;
+    end;
+  end;
+end;
+
+procedure UnitFini;
+begin
+  try
+    GHTTPForwarder.OnEndpointRequest := nil;
+    GAuditLog.Flush;
+    GAuditLog.OnPersistRecentToDb := nil;
+    GAuditLog.OnPruneDBToFile := nil;
+    GAuditLog.OnGetLastPrune := nil;
+    GCheckInApp.Free;
+    FiniDB;
+  except
+    on E: Exception do
+    begin
+      GLogLog(SV_CRIT, E.ClassName + ' ' + E.Message);
+      raise;
+    end;
+  end;
+end;
+
+{$IFNDEF MANUAL_UNIT_INITIALIZATION}
 initialization
-  Randomize;
-  SetupDB;
-  SetupCrypto;
-  GCheckInApp := TCheckInApp.Create;
-  Assert(Assigned(GAuditLog));
-  GAuditLog.OnPersistRecentToDb := GCheckInApp.AuditPersistRecentToDb;
-  GAuditLog.OnPruneDBToFile := GCheckInApp.AuditGetItemsForPrune;
-  GAuditLog.OnGetLastPrune := GCheckInApp.AuditGetLastPruneTime;
+  UnitInit;
 finalization
-  GAuditLog.Flush;
-  GAuditLog.OnPersistRecentToDb := nil;
-  GAuditLog.OnPruneDBToFile := nil;
-  GAuditLog.OnGetLastPrune := nil;
-  GCheckInApp.Free;
-  FiniDB;
+  UnitFini;
+{$ENDIF}
 end.
 

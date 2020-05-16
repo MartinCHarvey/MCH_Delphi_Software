@@ -55,6 +55,9 @@ type
     property MailerSenderEmailAddress: string read FMailerSenderEmailAddress write FMailerSenderEmailAddress;
   end;
 
+procedure UnitInit;
+procedure UnitFini;
+
 var
   GAppConfig: TCheckInAppConfig;
   RootDir: string;
@@ -62,7 +65,7 @@ var
 implementation
 
 uses
-  StreamingSystem, StreamSysXML, SysUtils, Classes, IoUtils;
+  StreamingSystem, StreamSysXML, SysUtils, Classes, IoUtils, GlobalLog;
 
 const
   DEFAULT_DATA_ROOT_LOCATION = 'MemDB';
@@ -108,73 +111,91 @@ begin
   end;
 end;
 
-procedure SetupPrefs;
+procedure UnitInit;
 var
   XMLStream: TStreamSysXML;
   FileStream: TFileStream;
 begin
-  RootDir := TPath.GetHomePath;
-  AppendTrailingDirSlash(RootDir);
-  if not DirectoryExists(RootDir) then
-    TDirectory.CreateDirectory(RootDir);
-  RootDir := RootDir + DEFAULT_APP_DATA_DIR;
-  AppendTrailingDirSlash(RootDir);
-  if not DirectoryExists(RootDir) then
-    TDirectory.CreateDirectory(RootDir);
-  DBDir := RootDir + DEFAULT_DATA_ROOT_LOCATION;
-  AppendTrailingDirSlash(DBDir);
-  if not DirectoryExists(DBDir) then
-    TDirectory.CreateDirectory(DBDir);
-  ConfFileName := RootDir + DEFAULT_PREFS_FILENAME;
-  SetupHeirarchy(Heirarchy);
-
-  FileStream := nil;
-  XMLStream := nil;
   try
+    RootDir := TPath.GetHomePath;
+    AppendTrailingDirSlash(RootDir);
+    if not DirectoryExists(RootDir) then
+      TDirectory.CreateDirectory(RootDir);
+    RootDir := RootDir + DEFAULT_APP_DATA_DIR;
+    AppendTrailingDirSlash(RootDir);
+    if not DirectoryExists(RootDir) then
+      TDirectory.CreateDirectory(RootDir);
+    DBDir := RootDir + DEFAULT_DATA_ROOT_LOCATION;
+    AppendTrailingDirSlash(DBDir);
+    if not DirectoryExists(DBDir) then
+      TDirectory.CreateDirectory(DBDir);
+    ConfFileName := RootDir + DEFAULT_PREFS_FILENAME;
+    SetupHeirarchy(Heirarchy);
+
+    FileStream := nil;
+    XMLStream := nil;
     try
-      XMLStream := TStreamSysXML.Create;
-      //Don't fail on no class / no property.
-      XMLStream.RegisterHeirarchy(Heirarchy);
-      FileStream := TFileStream.Create(ConfFileName, fmOpenRead);
-      GAppConfig := XMLStream.ReadStructureFromStream(FileStream) as TCheckInAppConfig;
-    except
-      on Exception do ;
+      try
+        XMLStream := TStreamSysXML.Create;
+        //Don't fail on no class / no property.
+        XMLStream.RegisterHeirarchy(Heirarchy);
+        FileStream := TFileStream.Create(ConfFileName, fmOpenRead);
+        GAppConfig := XMLStream.ReadStructureFromStream(FileStream) as TCheckInAppConfig;
+      except
+        on Exception do ;
+      end;
+    finally
+      FreeAndNil(FileStream);
+      FreeAndNil(XMLStream);
     end;
-  finally
-    FreeAndNil(FileStream);
-    FreeAndNil(XMLStream);
+    if not Assigned(GAppConfig) then
+      GAppConfig := TCheckInAppConfig.Create;
+  except
+    on E: Exception do
+    begin
+      GLogLog(SV_CRIT, E.ClassName + ' ' + E.Message);
+      raise;
+    end;
   end;
-  if not Assigned(GAppConfig) then
-    GAppConfig := TCheckInAppConfig.Create;
 end;
 
-procedure FinishPrefs;
+procedure UnitFini;
 var
   XMLStream: TStreamSysXML;
   FileStream: TFileStream;
 begin
-  //TODO - Setup of machine name / address and keeping it up to date.
-  FileStream := nil;
-  XMLStream := nil;
   try
+    //TODO - Setup of machine name / address and keeping it up to date.
+    FileStream := nil;
+    XMLStream := nil;
     try
-      XMLStream := TStreamSysXML.Create;
-      //Don't fail on no class / no property.
-      XMLStream.RegisterHeirarchy(Heirarchy);
-      FileStream := TFileStream.Create(ConfFileName, fmCreate);
-      XMLStream.WriteStructureToStream(GAppConfig, FileStream);
-    except
-      on Exception do ;
+      try
+        XMLStream := TStreamSysXML.Create;
+        //Don't fail on no class / no property.
+        XMLStream.RegisterHeirarchy(Heirarchy);
+        FileStream := TFileStream.Create(ConfFileName, fmCreate);
+        XMLStream.WriteStructureToStream(GAppConfig, FileStream);
+      except
+        on Exception do ;
+      end;
+    finally
+      FreeAndNil(FileStream);
+      FreeAndNil(XMLStream);
     end;
-  finally
-    FreeAndNil(FileStream);
-    FreeAndNil(XMLStream);
+    GAppConfig.Free;
+  except
+    on E: Exception do
+    begin
+      GLogLog(SV_CRIT, E.ClassName + ' ' + E.Message);
+      raise;
+    end;
   end;
-  GAppConfig.Free;
 end;
 
+{$IFNDEF MANUAL_UNIT_INITIALIZATION}
 initialization
-  SetupPrefs;
+  UnitInit;
 finalization
-  FinishPrefs;
+  UnitFini;
+{$ENDIF}
 end.

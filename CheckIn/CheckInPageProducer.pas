@@ -29,11 +29,9 @@ interface
 //TODO - This all uses table tags, when it should prob use div's and CSS.
 
 uses
-  HTTPServerPageProducer, HTTPServerDispatcher;
+  HTTPServerPageProducer, HTTPServerDispatcher, HTTPMisc;
 
 type
-  TEndpointRequestEvent = function(Sender: TObject):string of object;
-
   TCheckInPageProducer = class(TLoginPageProducer)
   private
     FOnEndpointRequest: TEndpointRequestEvent;
@@ -56,6 +54,7 @@ type
 
     procedure WriteRegistrationInfo(const ParsedParams: TParsedParameters);
     procedure WriteUpdateLinks(const ParsedParams: TParsedParameters);
+    procedure WriteRefreshLink(const ParsedParams: TParsedParameters);
     procedure WriteHistory(const ParsedParams: TParsedParameters);
     procedure WriteMainPage(const ParsedParams: TParsedParameters);
     procedure WriteCheckInResult(const ParsedParams: TParsedParameters;
@@ -74,10 +73,6 @@ const
   S_ACTION_PARAM = '&Action=';
   S_PAD = 'Pad';
   S_ACTION = 'Action';
-
-  //TODO - Deal with forwarding of HTTP to HTTPS.
-  S_PROTO_LINK_PREFIX = 'https://';
-
 
 implementation
 
@@ -98,8 +93,6 @@ const
   S_EMAIL_CHANGE_FAILED = 'Email address change failed.';
   S_QUICK_CHECKIN_FAILED = 'Set quick check in failed.';
   S_DELETE_ACCOUNT_FAILED = 'Delete account failed.';
-
-  S_LOCALHOST = 'localhost';
 
 constructor TCheckInPageProducer.Create;
 begin
@@ -419,7 +412,7 @@ begin
       if Length(UserRec.LoglessCheckInPad) > 0 then
       begin
         R := R + 'Enabled: ';
-        CxLink := S_PROTO_LINK_PREFIX
+        CxLink := S_HTTPS_PREFIX
           + DoEndpointRequest + '/'
           + S_LOGLESS_CHECKIN + S_PAD_PARAM
           + URLSafeString(UserRec.LoglessCheckInPad);
@@ -544,13 +537,22 @@ begin
       S := S + 'Email action successful. ' + HTMLSafeString(ResponseHint)
     else
       S := S + 'EMail action failed. ' + HTMLSafeString(ResponseHint);
-    S := S + '<br> <a href="' + S_PROTO_LINK_PREFIX
+    S := S + '<br> <a href="' + S_HTTPS_PREFIX
           + DoEndpointRequest + '/'
           + '">Home</a></h3></center>';
     ContentText := ContentText + S;
     WritePageFooter(ParsedParams);
     WritePagePostamble(ParsedParams);
   end;
+end;
+
+procedure TCheckInPageProducer.WriteRefreshLink(const ParsedParams: TParsedParameters);
+var
+  S: string;
+begin
+  S := '<a href="' + S_HTTPS_PREFIX + DoEndpointRequest + '/' + '">Refresh</a>';
+  with ParsedParams.IndyParams.AResponseInfo do
+    ContentText := ContentText + S;
 end;
 
 procedure TCheckInPageProducer.WriteMainPage(const ParsedParams: TParsedParameters);
@@ -560,6 +562,8 @@ begin
     WritePagePreamble(ParsedParams);
     WritePageHeader(ParsedParams);
     ContentText := ContentText + '<table><tr><td>';
+    WriteRefreshLink(ParsedParams);
+    ContentText := ContentText + '</td></tr><tr><td>';
     WriteRegistrationInfo(ParsedParams);
     ContentText := ContentText + '</td></tr><tr><td>';
     WriteUpdateLinks(ParsedParams);
@@ -585,7 +589,7 @@ begin
       S := S + 'Check in successful. ' + HTMLSafeString(ResponseHint)
     else
       S := S + 'Check in failed. ' + HTMLSafeString(ResponseHint);
-    S := S + '<br> <a href="' + S_PROTO_LINK_PREFIX
+    S := S + '<br> <a href="' + S_HTTPS_PREFIX
           + DoEndpointRequest + '/'
           + '">Home</a></h3></center>';
     ContentText := ContentText + S;
@@ -604,3 +608,4 @@ begin
 end;
 
 end.
+

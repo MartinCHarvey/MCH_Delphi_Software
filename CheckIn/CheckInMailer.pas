@@ -51,13 +51,17 @@ type
     property SenderEmailAddress: string read FEmailAddress write FEmailAddress;
   end;
 
+procedure UnitInit;
+procedure UnitFini;
+
 var
   GCheckInMailer: TCheckInMailer;
 
 implementation
 
 uses
-  SysUtils, IdMessage, IdEmailAddress, CheckInAppLogic, CheckInAppConfig;
+  SysUtils, IdMessage, IdEmailAddress, CheckInAppLogic, CheckInAppConfig,
+  GlobalLog;
 
 const
   S_ADMIN_MSG = 'CHECKIN: Admin message: ';
@@ -196,18 +200,46 @@ begin
     Msg.Free;
 end;
 
-initialization
-  GCheckInMailer := TCheckinMailer.Create;
-  with GCheckInMailer do
-  begin
-    Server := GAppConfig.MailerServer;
-    Port := GAppConfig.MailerPort;
-    Username := GAppConfig.MailerUName;
-    Password := GAppConfig.MailerPasswd;
-    UseTLS := GAppConfig.MailerUseTLS;
-    SenderEmailName := GAppConfig.MailerSenderEmailName;
-    SenderEmailAddress := GAppConfig.MailerSenderEmailAddress;
+procedure UnitInit;
+begin
+  try
+    GCheckInMailer := TCheckinMailer.Create;
+    with GCheckInMailer do
+    begin
+      Server := GAppConfig.MailerServer;
+      Port := GAppConfig.MailerPort;
+      Username := GAppConfig.MailerUName;
+      Password := GAppConfig.MailerPasswd;
+      UseTLS := GAppConfig.MailerUseTLS;
+      SenderEmailName := GAppConfig.MailerSenderEmailName;
+      SenderEmailAddress := GAppConfig.MailerSenderEmailAddress;
+    end;
+  except
+    on E: Exception do
+    begin
+      GLogLog(SV_CRIT, E.ClassName + ' ' + E.Message);
+      raise;
+    end;
   end;
+end;
+
+procedure UnitFini;
+begin
+  try
+    GCheckInMailer.Free;
+  except
+    on E: Exception do
+    begin
+      GLogLog(SV_CRIT, E.ClassName + ' ' + E.Message);
+      raise;
+    end;
+  end;
+end;
+
+{$IFNDEF MANUAL_UNIT_INITIALIZATION}
+initialization
+  UnitInit;
 finalization
-  GCheckInMailer.Free;
+  UnitFini;
+{$ENDIF}
 end.
