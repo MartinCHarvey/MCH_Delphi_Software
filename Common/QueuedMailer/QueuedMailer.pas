@@ -125,15 +125,18 @@ var
 begin
   if (FWorkItemCount = 0) and not FQuitFlag then
   begin
-    WorkItem := TQueuedMailerWorkItem.Create;
-    WorkItem.CanAutoFree := true;
-    WorkItem.CanAutoReset := false;
+    if FMailQueue.Count > 0 then
+    begin
+      WorkItem := TQueuedMailerWorkItem.Create;
+      WorkItem.CanAutoFree := true;
+      WorkItem.CanAutoReset := false;
 
-    WorkItem.FMailer := self;
-    if GCommonPool.AddWorkItem(FCommonPoolRec, WorkItem) then
-      Inc(FWorkItemCount)
-    else
-      WorkItem.Free;
+      WorkItem.FMailer := self;
+      if GCommonPool.AddWorkItem(FCommonPoolRec, WorkItem) then
+        Inc(FWorkItemCount)
+      else
+        WorkItem.Free;
+    end;
   end;
 end;
 
