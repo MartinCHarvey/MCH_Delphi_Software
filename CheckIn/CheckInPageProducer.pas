@@ -550,7 +550,7 @@ procedure TCheckInPageProducer.WriteRefreshLink(const ParsedParams: TParsedParam
 var
   S: string;
 begin
-  S := '<a href="' + S_HTTPS_PREFIX + DoEndpointRequest + '/' + '">Refresh</a>';
+  S := '<a href="' + S_HTTPS_PREFIX + DoEndpointRequest + '/' + S_MAIN_PAGE+ '">Refresh</a>';
   with ParsedParams.IndyParams.AResponseInfo do
     ContentText := ContentText + S;
 end;

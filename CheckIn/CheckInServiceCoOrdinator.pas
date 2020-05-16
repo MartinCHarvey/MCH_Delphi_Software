@@ -34,7 +34,7 @@ var
 
 procedure TServicePeriodicThread.Terminate;
 begin
-  inherited;
+  inherited Terminate;
   FPeriodicQuit.SetEvent;
 end;
 
