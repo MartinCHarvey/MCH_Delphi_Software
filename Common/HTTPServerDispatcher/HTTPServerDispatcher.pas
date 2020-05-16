@@ -53,8 +53,8 @@ interface
 uses
   GlobalLog, WorkItems, Trackables, IndexedStore, SyncObjs,
   IdHTTPServer, IdCustomHTTPServer, IdContext, IdGlobal, CommonPool,
-  SysUtils, IdSSL, IdSSLOpenSSL, IdIOHandler, IdIOHandlerStack,
-  IdSocketHandle, IdThread, IdYarn, Classes, IdSSLOpenSSLHeaders;
+  SysUtils, IdSSLOpenSSL, IdSSL,
+  Classes;
 
 const
   MAX_SIMUL_REQUESTS = 128;
@@ -270,11 +270,6 @@ type
     constructor Create(AOwner: TComponent);
   end;
 
-  TIdSSLContextRawHandleHack = class(TIdSSLContext)
-  public
-    property Context: PSSL_CTX read fContext;
-  end;
-
 var
   DefaultRootCertFile: string;
   DefaultCertFile: string;
@@ -283,7 +278,8 @@ var
 implementation
 
 uses
-  IdSchedulerOfThreadPool, IdTCpConnection, IdAssignedNumbers;
+  IdSchedulerOfThreadPool, IdTCpConnection, IdAssignedNumbers,
+  IdIOHandlerStack;
 
 const
   S_NOT_IMPLEMENTED = 'Not implemented.';

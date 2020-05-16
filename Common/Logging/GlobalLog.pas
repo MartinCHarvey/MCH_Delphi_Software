@@ -156,7 +156,7 @@ const
 implementation
 
 uses
-  IoUtils, FMX.Forms;
+  IoUtils;
 
 const
   WM_LOG_QUEUED_MSGS = WM_APP;
@@ -717,7 +717,7 @@ initialization
   AppGlobalLog.SetSeveritySet([SV_TRACE, SV_INFO, SV_WARN, SV_FAIL, SV_CRIT]);
   TmpName := TPath.GetTempFileName;
 {$IFOPT C+}
-  AppGlobalLog.OpenFileLog(TmpName + Application.Title + '.log');
+  AppGlobalLog.OpenFileLog(TmpName + '.log');
 {$ENDIF}
   SyncToMainThread := TQueueThread.Create;
 finalization

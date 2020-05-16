@@ -37,7 +37,10 @@ uses
   QueuedMailer in '..\..\Common\QueuedMailer\QueuedMailer.pas',
   CheckInAppConfig in '..\..\CheckIn\CheckInAppConfig.pas',
   CheckInAudit in '..\..\CheckIn\CheckInAudit.pas',
-  BufferedFileStream in '..\..\Common\CachedStream\BufferedFileStream.pas';
+  BufferedFileStream in '..\..\Common\CachedStream\BufferedFileStream.pas',
+  HTTPForwarder in '..\..\Common\HTTPServerDispatcher\HTTPForwarder.pas',
+  HTTPMisc in '..\..\Common\HTTPServerDispatcher\HTTPMisc.pas',
+  CheckInServiceCoOrdinator in '..\..\CheckIn\CheckInServiceCoOrdinator.pas';
 
 {$R *.res}
 

@@ -86,6 +86,9 @@ type
 
 procedure AudLog(Username: string; Details: string);
 
+procedure UnitInit;
+procedure UnitFini;
+
 var
   GAuditLog: TAuditLog;
 
@@ -291,14 +294,44 @@ begin
   GAuditLog.AuditLog(Username, Now, Details);
 end;
 
+procedure UnitInit;
+var
+  OldFileName: string;
+begin
+  try
+    GLogLog(SV_INFO, 'Now writing to file log at: ' + RootDir + 'checkin.log');
+    OldFileName :=  AppGlobalLog.LogFileName;
+    AppGlobalLog.CloseFileLog;
+    AppGlobalLog.OpenFileLog(RootDir + 'checkin.log');
+    GAuditLog := TAuditLog.Create;
+  except
+    on E: Exception do
+    begin
+      AppGlobalLog.OpenFileLog(OldFileName);
+      GLogLog(SV_CRIT, E.ClassName + ' ' + E.Message);
+      raise;
+    end;
+  end;
+end;
+
+procedure UnitFini;
+begin
+  try
+    GAuditLog.Free;
+    GAuditLog := nil;
+  except
+    on E: Exception do
+    begin
+      GLogLog(SV_CRIT, E.ClassName + ' ' + E.Message);
+      raise;
+    end;
+  end;
+end;
+
+{$IFNDEF MANUAL_UNIT_INITIALIZATION}
 initialization
-{$IFOPT C+}
-  AppGlobalLog.OpenFileLog('c:\temp\checkin.log');
-{$ELSE}
-  AppGlobalLog.OpenFileLog(RootDir + 'checkin.log');
-{$ENDIF}
-  GAuditLog := TAuditLog.Create;
+  UnitInit;
 finalization
-  GAuditLog.Free;
-  GAuditLog := nil;
+  UnitFini;
+{$ENDIF}
 end.
