@@ -98,11 +98,11 @@ uses
   GlobalLog, CheckInAppConfig, BufferedFileStream;
 
 const
-{$IFOPT C+}
+{$IFDEF DEBUG}
   PERSIST_FREQUENCY = 1 / (60 * 60 * 24); //Persist logs to DB every second.
   PRUNE_FREQUENCY = 1; //Prune old logs from DB once per day.
 {$ELSE}
-  PERSIST_FREQUENCY = 5 (60 * 60 * 24); //Persist logs to DB every five seconds.
+  PERSIST_FREQUENCY = 5 / (60 * 60 * 24); //Persist logs to DB every five seconds.
   PRUNE_FREQUENCY = 14; //Prune old logs from DB once every couple of weeks.
 {$ENDIF}
 
