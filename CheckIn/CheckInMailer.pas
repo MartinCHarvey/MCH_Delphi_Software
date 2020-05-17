@@ -73,6 +73,8 @@ const
   S_OWN_CHECKIN_SUBJECT = 'CHECKIN: Remember to checkin!';
   S_CONTACT_CHECKIN_SUBJECT1 = 'CHECKIN: ';
   S_CONTACT_CHECKIN_SUBJECT2 = ' has not checked in!!';
+  S_NULL_SENDER_ADDRESS = 'Cannot send e-mail, null sender address';
+  S_NULL_RECIPIENT_ADDRESS = 'Cannot send e-mail, null recipient address';
 
 { TCheckInMailer }
 
@@ -83,97 +85,118 @@ var
   Msg: TIdMessage;
   Recipient: TIdEmailAddressItem;
 begin
-  Msg := TIdMessage.Create(nil);
-  Msg.From.Name := FEmailName;
-  Msg.From.Address := FEmailAddress;
-  Recipient := Msg.Recipients.Add;
-  case MsgType of
-    rrtOwnerRegister, rrtCheckIn:
+  Msg := nil;
+  try
+    if (Length(FEmailName) = 0) or (Length(FEmailAddress) = 0)  then
     begin
-      Recipient.Name := UsrEmail;
-      Recipient.Address := UsrEmail;
+      GLogLog(SV_WARN, S_NULL_SENDER_ADDRESS);
+      result := false;
+      exit;
     end;
-    rrtContactRegister, rrtContactCheckIn:
+
+    Msg := TIdMessage.Create(nil);
+    Msg.From.Name := FEmailName;
+    Msg.From.Address := FEmailAddress;
+    Recipient := Msg.Recipients.Add;
+    case MsgType of
+      rrtOwnerRegister, rrtCheckIn:
+      begin
+        Recipient.Name := UsrEmail;
+        Recipient.Address := UsrEmail;
+      end;
+      rrtContactRegister, rrtContactCheckIn:
+      begin
+        Recipient.Name := ContEmail;
+        Recipient.Address := ContEmail;
+      end;
+    else
+      Assert(false);
+    end;
+
+    if (Length(Recipient.Address) = 0) then
     begin
-      Recipient.Name := ContEmail;
-      Recipient.Address := ContEmail;
+      GLogLog(SV_WARN, S_NULL_RECIPIENT_ADDRESS);
+      result := false;
+      exit;
     end;
-  else
-    Assert(false);
-  end;
-  case MsgType of
-    rrtOwnerRegister: Msg.Subject := S_OWN_REGISTER_SUBJECT;
-    rrtContactRegister: Msg.Subject := S_CONTACT_REGISTER_SUBJECT;
-    rrtCheckIn: Msg.Subject := S_OWN_CHECKIN_SUBJECT;
-    rrtContactCheckIn: Msg.Subject :=
-      S_CONTACT_CHECKIN_SUBJECT1 + UsrName + ' ' + UsrEmail + S_CONTACT_CHECKIN_SUBJECT2;
-  else
-    Assert(false);
-  end;
-  case MsgType of
-    rrtOwnerRegister:
-    begin
-      Msg.Body.Add('Please register your email address and account by following the link below.');
-      Msg.Body.Add('');
-      Msg.Body.Add(PositiveAction);
-      Msg.Body.Add('');
-      Msg.Body.Add('');
-      Msg.Body.Add('If you''ve forgotten your password, you can delete your account');
-      Msg.Body.Add('and start over by following this link.');
-      Msg.Body.Add('');
-      Msg.Body.Add(NegativeAction);
-      Msg.Body.Add('');
-      Msg.Body.Add('');
+
+    case MsgType of
+      rrtOwnerRegister: Msg.Subject := S_OWN_REGISTER_SUBJECT;
+      rrtContactRegister: Msg.Subject := S_CONTACT_REGISTER_SUBJECT;
+      rrtCheckIn: Msg.Subject := S_OWN_CHECKIN_SUBJECT;
+      rrtContactCheckIn: Msg.Subject :=
+        S_CONTACT_CHECKIN_SUBJECT1 + UsrName + ' ' + UsrEmail + S_CONTACT_CHECKIN_SUBJECT2;
+    else
+      Assert(false);
     end;
-    rrtContactRegister:
-    begin
-      Msg.Body.Add(UsrName + ' ' + UsrEmail + ' has asked you to register as a point of contact');
-      Msg.Body.Add('if they become unwell and are unable to check-in on this system periodically.');
-      Msg.Body.Add('If you agree with this, please follow the link below.');
-      Msg.Body.Add('You will be notified by e-mail if they fail to respond to check-in requests.');
-      Msg.Body.Add('');
-      Msg.Body.Add(PositiveAction);
-      Msg.Body.Add('');
-      Msg.Body.Add('');
-      Msg.Body.Add('If you do not agree, and do not wish to receive these e-mails,');
-      Msg.Body.Add('follow the link below.');
-      Msg.Body.Add('');
-      Msg.Body.Add(NegativeAction);
-      Msg.Body.Add('');
-      Msg.Body.Add('');
+    case MsgType of
+      rrtOwnerRegister:
+      begin
+        Msg.Body.Add('Please register your email address and account by following the link below.');
+        Msg.Body.Add('');
+        Msg.Body.Add(PositiveAction);
+        Msg.Body.Add('');
+        Msg.Body.Add('');
+        Msg.Body.Add('If you''ve forgotten your password, you can delete your account');
+        Msg.Body.Add('and start over by following this link.');
+        Msg.Body.Add('');
+        Msg.Body.Add(NegativeAction);
+        Msg.Body.Add('');
+        Msg.Body.Add('');
+      end;
+      rrtContactRegister:
+      begin
+        Msg.Body.Add(UsrName + ' ' + UsrEmail + ' has asked you to register as a point of contact');
+        Msg.Body.Add('if they become unwell and are unable to check-in on this system periodically.');
+        Msg.Body.Add('If you agree with this, please follow the link below.');
+        Msg.Body.Add('You will be notified by e-mail if they fail to respond to check-in requests.');
+        Msg.Body.Add('');
+        Msg.Body.Add(PositiveAction);
+        Msg.Body.Add('');
+        Msg.Body.Add('');
+        Msg.Body.Add('If you do not agree, and do not wish to receive these e-mails,');
+        Msg.Body.Add('follow the link below.');
+        Msg.Body.Add('');
+        Msg.Body.Add(NegativeAction);
+        Msg.Body.Add('');
+        Msg.Body.Add('');
+      end;
+      rrtCheckIn:
+      begin
+        Msg.Body.Add('You haven''t checked in recently. Please check-in by following the link below.');
+        Msg.Body.Add('');
+        Msg.Body.Add(PositiveAction);
+        Msg.Body.Add('');
+        Msg.Body.Add('');
+        Msg.Body.Add('If you wish to delete your account, please follow this link:');
+        Msg.Body.Add('');
+        Msg.Body.Add(NegativeAction);
+        Msg.Body.Add('');
+        Msg.Body.Add('');
+      end;
+      rrtContactCheckIn:
+      begin
+        Msg.Body.Add(UsrName + ' ' + UsrEmail + ' has not checked in recently,');
+        Msg.Body.Add('it might be a good idea to contact them, see if they are OK.');
+        Msg.Body.Add('');
+        Msg.Body.Add('');
+        Msg.Body.Add('If you do not wish to receive these e-mails,');
+        Msg.Body.Add('follow the link below.');
+        Msg.Body.Add('');
+        Msg.Body.Add(NegativeAction);
+        Msg.Body.Add('');
+        Msg.Body.Add('');
+      end;
+    else
+      Assert(false);
     end;
-    rrtCheckIn:
-    begin
-      Msg.Body.Add('You haven''t checked in recently. Please check-in by following the link below.');
-      Msg.Body.Add('');
-      Msg.Body.Add(PositiveAction);
-      Msg.Body.Add('');
-      Msg.Body.Add('');
-      Msg.Body.Add('If you wish to delete your account, please follow this link:');
-      Msg.Body.Add('');
-      Msg.Body.Add(NegativeAction);
-      Msg.Body.Add('');
-      Msg.Body.Add('');
-    end;
-    rrtContactCheckIn:
-    begin
-      Msg.Body.Add(UsrName + ' ' + UsrEmail + ' has not checked in recently,');
-      Msg.Body.Add('it might be a good idea to contact them, see if they are OK.');
-      Msg.Body.Add('');
-      Msg.Body.Add('');
-      Msg.Body.Add('If you do not wish to receive these e-mails,');
-      Msg.Body.Add('follow the link below.');
-      Msg.Body.Add('');
-      Msg.Body.Add(NegativeAction);
-      Msg.Body.Add('');
-      Msg.Body.Add('');
-    end;
-  else
-    Assert(false);
-  end;
-  result := Self.QueueEmail(Msg);
-  if not result then
+    result := Self.QueueEmail(Msg);
+    if result then
+      Msg := nil;
+
+  finally
     Msg.Free;
+  end;
 end;
 
 function TCheckInMailer.SendAdminMessage(MsgType: TAdminMsgType): boolean;

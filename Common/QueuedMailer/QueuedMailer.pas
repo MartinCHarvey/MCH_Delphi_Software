@@ -91,6 +91,12 @@ const
   MailsPerSession = 128;
   S_MAILER_EXCEPTION = 'Exception sending e-mail: ';
 
+  S_DBG_MSG_FROM_NAME = 'Debug msg from: ';
+  S_DBG_MSG_FROM_ADDRESS = 'Debug msg from address: ';
+  S_DBG_MSG_RCP_COUNT = 'Debug msg recipient count: ';
+  S_DBG_MSG_TO_NAME = 'Debug msg to: ';
+  S_DBG_MSG_TO_ADDRESS = 'Debug msg to address: ';
+
 { TQueuedMailer }
 
 function TQueuedMailer.QueueEmail(Mail: TIdMessage): boolean;
@@ -205,7 +211,8 @@ procedure TQueuedMailer.WorkInThread;
 var
   MailsLeft: integer;
   SMTP: TIdSMTP;
-  Msg: TIdMessage;
+  Msg, DbgMsg: TIdMessage;
+  i: integer;
 begin
   if not FQuitFlag then
   begin
@@ -230,6 +237,7 @@ begin
       SMTP.Connect;
       while (not FQuitFlag) and (MailsLeft > 0) do
       begin
+        DbgMsg := nil;
         FMailQueue.AcquireLock;
         try
           Msg := FMailQueue.RemoveHeadObj as TIdMessage;
@@ -239,7 +247,16 @@ begin
         try
           if Assigned(Msg) then
           begin
-            SMTP.Send(Msg);
+            try
+              SMTP.Send(Msg);
+            except
+              on Exception do
+              begin
+                DbgMsg := TIdMessage.Create;
+                DbgMsg.Assign(Msg);
+                raise;
+              end;
+            end;
             Dec(MailsLeft);
           end
           else
@@ -254,6 +271,22 @@ begin
         GLogLog(SV_FAIL, S_MAILER_EXCEPTION + E.ClassName + ' ' + E.Message);
         //At this point, prevent further e-mail sending so we can debug.
         //TODO - Consider retry stratgies in future.
+        try
+          if Assigned(DbgMsg) then
+          begin
+            GLogLog(SV_FAIL, S_DBG_MSG_FROM_NAME + DbgMsg.From.Name);
+            GLogLog(SV_FAIL, S_DBG_MSG_FROM_ADDRESS + DbgMsg.From.Address);
+            GLogLog(SV_FAIL, S_DBG_MSG_RCP_COUNT + IntToStr(DbgMsg.Recipients.Count));
+            for i := 0 to Pred(DbgMsg.Recipients.Count) do
+            begin
+              GLogLog(SV_FAIL, S_DBG_MSG_TO_NAME + DbgMsg.Recipients[i].Name);
+              GLogLog(SV_FAIL, S_DBG_MSG_TO_ADDRESS + DbgMsg.Recipients[i].Address);
+            end;
+            DbgMsg.Free;
+          end;
+        except
+          on Exception do ;
+        end;
         FQuitFlag := true;
       end;
     end;

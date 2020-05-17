@@ -268,6 +268,7 @@ procedure TAuditLog.DoPeriodic;
 var
   RightNow: TDateTime;
   Before: TDateTime;
+  NextPruneBefore, NextPruneActionAt: TDateTime;
 begin
   RightNow := Now;
   if RightNow > FLastPersistEvent + PERSIST_FREQUENCY then
@@ -276,11 +277,12 @@ begin
     DoPersistRecent;
   end;
   UpdateLastPruneEvent;
-  if RightNow > FLastPruneEvent + PRUNE_FREQUENCY then
+  NextPruneBefore := FLastPruneEvent + PRUNE_FREQUENCY;
+  NextPruneActionAt := NextPruneBefore + PRUNE_FREQUENCY;
+  if RightNow > NextPruneActionAt then
   begin
-    Before := FLastPruneEvent;
-    FLastPruneEvent := RightNow;
-    DoPruneDB(Before);
+    FLastPruneEvent := NextPruneBefore;
+    DoPruneDB(FLastPruneEvent);
   end;
 end;
 
