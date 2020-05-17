@@ -57,6 +57,7 @@ type
 
     procedure UpdateRegistrationTimers(UTable: TMemAPITableData; Initial: boolean);
     procedure UpdateCheckInTimers(UTable: TMemAPITableData);
+    procedure UpdateNextPeriodicField(UTable: TMemAPITableData);
 
     function UserPeriodicActions(T: TMemDBTransaction; UTable: TMemAPITableData): boolean;
     function UserVerificationActions(T: TMemDBTransaction; UTable: TMemAPITableData; StartUserRecord: TUserRecord): boolean;
@@ -305,25 +306,21 @@ const
 
 const
   ONE_MINUTE = (1 / (24 * 60));
-{$IFDEF DEBUG}
   SYSTEM_PERIODIC_CHECK_INTERVAL = ONE_MINUTE;
-  USER_PERIODIC_CHECK_INTERVAL = 3 * ONE_MINUTE;
-  USER_REGISTER_NOTIFY_INTERVAL = 15 * ONE_MINUTE;
-  USER_REGISTER_EXPIRE_INTERVAL =  60 * ONE_MINUTE;
+  USER_PERIODIC_CHECK_INTERVAL = 0.5;
+  USER_REGISTER_NOTIFY_INTERVAL = 2;
+  USER_REGISTER_EXPIRE_INTERVAL =  7;
+{$IFDEF DEBUG}
   USER_CHECKIN_NOTIFY_INTERVAL = 15 * ONE_MINUTE;
   USER_CHECKIN_STOP_INTERVAL = 1;
   USER_INACTIVE_EXPIRE_INTERVAL = 7;
 {$ELSE}
-  SYSTEM_PERIODIC_CHECK_INTERVAL = 15 * ONE_MINUTE;
-  USER_PERIODIC_CHECK_INTERVAL = 0.5;
-  USER_REGISTER_NOTIFY_INTERVAL = 2;
-  USER_REGISTER_EXPIRE_INTERVAL =  7;
   USER_CHECKIN_NOTIFY_INTERVAL = 1;
   USER_CHECKIN_STOP_INTERVAL = 7;
   USER_INACTIVE_EXPIRE_INTERVAL = 31;
 {$ENDIF}
-  CONTACT_CHECKIN_NOTIFY_INTERVAL = USER_CHECKIN_NOTIFY_INTERVAL * 2;
   USER_REGISTER_INITIAL_NOTIFY_INTERVAL = ONE_MINUTE;
+  CONTACT_CHECKIN_NOTIFY_INTERVAL = USER_CHECKIN_NOTIFY_INTERVAL * 2;
 
 
 var
@@ -615,8 +612,7 @@ begin
               end;
               while Located and (DataRec.dVal < Now)  do
               begin
-                DataRec.dVal := Now + USER_PERIODIC_CHECK_INTERVAL;
-                ApiData.WriteField(S_NEXT_PERIODIC, DataRec);
+                UpdateNextPeriodicField(ApiData);
                 Deleted := UserPeriodicActions(T, ApiData);
                 if not Deleted then
                   ApiData.Post;
@@ -668,7 +664,6 @@ begin
     result := GAppConfig.EndpointName
   else
   begin
-    //TODO - Dynamically look-up if possible.
     result := S_LOCALHOST;
   end;
 end;
@@ -731,6 +726,42 @@ begin
   end;
 end;
 
+//TODO - This is not quite right when using read comitted transactions....
+procedure TCheckInApp.UpdateNextPeriodicField(UTable: TMemAPITableData);
+var
+  DataRec: TMemDbFieldDataRec;
+  RightNow: TDateTime;
+  Soonest: TDateTime;
+  UserRecord: TUserRecord;
+
+  procedure LessThan(DT: TDateTime);
+  begin
+    if (DT > RightNow) and (DT < Soonest) then
+      Soonest := DT;
+  end;
+
+begin
+  UserRecord := TUserRecord.Create;
+  RightNow := Now;
+  try
+    with UserRecord do
+    begin
+      FromUTable(UTable);
+      Soonest := ExpireAfter;
+      LessThan(NextRegisterRemind);
+      LessThan(NextCheckinRemind);
+      LessThan(NextContactCheckinRemind);
+      LessThan(StopCheckinRemind);
+      LessThan(RightNow + USER_PERIODIC_CHECK_INTERVAL);
+    end;
+    DataRec.FieldType := ftDouble;
+    DataRec.dVal := Soonest;
+    UTable.WriteField(S_NEXT_PERIODIC, DataRec);
+  finally
+    UserRecord.Free;
+  end;
+end;
+
 procedure TCheckInApp.UpdateCheckInTimers(UTable: TMemAPITableData);
 var
   DataRec: TMemDbFieldDataRec;
@@ -744,6 +775,7 @@ begin
   UTable.WriteField(S_NEXT_CONTACT_CHECKIN_REMIND, DataRec);
   DataRec.dVal := RightNow + USER_CHECKIN_STOP_INTERVAL;
   UTable.WriteField(S_STOP_CHECKIN_REMIND, DataRec);
+  UpdateNextPeriodicField(UTable);
 end;
 
 procedure TCheckInApp.UpdateRegistrationTimers(UTable: TMemAPITableData; Initial: boolean);
@@ -760,6 +792,7 @@ begin
   UTable.WriteField(S_NEXT_REGISTER_REMIND, DataRec);
   DataRec.dVal := RightNow + USER_REGISTER_EXPIRE_INTERVAL;
   UTable.WriteField(S_EXPIRE_AFTER, DataRec);
+  UpdateNextPeriodicField(UTable);
 end;
 
 function TCheckInApp.HandleRegisterRequest(Sender: TObject; Username, CryptKey, CryptPassword:string):boolean;
