@@ -590,6 +590,7 @@ var
   DataRec: TMemDBFieldDataRec;
   UsrTblHandle: TMemDBHandle;
   Located, Deleted: boolean;
+  MadeChanges: boolean;
 begin
   try
     if FLastPeriodicAllTasks + SYSTEM_PERIODIC_CHECK_INTERVAL < Now then
@@ -597,6 +598,7 @@ begin
       FLastPeriodicAllTasks := Now;
       S := MemDB.StartSession;
       try
+        MadeChanges := false;
         T := S.StartTransaction(amReadWrite, amLazyWrite, ilCommittedRead);
         try
           ApiDB := T.GetAPI;
@@ -612,6 +614,7 @@ begin
               end;
               while Located and (DataRec.dVal < Now)  do
               begin
+                MadeChanges := true;
                 UpdateNextPeriodicField(ApiData);
                 Deleted := UserPeriodicActions(T, ApiData);
                 if not Deleted then
@@ -629,7 +632,10 @@ begin
           finally
             ApiDB.Free;
           end;
-          T.CommitAndFree;
+          if MadeChanges then
+            T.CommitAndFree
+          else
+            T.RollbackAndFree;
         except
           T.RollbackAndFree;
           raise;
