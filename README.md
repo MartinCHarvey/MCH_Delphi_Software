@@ -9,8 +9,9 @@ Files / Folders:
 
 - ProjectXPlant: A handy utility which parses delphi project files and copies projects from one location to another.
 
-- CheckIn: A test web application, allowing users to check-in online. Will send e-mail notifications if they don't.
-           Work in progress, unfinished.
+- CheckIn: Simple hard-coded COVID-19 inspired web application.
+  - Requires users to check-in online regularly.
+  - Sends notifications to nominated contacts if they don't.
 
 Common: Common utility code, including:
 
