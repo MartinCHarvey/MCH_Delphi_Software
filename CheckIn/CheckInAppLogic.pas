@@ -354,7 +354,7 @@ begin
   end;
   Pad := URLSafeString(Pad);
   Action := URLSafeString(Action);
-  result := S_HTTPS_PREFIX + Host + '/' + S_MAIL_ACTION + S_PAD_PARAM
+  result := S_TRANSPORT_PREFIX + Host + '/' + S_MAIL_ACTION + S_PAD_PARAM
     + Pad + S_ACTION_PARAM + Action;
 end;
 
@@ -2107,6 +2107,7 @@ begin
   MemDB := TMemDB.Create;
   if not MemDB.InitDB(GAppConfig.DBRootDir) then
     raise Exception.Create(S_DB_INIT_FATAL);
+  MemDB.Checkpoint;
 end;
 
 procedure FiniDB;

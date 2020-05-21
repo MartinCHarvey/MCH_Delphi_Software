@@ -62,7 +62,8 @@ uses
 
 procedure THTTPForwarder.HandleIdCommandGet(AContext: TIdContext; ARequestInfo: TIdHTTPRequestInfo; AResponseInfo: TIdHTTPResponseInfo);
 begin
-  AResponseInfo.Redirect(S_HTTPS_PREFIX + DoEndpointRequest + ARequestInfo.URI);
+  AResponseInfo.Redirect(S_TRANSPORT_PREFIX + DoEndpointRequest + ARequestInfo.URI);
+  AResponseInfo.ContentText := #13 + #10;
 end;
 
 function THTTPForwarder.DoEndpointRequest: string;

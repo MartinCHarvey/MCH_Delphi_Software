@@ -455,6 +455,7 @@ begin
       vaRedirect:
       begin
         ParsedParams.IndyParams.AResponseInfo.Redirect(Validate.RedirectAddress);
+        ParsedParams.IndyParams.AResponseInfo.ContentText := #13 + #10;
         result := true;
       end
     else
@@ -661,7 +662,10 @@ begin
             if GetRequestParam(ParsedParams.PageQueryParams, S_USERNAME, User)
             and GetRequestParam(ParsedParams.PageQueryParams, S_PASSWORD, Pass)
             and DoLogin(User, Pass) then
-              ParsedParams.IndyParams.AResponseInfo.Redirect('/' + S_MAIN_PAGE)
+            begin
+              ParsedParams.IndyParams.AResponseInfo.Redirect('/' + S_MAIN_PAGE);
+              ParsedParams.IndyParams.AResponseInfo.ContentText := #13 + #10;
+            end
             else
             begin
               Sleep(FAILED_LOGIN_DELAY);
@@ -689,6 +693,7 @@ begin
             and DoRegister(User, Pass) then
             begin
               ParsedParams.IndyParams.AResponseInfo.Redirect('/' + S_LOGIN_PAGE);
+              ParsedParams.IndyParams.AResponseInfo.ContentText := #13 + #10;
               FLastErrMsg := S_REGISTRATION_OK;
             end
             else
@@ -705,6 +710,7 @@ begin
       begin
         Session.LogonId := '';
         ParsedParams.IndyParams.AResponseInfo.Redirect('/'+S_LOGIN_PAGE);
+        ParsedParams.IndyParams.AResponseInfo.ContentText := #13 + #10;
         result := true;
       end;
     end;

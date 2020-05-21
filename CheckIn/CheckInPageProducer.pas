@@ -316,6 +316,7 @@ begin
               //Implicit logout.
               Session.LogonId := '';
               ParsedParams.IndyParams.AResponseInfo.Redirect('/'+ S_LOGIN_PAGE);
+              ParsedParams.IndyParams.AResponseInfo.ContentText := #13 + #10;
             end
             else
             begin
@@ -412,7 +413,7 @@ begin
       if Length(UserRec.LoglessCheckInPad) > 0 then
       begin
         R := R + 'Enabled: ';
-        CxLink := S_HTTPS_PREFIX
+        CxLink := S_TRANSPORT_PREFIX
           + DoEndpointRequest + '/'
           + S_LOGLESS_CHECKIN + S_PAD_PARAM
           + URLSafeString(UserRec.LoglessCheckInPad);
@@ -537,7 +538,7 @@ begin
       S := S + 'Email action successful. ' + HTMLSafeString(ResponseHint)
     else
       S := S + 'EMail action failed. ' + HTMLSafeString(ResponseHint);
-    S := S + '<br> <a href="' + S_HTTPS_PREFIX
+    S := S + '<br> <a href="' + S_TRANSPORT_PREFIX
           + DoEndpointRequest + '/'
           + '">Home</a></h3></center>';
     ContentText := ContentText + S;
@@ -550,7 +551,7 @@ procedure TCheckInPageProducer.WriteRefreshLink(const ParsedParams: TParsedParam
 var
   S: string;
 begin
-  S := '<a href="' + S_HTTPS_PREFIX + DoEndpointRequest + '/' + S_MAIN_PAGE+ '">Refresh</a>';
+  S := '<a href="' + S_TRANSPORT_PREFIX + DoEndpointRequest + '/' + S_MAIN_PAGE+ '">Refresh</a>';
   with ParsedParams.IndyParams.AResponseInfo do
     ContentText := ContentText + S;
 end;
@@ -589,7 +590,7 @@ begin
       S := S + 'Check in successful. ' + HTMLSafeString(ResponseHint)
     else
       S := S + 'Check in failed. ' + HTMLSafeString(ResponseHint);
-    S := S + '<br> <a href="' + S_HTTPS_PREFIX
+    S := S + '<br> <a href="' + S_TRANSPORT_PREFIX
           + DoEndpointRequest + '/'
           + '">Home</a></h3></center>';
     ContentText := ContentText + S;
