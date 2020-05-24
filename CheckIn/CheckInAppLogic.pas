@@ -798,7 +798,16 @@ begin
   UTable.WriteField(S_NEXT_REGISTER_REMIND, DataRec);
   DataRec.dVal := RightNow + USER_REGISTER_EXPIRE_INTERVAL;
   UTable.WriteField(S_EXPIRE_AFTER, DataRec);
-  UpdateNextPeriodicField(UTable);
+
+  //Looks like a bug, but isn't.
+  //You don't immediately want to send a "user has been inactive"
+  //mail to contacts just because the delay is because e-mails haven't been
+  //registered. The check-in timers should run from not only last
+  //administrative action of user, but also last re-register action
+  //of contact: user can see results in audit log, and stops contact
+  //*immediately* getting an e-mail upon registering (which they then
+  //think is spurious).
+  UpdateCheckInTimers(UTable);
 end;
 
 function TCheckInApp.HandleRegisterRequest(Sender: TObject; Username, CryptKey, CryptPassword:string):boolean;
@@ -835,8 +844,6 @@ begin
               ApiData.WriteField(S_PASS_CRYPT, DataRec);
 
               UpdateRegistrationTimers(ApiData, false);
-              //S_NEXT_CHECKIN_REMIND, S_STOP_CHECKIN_REMIND not needed yet.
-              //S_LAST_LOGIN, S_LAST_CHECKIN both zero.
               ApiData.Post;
             end;
           finally
@@ -1031,7 +1038,6 @@ begin
                 TD.WriteField(S_OWN_EMAIL_PAD, Data);
 
                 UpdateRegistrationTimers(TD, false);
-                UpdateCheckInTimers(TD);
 
                 TD.ReadField(S_USERID, Data);
                 AudLog(Data.sVal, S_AUDIT_ACCOUNT_EMAIL_VERIFIED);
