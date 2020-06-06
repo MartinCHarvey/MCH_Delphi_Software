@@ -13,6 +13,8 @@ Files / Folders:
   - Requires users to check-in online regularly.
   - Sends notifications to nominated contacts if they don't.
 
+- Sudoku: A sudoku solver. Currently very rudimentary, but I have all sorts of plans for tree / state space search, topology, categorization.
+
 Common: Common utility code, including:
 
 - Raw AVL tree.
