@@ -1,7 +1,7 @@
 object SudokuSimpleForm: TSudokuSimpleForm
   Left = 0
   Top = 0
-  Caption = 'Form1'
+  Caption = 'Sudoku'
   ClientHeight = 317
   ClientWidth = 339
   FormFactor.Width = 320
@@ -32,16 +32,53 @@ object SudokuSimpleForm: TSudokuSimpleForm
       Height = 49.000000000000000000
       TabOrder = 0
       Text = 'Solve'
-      Width = 234.000000000000000000
+      Width = 114.000000000000000000
       OnClick = SolveBtnClick
     end
     object NextMoveBtn: TButton
       Align = alLeft
       Height = 49.000000000000000000
       TabOrder = 1
-      Text = 'Next move'
-      Width = 105.000000000000000000
+      Text = 'Next'
+      Width = 57.000000000000000000
       OnClick = NextMoveBtnClick
     end
+    object LoadBtn: TButton
+      Align = alLeft
+      Height = 49.000000000000000000
+      Position.X = 57.000000000000000000
+      TabOrder = 2
+      Text = 'Load'
+      Width = 56.000000000000000000
+      OnClick = LoadBtnClick
+    end
+    object SaveBtn: TButton
+      Align = alLeft
+      Height = 49.000000000000000000
+      Position.X = 113.000000000000000000
+      TabOrder = 3
+      Text = 'Save'
+      Width = 56.000000000000000000
+      OnClick = SaveBtnClick
+    end
+    object ClearBtn: TButton
+      Align = alLeft
+      Height = 49.000000000000000000
+      Position.X = 169.000000000000000000
+      TabOrder = 4
+      Text = 'Clear'
+      Width = 56.000000000000000000
+      OnClick = ClearBtnClick
+    end
+  end
+  object OpenDialog: TOpenDialog
+    Filter = '*.xml'
+    Left = 24
+    Top = 72
+  end
+  object SaveDialog: TSaveDialog
+    Filter = '*.xml'
+    Left = 24
+    Top = 120
   end
 end
