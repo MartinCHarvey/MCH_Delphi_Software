@@ -2,6 +2,9 @@ unit SudokuBoard;
 
 {$DEFINE OPTIMISE_COUNT_BITS}
 {$DEFINE OPTIMISE_SET_HANDLING}
+{$DEFINE UNROLL_INNER_LOOP}
+{$DEFINE EXPAND_GETALLOWEDSET}
+//{$DEFINE FIND_JUST_ONE_SOLN}
 
 interface
 
@@ -24,9 +27,9 @@ type
   TSBoardState = class(TObjStreamable)
   private
     FBoard: TSBoard;
-    FRowConstraints: TSConstraint;
-    FColConstraints: TSConstraint;
-    FBlockConstraints: TSConstraint;
+    FRowExcludes: TSConstraint;
+    FColExcludes: TSConstraint;
+    FBlockExcludes: TSConstraint;
   protected
     procedure CustomMarshal(Sender: TDefaultSSController); override;
     procedure CustomUnmarshal(Sender: TDefaultSSController); override;
@@ -255,8 +258,13 @@ begin
         begin
           SetOK := FBoardState.SetEntry(Row, Col, AppliedNumber);
           Assert(SetOK);
-          //Boolean ordering important here ...
+{$IFDEF FIND_JUST_ONE_SOLN}
+          result := SolveSingleThreaded;
+          if result then
+            break;
+{$ELSE}
           result := SolveSingleThreaded or result;
+{$ENDIF}
           FBoardState.ClearEntry(Row, Col);
         end;
       end;
@@ -377,9 +385,9 @@ begin
   //Faster to check constraints.
   for N := Low(TSNumber) to High(TSNumber) do
   begin
-    result := (FRowConstraints[N] = AllAllowed)
-      and (FColConstraints[N] = AllAllowed)
-      and (FBlockConstraints[N] = AllAllowed);
+    result := (FRowExcludes[N] = AllAllowed)
+      and (FColExcludes[N] = AllAllowed)
+      and (FBlockExcludes[N] = AllAllowed);
     if not result then
       exit;
   end;
@@ -443,6 +451,76 @@ begin
   MinTreeSet := EmptySet;
   for LRow := Low(LRow) to High(LRow) do
   begin
+{$IFDEF UNROLL_INNER_LOOP}
+    LCol := Low(LCol);
+    while LCol <= High(LCol) do
+    begin
+{$IFDEF EXPAND_GETALLOWEDSET}
+      if FBoard[LRow][LCol] <> 0 then
+        TreeSet := EmptySet
+      else
+      begin
+        TreeSet := TSSetSub(AllAllowed,
+          TSSetAdd(TSSetAdd(FRowExcludes[LRow], FColExcludes[LCol]),
+            FBlockExcludes[MapToBlockSetIdx(LRow, LCol)]));
+      end;
+{$ELSE}
+      TreeSet := GetAllowedSet(LRow, LCol);
+{$ENDIF}
+      Branches := CountBits(TreeSet);
+      if (Branches > 0) and (Branches < MinTreeBranches) then
+      begin
+        MinTreeBranches := Branches;
+        MinTreeRow := LRow;
+        MinTreeCol := LCol;
+        MinTreeSet := TreeSet;
+      end;
+
+{$IFDEF EXPAND_GETALLOWEDSET}
+      if FBoard[LRow][LCol + 1] <> 0 then
+        TreeSet := EmptySet
+      else
+      begin
+        TreeSet := TSSetSub(AllAllowed,
+          TSSetAdd(TSSetAdd(FRowExcludes[LRow], FColExcludes[LCol + 1]),
+            FBlockExcludes[MapToBlockSetIdx(LRow, LCol + 1)]));
+      end;
+{$ELSE}
+      TreeSet := GetAllowedSet(LRow, LCol + 1);
+{$ENDIF}
+      Branches := CountBits(TreeSet);
+      if (Branches > 0) and (Branches < MinTreeBranches) then
+      begin
+        MinTreeBranches := Branches;
+        MinTreeRow := LRow;
+        MinTreeCol := LCol + 1;
+        MinTreeSet := TreeSet;
+      end;
+
+{$IFDEF EXPAND_GETALLOWEDSET}
+      if FBoard[LRow][LCol + 2] <> 0 then
+        TreeSet := EmptySet
+      else
+      begin
+        TreeSet := TSSetSub(AllAllowed,
+          TSSetAdd(TSSetAdd(FRowExcludes[LRow], FColExcludes[LCol + 2]),
+            FBlockExcludes[MapToBlockSetIdx(LRow, LCol + 2)]));
+      end;
+{$ELSE}
+      TreeSet := GetAllowedSet(LRow, LCol + 2);
+{$ENDIF}
+      Branches := CountBits(TreeSet);
+      if (Branches > 0) and (Branches < MinTreeBranches) then
+      begin
+        MinTreeBranches := Branches;
+        MinTreeRow := LRow;
+        MinTreeCol := LCol + 2;
+        MinTreeSet := TreeSet;
+      end;
+
+      Inc(LCol, 3);
+    end;
+{$ELSE}
     for LCol := Low(LCol) to High(LCol) do
     begin
       TreeSet := GetAllowedSet(LRow, LCol);
@@ -455,6 +533,7 @@ begin
         MinTreeSet := TreeSet;
       end;
     end;
+{$ENDIF}
   end;
   if MinTreeBranches <> High(Integer) then
   begin
@@ -473,8 +552,8 @@ begin
   else
   begin
     result := TSSetSub(AllAllowed,
-      TSSetAdd(TSSetAdd(FRowConstraints[Row], FColConstraints[Col]),
-        FBlockConstraints[MapToBlockSetIdx(Row, Col)]));
+      TSSetAdd(TSSetAdd(FRowExcludes[Row], FColExcludes[Col]),
+        FBlockExcludes[MapToBlockSetIdx(Row, Col)]));
   end;
 end;
 
@@ -517,12 +596,12 @@ begin
   else
   begin
     Map := MapToBlockSetIdx(Row, Col);
-    Assert(not TSNumberIn(FRowConstraints[Row], Entry));
-    Assert(not TSNumberIn(FColConstraints[Col], Entry));
-    Assert(not TSNumberIn(FBlockConstraints[Map], Entry));
-    FRowConstraints[Row] := TSSetAdd(FRowConstraints[Row], TSSetIndividual(Entry));
-    FColConstraints[Col] := TSSetAdd(FColConstraints[Col], TSSetIndividual(Entry));
-    FBlockConstraints[Map] := TSSetAdd(FBlockConstraints[Map], TSSetIndividual(Entry));
+    Assert(not TSNumberIn(FRowExcludes[Row], Entry));
+    Assert(not TSNumberIn(FColExcludes[Col], Entry));
+    Assert(not TSNumberIn(FBlockExcludes[Map], Entry));
+    FRowExcludes[Row] := TSSetAdd(FRowExcludes[Row], TSSetIndividual(Entry));
+    FColExcludes[Col] := TSSetAdd(FColExcludes[Col], TSSetIndividual(Entry));
+    FBlockExcludes[Map] := TSSetAdd(FBlockExcludes[Map], TSSetIndividual(Entry));
     FBoard[Row][Col] := Entry;
     result := true;
   end;
@@ -542,12 +621,12 @@ begin
   if Entry <> 0 then
   begin
     Map := MapToBlockSetIdx(Row, Col);
-    Assert(TSNumberIn(FRowConstraints[Row], Entry));
-    Assert(TSNumberIn(FColConstraints[Col], Entry));
-    Assert(TSNumberIn(FBlockConstraints[Map], Entry));
-    FRowConstraints[Row] := TSSetSub(FRowConstraints[Row], TSSetIndividual(Entry));
-    FColConstraints[Col] := TSSetSub(FColConstraints[Col], TSSetIndividual(Entry));
-    FBlockConstraints[Map] := TSSetSub(FBlockConstraints[Map], TSSetIndividual(Entry));
+    Assert(TSNumberIn(FRowExcludes[Row], Entry));
+    Assert(TSNumberIn(FColExcludes[Col], Entry));
+    Assert(TSNumberIn(FBlockExcludes[Map], Entry));
+    FRowExcludes[Row] := TSSetSub(FRowExcludes[Row], TSSetIndividual(Entry));
+    FColExcludes[Col] := TSSetSub(FColExcludes[Col], TSSetIndividual(Entry));
+    FBlockExcludes[Map] := TSSetSub(FBlockExcludes[Map], TSSetIndividual(Entry));
     FBoard[Row][Col] := 0;
   end;
 end;
@@ -558,9 +637,9 @@ var
 begin
   for i := Low(TSNumber) to High(TSNumber) do
   begin
-    FRowConstraints[i] := EmptySet;
-    FColConstraints[i] := EmptySet;
-    FBlockConstraints[i] := EmptySet;
+    FRowExcludes[i] := EmptySet;
+    FColExcludes[i] := EmptySet;
+    FBlockExcludes[i] := EmptySet;
     for j := Low(TSNumber) to High(TSNumber) do
       FBoard[i,j] := 0;
   end;
@@ -611,9 +690,9 @@ begin
   Assert(Assigned(Source) and (Source is TSBoardState));
   Src := TSBoardState(Source);
   FBoard := Src.FBoard;
-  FRowConstraints := Src.FRowConstraints;
-  FColConstraints := Src.FColConstraints;
-  FBlockConstraints := Src.FBlockConstraints;
+  FRowExcludes := Src.FRowExcludes;
+  FColExcludes := Src.FColExcludes;
+  FBlockExcludes := Src.FBlockExcludes;
 end;
 
 initialization
