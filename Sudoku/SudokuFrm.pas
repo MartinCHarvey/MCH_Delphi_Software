@@ -5,7 +5,8 @@ interface
 uses
   System.SysUtils, System.Types, System.UITypes, System.Rtti, System.Classes,
   System.Variants, FMX.Types, FMX.Controls, FMX.Forms, FMX.Dialogs,
-  FMX.StdCtrls, FMX.Layouts, FMX.Grid, SudokuBoard;
+  FMX.StdCtrls, FMX.Layouts, FMX.Grid, SudokuBoard, StreamSysXML, SSAbstracts,
+  SSStreamables;
 
 type
   TSudokuSimpleForm = class(TForm)
@@ -13,15 +14,24 @@ type
     SolveBtn: TButton;
     TopLayout: TLayout;
     NextMoveBtn: TButton;
+    LoadBtn: TButton;
+    SaveBtn: TButton;
+    OpenDialog: TOpenDialog;
+    SaveDialog: TSaveDialog;
+    ClearBtn: TButton;
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
     procedure GridEditingDone(Sender: TObject; const Col, Row: Integer);
     procedure SolveBtnClick(Sender: TObject);
     procedure NextMoveBtnClick(Sender: TObject);
+    procedure LoadBtnClick(Sender: TObject);
+    procedure SaveBtnClick(Sender: TObject);
+    procedure ClearBtnClick(Sender: TObject);
   private
     { Private declarations }
     FBoard: TSBoardState;
     procedure GridFromBoard;
+    procedure ShowStats(Stats: TSSolverStats);
   public
     { Public declarations }
   end;
@@ -33,6 +43,10 @@ implementation
 
 {$R *.fmx}
 
+const
+  S_MULTIPLE = 'Multiple next moves from this point, click solve instead.';
+  S_NONE = 'No next move from this point, click solve instead.';
+  S_NOT_A_VALID_BOARD = 'Not a valid board.';
 
 procedure TSudokuSimpleForm.GridEditingDone(Sender: TObject; const Col, Row: Integer);
 var
@@ -86,9 +100,37 @@ begin
     end;
 end;
 
-const
-  S_MULTIPLE = 'Not fully solved: Multiple next moves from this point.';
-  S_NONE = 'Not fully solved: No next move from this point.';
+procedure TSudokuSimpleForm.LoadBtnClick(Sender: TObject);
+var
+  FS: TFileStream;
+  SS: TStreamSysXml;
+  Obj: TObjStreamable;
+begin
+  if OpenDialog.Execute then
+  begin
+    FS := TFileStream.Create(OpenDialog.FileName, fmOpenRead, fmShareDenyNone);
+    try
+      SS := TStreamSysXML.Create;
+      SS.RegisterHeirarchy(SBoardHeirarchy);
+      try
+        Obj := SS.ReadStructureFromStream(FS) as TObjStreamable;
+        try
+          if Assigned(Obj) and (Obj is TSBoardState) then
+            FBoard.Assign(Obj)
+          else
+            raise EStreamSystemError.Create(S_NOT_A_VALID_BOARD);
+        finally
+          Obj.Free;
+        end;
+      finally
+        SS.Free;
+      end;
+    finally
+      FS.Free;
+    end;
+    GridFromBoard;
+  end;
+end;
 
 procedure TSudokuSimpleForm.NextMoveBtnClick(Sender: TObject);
 var
@@ -111,25 +153,64 @@ begin
   GridFromBoard;
 end;
 
+procedure TSudokuSimpleForm.SaveBtnClick(Sender: TObject);
+var
+  FS: TFileStream;
+  SS: TStreamSysXml;
+begin
+  if SaveDialog.Execute then
+  begin
+    FS := TFileStream.Create(SaveDialog.FileName, fmCreate, fmShareExclusive);
+    try
+      SS := TStreamSysXML.Create;
+      SS.RegisterHeirarchy(SBoardHeirarchy);
+      try
+        SS.WriteStructureToStream(FBoard, FS);
+      finally
+        SS.Free;
+      end;
+    finally
+      FS.Free;
+    end;
+  end;
+end;
+
+procedure TSudokuSimpleForm.ShowStats(Stats: TSSolverStats);
+var
+  S: string;
+begin
+  S :=
+    'DecisionPoints: ' + IntToStr(Stats.DecisionPoints) + #13 + #10 +
+    'DecisionPointsWithSolution: ' + IntToStr(Stats.DecisionPointsWithSolution) + #13 + #10 +
+    'DecisionPointsAllDeadEnd: ' + IntToStr(Stats.DecisionPointsAllDeadEnd) + #13 + #10 +
+    'CorrectSolutions: ' + IntToStr(Stats.CorrectSolutions) + #13 + #10 +
+    'DeadEnds: ' + IntToStr(Stats.DeadEnds) + #13 + #10;
+  ShowMessage(S);
+end;
+
 procedure TSudokuSimpleForm.SolveBtnClick(Sender: TObject);
 var
-  NRow, NCol: TSNumber;
-  NSet: TSNumberSet;
-  DoneMove: boolean;
+  SSolver: TSSingleThreadSolver;
 begin
-  DoneMove := true;
-  while DoneMove do
-  begin
-    NSet := FBoard.FindNextMove(NRow, NCol);
-    DoneMove := FBoard.EvolveIfSingular(NRow, NCol, NSet);
-  end;
-  if not FBoard.Complete then
-  begin
-    if FBoard.Proceedable then
-      ShowMessage(S_MULTIPLE)
+  SSolver := TSSingleThreadSolver.Create;
+  try
+    SSolver.BoardState := FBoard;
+    SSolver.SolveSingleThreaded;
+    if Assigned(SSolver.UniqueSolution) then
+      FBoard.Assign(SSolver.UniqueSolution)
     else
-      ShowMessage(S_NONE);
+      FBoard.Assign(SSolver.BoardState);
+    GridFromBoard;
+    ShowStats(SSolver.Stats);
+  finally
+    SSolver.Free;
   end;
+  GridFromBoard;
+end;
+
+procedure TSudokuSimpleForm.ClearBtnClick(Sender: TObject);
+begin
+  FBoard.Clear;
   GridFromBoard;
 end;
 
