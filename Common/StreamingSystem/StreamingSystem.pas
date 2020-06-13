@@ -39,6 +39,9 @@ IN THE SOFTWARE.
   Likewise, at unstream time, the count of items in the array is given, and
   names passed to the unstream functions should be zero length. The streaming
   system will then insert appropriate ordinals, and look for them.
+
+  TODO - There is a bug needs fixing with respect to nested arrays and
+  property naming.
 }
 
 interface

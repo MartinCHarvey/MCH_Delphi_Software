@@ -39,26 +39,26 @@ type
     BLink: PDLEntry;
   end;
 
-procedure DLItemInitObj(Owner: TObject; Entry: PDLEntry);
-procedure DLItemInitList(Entry: PDLEntry);
+procedure DLItemInitObj(Owner: TObject; Entry: PDLEntry); inline;
+procedure DLItemInitList(Entry: PDLEntry); inline;
 
-function DLItemIsList(Entry: PDLEntry): boolean;
-function DlItemIsEmpty(Entry: PDLEntry): boolean;
+function DLItemIsList(Entry: PDLEntry): boolean; inline;
+function DlItemIsEmpty(Entry: PDLEntry): boolean; inline;
 
-procedure DLItemInsertAfter(Entry: PDLEntry; NewEntry: PDLEntry);
-procedure DLItemInsertBefore(Entry: PDLEntry; NewEntry: PDLEntry);
+procedure DLItemInsertAfter(Entry: PDLEntry; NewEntry: PDLEntry); inline;
+procedure DLItemInsertBefore(Entry: PDLEntry; NewEntry: PDLEntry); inline;
 
-function DLItemRemoveBefore(Entry: PDLEntry): PDLEntry;
-function DLItemRemoveAfter(Entry: PDLEntry): PDLEntry;
+function DLItemRemoveBefore(Entry: PDLEntry): PDLEntry; inline;
+function DLItemRemoveAfter(Entry: PDLEntry): PDLEntry; inline;
 
-procedure DLListInsertHead(List: PDLEntry; NewEntry: PDlEntry);
-procedure DLListInsertTail(List: PDLEntry; NewEntry: PDlEntry);
+procedure DLListInsertHead(List: PDLEntry; NewEntry: PDlEntry); inline;
+procedure DLListInsertTail(List: PDLEntry; NewEntry: PDlEntry); inline;
 
-function DLListRemoveHead(List: PDLEntry): PDLEntry;
-function DLListRemoveTail(List: PDLEntry): PDLEntry;
+function DLListRemoveHead(List: PDLEntry): PDLEntry; inline;
+function DLListRemoveTail(List: PDLEntry): PDLEntry; inline;
 
-procedure DLListRemoveObj(Entry: PDlEntry);
-procedure DLListRemoveList(List: PDLEntry); //Remove list head ptr from list.
+procedure DLListRemoveObj(Entry: PDlEntry); inline;
+procedure DLListRemoveList(List: PDLEntry); inline;//Remove list head ptr from list.
 
 implementation
 
