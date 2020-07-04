@@ -45,7 +45,8 @@ type
   TQueuedMailer = class
 {$ENDIF}
   private
-    FQuitFlag: boolean;
+    FQuitFlag: boolean; //Disposing, not further work to be scheduled.
+    FDormantFlag: boolean; //Failed mail op. No further work until user explicitly queues mail.
     FWorkItemCount: integer;
     FStateLock: TCriticalSection;
     FMailQueue: TDLProxyThreadQueuePublicLock; //Queue of IdMessages.
@@ -105,6 +106,7 @@ begin
   begin
     FMailQueue.AcquireLock;
     try
+      FDormantFlag := false;
       result := Assigned(FMailQueue.AddTailobj(Mail));
       CondStartWorkItemLocked;
     finally
@@ -129,7 +131,7 @@ procedure TQueuedMailer.CondStartWorkItemLocked;
 var
   WorkItem: TQueuedMailerWorkItem;
 begin
-  if (FWorkItemCount = 0) and not FQuitFlag then
+  if (FWorkItemCount = 0) and not (FQuitFlag or FDormantFlag)then
   begin
     if FMailQueue.Count > 0 then
     begin
@@ -214,7 +216,7 @@ var
   Msg, DbgMsg: TIdMessage;
   i: integer;
 begin
-  if not FQuitFlag then
+  if not (FQuitFlag or FDormantFlag) then
   begin
     MailsLeft := MailsPerSession;
     SMTP := TIDSMTP.Create(nil);
@@ -235,7 +237,7 @@ begin
       SMTP.Host := FServer;
       SMTP.Port := FPort;
       SMTP.Connect;
-      while (not FQuitFlag) and (MailsLeft > 0) do
+      while (not (FQuitFlag or FDormantFlag)) and (MailsLeft > 0) do
       begin
         DbgMsg := nil;
         FMailQueue.AcquireLock;
@@ -287,7 +289,7 @@ begin
         except
           on Exception do ;
         end;
-        FQuitFlag := true;
+        FDormantFlag := true;
       end;
     end;
     SMTP.Free;

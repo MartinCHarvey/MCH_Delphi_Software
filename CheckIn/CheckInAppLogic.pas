@@ -310,7 +310,7 @@ const
   USER_PERIODIC_CHECK_INTERVAL = 0.5;
   USER_REGISTER_NOTIFY_INTERVAL = 2;
   USER_REGISTER_EXPIRE_INTERVAL =  7;
-{$IFDEF DEBUG}
+{$IFDEF DEBUG_INTERVALS}
   USER_CHECKIN_NOTIFY_INTERVAL = 15 * ONE_MINUTE;
   USER_CHECKIN_STOP_INTERVAL = 1;
   USER_INACTIVE_EXPIRE_INTERVAL = 7;
@@ -753,12 +753,12 @@ begin
     with UserRecord do
     begin
       FromUTable(UTable);
-      Soonest := ExpireAfter;
+      Soonest := RightNow + USER_PERIODIC_CHECK_INTERVAL;
       LessThan(NextRegisterRemind);
       LessThan(NextCheckinRemind);
       LessThan(NextContactCheckinRemind);
       LessThan(StopCheckinRemind);
-      LessThan(RightNow + USER_PERIODIC_CHECK_INTERVAL);
+      LessThan(ExpireAfter);
     end;
     DataRec.FieldType := ftDouble;
     DataRec.dVal := Soonest;
