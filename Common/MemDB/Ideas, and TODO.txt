@@ -3,13 +3,19 @@ MemDB: TODO and notes.
 
 Potential improvements:
 
+0. Need a case insensitive comparison for string indexes.
+
 1. Would be nice / a good idea to be able to index on multiple fields.
    Quite likely that current index tag strategy will go in the bin.
+   Existing bitmask is now 64 bits wide, can be replaced with a pointer to some
+   proper index metadata. Deconfliction info will go away.
 
 2. Removing data / metadata conflicts. Transactions need to be able to consist of
    multiple changesets. Auto-commit of intermediate changesets OK....
    but then rollback needs to be able to replay multiple transactions in reverse.
    However, would be good to do to make the DB fully transactional.
+
+   (Changeset pipeline deeper: multi internal transactions make one user transaction).
 
    Given always updating from one consistent state to another, might be able to get
    rid of quite a lot of checking.
@@ -26,4 +32,15 @@ Potential improvements:
    - Sets of changesets then need to be labelled (poss by location / clock),
      and we're then into voting algorithms - consistency constraints etc.
 
+5. MemDB efficiency improvements / memory usage: More compact table rows.
+
+6. Indexing could be improved. The current tag system is not as general as it could be,
+   and we probably want to index off multiple fields.
+
+7. Transaction handling can be improved: nested calls to start transaction - solving that is easy(ish),
+   but more complicatedly, allowing multiple write transactions in progress at the same time,
+   which requires a rethink to the buffering model.
+
+   (Changeset pipeline wider: more than one one A-B buffered changeset in progress
+    at any one time)
 
