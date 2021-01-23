@@ -2,8 +2,8 @@ object Form1: TForm1
   Left = 0
   Top = 0
   Caption = 'Form1'
-  ClientHeight = 480
-  ClientWidth = 640
+  ClientHeight = 340
+  ClientWidth = 419
   FormFactor.Width = 320
   FormFactor.Height = 480
   FormFactor.Devices = [dkDesktop, dkiPhone, dkiPad]
@@ -12,4 +12,28 @@ object Form1: TForm1
   DesignerHeight = 0
   DesignerDeviceName = ''
   DesignerOrientation = 0
+  object TestMatrix: TButton
+    Height = 25.000000000000000000
+    Position.X = 24.000000000000000000
+    Position.Y = 16.000000000000000000
+    TabOrder = 0
+    Text = 'TestMatrix'
+    Width = 80.000000000000000000
+    OnClick = TestMatrixClick
+  end
+  object TestSolver: TButton
+    Height = 25.000000000000000000
+    Position.X = 128.000000000000000000
+    Position.Y = 16.000000000000000000
+    TabOrder = 1
+    Text = 'TestSolver'
+    Width = 80.000000000000000000
+  end
+  object LogMemo: TMemo
+    Height = 281.000000000000000000
+    Position.X = 8.000000000000000000
+    Position.Y = 48.000000000000000000
+    TabOrder = 2
+    Width = 401.000000000000000000
+  end
 end
