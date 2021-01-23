@@ -26,8 +26,9 @@ IN THE SOFTWARE.
 
 interface
 
-//TODO - Potentially optimiseable with respect to classes / records,
-//       allocation, lookaside lists etc. Not yet tho!
+{
+  TODO - Review inlines after profiling.
+}
 
 uses
   DLList,
@@ -39,6 +40,12 @@ uses
 type
   TSparseMatrix = class;
   TMatrixCell = class;
+
+  //NB. GenericUnlinkAndFree functions implemented instead of destructor
+  //just in case you want to implement a cache, in which case,
+  //override AllocCell / FreeCell, AllocHeader / FreeHeader
+  //to call these and quirrel the class away, instead of destructor.
+  //Caching untested....
 
 {$IFDEF USE_TRACKABLES}
   THeader = class(TTrackable)
@@ -98,6 +105,8 @@ type
     property Item: TObject read FItem write FItem;
     property Row: integer read GetRow;
     property Col: integer read GetCol;
+    property RowHeader: THeader read FRowHeader;
+    property ColHeader: THeader read FColHeader;
   end;
 
 {$IFDEF USE_TRACKABLES}
@@ -112,8 +121,8 @@ type
     FOwnsItems: boolean;
     FSearchAlongRows: boolean; //The alternative being searching down columns
   protected
-    function AddHeaderGeneric(HeaderList: PDLEntry): THeader;
-    function InsertHeaderGeneric(Idx: integer; HeaderList: PDLEntry; Reindex: boolean; var IncCount: boolean): THeader;
+    function AddHeaderGeneric(HeaderList: PDLEntry; Row: boolean): THeader;
+    function InsertHeaderGeneric(Idx: integer; HeaderList: PDLEntry; Row: boolean; Reindex: boolean; var IncCount: boolean): THeader;
     function GetHeaderGeneric(Idx: integer; HeaderList: PDLEntry): THeader;
     function NextHeaderGeneric(Header:Theader):THeader; inline;
     function PrevHeaderGeneric(Header:THeader):THeader; inline;
@@ -164,11 +173,14 @@ type
     //Alloc and free functions to enable lookaside lists if you want.
     function AllocCell: TMatrixCell; virtual;
     procedure FreeCell(Cell: TMatrixCell); virtual;
-    function AllocHeader: THeader; virtual;
+    function AllocHeader(Row: boolean): THeader; virtual;
     procedure FreeHeader(Header:THeader);virtual;
 
     property OwnsItems: boolean read FOwnsItems write FOwnsItems;
     property SearchAlongRows: boolean read FSearchAlongRows write FSearchAlongRows;
+
+    property RowCount: integer read FRowCount;
+    property ColCount: integer read FColCount;
   end;
 
 implementation
@@ -269,7 +281,7 @@ begin
   Dec(FColHeader.FEntryCount);
   DLListRemoveObj(@FRowLinks);
   DLListRemoveObj(@FColLinks);
-  if FRowHeader.FMatrix.FOwnsItems then
+  if FRowHeader.FMatrix.OwnsItems then
     FItem.Free;
   FRowHeader := nil;
   FColHeader := nil;
@@ -357,7 +369,7 @@ begin
   inherited;
 end;
 
-function TSparseMatrix.AddHeaderGeneric(HeaderList: PDLEntry): THeader;
+function TSparseMatrix.AddHeaderGeneric(HeaderList: PDLEntry; Row: boolean): THeader;
 var
   PrevIndex: integer;
 begin
@@ -370,7 +382,7 @@ begin
     PrevIndex := THeader(HeaderList.BLink.Owner).FIndex;
 {$ENDIF}
   end;
-  result := AllocHeader;
+  result := AllocHeader(Row);
   with result do
   begin
     FMatrix := self;
@@ -381,7 +393,7 @@ end;
 
 function TSparseMatrix.AddRow: THeader;
 begin
-  result := AddHeaderGeneric(@FRowHeaders);
+  result := AddHeaderGeneric(@FRowHeaders, true);
   if Assigned(result) then
   begin
     result.FIsRow := true;
@@ -391,7 +403,7 @@ end;
 
 function TSparseMatrix.AddColumn: THeader;
 begin
-  result := AddHeaderGeneric(@FColHeaders);
+  result := AddHeaderGeneric(@FColHeaders, false);
   if Assigned(result) then
   begin
     result.FIsRow := false;
@@ -399,7 +411,7 @@ begin
   end;
 end;
 
-function TSparseMatrix.InsertHeaderGeneric(Idx: integer; HeaderList: PDLEntry; Reindex: boolean;  var IncCount: boolean): THeader;
+function TSparseMatrix.InsertHeaderGeneric(Idx: integer; HeaderList: PDLEntry; Row: boolean; Reindex: boolean;  var IncCount: boolean): THeader;
 var
   PrevEntry, NextEntry: PDLEntry;
   PrevHeader, NextHeader: THeader;
@@ -514,7 +526,7 @@ begin
   begin
     //OK, insert new header just after PrevEntry.
     IncCount := true;
-    result := AllocHeader;
+    result := AllocHeader(Row);
     result.FMatrix := self;
     result.FIndex := Idx;
     DLItemInsertAfter(PrevEntry, @result.FHeaderLinks);
@@ -543,10 +555,10 @@ function TSparseMatrix.InsertRowAt(Idx: integer; Reindex: boolean): THeader;
 var
   IncCount: boolean;
 begin
-  result := InsertHeaderGeneric(Idx, @FRowHeaders, Reindex, IncCount);
+  result := InsertHeaderGeneric(Idx, @FRowHeaders, true, Reindex, IncCount);
   if Assigned(result) then
     result.FIsRow := true;
-  if IncCount then  
+  if IncCount then
     Inc(FRowCount);
 end;
 
@@ -554,7 +566,7 @@ function TSparseMatrix.InsertColumnAt(Idx: integer; Reindex: boolean): THeader;
 var
   IncCount: boolean;
 begin
-  result := InsertHeaderGeneric(Idx, @FColHeaders, Reindex, IncCount);
+  result := InsertHeaderGeneric(Idx, @FColHeaders, false, Reindex, IncCount);
   if Assigned(result) then
     result.FIsRow := false;
   if IncCount then  
@@ -1189,7 +1201,7 @@ begin
   Cell.Free;
 end;
 
-function TSparseMatrix.AllocHeader: THeader;
+function TSparseMatrix.AllocHeader(Row: boolean): THeader;
 begin
   result := THeader.Create;
 end;

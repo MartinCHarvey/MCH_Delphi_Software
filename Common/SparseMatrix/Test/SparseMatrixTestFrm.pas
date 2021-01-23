@@ -1,7 +1,5 @@
 unit SparseMatrixTestFrm;
 
-{$C+} //Assertions must be on in this unit.
-
 interface
 
 uses
@@ -49,11 +47,11 @@ type
     procedure TestCellOrderedDelete;
     procedure TestCellArbitraryDelete;
     procedure TestFreeWithCells;
+    procedure TestClearRowColumn;
 
     procedure TestPre;
     procedure TestPost;
     procedure DoTest(Test: TTest; TestName: string);
-    procedure CheckAssertionsOn;
   public
     { Public declarations }
   end;
@@ -65,43 +63,29 @@ implementation
 
 {$R *.fmx}
 
-procedure TTestForm.CheckAssertionsOn;
-var
-  Raised: boolean;
-begin
-  Raised := false;
-  try
-    Assert(false);
-  except
-    on EAssertionFailed do Raised := true;
-  end;
-  if not Raised then
-    raise Exception.Create('Assertions need to be enabled in this unit for testapp to work.');
-end;
-
 procedure TTestForm.TestBtnClick(Sender: TObject);
 var
   iter: integer;
 begin
-  CheckAssertionsOn;
-//  for iter := 0 to MATRIX_SIZE do
-//  begin
-    ResultsMemo.Lines.Clear;
-    DoTest(TestRowColOrderedAdd, 'Row and column ordered addition');
-    DoTest(TestRowColDuplicateAdd, 'Row and column duplicate addition');
-    DoTest(TestRowColArbitraryInsertNoReindex, 'Row and column arbitrary insert, no reindex');
-    DoTest(TestRowColArbitraryInsertReindex, 'Row and col arbitrary insert, reindex');
-    DoTest(TestRowColAddAfterInsert, 'Test add after arbitrary inserts');
-    DoTest(TestRowColDeleteReindex, 'Test row and column delete with reindexing on');
-    DoTest(TestRowColDeleteNoReindex, 'Test row and column delete with reindexing off');
-    DoTest(TestCellOrderedAdd, 'Test cell ordered addition');
-    DoTest(TestCellDuplicateAdd, 'Test cell duplicate addition');
-    DoTest(TestCellArbitraryAdd, 'Test cell arbitrary addition');
-    DoTest(TestMatrixPartiallyFilled, 'Test matrix partially filled');
-    DoTest(TestCellOrderedDelete, 'Test cell ordered delete');
-    DoTest(TestCellArbitraryDelete, 'Test cell arbitrary delete');
-    DoTest(TestFreeWithCells, 'Test free with cells.');
-//  end;
+  ResultsMemo.Lines.Clear;
+{$IFOPT C-}
+  ResultsMemo.Lines.Add('INFO: Turn assertions on for more complete checking');
+{$ENDIF}
+  DoTest(TestRowColOrderedAdd, 'Row and column ordered addition');
+  DoTest(TestRowColDuplicateAdd, 'Row and column duplicate addition');
+  DoTest(TestRowColArbitraryInsertNoReindex, 'Row and column arbitrary insert, no reindex');
+  DoTest(TestRowColArbitraryInsertReindex, 'Row and col arbitrary insert, reindex');
+  DoTest(TestRowColAddAfterInsert, 'Test add after arbitrary inserts');
+  DoTest(TestRowColDeleteReindex, 'Test row and column delete with reindexing on');
+  DoTest(TestRowColDeleteNoReindex, 'Test row and column delete with reindexing off');
+  DoTest(TestCellOrderedAdd, 'Test cell ordered addition');
+  DoTest(TestCellDuplicateAdd, 'Test cell duplicate addition');
+  DoTest(TestCellArbitraryAdd, 'Test cell arbitrary addition');
+  DoTest(TestMatrixPartiallyFilled, 'Test matrix partially filled');
+  DoTest(TestCellOrderedDelete, 'Test cell ordered delete');
+  DoTest(TestCellArbitraryDelete, 'Test cell arbitrary delete');
+  DoTest(TestFreeWithCells, 'Test free with cells.');
+  DoTest(TestClearRowColumn, 'Test clear row and column');
 end;
 
 procedure TTestForm.TestPre;
@@ -766,6 +750,38 @@ begin
     for j := 0 to Pred(MATRIX_SIZE) do
       FTestMatrix.InsertCell(i, j);
   end;
+  TestCellGetAfterSetup;
+end;
+
+procedure TTestForm.TestClearRowColumn;
+
+const
+  ClRowIdx = 15;
+  ClColIdx = 42;
+var
+  i,j: integer;
+begin
+  TestCellGetAfterSetup;
+  for i := 0 to Pred(MATRIX_SIZE) do
+    FTestMatrix.AddRow;
+  for i := 0 to Pred(MATRIX_SIZE) do
+    FTestMatrix.AddColumn;
+  for i := 0 to Pred(MATRIX_SIZE) do
+  begin
+    for j := 0 to Pred(MATRIX_SIZE) do
+        FTestMatrix.InsertCell(i, j);
+  end;
+  FTestMatrix.ClearRow(FTestMatrix.GetRow(ClRowIdx));
+  FTestMatrix.ClearColumn(FTestMatrix.GetColumn(ClColIdx));
+  for i := 0 to Pred(MATRIX_SIZE) do
+  begin
+    for j := 0 to Pred(MATRIX_SIZE) do
+    begin
+      Assert(Assigned(FTestMatrix.GetCell(i,j))
+       = ((i <> ClRowIdx) and (j <> ClColIdx)));
+    end;
+  end;
+  ClearRowColsAfterSetup;
   TestCellGetAfterSetup;
 end;
 
