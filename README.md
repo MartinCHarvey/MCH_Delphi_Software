@@ -13,7 +13,8 @@ Files / Folders:
   - Requires users to check-in online regularly.
   - Sends notifications to nominated contacts if they don't.
 
-- Sudoku: A sudoku solver. Currently very rudimentary, but I have all sorts of plans for tree / state space search, topology, categorization.
+- Sudoku: A sudoku solver.
+  - "Algorithm X" / "DLX" exact cover code in progress.
 
 Common: Common utility code, including:
 
@@ -31,6 +32,8 @@ Common: Common utility code, including:
 - Custom object streaming system.
 - Debug object tracking.
 - Custom threadpool implementation.
+- Sparse Matrices.
+- DLX like "Algorithm X" implementation for the exact cover problem.
 
 Additional testapps and utility code.
 
@@ -42,5 +45,7 @@ Additional testapps and utility code.
 - Threadpool testapp: Common/WorkItems/Test3/
 - Instagram / Twitter importer testapp MMapper/
 - FetchParse library testapp: PageMapper/
+- Sparse Matrix testapp Commmon/SparseMatrix/Test
+- ExactCover testapp Common/ExactCover/Test
 
 Comments / queries to martin_c_harvey@hotmail.com
