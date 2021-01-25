@@ -2,6 +2,8 @@ unit SudokuBoard;
 
 {$DEFINE OPTIMISE_COUNT_BITS}
 {$DEFINE OPTIMISE_SET_HANDLING}
+//{$DEFINE OPTIMISE_BLOCK_SET_MAP} Nope, makes it slower!
+//Testament to good branch prediction on modern CPU's.
 
 {$IFOPT R-}
 {$DEFINE UNROLL_INNER_LOOP}
@@ -38,7 +40,7 @@ type
     procedure CustomMarshal(Sender: TDefaultSSController); override;
     procedure CustomUnmarshal(Sender: TDefaultSSController); override;
 
-    function MapToBlockSetIdx(Row, Col: TSNumber): TSNumber;
+    function MapToBlockSetIdx(Row, Col: TSNumber): TSNumber; inline;
     function GetAllowedSet(Row, Col: TSNumber): TSNumberSet; inline;
 
     function GetOptEntry(Row, Col: TSNumber): TSOptNumber;
@@ -76,7 +78,8 @@ type
     DecisionPointsAllDeadEnd: int64;
     CorrectSolutions: int64;
     DeadEnds: int64;
-
+    StartTime: TDateTime;
+    ElapsedTime: double;
     procedure Zero;
     procedure Sum(OtherStats: TSSolverStats);
   end;
@@ -101,6 +104,8 @@ type
 
   //Simple recursive (and hence hopefully quick), single thread solver.
   TSSingleThreadSolver = class(TSSolver)
+  protected
+    function SolveSingleThreadedInt: boolean;
   public
     //Returns whether any solutions found.
     function SolveSingleThreaded: boolean;
@@ -118,6 +123,9 @@ const
 
 var
   SBoardHeirarchy: THeirarchyInfo;
+{$IFDEF OPTIMISE_BLOCK_SET_MAP}
+  PrecalcMap: array[TSNumber, TSNumber] of TSNumber;
+{$ENDIF}
 
 implementation
 
@@ -215,6 +223,13 @@ end;
 { TSSingleThreadSolver }
 
 function TSSingleThreadSolver.SolveSingleThreaded: boolean;
+begin
+  FStats.StartTime := Now;
+  result := SolveSingleThreadedInt;
+  FStats.ElapsedTime := Now - FStats.StartTime;
+end;
+
+function TSSingleThreadSolver.SolveSingleThreadedInt: boolean;
 var
   NextSet: TSNumberSet;
   AppliedNumber: TSNumber;
@@ -249,13 +264,14 @@ begin
   begin
     if FBoardState.EvolveIfSingular(Row, Col, NextSet) then
     begin
-      result := SolveSingleThreaded;
+      result := SolveSingleThreadedInt;
       FBoardState.ClearEntry(Row, Col);
     end
     else
     begin
       Inc(FStats.DecisionPoints);
       result := false;
+      //TODO - Magical way of pulling out the bottom bit index?
       for AppliedNumber := Low(TSNumber) to High(TSNumber) do
       begin
         if TSNumberIn(NextSet, AppliedNumber) then
@@ -263,11 +279,11 @@ begin
           SetOK := FBoardState.SetEntry(Row, Col, AppliedNumber);
           Assert(SetOK);
 {$IFDEF FIND_JUST_ONE_SOLN}
-          result := SolveSingleThreaded;
+          result := SolveSingleThreadedInt;
           if result then
             break;
 {$ELSE}
-          result := SolveSingleThreaded or result;
+          result := SolveSingleThreadedInt or result;
 {$ENDIF}
           FBoardState.ClearEntry(Row, Col);
         end;
@@ -650,7 +666,17 @@ begin
 end;
 
 
+
+{$IFDEF OPTIMISE_BLOCK_SET_MAP}
 function TSBoardState.MapToBlockSetIdx(Row, Col: TSNumber): TSNumber;
+begin
+  result := PrecalcMap[Row][Col];
+end;
+
+function MapToBlockSetIdxSlow(Row, Col: TSNumber): TSNumber;
+{$ELSE}
+function TSBoardState.MapToBlockSetIdx(Row, Col: TSNumber): TSNumber;
+{$ENDIF}
 label error;
 begin
   case Row of
@@ -687,6 +713,17 @@ error:
   result := 1;
 end;
 
+{$IFDEF OPTIMISE_BLOCK_SET_MAP}
+procedure Precalc;
+var
+  Row, Col: TSNumber;
+begin
+  for Row := Low(Row) to High(Row) do
+    for Col := Low(Col) to High(Col) do
+      PrecalcMap[Row][Col] := MapToBlockSetIdxSlow(Row, Col);
+end;
+{$ENDIF}
+
 procedure TSBoardState.Assign(Source: TObjStreamable);
 var
   Src: TSBoardState;
@@ -703,4 +740,7 @@ initialization
   SBoardHeirarchy := TObjDefaultHeirarchy;
   SetLength(SBoardHeirarchy.MemberClasses, 1);
   SBoardHeirarchy.MemberClasses[0] := TSBoardState;
+{$IFDEF OPTIMISE_BLOCK_SET_MAP}
+  Precalc;
+{$ENDIF}
 end.

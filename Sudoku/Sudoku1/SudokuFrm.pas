@@ -184,7 +184,9 @@ begin
     'DecisionPointsWithSolution: ' + IntToStr(Stats.DecisionPointsWithSolution) + #13 + #10 +
     'DecisionPointsAllDeadEnd: ' + IntToStr(Stats.DecisionPointsAllDeadEnd) + #13 + #10 +
     'CorrectSolutions: ' + IntToStr(Stats.CorrectSolutions) + #13 + #10 +
-    'DeadEnds: ' + IntToStr(Stats.DeadEnds) + #13 + #10;
+    'DeadEnds: ' + IntToStr(Stats.DeadEnds) + #13 + #10 +
+    'Elapsed Time: ' + FloatToStrF(Stats.ElapsedTime * (3600 * 24),
+    TFloatFormat.ffGeneral, 5, 10);
   ShowMessage(S);
 end;
 
