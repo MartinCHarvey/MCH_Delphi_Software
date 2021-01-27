@@ -3,7 +3,14 @@ MemDB: TODO and notes.
 
 Potential improvements:
 
-0. Need a case insensitive comparison for string indexes.
+0: String mem usage. After first item of journal replay,
+    scan all ordered (indexed) lists of strings in tables. Use assignment
+    between equals to remove redundant copies.
+
+1. Need a case insensitive comparison for string indexes.
+
+2. Further parallelisation on DB load. Load all tables etc in parallel,
+   and not just separate indexes in tables.
 
 1. Would be nice / a good idea to be able to index on multiple fields.
    Quite likely that current index tag strategy will go in the bin.

@@ -227,6 +227,7 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
+    ResMemo.Lines.Add('Edge test OK (1)');
   except
     Trans.RollbackAndFree;
     ResMemo.Lines.Add('Edge test failed (1)');
@@ -259,6 +260,7 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
+    ResMemo.Lines.Add('Edge test OK (2)');
   except
     Trans.RollbackAndFree;
     ResMemo.Lines.Add('Edge test failed (2)');
@@ -345,6 +347,7 @@ begin
     finally
       DBAPI.Free;
     end;
+    ResMemo.Lines.Add('Edge test finished');
   finally
     Trans.CommitAndFree;
   end;
@@ -1851,19 +1854,24 @@ var
   Trans: TMemDBTransaction;
 begin
   ResetClick(Sender);
-  for Idx := 0 to Pred(TRANS_LIMIT) do
-  begin
-    Trans := FSession.StartTransaction(amReadWrite);
-    try
-      Trans.CommitAndFree;
-    except
-      on E: Exception do
-      begin
-        Trans.RollbackAndFree;
-        ResMemo.Lines.Add('Many small transactions failed: ' + E.Message);
-        raise;
+  try
+    for Idx := 0 to Pred(TRANS_LIMIT) do
+    begin
+      Trans := FSession.StartTransaction(amReadWrite);
+      try
+        Trans.CommitAndFree;
+      except
+        on E: Exception do
+        begin
+          Trans.RollbackAndFree;
+          raise;
+        end;
       end;
     end;
+    ResMemo.Lines.Add('Many small transactions OK');
+  except
+    on E: Exception do
+      ResMemo.Lines.Add('Many small transactions failed: ' + E.Message);
   end;
 end;
 
