@@ -36,7 +36,6 @@ User interface TODO.
     5. Import tweets into DB and run with mixed DB.
     6. Tweet display, and tweets which are referenced in other timelines (retweets). HTML handling.
     7. List views don’t allow fancy colours, so I have to put detail text in there. Investigate whether suitable replacement.
-    8. Stats on database sizes.
 
 
 More nebulous TODO.

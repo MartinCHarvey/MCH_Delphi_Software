@@ -22,4 +22,3 @@ Bugs to Fix.
     19. (Medium?) Parsers All object creation calls need a set location call after them..
     20. (Low)  Unicode handling is currently wrong. We deal with input streams as ASCII, and then convert the strings. We should deal with unicode code points at the lexer stage for all parsers - theoretically this means we need separate lexers for each encoding scheme, but currently, stick with UTF-8.
     21. MemDB: Some operations require more than one transaction. We need to be able to daisy-chain changesets in a transation and commit and rollback multi-changesets.
-    22. (High): After a long series of operations, on a database with data that goes wayback, GUID keys seem to be inconsistent for some media items. Not clear why. Need more debugging code to find out which set of ID’s have changed.
