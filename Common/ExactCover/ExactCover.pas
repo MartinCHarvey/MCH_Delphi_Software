@@ -139,9 +139,14 @@ type
     //of included rows/cols and how many cells they contain.
     //TODO - If virtual functions / class traverse too slow,
     //then use event handlers instead.
+
+    //TODO - Don't think need these, but keep till sure unnecessary,
+    //and quicker to just scan thru.
+{
     procedure ClientHandleExclude; virtual;
     procedure ClientHandleInclude(InclCellCount: integer); virtual;
     procedure ClientHandleInclCountChange(OldCount, NewCount: integer); virtual;
+}
   public
     constructor Create;
 
@@ -205,8 +210,6 @@ type
     procedure ExcludeAndPush(Header: TExactCoverHeader);
     function PopAndInclude: TExactCoverHeader;
     function PeekTop: TExactCoverHeader; inline;
-    //TODO - Do we need to keep track of how many to push / pop at once?
-    //Do we need to push / pop in bunches of stuff?
 
     function AllocCell: TMatrixCell; override;
     procedure FreeCell(Cell: TMatrixCell); override;
@@ -235,9 +238,11 @@ type
   private
     FPicker: TAbstractPicker;
   protected
+{ TODO - If these not needed, remove TPickedHeader.
     procedure ClientHandleExclude; override;
     procedure ClientHandleInclude(InclCellCount: integer); override;
     procedure ClientHandleInclCountChange(OldCount, NewCount: integer); override;
+}
   end;
 
   TConstraint = class (TPickedHeader)
@@ -273,6 +278,22 @@ type
 
   EExactCoverException = class(Exception);
 
+  TCoverTerminationType =
+   (cttInvalid, //No valid computation performed.
+    cttOKExactCover, //Covered everything exactly.
+    cttOKUnderconstrained, //Covered all constraints, possibs outstanding.
+    cttFailGenerallyOverconstrained, //Not covered all constraints, no possibs left.
+    cttFailSpecificallyOverconstrained //Not covered all constraints, selected constraint cannot be satisfied.
+    //TODO - Any more possible types of termination?
+    );
+
+  TCoverNotifySet = set of TCoverTerminationType;
+
+  TCoverNotifyEvent = procedure(Sender: TObject;
+                                TerminationType: TCoverTerminationType;
+                                var Continue: boolean) of object;
+
+
 {$IFDEF USE_TRACKABLES}
   TExactCoverProblem = class(TTrackable)
 {$ELSE}
@@ -291,6 +312,10 @@ type
     FOnFreePossibility: TOnFreePossibilityEvent;
     FOnFreeConstraint: TOnFreeConstraintEvent;
 
+    FOnCoverNotifyEvent: TCoverNotifyEvent;
+    FGeneralResult: TCoverTerminationType;
+    FCoverNotifySet: TCoverNotifySet;
+
     FConnectivityCurrent: boolean;
     FConnectivityComplete: boolean;
     FPossConsCheck: TPossConstraintMethod;
@@ -303,6 +328,14 @@ type
     procedure DoFreeCell(Cell: TMatrixCell);
     function DoAllocHeader(Row: boolean): THeader;
     procedure DoFreeHeader(Header: THeader);
+
+    function GetTotalPossibilityCount: integer; inline;
+    function GetTotalConstraintCount: integer; inline;
+    function GetIncludedPossibilityCount: integer; inline;
+    function GetIncludedConstraintCount: integer; inline;
+    procedure CreatePickers; virtual;
+    //Returns whether to continue.
+    function DoTerminationHandler(NewTermination: TCoverTerminationType): boolean;
   public
     constructor Create;
     destructor Destroy; override;
@@ -333,13 +366,10 @@ type
     //no poss, and allows addition, else clears and re-scans everything.
     procedure SetupConnectivity(AllowPartialAddition: boolean = false);
 
-
     //Possibilities which have not only been eliminated from matrix, but
     //stacked as part of a partial solution.
     function TopPartialSolutionPossibility: TPossibility; inline;
     function NextPartialSolutionPossibility(Poss: TPossibility): TPossibility; inline;
-
-    //TODO - Iterate remaining constraints not yet satisfied?
 
     //If RunOneAlgX step, then performs AlgX row-column elimination for
     //that possibility, else just elimininates the possibility (no eliminate constraint).
@@ -361,10 +391,13 @@ type
     property OnFreePossibility:TOnFreePossibilityEvent read FOnFreePossibility write FOnFreePossibility;
     property OnFreeConstraint:TOnFreeConstraintEvent read FOnFreeConstraint write FOnFreeConstraint;
     property PartialSolutionStackCount: integer read FPartSolutionStackCount;
-  end;
 
-  //TODO - Opt involving removal of unnecessary virtuals...
-  //Conditional compile if necessary.
+    property TotalPossibilityCount: integer read GetTotalPossibilityCount;
+    property TotalConstraintCount: integer read GetTotalConstraintCount;
+
+    property IncludedPossibilityCount: integer read GetIncludedPossibilityCount;
+    property IncludedConstraintCount: integer read GetIncludedConstraintCount;
+  end;
 
 {$IFDEF USE_TRACKABLES}
   TAbstractPicker = class(TTrackable)
@@ -372,19 +405,20 @@ type
   TAbstractPicker = class
 {$ENDIF}
   private
-    FParentProblem: TExactCoverProblem;
+    FPickingPossibilities: boolean;
   protected
+    FParentProblem: TExactCoverProblem;
   public
-    procedure ExcludeHeader(Header: TPickedHeader); virtual;
-    procedure IncludeHeader(Header: TPickedHeader; InitialCount: integer); virtual;
-    procedure ConstraintCountChange(Header: TPickedHeader; OldCount, NewCount: integer); virtual;
-
     procedure PickerPushNewLevel; virtual;
     procedure PickerPopOldLevel; virtual;
+    //Init no context for columns, init with context for rows.
+    function PickOne(Context: TPickedHeader):TPickedHeader; virtual; abstract;
 
-    function PickOne:TPickedHeader; virtual; abstract;
+    property PickingPossibilities: boolean read FPickingPossibilities write FPickingPossibilities;
   end;
 
+  //TODO - Rethink the row / col pickers again.
+  //We need slighty different strategy when initting for cols and rows.
 
 {$IFDEF USE_TRACKABLES}
   TNaivePickerStackEntry = class(TTrackable)
@@ -396,7 +430,8 @@ type
 {$IFDEF PICKER_STRINGENT_CHECKS}
     FHeadersThisLevel: array of TPickedHeader;
 {$ENDIF}
-    FLastPickedThisLevel: TPickedHeader;
+    FNextToPickThisLevel: TPickedHeader;
+    //Headers setup flag not needed.
   public
     constructor Create;
     destructor Destroy; override;
@@ -408,22 +443,18 @@ type
   TNaivePicker = class (TAbstractPicker)
   private
     FStackHead: TDLEntry;
-    FPickingPossibilities: boolean;
   protected
 {$IFDEF PICKER_STRINGENT_CHECKS}
     procedure CheckHeaderOrderAgrees;
 {$ENDIF}
+  procedure NewStackEntry;
   public
-    procedure ExcludeHeader(Header: TPickedHeader); override;
-    procedure IncludeHeader(Header: TPickedHeader; InitialCount: integer); override;
-    procedure ConstraintCountChange(Header: TPickedHeader; OldCount, NewCount: integer); override;
     procedure PickerPushNewLevel; override;
     procedure PickerPopOldLevel; override;
-    function PickOne:TPickedHeader; override;
+    function PickOne(Context: TPickedHeader):TPickedHeader; override;
 
     constructor Create;
     destructor Destroy; override;
-    property PickingPossibilities: boolean read FPickingPossibilities write FPickingPossibilities;
   end;
 
   // TODO TLeastChoice picker.
@@ -523,11 +554,11 @@ begin
       Inc(M.FIncludedColCount);
       Assert(M.FIncludedColCount <= M.ColCount);
     end;
-    ClientHandleInclude(FInclCellsCount);
+    //ClientHandleInclude(FInclCellsCount);
   end
   else
   begin
-    ClientHandleExclude;
+    //ClientHandleExclude;
     //Remove from header list.
     Assert(not Assigned(FPrevInclSave));
     FPrevInclSave := FInclHeaderLink.BLink;
@@ -581,7 +612,7 @@ begin
       else
         Cell := Cell.NextCellDownColumn as TExactCoverCell
     end;
-    ClientHandleInclude(FInclCellsCount);
+    //ClientHandleInclude(FInclCellsCount);
   end;
 end;
 
@@ -616,8 +647,8 @@ end;
 
 procedure TExactCoverHeader.GenericUnlinkAndFree;
 begin
-  if Included then
-    ClientHandleExclude;
+//  if Included then
+//    ClientHandleExclude;
 
   if not DlItemIsEmpty(@FStackLink) then
   begin
@@ -639,6 +670,7 @@ begin
   Assert(FInclCellsCount = 0);
 end;
 
+{
 procedure TExactCoverHeader.ClientHandleExclude;
 begin
 end;
@@ -650,6 +682,7 @@ end;
 procedure TExactCoverHeader.ClientHandleInclCountChange(OldCount, NewCount: integer);
 begin
 end;
+}
 
 constructor TExactCoverHeader.Create;
 begin
@@ -721,7 +754,7 @@ begin
       FPrevColSave := nil;
       Hdr := (ColHeader as TExactCoverHeader);
       Inc(Hdr.FInclCellsCount);
-      Hdr.ClientHandleInclCountChange(Pred(Hdr.FInclCellsCount), Hdr.FInclCellsCount);
+//      Hdr.ClientHandleInclCountChange(Pred(Hdr.FInclCellsCount), Hdr.FInclCellsCount);
     end
     else
     begin
@@ -730,7 +763,7 @@ begin
       FPrevRowSave := nil;
       Hdr := (RowHeader as TExactCoverHeader);
       Inc(Hdr.FInclCellsCount);
-      Hdr.ClientHandleInclCountChange(Pred(Hdr.FInclCellsCount), Hdr.FInclCellsCount);
+//      Hdr.ClientHandleInclCountChange(Pred(Hdr.FInclCellsCount), Hdr.FInclCellsCount);
     end;
   end
   else
@@ -742,7 +775,7 @@ begin
       DLListRemoveObj(@FInclColLink);
       Hdr := (ColHeader as TExactCoverHeader);
       Dec(Hdr.FInclCellsCount);
-      Hdr.ClientHandleInclCountChange(Succ(Hdr.FInclCellsCount), Hdr.FInclCellsCount);
+//      Hdr.ClientHandleInclCountChange(Succ(Hdr.FInclCellsCount), Hdr.FInclCellsCount);
     end
     else
     begin
@@ -751,7 +784,7 @@ begin
       DLListRemoveObj(@FInclRowLink);
       Hdr := (RowHeader as TExactCoverHeader);
       Dec(Hdr.FInclCellsCount);
-      Hdr.ClientHandleInclCountChange(Succ(Hdr.FInclCellsCount), Hdr.FInclCellsCount);
+//      Hdr.ClientHandleInclCountChange(Succ(Hdr.FInclCellsCount), Hdr.FInclCellsCount);
     end;
   end;
 end;
@@ -1029,6 +1062,7 @@ end;
 
 { TPickedHeader }
 
+{
 procedure TPickedHeader.ClientHandleExclude;
 begin
   FPicker.ExcludeHeader(self);
@@ -1043,6 +1077,7 @@ procedure TPickedHeader.ClientHandleInclCountChange(OldCount, NewCount: integer)
 begin
   FPicker.ConstraintCountChange(self, OldCount, NewCount);
 end;
+}
 
 { TConstraint }
 
@@ -1081,46 +1116,6 @@ begin
 end;
 
 { TExactCoverProblem }
-
-{
-    //Possibilities which have not only been eliminated from matrix, but
-    //stacked as part of a partial solution.
-    function FirstPartialSolutionPossibility: TPossibility;
-    function NextPartialSolutionPossibility: TPossibility;
-
-    //TODO - Iterate remaining constraints not yet satisfied?
-
-    //If RunOneAlgX step, then performs AlgX row-column elimination for
-    //that possibility, else just elimininates the possibility (no eliminate constraint).
-    //May need to do this for "givens" or part-initial solutions.
-    procedure StackSolutionPossibility(Poss: TPossibility; RunOneAlgXStep: boolean = true);
-    function PeekTopSolutionPossibity: TPossibility; //Determine if a "given"
-    function PopTopSolutionPossibility: TPossibility;
-
-    property RowsColsStacked: integer read GetRowsColsStacked;
-    property ConnectivityCurrent: boolean read FConnectivityCurrent;
-    property ConnectivityComplete: boolean read FConnectivityCurrent;
-    property OnPossibilitySatisfiesConstraint: TPossConstraintMethod
-      read FPossConsCheck write FPossConsCheck;
-    property OnAllocateCell: TOnAllocCellEvent read FOnAllocCell write FOnAllocCell;
-    property OnAllocPossibility:TOnAllocPossibilityEvent read FOnAllocPossibility write FOnAllocPossibility;
-    property OnAllocConstraint:TOnAllocConstraintEvent read FOnAllocConstraint write FOnAllocConstraint;
-    property OnFreeCell: TOnFreeCellEvent read FOnFreeCell write FOnFreeCell;
-    property OnFreePossibility:TOnFreePossibilityEvent read FOnFreePossibility write FOnFreePossibility;
-    property OnFreeConstraint:TOnFreeConstraintEvent read FOnFreeConstraint write FOnFreeConstraint;
-    property PartialSolutionStackCount: integer read FPartSolutionStackCount;
-  end;
-}
-
-{
-    FMatrix: TExactCoverMatrix;
-
-    FConnectivityCurrent: boolean;
-    FConnectivityComplete: boolean;
-
-    FPartSolutionStack: TDLEntry;
-    FPartSolutionStackCount: integer;
-}
 
 function TExactCoverProblem.DoAllocCell: TMatrixCell;
 begin
@@ -1185,12 +1180,22 @@ begin
   end;
 end;
 
+procedure TExactCoverProblem.CreatePickers;
+begin
+  FConstraintPicker := TNaivePicker.Create;
+  FConstraintPicker.FPickingPossibilities := false;
+  FPossibilityPicker := TNaivePicker.Create;
+  FPossibilityPicker.FPickingPossibilities := true;
+  FConstraintPicker.FParentProblem := self;
+  FPossibilityPicker.FParentProblem := self;
+end;
 
 constructor TExactCoverProblem.Create;
 begin
   inherited;
   FMatrix := TExactCoverMatrix.Create;
   DLItemInitList(@FPartSolutionStack);
+  CreatePickers;
 end;
 
 destructor TExactCoverProblem.Destroy;
@@ -1205,6 +1210,27 @@ function TExactCoverProblem.GetRowsColsStacked;
 begin
   result := FMatrix.StackedHeadersPushed;
 end;
+
+function TExactCoverProblem.GetTotalPossibilityCount: integer;
+begin
+  result := FMatrix.RowCount;
+end;
+
+function TExactCoverProblem.GetTotalConstraintCount: integer;
+begin
+  result := FMatrix.ColCount;
+end;
+
+function TExactCoverProblem.GetIncludedPossibilityCount: integer;
+begin
+  result := FMatrix.IncludedRowCount;
+end;
+
+function TExactCoverProblem.GetIncludedConstraintCount: integer;
+begin
+  result := FMatrix.IncludedColCount;
+end;
+
 
 function TExactCoverProblem.FirstPossibility: TPossibility;
 begin
@@ -1420,8 +1446,6 @@ begin
   result := Poss.FPartSolutionLink.FLink.Owner as TPossibility;
 end;
 
-//TODO - think about where to put the exceptions in this bit of code. (poss opt?)
-
 procedure TExactCoverProblem.StackSolutionPossibility(Poss: TPossibility; RunOneAlgXStep: boolean = true);
 var
   Cons, NextCons: TConstraint; //Constraints satisfied by row inclusion in poss.
@@ -1593,17 +1617,102 @@ end;
 }
 
 procedure TExactCoverProblem.AlgorithmX;
+var
+  Cons: TConstraint;
+  Poss: TPossibility;
+  Terminate: boolean;
+  Pop: boolean;
 begin
   if (FConnectivityCurrent and FConnectivityComplete) then
   begin
+    Terminate := false;
+    Pop := false;
+    while true do
+    begin
+      //First of all, should we bomb out all the way?
+      if IncludedConstraintCount = 0 then
+      begin
+        if IncludedPossibilityCount = 0 then
+          Terminate := DoTerminationHandler(cttOKExactCover)
+        else
+          Terminate := DoTerminationHandler(cttOKUnderconstrained);
+        Pop := true; //regardless, we have to back up.
+      end;
+      if IncludedPossibilityCount = 0 then
+      begin
+        Terminate := DoTerminationHandler(TCoverTerminationType.cttFailGenerallyOverconstrained);
+        Pop := true;
+      end;
 
+      //Proceed forward...
+      if not Pop then
+      begin
+        //TODO - Arrange so we try going through all possible constraints?
+        //If we can't find possibility that satisfies this constraint,
+        //what's the point of trying any other constraints first?
+
+        //TODO - Revisit pickers after this.
+        Cons := FConstraintPicker.PickOne(nil) as TConstraint; //No context required for cons picker.
+        Assert(Assigned(Cons));
+        //We darn well should be able to pick one, Included constraint count > 0
+        //Repeated calls at this level should give same result. (deterministic, stateless),
+        //TODO - Consider if no progress through various solutions for one constraint,
+        //we try another constraint.
+
+        //TODO - How we arrange these depends on how we want to structure the search tree.
+        //we could encounter the same "path" in a conventional search tree by picking
+        //same combos of (cons, poss) at different levels in our stack here.
+        if Cons.InclCellsCount = 0 then
+        begin
+          //We have possibilities, but none of them seem to remove the constraint we have
+          Terminate := DoTerminationHandler(TCoverTerminationType.cttFailSpecificallyOverconstrained);
+          Pop := true; //And we need to back out.
+        end;
+      end;
+      //Proceed forward...
+      if not Pop then
+      begin
+        Poss := FPossibilityPicker.PickOne(Cons) as TPossibility; //Constraint context required for possib picker.
+        //Repeated calls to iterate through? For the moment, be conservative, assume yes.
+        Pop := not Assigned(Poss);
+      end;
+      //Proceed forward...
+      if not Pop then
+      begin
+        FPossibilityPicker.PickerPushNewLevel;
+        FConstraintPicker.PickerPushNewLevel;
+        StackSolutionPossibility(Poss);
+      end;
+      //Ooops no, back up a level.
+      if Pop then
+      begin
+        //Have to backtrack.
+        if PopTopSolutionPossibility() <> nil then
+        begin
+          FConstraintPicker.PickerPopOldLevel;
+          FPossibilityPicker.PickerPopOldLevel;
+          if not Terminate then
+            Pop := false; //Don't pop next time round, try next poss
+        end
+        else
+          exit; //No more pops to do, finished.
+      end;
+    end;
   end
   else
     raise EExactCoverException.Create(S_CANNOT_SOLVE_UNTIL_CONNECTIVITY_SETUP);
 end;
 
+function TExactCoverProblem.DoTerminationHandler(NewTermination: TCoverTerminationType): boolean;
+begin
+  Assert(false); //TODO - write this.
+  result := true; //yeah, quit.
+end;
+
+
 { TAbstractPicker }
 
+{
 procedure TAbstractPicker.ExcludeHeader(Header: TPickedHeader);
 begin
 end;
@@ -1615,6 +1724,7 @@ end;
 procedure TAbstractPicker.ConstraintCountChange(Header: TPickedHeader; OldCount, NewCount: integer);
 begin
 end;
+}
 
 procedure TAbstractPicker.PickerPushNewLevel;
 begin
@@ -1636,7 +1746,7 @@ destructor TNaivePickerStackEntry.Destroy;
 begin
   Assert(DlItemIsEmpty(@FStackLink));
   //Headers get destroyed.
-  Assert(not Assigned(FLastPickedThisLevel));
+  Assert(not Assigned(FNextToPickThisLevel));
   //TODO - do we need to assert we've tried all possibs or constraints?
 end;
 
@@ -1644,11 +1754,38 @@ end;
 
 {$IFDEF PICKER_STRINGENT_CHECKS}
 procedure TNaivePicker.CheckHeaderOrderAgrees;
+var
+  Entry: TNaivePickerStackEntry;
+  Header: TPickedHeader;
+  Matrix: TExactCoverMatrix;
+  idx: integer;
 begin
-  Assert(false); //TODO - write this.
+  if not DlItemIsEmpty(@FStackHead) then
+  begin
+    Matrix := FParentProblem.FMatrix;
+
+    Entry := FStackHead.FLink.Owner as TNaivePickerStackEntry;
+    //Cross check poss / cons against row / col.
+    if FPickingPossibilities then
+    begin
+      Assert(Length(Entry.FHeadersThisLevel) = FParentProblem.IncludedPossibilityCount);
+      Header := FParentProblem.FMatrix.FirstIncludedRow as TPickedHeader;
+    end
+    else
+    begin
+      Assert(Length(Entry.FHeadersThisLevel) = FParentProblem.IncludedConstraintCount);
+      Header := FParentProblem.FMatrix.FirstIncludedColumn as TPickedHeader;
+    end;
+    for idx := 0 to Pred(Length(Entry.FHeadersThisLevel)) do
+    begin
+      Assert(Entry.FHeadersThisLevel[idx] = Header);
+      Header := Header.NextIncludedHeader as TPickedHeader;
+    end;
+  end;
 end;
 {$ENDIF}
 
+{
 procedure TNaivePicker.ExcludeHeader(Header: TPickedHeader);
 begin //Ignore header notifications
 end;
@@ -1660,8 +1797,9 @@ end;
 procedure TNaivePicker.ConstraintCountChange(Header: TPickedHeader; OldCount, NewCount: integer);
 begin //Ignore header notifications
 end;
+}
 
-procedure TNaivePicker.PickerPushNewLevel;
+procedure TNaivePicker.NewStackEntry;
 var
   NewEntry: TNaivePickerStackEntry;
   Count, Idx: integer;
@@ -1683,6 +1821,7 @@ begin
 {$ENDIF}
     Header := FParentProblem.FMatrix.FirstIncludedColumn as TPickedHeader;
   end;
+  NewEntry.FNextToPickThisLevel := Header;
 {$IFDEF PICKER_STRINGENT_CHECKS}
   SetLength(NewEntry.FHeadersThisLevel, Count);
   Idx := 0;
@@ -1692,7 +1831,18 @@ begin
     Inc(Idx);
     Header := Header.NextIncludedHeader as TPickedHeader;
   end;
+  //No need to check header order agrees.
 {$ENDIF}
+end;
+
+procedure TNaivePicker.PickerPushNewLevel;
+begin
+{$IFDEF PICKER_STRINGENT_CHECKS}
+  //TODO - Check here - matrix inclusions changed? Depends on pop order...
+  CheckHeaderOrderAgrees;
+{$ENDIF}
+  NewStackEntry;
+  //No need to check headers, just set them up.
 end;
 
 procedure TNaivePicker.PickerPopOldLevel;
@@ -1700,29 +1850,52 @@ var
   OldEntry: TNaivePickerStackEntry;
 begin
 {$IFDEF PICKER_STRINGENT_CHECKS}
+  //TODO - Check here - matrix inclusions changed? Depends on pop order...
   CheckHeaderOrderAgrees;
 {$ENDIF}
   OldEntry := DLListRemoveHead(@FStackHead).Owner as TNaivePickerStackEntry;
   Assert(Assigned(OldEntry));
   OldEntry.Free;
-end;
-
-function TNaivePicker.PickOne:TPickedHeader;
-begin
 {$IFDEF PICKER_STRINGENT_CHECKS}
+  //TODO - Check here - matrix inclusions changed? Depends on pop order...
   CheckHeaderOrderAgrees;
 {$ENDIF}
+end;
+
+function TNaivePicker.PickOne(Context: TPickedHeader):TPickedHeader;
+var
+  StackTop: TNaivePickerStackEntry;
+  H: TPickedHeader;
+begin
+  if DlItemIsEmpty(@FStackHead) then
+    NewStackEntry;
+{$IFDEF PICKER_STRINGENT_CHECKS}
+  //TODO - Check here - matrix inclusions changed? Depends on pop order...
+  CheckHeaderOrderAgrees;
+{$ENDIF}
+  StackTop := FStackHead.FLink.Owner as TNaivePickerStackEntry;
+  H := StackTop.FNextToPickThisLevel;
+  result := H;
+  if Assigned(H) then
+  begin
+    if FPickingPossibilities then
+      H := FParentProblem.NextPossibility(H as TPossibility)
+    else
+      H := FParentProblem.NextConstraint(H as TConstraint);
+    StackTop.FNextToPickThisLevel := H;
+  end;
 end;
 
 constructor TNaivePicker.Create;
 begin
   inherited;
-  Assert(false);
+  DLList.DLItemInitList(@FStackHead);
 end;
 
 destructor TNaivePicker.Destroy;
 begin
-  Assert(false);
+  while not DLItemIsEMpty(@FStackHead) do
+    PickerPopOldLevel; //TODO - Considder asserts at free time;
   inherited;
 end;
 
