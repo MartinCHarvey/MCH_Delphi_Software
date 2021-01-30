@@ -28,6 +28,7 @@ object Form1: TForm1
     TabOrder = 1
     Text = 'TestSolver'
     Width = 80.000000000000000000
+    OnClick = TestSolverClick
   end
   object LogMemo: TMemo
     Height = 281.000000000000000000
