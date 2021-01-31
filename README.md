@@ -14,7 +14,7 @@ Files / Folders:
   - Sends notifications to nominated contacts if they don't.
 
 - Sudoku: A sudoku solver.
-  - "Algorithm X" / "DLX" exact cover code in progress.
+  - Simple testapp for Exact cover DLX algorithm. Allows you to load, save, and solve sudoku problems fast.
 
 Common: Common utility code, including:
 
