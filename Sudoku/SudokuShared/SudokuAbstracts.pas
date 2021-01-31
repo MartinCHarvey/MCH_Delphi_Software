@@ -105,6 +105,7 @@ type
     procedure SetInitialConfig(InitialConfig: TSAbstractBoardState); virtual;
     function CreateBoardState: TSAbstractBoardState; virtual; abstract;
   public
+    constructor Create;
     destructor Destroy; override;
     property BoardState: TSAbstractBoardState read FBoardState write SetInitialConfig;
     property UniqueSolution: TSAbstractBoardState read FUniqueSolution;
@@ -256,6 +257,12 @@ end;
 
 
 { TSAbstractSolver }
+
+constructor TSAbstractSolver.Create;
+begin
+  inherited;
+  FSolveMode := ssmFindAll;
+end;
 
 destructor TSAbstractSolver.Destroy;
 begin
