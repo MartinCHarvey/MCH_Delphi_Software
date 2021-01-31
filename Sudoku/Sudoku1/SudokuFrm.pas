@@ -5,8 +5,8 @@ interface
 uses
   System.SysUtils, System.Types, System.UITypes, System.Rtti, System.Classes,
   System.Variants, FMX.Types, FMX.Controls, FMX.Forms, FMX.Dialogs,
-  FMX.StdCtrls, FMX.Layouts, FMX.Grid, SudokuBoard, StreamSysXML, SSAbstracts,
-  SSStreamables;
+  FMX.StdCtrls, FMX.Layouts, FMX.Grid, StreamSysXML, SSAbstracts,
+  SSStreamables, SudokuAbstracts;
 
 type
   TSudokuSimpleForm = class(TForm)
@@ -29,7 +29,7 @@ type
     procedure ClearBtnClick(Sender: TObject);
   private
     { Private declarations }
-    FBoard: TSBoardState;
+    FBoard: TSAbstractBoardState;
     procedure GridFromBoard;
     procedure ShowStats(Stats: TSSolverStats);
   public
@@ -42,6 +42,9 @@ var
 implementation
 
 {$R *.fmx}
+
+uses
+  SudokuStreaming, SudokuBoard;
 
 const
   S_MULTIPLE = 'Multiple next moves from this point, click solve instead.';
@@ -115,7 +118,7 @@ begin
       try
         Obj := SS.ReadStructureFromStream(FS) as TObjStreamable;
         try
-          if Assigned(Obj) and (Obj is TSBoardState) then
+          if Assigned(Obj) and (Obj is TSAbstractBoardState) then
             FBoard.Assign(Obj)
           else
             raise EStreamSystemError.Create(S_NOT_A_VALID_BOARD);
@@ -192,12 +195,12 @@ end;
 
 procedure TSudokuSimpleForm.SolveBtnClick(Sender: TObject);
 var
-  SSolver: TSSingleThreadSolver;
+  SSolver: TSSimpleSolver;
 begin
-  SSolver := TSSingleThreadSolver.Create;
+  SSolver := TSSimpleSolver.Create;
   try
     SSolver.BoardState := FBoard;
-    SSolver.SolveSingleThreaded;
+    SSolver.Solve;
     if Assigned(SSolver.UniqueSolution) then
       FBoard.Assign(SSolver.UniqueSolution)
     else

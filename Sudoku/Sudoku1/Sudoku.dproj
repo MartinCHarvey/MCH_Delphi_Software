@@ -144,6 +144,11 @@
         <DCCReference Include="..\..\Common\Indexed Store\IndexedStore.pas"/>
         <DCCReference Include="..\..\Common\DLList\DLList.pas"/>
         <DCCReference Include="..\..\CoCoDM\Distributable\Frames\CocoBase.pas"/>
+        <DCCReference Include="..\SudokuShared\SudokuAbstracts.pas"/>
+        <DCCReference Include="..\SudokuShared\SudokuStreaming.pas"/>
+        <DCCReference Include="..\SudokuShared\SudokuExactCover.pas"/>
+        <DCCReference Include="..\..\Common\ExactCover\ExactCover.pas"/>
+        <DCCReference Include="..\..\Common\SparseMatrix\SparseMatrix.pas"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>

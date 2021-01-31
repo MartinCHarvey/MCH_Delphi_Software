@@ -16,7 +16,12 @@ uses
   BinaryTree in '..\..\Common\Balanced Tree\BinaryTree.pas',
   IndexedStore in '..\..\Common\Indexed Store\IndexedStore.pas',
   DLList in '..\..\Common\DLList\DLList.pas',
-  CocoBase in '..\..\CoCoDM\Distributable\Frames\CocoBase.pas';
+  CocoBase in '..\..\CoCoDM\Distributable\Frames\CocoBase.pas',
+  SudokuAbstracts in '..\SudokuShared\SudokuAbstracts.pas',
+  SudokuStreaming in '..\SudokuShared\SudokuStreaming.pas',
+  SudokuExactCover in '..\SudokuShared\SudokuExactCover.pas',
+  ExactCover in '..\..\Common\ExactCover\ExactCover.pas',
+  SparseMatrix in '..\..\Common\SparseMatrix\SparseMatrix.pas';
 
 {$R *.res}
 

@@ -19,7 +19,10 @@ type
     FTerminationCounts: array[TCoverTerminationType] of integer;
     procedure CoverNotify1(Sender: TObject;
                                 TerminationType: TCoverTerminationType;
-                                var Continue: boolean);
+                                var Stop: boolean);
+    procedure CoverNotify2(Sender: TObject;
+                                TerminationType: TCoverTerminationType;
+                                var Stop: boolean);
     function CheckSatisfies1(Possibility: TPossibility; Constraint: TConstraint): boolean;
   public
     { Public declarations }
@@ -220,11 +223,20 @@ element from A,B,C,D,E,F.
 
 procedure TForm1.CoverNotify1(Sender: TObject;
                        TerminationType: TCoverTerminationType;
-                       var Continue: boolean);
+                       var Stop: boolean);
 begin
   Inc(FTerminationCounts[TerminationType]);
   //And continue;
 end;
+
+procedure TForm1.CoverNotify2(Sender: TObject;
+                       TerminationType: TCoverTerminationType;
+                       var Stop: boolean);
+begin
+  Inc(FTerminationCounts[TerminationType]);
+  Stop := TerminationType = cttOKExactCover;
+end;
+
 
 function TForm1.CheckSatisfies1(Possibility: TPossibility; Constraint: TConstraint): boolean;
 begin
@@ -265,6 +277,7 @@ end;
 procedure TForm1.TestSolverClick(Sender: TObject);
 var
   Problem: TExactCoverProblem;
+  Possibility: TPossibility;
   idx: integer;
 begin
 {$IFOPT C-}
@@ -295,7 +308,7 @@ begin
     Problem.AlgorithmX;
     Assert(Problem.Solved);
     Assert(FTerminationCounts[cttInvalid] =0);
-    Assert(FTerminationCounts[cttOKExactCover] = 2);
+    Assert(FTerminationCounts[cttOKExactCover] = 2); //explanation for this later...
     Assert(FTerminationCounts[cttOKUnderconstrained] = 0);
   finally
     Problem.Free;
@@ -303,11 +316,81 @@ begin
   LogMemo.Lines.Add('PASS: Basic solve.');
 
   //2. Check Free path when terminated early.
+  Problem := TExactCoverProblem.Create;
+  try
+    Problem.OnPossibilitySatisfiesConstraint := CheckSatisfies1;
+    Problem.CoverNotifySet :=
+      [Low(TCoverTerminationType) .. High(TCoverTerminationType)];
+    Problem.OnCoverNotify := CoverNotify2;
+    ///NB stop after initial solution.
+    for idx := 0 to 6 do
+      Problem.AddPossibility;
+    for idx := 0 to 5 do
+      Problem.AddConstraint;
+    Problem.SetupConnectivity;
+    FillChar(FTerminationCounts, sizeof(FTerminationCounts), 0);
+    Problem.AlgorithmX;
+    Assert(FTerminationCounts[cttInvalid] =0);
+    //Just check we found just one solution
+    Assert(FTerminationCounts[cttOKExactCover] = 1);
+    Assert(FTerminationCounts[cttOKUnderconstrained] = 0);
+  finally
+    Problem.Free;
+  end;
+  LogMemo.Lines.Add('PASS: Free when partly solved.');
 
-  //TODO 3. Check initial placement of givens,
-  //and free path when some solutions pushed.
+  //TODO 3. Check initial placement of givens, free path when initial solutions pushed.
+  Problem := TExactCoverProblem.Create;
+  try
+    Problem.OnPossibilitySatisfiesConstraint := CheckSatisfies1;
+    Problem.CoverNotifySet :=
+      [Low(TCoverTerminationType) .. High(TCoverTerminationType)];
+    Problem.OnCoverNotify := CoverNotify1;
+    for idx := 0 to 6 do
+      Problem.AddPossibility;
+    for idx := 0 to 5 do
+      Problem.AddConstraint;
+    Problem.SetupConnectivity;
+    FillChar(FTerminationCounts, sizeof(FTerminationCounts), 0);
 
-  //TODO 4. Check under and overconstrained problems.
+    //Constrain ourselves to solutions that contain the second possibility.
+    //By doing this, we remove the choice about possibilities 3 and 6,
+    //which means that we only get to the solution once.
+    Possibility := Problem.FirstPossibility;
+    Possibility := Problem.NextPossibility(Possibility);
+    Problem.PushSolutionPossibility(Possibility, true);
+
+    Problem.AlgorithmX;
+    Assert(Problem.Solved);
+    Assert(FTerminationCounts[cttInvalid] =0);
+    Assert(FTerminationCounts[cttOKExactCover] = 1);
+    Assert(FTerminationCounts[cttOKUnderconstrained] = 0);
+    Assert(Problem.PartialSolutionStackCount > 0);
+    Assert(Problem.RowsColsStacked > 0);
+    LogMemo.Lines.Add('PASS: Solve with initial given possibility and free.');
+
+    //Now supply bad initial possibility.
+    Problem.PopTopSolutionPossibility(true);
+    Assert(Problem.PartialSolutionStackCount = 0);
+    Assert(Problem.RowsColsStacked = 0);
+
+    FillChar(FTerminationCounts, sizeof(FTerminationCounts), 0);
+    Possibility := Problem.FirstPossibility;
+    Possibility := Problem.NextPossibility(Possibility);
+    Possibility := Problem.NextPossibility(Possibility);
+    Problem.PushSolutionPossibility(Possibility, true);
+
+    Problem.AlgorithmX;
+    Assert(Problem.Solved); //Doesn't mean it found an exact cover...
+    Assert(FTerminationCounts[cttInvalid] = 0);
+    Assert(FTerminationCounts[cttOKExactCover] = 0);
+    Assert(FTerminationCounts[cttOKUnderconstrained] = 0);
+    Assert(Problem.PartialSolutionStackCount > 0);
+    Assert(Problem.RowsColsStacked > 0);
+    LogMemo.Lines.Add('PASS: No solution with bad initial possibility.');
+  finally
+    Problem.Free;
+  end;
 end;
 
 initialization

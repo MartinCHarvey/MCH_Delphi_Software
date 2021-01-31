@@ -33,7 +33,8 @@ To solve Exact Cover we need to reduce the matrix by removing rows so that
 we end up with a subset of the rows such that each column has exactly one
 entry in it.
 
-As in the an example, let S = {A, B, C, D, E, F} be a collection of subsets of a set X = {1, 2, 3, 4, 5, 6, 7} such that:
+As in the an example, let S = {A, B, C, D, E, F} be a collection of subsets of a
+set X = {1, 2, 3, 4, 5, 6, 7} such that:
 
 A = {1, 4, 7};
 B = {1, 4};
@@ -55,40 +56,6 @@ This is represented in a (sparse) matrix as follows:
 
 For this, we need to select rows 1, 2 and 5, which then contains exactly one
 element from A,B,C,D,E,F.
-
-Application to Sudoku.
-
-This is then simply an application of labelling. For possibilities, instead of
-1,2,3,4,5 we have a possible placement of a number in a row and column:
-
-Row Labels, "possibilities" in our matrix:
-
-Row X, Col Y, constains # Z.
-
-R1C1N1, R1C1N2 ... RX, CY, NZ ... R9C9N9.
-
-Column labels.
-
-Each column is a constraint.
-
-There are four types contraints, each of which should be satisfied exactly once:
-
-Row-Column: Each row column intersection contains one number.
-
-81 constraints, one for each Cell.
-R1C1 = Entry set in RnCn constraint if that row and column contains a number.
-
-Row-Number: Each row contains a particular number.
-
-81 constraints, 9 rows by 9 possible numbers.
-R1#1 = Each entry set in Rn#, constraint if that row contains a particular number.
-
-Column-number: Same as for rows, 81 constraints for that row contains a particular number.
-
-C1#1 = Each entry set in Rn#, constraint if that column contains a particular number.
-
-Block-Number: Like rows and columns, label the boxes (groups of 3x3 cells),
-Constraint satisfied if each boxcontains a particular number.
 
 *)
 
@@ -257,7 +224,7 @@ type
 
   TCoverNotifyEvent = procedure(Sender: TObject;
                                 TerminationType: TCoverTerminationType;
-                                var Continue: boolean) of object;
+                                var Stop: boolean) of object;
 
 
 {$IFDEF USE_TRACKABLES}
@@ -346,6 +313,8 @@ type
     function PopTopSolutionPossibility(OverBacktracks: boolean = false): TPossibility;
     procedure AlgorithmX;
 
+    //Rows/Cols stacked is matrix internal, consider using
+    //"PartialSolutionStackCount" of possibilities included in the solution.
     property RowsColsStacked: integer read GetRowsColsStacked;
     property ConnectivityCurrent: boolean read FConnectivityCurrent;
     property ConnectivityComplete: boolean read FConnectivityCurrent;
@@ -365,6 +334,7 @@ type
     property OnFreeCell: TOnFreeCellEvent read FOnFreeCell write FOnFreeCell;
     property OnFreePossibility:TOnFreePossibilityEvent read FOnFreePossibility write FOnFreePossibility;
     property OnFreeConstraint:TOnFreeConstraintEvent read FOnFreeConstraint write FOnFreeConstraint;
+    //See Top/Next partial solution possibility.
     property PartialSolutionStackCount: integer read FPartSolutionStackCount;
 
     property TotalPossibilityCount: integer read GetTotalPossibilityCount;
@@ -385,7 +355,8 @@ type
   protected
     FParentProblem: TExactCoverProblem;
   public
-    procedure PickerInitLevel; virtual;
+    procedure PickerInitSolve; virtual;
+    procedure PickerFiniSolve; virtual;
     procedure PickerPrePush; virtual;
     procedure PickerPostPush; virtual;
     procedure PickerPrePop; virtual;
@@ -423,7 +394,8 @@ type
     procedure CheckHeaderOrderAgrees;
   procedure NewStackEntry;
   public
-    procedure PickerInitLevel; override;
+    procedure PickerInitSolve; override;
+    procedure PickerFiniSolve; override;
     procedure PickerPrePush; override;
     procedure PickerPostPush; override;
     procedure PickerPrePop; override;
@@ -460,7 +432,8 @@ type
     FPickedStack: array of TExactCoverCell;
     FStackIndex: integer;
   public
-    procedure PickerInitLevel; override;
+    procedure PickerInitSolve; override;
+    procedure PickerFiniSolve; override;
     procedure PickerPostPush; override;
     procedure PickerPostPop; override;
     function PickOne(Context: TExactCoverHeader):TExactCoverHeader; override;
@@ -1051,8 +1024,11 @@ begin
   if not DLItemIsEmpty(@FPartSolutionLink) then
   begin
    DLListRemoveObj(@FPartSolutionLink);
-   Assert((self.Matrix as TExactCoverMatrix).FParentProblem.PartialSolutionStackCount > 0);
-   Dec((Matrix as TExactCoverMatrix).FParentProblem.FPartSolutionStackCount);
+   if Assigned((self.Matrix as TExactCoverMatrix).FParentProblem) then
+   begin
+     Assert((self.Matrix as TExactCoverMatrix).FParentProblem.PartialSolutionStackCount > 0);
+     Dec((Matrix as TExactCoverMatrix).FParentProblem.FPartSolutionStackCount);
+   end;
   end;
   inherited;
 end;
@@ -1136,6 +1112,7 @@ begin
   inherited;
   FCoverNotifySet := [cttOKExactCover];
   FMatrix := TExactCoverMatrix.Create;
+  FMatrix.FParentProblem := self;
   DLItemInitList(@FPartSolutionStack);
   CreatePickers;
 end;
@@ -1531,14 +1508,16 @@ begin
         FSolved := false;
 
       //Pop the possibility which was part of the solution.
-      result := DLListRemoveHead(@FPartSolutionStack).Owner as TPossibility;
+      result := FPartSolutionStack.FLink.Owner as TPossibility;
       Assert(Assigned(result));
-      Dec(FPartSolutionStackCount);
-      //Is thing to be popped a very initial given part of a solution?
       if result.NoBackTrack and not OverBacktracks then
-        result := nil
-      else
+        result := nil;
+
+      if Assigned(result) then
       begin
+        DLListRemoveHead(@FPartSolutionStack);
+        Dec(FPartSolutionStackCount);
+
         OtherPoss := FMatrix.PopAndInclude as TPossibility;
         Assert(OtherPoss = result);
         //Now find the next possibility (maybe nil) that we should stop popping at.
@@ -1547,14 +1526,14 @@ begin
         //until we get to the next partial soln possibility.
         while FMatrix.PeekTop <> OtherPoss do
           FMatrix.PopAndInclude;
-
-        Assert(DlItemIsEmpty(@FPartSolutionStack) = (FPartSolutionStackCount = 0));
-        Assert((FMatrix.StackedHeadersPushed = 0) = (FPartSolutionStackCount = 0));
-        Assert(TopPartialSolutionPossibility = FMatrix.PeekTop);
       end;
     end
     else
       result := nil;
+
+    Assert(DlItemIsEmpty(@FPartSolutionStack) = (FPartSolutionStackCount = 0));
+    Assert((FMatrix.StackedHeadersPushed = 0) = (FPartSolutionStackCount = 0));
+    Assert(TopPartialSolutionPossibility = FMatrix.PeekTop);
   end
   else
     raise EExactCoverException.Create(S_CANNOT_SOLVE_UNTIL_CONNECTIVITY_SETUP);
@@ -1593,8 +1572,8 @@ begin
 
     Terminate := false;
     Pop := false;
-    FPossibilityPicker.PickerInitLevel;
-    FConstraintPicker.PickerInitLevel;
+    FPossibilityPicker.PickerInitSolve;
+    FConstraintPicker.PickerInitSolve;
     while true do
     begin
       //Remove warnings.
@@ -1669,6 +1648,8 @@ begin
         else
         begin
           FSolved := true;
+          FPossibilityPicker.PickerFiniSolve;
+          FConstraintPicker.PickerFiniSolve;
           exit; //No more pops to do, finished.
         end;
       end;
@@ -1696,7 +1677,11 @@ end;
 
 { TAbstractPicker }
 
-procedure TAbstractPicker.PickerInitLevel;
+procedure TAbstractPicker.PickerInitSolve;
+begin
+end;
+
+procedure TAbstractPicker.PickerFiniSolve;
 begin
 end;
 
@@ -1793,10 +1778,25 @@ begin
   //No need to check header order agrees.
 end;
 
-procedure TCheckedPicker.PickerInitLevel;
+procedure TCheckedPicker.PickerInitSolve;
 begin
   if DLItemIsEmpty(@FStackHead) then
     NewStackEntry;
+  inherited;
+end;
+
+procedure TCheckedPicker.PickerFiniSolve;
+var
+  OldEntry: TObject;
+begin
+  //Expect just one item in the stack
+  Assert(not DLItemIsEmpty(@FStackHead));
+  Assert(FStackHead.FLink = FStackHead.BLink);
+
+  OldEntry := DLListRemoveHead(@FStackHead).Owner as TCheckedPickerStackEntry;
+  Assert(Assigned(OldEntry));
+  OldEntry.Free;
+  inherited;
 end;
 
 procedure TCheckedPicker.PickerPrePush;
@@ -1835,7 +1835,7 @@ var
   OldEntry: TObject;
   Count: integer;
 begin
-  Count := 0;
+  //Belt and braces.
   while not DLItemIsEMpty(@FStackHead) do
   begin
     OldEntry := DLListRemoveHead(@FStackHead).Owner as TCheckedPickerStackEntry;
@@ -1843,7 +1843,6 @@ begin
     OldEntry.Free;
     Inc(Count);
   end;
-  Assert(Count = 1);
   inherited;
 end;
 
@@ -1876,11 +1875,18 @@ end;
 { TSimplePossibilityPicker }
 
 
-procedure TSimplePossibilityPicker.PickerInitLevel;
+procedure TSimplePossibilityPicker.PickerInitSolve;
 begin
   Assert(FStackIndex = 0);
   SetLength(FPickedStack, Succ(0));
   Assert(FPickedStack[FStackIndex] = nil);
+  inherited;
+end;
+
+procedure TSimplePossibilityPicker.PickerFiniSolve;
+begin
+  Assert(FStackIndex = 0);
+  SetLength(FPickedStack, 0);
   inherited;
 end;
 
