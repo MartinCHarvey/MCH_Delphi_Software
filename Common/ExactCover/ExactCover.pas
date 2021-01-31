@@ -2,7 +2,7 @@ unit ExactCover;
 
 {
 
-Copyright © 2020 Martin Harvey <martin_c_harvey@hotmail.com>
+Copyright © 2021 Martin Harvey <martin_c_harvey@hotmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the “Software”), to deal in
@@ -61,13 +61,7 @@ element from A,B,C,D,E,F.
 
 interface
 
-{
-  TODO - Review inlines and optimisations after profiling.
-}
-
-{$IFOPT C+}
-{$DEFINE PICKER_STRINGENT_CHECKS}
-{$ENDIF}
+//  TODO - Review inlines and optimisations after profiling.
 
 uses SysUtils, SparseMatrix, Trackables, DLList;
 
@@ -265,8 +259,8 @@ type
 
     function GetTotalPossibilityCount: integer; inline;
     function GetTotalConstraintCount: integer; inline;
-    function GetIncludedPossibilityCount: integer; inline;
-    function GetIncludedConstraintCount: integer; inline;
+    function GetIncludedPossibilityCount: integer;
+    function GetIncludedConstraintCount: integer;
     procedure CreatePickers; virtual;
     //Returns whether to quit.
     function DoTerminationHandler(NewTermination: TCoverTerminationType): boolean;
@@ -357,9 +351,7 @@ type
   public
     procedure PickerInitSolve; virtual;
     procedure PickerFiniSolve; virtual;
-    procedure PickerPrePush; virtual;
     procedure PickerPostPush; virtual;
-    procedure PickerPrePop; virtual;
     procedure PickerPostPop; virtual;
     //Init no context for columns, init with context for rows.
     function PickOne(Context: TExactCoverHeader):TExactCoverHeader; virtual; abstract;
@@ -367,52 +359,9 @@ type
     property PickingPossibilities: boolean read FPickingPossibilities write FPickingPossibilities;
   end;
 
-{$IFDEF PICKER_STRINGENT_CHECKS}
-
-//TODO - Eventually remove all the pre-post / push pop checking for speed.
-
-{$IFDEF USE_TRACKABLES}
-  TCheckedPickerStackEntry = class(TTrackable)
-{$ELSE}
-  TCheckedPickerStackEntry = class
-{$ENDIF}
-  private
-    FStackLink: TDLEntry;
-    FHeadersThisLevel: array of TExactCoverHeader;
-  public
-    constructor Create;
-    destructor Destroy; override;
-  end;
-
-  //Naive picker fairly easily guaranteed to pick all possible
-  //constraints at any particular level.
-  //Naive picker also contains debug checks.
-  TCheckedPicker = class (TAbstractPicker)
-  private
-    FStackHead: TDLEntry;
-  protected
-    procedure CheckHeaderOrderAgrees;
-  procedure NewStackEntry;
-  public
-    procedure PickerInitSolve; override;
-    procedure PickerFiniSolve; override;
-    procedure PickerPrePush; override;
-    procedure PickerPostPush; override;
-    procedure PickerPrePop; override;
-    procedure PickerPostPop; override;
-
-    constructor Create;
-    destructor Destroy; override;
-  end;
-{$ENDIF}
-
 //Pick first or lowest related possibs constraint at each stack level,
 //no iteration required, even if want to iter all possible solutions.
-{$IFDEF PICKER_STRINGENT_CHECKS}
-  TSimpleConstraintPicker = class(TCheckedPicker)
-{$ELSE}
   TSimpleConstraintPicker = class(TAbstractPicker)
-{$ENDIF}
   private
     FPickLowest: boolean;
   public
@@ -423,11 +372,7 @@ type
 
 //Iterate through all possibilities at each stack level,
 //so solver can find one, or all possible solutions.
-{$IFDEF PICKER_STRINGENT_CHECKS}
-  TSimplePossibilityPicker = class(TCheckedPicker)
-{$ELSE}
   TSimplePossibilityPicker = class(TAbstractPicker)
-{$ENDIF}
   private
     FPickedStack: array of TExactCoverCell;
     FStackIndex: integer;
@@ -438,6 +383,15 @@ type
     procedure PickerPostPop; override;
     function PickOne(Context: TExactCoverHeader):TExactCoverHeader; override;
   end;
+
+{
+  N.B Solver with default pickers will not give us all possible solutions
+  in all possible orders, because constraints are deterministically selected
+  in a certain order.
+
+  In order for us to get the same solutions in different orders, we would have
+  to pick the constraints in another order for any particular stats.
+}
 
 
 implementation
@@ -1624,8 +1578,6 @@ begin
       //Proceed forward...
       if not Pop then
       begin
-        FPossibilityPicker.PickerPrePush;
-        FConstraintPicker.PickerPrePush;
         PushSolutionPossibility(Poss);
         FPossibilityPicker.PickerPostPush;
         FConstraintPicker.PickerPostPush;
@@ -1634,10 +1586,6 @@ begin
       if Pop then
       begin
         //Have to backtrack.
-        FPossibilityPicker.PickerPrePop;
-        FConstraintPicker.PickerPrePop;
-        //TODO - For solving sub-problems stop popping
-        //when popping "initially given" parts of the sub-problem.
         if PopTopSolutionPossibility() <> nil then
         begin
           FConstraintPicker.PickerPostPop;
@@ -1685,168 +1633,13 @@ procedure TAbstractPicker.PickerFiniSolve;
 begin
 end;
 
-procedure TAbstractPicker.PickerPrePush;
-begin
-end;
-
 procedure TAbstractPicker.PickerPostPush;
-begin
-end;
-
-procedure TAbstractPicker.PickerPrePop;
 begin
 end;
 
 procedure TAbstractPicker.PickerPostPop;
 begin
 end;
-
-
-{$IFDEF PICKER_STRINGENT_CHECKS}
-
-{ TCheckedPickerStackEntry }
-
-constructor TCheckedPickerStackEntry.Create;
-begin
-  inherited;
-  DLItemInitObj(self, @FStackLink);
-end;
-
-destructor TCheckedPickerStackEntry.Destroy;
-begin
-  Assert(DlItemIsEmpty(@FStackLink));
-  inherited;
-end;
-
-{ TCheckedPicker }
-
-
-procedure TCheckedPicker.CheckHeaderOrderAgrees;
-var
-  Entry: TCheckedPickerStackEntry;
-  Header: TExactCoverHeader;
-  idx: integer;
-begin
-  Assert(not DLItemIsEmpty(@FStackHead));
-
-  Entry := FStackHead.FLink.Owner as TCheckedPickerStackEntry;
-  //Cross check poss / cons against row / col.
-  if FPickingPossibilities then
-  begin
-    Assert(Length(Entry.FHeadersThisLevel) = FParentProblem.IncludedPossibilityCount);
-    Header := FParentProblem.FMatrix.FirstIncludedRow;
-  end
-  else
-  begin
-    Assert(Length(Entry.FHeadersThisLevel) = FParentProblem.IncludedConstraintCount);
-    Header := FParentProblem.FMatrix.FirstIncludedColumn;
-  end;
-  for idx := 0 to Pred(Length(Entry.FHeadersThisLevel)) do
-  begin
-    Assert(Entry.FHeadersThisLevel[idx] = Header);
-    Header := Header.NextIncludedHeader;
-  end;
-end;
-
-
-procedure TCheckedPicker.NewStackEntry;
-var
-  NewEntry: TCheckedPickerStackEntry;
-  Count, Idx: integer;
-  Header: TExactCoverHeader;
-begin
-  NewEntry := TCheckedPickerStackEntry.Create;
-  DLListInsertHead(@FStackHead, @NewEntry.FStackLink);
-  if FPickingPossibilities then
-  begin
-    Count := FParentProblem.FMatrix.IncludedRowCount;
-    Header := FParentProblem.FMatrix.FirstIncludedRow;
-  end
-  else
-  begin
-    Count := FParentProblem.FMatrix.IncludedColCount;
-    Header := FParentProblem.FMatrix.FirstIncludedColumn;
-  end;
-  SetLength(NewEntry.FHeadersThisLevel, Count);
-  Idx := 0;
-  while Idx < Count do
-  begin
-    NewEntry.FHeadersThisLevel[Idx] := Header;
-    Inc(Idx);
-    Header := Header.NextIncludedHeader;
-  end;
-  //No need to check header order agrees.
-end;
-
-procedure TCheckedPicker.PickerInitSolve;
-begin
-  if DLItemIsEmpty(@FStackHead) then
-    NewStackEntry;
-  inherited;
-end;
-
-procedure TCheckedPicker.PickerFiniSolve;
-var
-  OldEntry: TObject;
-begin
-  //Expect just one item in the stack
-  Assert(not DLItemIsEmpty(@FStackHead));
-  Assert(FStackHead.FLink = FStackHead.BLink);
-
-  OldEntry := DLListRemoveHead(@FStackHead).Owner as TCheckedPickerStackEntry;
-  Assert(Assigned(OldEntry));
-  OldEntry.Free;
-  inherited;
-end;
-
-procedure TCheckedPicker.PickerPrePush;
-begin
-  CheckHeaderOrderAgrees;
-end;
-
-procedure TCheckedPicker.PickerPostPush;
-begin
-  NewStackEntry;
-end;
-
-procedure TCheckedPicker.PickerPrePop;
-begin
-  CheckHeaderOrderAgrees;
-end;
-
-procedure TCheckedPicker.PickerPostPop;
-var
-  OldEntry: TObject;
-begin
-  OldEntry := DLListRemoveHead(@FStackHead).Owner as TCheckedPickerStackEntry;
-  Assert(Assigned(OldEntry));
-  OldEntry.Free;
-  CheckHeaderOrderAgrees;
-end;
-
-constructor TCheckedPicker.Create;
-begin
-  inherited;
-  DLList.DLItemInitList(@FStackHead);
-end;
-
-destructor TCheckedPicker.Destroy;
-var
-  OldEntry: TObject;
-  Count: integer;
-begin
-  //Belt and braces.
-  while not DLItemIsEMpty(@FStackHead) do
-  begin
-    OldEntry := DLListRemoveHead(@FStackHead).Owner as TCheckedPickerStackEntry;
-    Assert(Assigned(OldEntry));
-    OldEntry.Free;
-    Inc(Count);
-  end;
-  inherited;
-end;
-
-{$ENDIF}
 
 { TSimpleConstraintPicker }
 
@@ -1896,13 +1689,11 @@ begin
   if Length(FPickedStack) < Succ(FStackIndex) then
     SetLength(FPickedStack, Succ(FStackIndex));
   FPickedStack[FStackIndex] := nil;
-  inherited;
 end;
 
 procedure TSimplePossibilityPicker.PickerPostPop;
 begin
   Dec(FStackIndex);
-  inherited;
 end;
 
 function TSimplePossibilityPicker.PickOne(Context: TExactCoverHeader):TExactCoverHeader;

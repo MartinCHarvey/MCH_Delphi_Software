@@ -1,24 +1,42 @@
 unit SudokuBoard;
 
+{
+
+Copyright © 2020 Martin Harvey <martin_c_harvey@hotmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the “Software”), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.
+
+}
+
 {$DEFINE OPTIMISE_COUNT_BITS}
 {$DEFINE OPTIMISE_SET_HANDLING}
-//{$DEFINE OPTIMISE_BLOCK_SET_MAP} Nope, makes it slower!
-//Testament to good branch prediction on modern CPU's.
 
 {$IFOPT R-}
 {$DEFINE UNROLL_INNER_LOOP}
 {$ENDIF}
 
 {$DEFINE EXPAND_GETALLOWEDSET}
-//{$DEFINE FIND_JUST_ONE_SOLN}
 
 interface
 
 uses
   Classes, SSStreamables, StreamingSystem, SudokuAbstracts;
-
-//TODO - We can carefully unpick this, and make some of it abstract and
-//put both sorts of solver into the one app.
 
 type
   TSBoardState = class(TSAbstractBoardState)
@@ -28,7 +46,6 @@ type
     FColExcludes: TSConstraint;
     FBlockExcludes: TSConstraint;
   protected
-    function MapToBlockSetIdx(Row, Col: TSNumber): TSNumber; inline;
     function GetAllowedSet(Row, Col: TSNumber): TSNumberSet; inline;
 
     function GetOptEntry(Row, Col: TSNumber): TSOptNumber; override;
@@ -58,15 +75,6 @@ type
   end;
 
 
-const
-{$IFDEF OPTIMISE_SET_HANDLING}
-  AllAllowed: TSNumberSet = $3FE;
-  EmptySet: TSNumberSet = 0;
-{$ELSE}
-  AllAllowed: TSNumberSet = [1,2,3,4,5,6,7,8,9];
-  EmptySet: TSNumberSet = [];
-{$ENDIF}
-
 {$IFDEF OPTIMISE_BLOCK_SET_MAP}
 var
   PrecalcMap: array[TSNumber, TSNumber] of TSNumber;
@@ -76,91 +84,6 @@ implementation
 
 uses
   SysUtils, SSAbstracts;
-
-{ Misc util functions }
-
-function TSNumberIn(NSet: TSNumberSet; Number: integer): boolean; inline;
-begin
-{$IFNDEF OPTIMISE_SET_HANDLING}
-  result := Number in NSet;
-{$ELSE}
-  result := (Word(1 shl Number) and NSet) <> 0;
-{$ENDIF}
-end;
-
-function TSSetSub(X, Y: TSNumberSet): TSNumberSet; inline;
-begin
-{$IFNDEF OPTIMISE_SET_HANDLING}
-  result := X - Y;
-{$ELSE}
-  result := X and not Y;
-{$ENDIF}
-end;
-
-function TSSetAdd(X, Y: TSNumberSet): TSNumberSet; inline;
-begin
-{$IFNDEF OPTIMISE_SET_HANDLING}
-  result := X + Y;
-{$ELSE}
-  result := X or Y;
-{$ENDIF}
-end;
-
-function TSSetIndividual(X: integer): TSNumberSet; inline;
-begin
-{$IFNDEF OPTIMISE_SET_HANDLING}
-  result := [X];
-{$ELSE}
-  result := 1 shl X;
-{$ENDIF}
-end;
-
-function CountBits(NSet: TSNumberSet): integer; inline;
-var
-{$IFDEF OPTIMISE_COUNT_BITS}
-  C: WORD;
-{$ELSE}
-  i: TSNumber;
-{$ENDIF}
-begin
-  result := 0;
-{$IFDEF OPTIMISE_COUNT_BITS}
-  Assert(Sizeof(NSet) = sizeof(Word));
-{$IFDEF OPTIMISE_SET_HANDLING}
-  C := NSet;
-{$ELSE}
-  C := PWord(@NSet)^;
-{$ENDIF}
-  while C <> 0 do
-  begin
-    C := C and (C-1);
-    Inc(Result);
-  end;
-{$ELSE}
-  if NSet <> EmptySet then
-  begin
-    for i := Low(i) to High(i) do
-    begin
-      if TSNumberIn(NSet,i) then
-        Inc(result);
-    end;
-  end;
-{$ENDIF}
-end;
-
-function FindSetBit(NSet: TSNumberSet): TSNumber;
-var
-  N: TSNumber;
-begin
-  result := Low(N);
-  Assert(CountBits(NSet) = 1);
-  for N := Low(TSNumber) to High(TSNumber) do
-    if TSNumberIn(NSet, N) then
-    begin
-      result := N;
-      exit;
-    end;
-end;
 
 { TSSimpleSolver }
 
@@ -222,13 +145,17 @@ begin
           Assert(FBoardState is TSBoardState);
           SetOK := TSBoardState(FBoardState).SetEntry(Row, Col, AppliedNumber);
           Assert(SetOK);
-{$IFDEF FIND_JUST_ONE_SOLN}
-          result := SolveSingleThreadedInt;
-          if result then
-            break;
-{$ELSE}
-          result := SolveSingleThreadedInt or result;
-{$ENDIF}
+          case FSolveMode of
+            ssmFindOne:
+            begin
+              result := SolveSingleThreadedInt;
+              if result then
+                break; //Out of loop, not case.
+            end;
+            ssmFindAll: result := SolveSingleThreadedInt or result;
+          else
+            Assert(false);
+          end;
           Assert(FBoardState is TSBoardState);
           TSBoardState(FBoardState).ClearEntry(Row, Col);
         end;
@@ -475,67 +402,4 @@ begin
   end;
 end;
 
-
-
-{$IFDEF OPTIMISE_BLOCK_SET_MAP}
-function TSBoardState.MapToBlockSetIdx(Row, Col: TSNumber): TSNumber;
-begin
-  result := PrecalcMap[Row][Col];
-end;
-
-function MapToBlockSetIdxSlow(Row, Col: TSNumber): TSNumber;
-{$ELSE}
-function TSBoardState.MapToBlockSetIdx(Row, Col: TSNumber): TSNumber;
-{$ENDIF}
-label error;
-begin
-  case Row of
-    1,2,3:
-      case Col of
-        1,2,3: result := 1;
-        4,5,6: result := 2;
-        7,8,9: result := 3;
-      else
-        goto error;
-      end;
-    4,5,6:
-      case Col of
-        1,2,3: result := 4;
-        4,5,6: result := 5;
-        7,8,9: result := 6;
-      else
-        goto error;
-      end;
-    7,8,9:
-      case Col of
-        1,2,3: result := 7;
-        4,5,6: result := 8;
-        7,8,9: result := 9;
-      else
-        goto error;
-      end;
-    else
-      goto error;
-  end;
-  exit;
-error:
-  Assert(false);
-  result := 1;
-end;
-
-{$IFDEF OPTIMISE_BLOCK_SET_MAP}
-procedure Precalc;
-var
-  Row, Col: TSNumber;
-begin
-  for Row := Low(Row) to High(Row) do
-    for Col := Low(Col) to High(Col) do
-      PrecalcMap[Row][Col] := MapToBlockSetIdxSlow(Row, Col);
-end;
-{$ENDIF}
-
-initialization
-{$IFDEF OPTIMISE_BLOCK_SET_MAP}
-  Precalc;
-{$ENDIF}
 end.
