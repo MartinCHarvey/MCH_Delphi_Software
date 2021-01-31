@@ -1,5 +1,29 @@
 unit SudokuBoard;
 
+{
+
+Copyright © 2020 Martin Harvey <martin_c_harvey@hotmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the “Software”), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.
+
+}
+
 {$DEFINE OPTIMISE_COUNT_BITS}
 {$DEFINE OPTIMISE_SET_HANDLING}
 
@@ -8,213 +32,69 @@ unit SudokuBoard;
 {$ENDIF}
 
 {$DEFINE EXPAND_GETALLOWEDSET}
-//{$DEFINE FIND_JUST_ONE_SOLN}
 
 interface
 
 uses
-  Classes, SSStreamables, StreamingSystem;
+  Classes, SSStreamables, StreamingSystem, SudokuAbstracts;
 
 type
-  TSNumber = 1..9;
-{$IFDEF OPTIMISE_SET_HANDLING}
-  TSNumberSet = type WORD;
-{$ELSE}
-  TSNumberSet = set of TSNumber;
-{$ENDIF}
-  TSConstraint = array[TSNumber] of TSNumberSet;
-
-  TSOptNumber = 0..9;
-  TSRow = array[TSNumber] of TSOptNumber;
-  TSBoard = array[TSNumber] of TSRow;
-
-  TSBoardState = class(TObjStreamable)
+  TSBoardState = class(TSAbstractBoardState)
   private
     FBoard: TSBoard;
     FRowExcludes: TSConstraint;
     FColExcludes: TSConstraint;
     FBlockExcludes: TSConstraint;
   protected
-    procedure CustomMarshal(Sender: TDefaultSSController); override;
-    procedure CustomUnmarshal(Sender: TDefaultSSController); override;
-
-    function MapToBlockSetIdx(Row, Col: TSNumber): TSNumber;
     function GetAllowedSet(Row, Col: TSNumber): TSNumberSet; inline;
 
-    function GetOptEntry(Row, Col: TSNumber): TSOptNumber;
-    procedure SetOptEntry(Row, Col: TSNumber; Entry: TSOptNumber);
-    procedure SetOptEntryInt(Row, Col: TSNumber; Entry: TSOptNumber; Check: boolean = false);
+    function GetOptEntry(Row, Col: TSNumber): TSOptNumber; override;
 
-    function SetEntry(Row, Col, Entry: TSNumber): boolean;
-    procedure ClearEntry(Row, Col: TSNumber);
+    function SetEntry(Row, Col, Entry: TSNumber): boolean; override;
+    procedure ClearEntry(Row, Col: TSNumber); override;
 
-    function GetComplete: boolean;
-    function GetProceedable: boolean;
+    function GetComplete: boolean; override;
+    function GetProceedable: boolean; override;
   public
-    procedure Assign(Source: TObjStreamable); override;
     //Find the minimally constrained position for a next move,
     //or return empty set if there is none.
-    function FindNextMove(var Row, Col: TSNumber): TSNumberSet;
+    function FindNextMove(var Row, Col: TSNumber): TSNumberSet; override;
 
-    function EvolveIfSingular(Row, Col: TSNumber; NSet: TSNumberSet): boolean;
-    function GenChildTree(Row, Col: TSNumber; NSet: TSNumberSet): TList;
-    procedure Clear;
-
-    //TODO - Slow streaming functions involving stream system
-    //TODO - Fast streaming functions to and from little strings
-    // (for bulk / space-intensive) operations.
-
-    property Entries[Row, Col: TSNumber]: TSOptNumber read GetOptEntry write SetOptEntry; default;
-    property Complete: boolean read GetComplete;
-    property Proceedable: boolean read GetProceedable;
-  end;
-
-  TSSolverStats = class
-  public
-    DecisionPoints: int64;
-    DecisionPointsWithSolution: int64;
-    DecisionPointsAllDeadEnd: int64;
-    CorrectSolutions: int64;
-    DeadEnds: int64;
-
-    procedure Zero;
-    procedure Sum(OtherStats: TSSolverStats);
-  end;
-
-{$IFDEF USE_TRACKABLES}
-  TSSolver = class(TTrackable)
-{$ELSE}
-  TSSolver = class
-{$ENDIF}
-  private
-  protected
-    FBoardState: TSBoardState;
-    FUniqueSolution: TSBoardState;
-    FStats: TSSolverStats;
-    procedure SetInitialConfig(InitialConfig: TSBoardState); virtual;
-  public
-    destructor Destroy; override;
-    property BoardState: TSBoardState read FBoardState write SetInitialConfig;
-    property UniqueSolution: TSBoardState read FUniqueSolution;
-    property Stats: TSSolverStats read FStats;
+    function EvolveIfSingular(Row, Col: TSNumber; NSet: TSNumberSet): boolean; override;
+    procedure Clear; override;
   end;
 
   //Simple recursive (and hence hopefully quick), single thread solver.
-  TSSingleThreadSolver = class(TSSolver)
+  TSSimpleSolver = class(TSAbstractSolver)
+  protected
+    function SolveSingleThreadedInt: boolean;
+    function CreateBoardState: TSAbstractBoardState; override;
   public
     //Returns whether any solutions found.
-    function SolveSingleThreaded: boolean;
+    function Solve: boolean; override;
   end;
 
 
-const
-{$IFDEF OPTIMISE_SET_HANDLING}
-  AllAllowed: TSNumberSet = $3FE;
-  EmptySet: TSNumberSet = 0;
-{$ELSE}
-  AllAllowed: TSNumberSet = [1,2,3,4,5,6,7,8,9];
-  EmptySet: TSNumberSet = [];
-{$ENDIF}
-
+{$IFDEF OPTIMISE_BLOCK_SET_MAP}
 var
-  SBoardHeirarchy: THeirarchyInfo;
+  PrecalcMap: array[TSNumber, TSNumber] of TSNumber;
+{$ENDIF}
 
 implementation
 
 uses
   SysUtils, SSAbstracts;
 
-const
-  S_INVALID_CONFIGURATION = 'Unstream board: Invalid configuration.';
+{ TSSimpleSolver }
 
-{ Misc util functions }
-
-function TSNumberIn(NSet: TSNumberSet; Number: integer): boolean; inline;
+function TSSimpleSolver.Solve: boolean;
 begin
-{$IFNDEF OPTIMISE_SET_HANDLING}
-  result := Number in NSet;
-{$ELSE}
-  result := (Word(1 shl Number) and NSet) <> 0;
-{$ENDIF}
+  FStats.StartTime := Now;
+  result := SolveSingleThreadedInt;
+  FStats.ElapsedTime := Now - FStats.StartTime;
 end;
 
-function TSSetSub(X, Y: TSNumberSet): TSNumberSet; inline;
-begin
-{$IFNDEF OPTIMISE_SET_HANDLING}
-  result := X - Y;
-{$ELSE}
-  result := X and not Y;
-{$ENDIF}
-end;
-
-function TSSetAdd(X, Y: TSNumberSet): TSNumberSet; inline;
-begin
-{$IFNDEF OPTIMISE_SET_HANDLING}
-  result := X + Y;
-{$ELSE}
-  result := X or Y;
-{$ENDIF}
-end;
-
-function TSSetIndividual(X: integer): TSNumberSet; inline;
-begin
-{$IFNDEF OPTIMISE_SET_HANDLING}
-  result := [X];
-{$ELSE}
-  result := 1 shl X;
-{$ENDIF}
-end;
-
-function CountBits(NSet: TSNumberSet): integer; inline;
-var
-{$IFDEF OPTIMISE_COUNT_BITS}
-  C: WORD;
-{$ELSE}
-  i: TSNumber;
-{$ENDIF}
-begin
-  result := 0;
-{$IFDEF OPTIMISE_COUNT_BITS}
-  Assert(Sizeof(NSet) = sizeof(Word));
-{$IFDEF OPTIMISE_SET_HANDLING}
-  C := NSet;
-{$ELSE}
-  C := PWord(@NSet)^;
-{$ENDIF}
-  while C <> 0 do
-  begin
-    C := C and (C-1);
-    Inc(Result);
-  end;
-{$ELSE}
-  if NSet <> EmptySet then
-  begin
-    for i := Low(i) to High(i) do
-    begin
-      if TSNumberIn(NSet,i) then
-        Inc(result);
-    end;
-  end;
-{$ENDIF}
-end;
-
-function FindSetBit(NSet: TSNumberSet): TSNumber;
-var
-  N: TSNumber;
-begin
-  result := Low(N);
-  Assert(CountBits(NSet) = 1);
-  for N := Low(TSNumber) to High(TSNumber) do
-    if TSNumberIn(NSet, N) then
-    begin
-      result := N;
-      exit;
-    end;
-end;
-
-{ TSSingleThreadSolver }
-
-function TSSingleThreadSolver.SolveSingleThreaded: boolean;
+function TSSimpleSolver.SolveSingleThreadedInt: boolean;
 var
   NextSet: TSNumberSet;
   AppliedNumber: TSNumber;
@@ -232,7 +112,7 @@ begin
         1:
         begin
           if not Assigned(FUniqueSolution) then
-            FUniqueSolution := TSBoardState.Create;
+            FUniqueSolution := CreateBoardState;
           FUniqueSolution.Assign(FBoardState);
         end;
         2:
@@ -249,27 +129,35 @@ begin
   begin
     if FBoardState.EvolveIfSingular(Row, Col, NextSet) then
     begin
-      result := SolveSingleThreaded;
-      FBoardState.ClearEntry(Row, Col);
+      result := SolveSingleThreadedInt;
+      Assert(FBoardState is TSBoardState);
+      TSBoardState(FBoardState).ClearEntry(Row, Col);
     end
     else
     begin
       Inc(FStats.DecisionPoints);
       result := false;
+      //TODO - Magical way of pulling out the bottom bit index?
       for AppliedNumber := Low(TSNumber) to High(TSNumber) do
       begin
         if TSNumberIn(NextSet, AppliedNumber) then
         begin
-          SetOK := FBoardState.SetEntry(Row, Col, AppliedNumber);
+          Assert(FBoardState is TSBoardState);
+          SetOK := TSBoardState(FBoardState).SetEntry(Row, Col, AppliedNumber);
           Assert(SetOK);
-{$IFDEF FIND_JUST_ONE_SOLN}
-          result := SolveSingleThreaded;
-          if result then
-            break;
-{$ELSE}
-          result := SolveSingleThreaded or result;
-{$ENDIF}
-          FBoardState.ClearEntry(Row, Col);
+          case FSolveMode of
+            ssmFindOne:
+            begin
+              result := SolveSingleThreadedInt;
+              if result then
+                break; //Out of loop, not case.
+            end;
+            ssmFindAll: result := SolveSingleThreadedInt or result;
+          else
+            Assert(false);
+          end;
+          Assert(FBoardState is TSBoardState);
+          TSBoardState(FBoardState).ClearEntry(Row, Col);
         end;
       end;
       if result then
@@ -280,106 +168,13 @@ begin
   end;
 end;
 
-{ TSSolver }
-
-destructor TSSolver.Destroy;
+function TSSimpleSolver.CreateBoardState: TSAbstractBoardState;
 begin
-  FBoardState.Free;
-  FUniqueSolution.Free;
-  FStats.Free;
-  inherited;
+  result := TSBoardState.Create;
 end;
 
-procedure TSSolver.SetInitialConfig(InitialConfig: TSBoardState);
-begin
-  if not Assigned(FBoardState) then
-    FBoardState := TSBoardState.Create;
-  FBoardState.Assign(InitialConfig);
-  FUniqueSolution.Free;
-  FUniqueSolution := nil;
-  if not Assigned(FStats) then
-    FStats := TSSolverStats.Create;
-  FStats.Zero;
-end;
 
-{ TSSolverStats }
-
-procedure TSSolverStats.Zero;
-begin
-  DecisionPoints := 0;
-  DecisionPointsWithSolution := 0;
-  DecisionPointsAllDeadEnd := 0;
-  CorrectSolutions := 0;
-  DeadEnds := 0;
-end;
-
-procedure TSSolverStats.Sum(OtherStats: TSSolverStats);
-begin
-  Inc(DecisionPoints, OtherStats.DecisionPoints);
-  Inc(DecisionPointsWithSolution, OtherStats.DecisionPointsWithSolution);
-  Inc(DecisionPointsAllDeadEnd, OtherStats.DecisionPointsAllDeadEnd);
-  Inc(CorrectSolutions, OtherStats.CorrectSolutions);
-  Inc(DeadEnds, OtherStats.DeadEnds);
-end;
-
-{ TSBoardState}
-
-procedure TSBoardState.CustomMarshal(Sender: TDefaultSSController);
-var
-  Row, Col: TSNumber;
-  ArrayNum: integer;
-begin
-  Sender.StreamArrayStart('Rows');
-  ArrayNum := 0;
-  for Row := Low(TSNumber) to High(TSNumber) do
-  begin
-    Sender.StreamArrayStart('');
-    for Col := Low(TSNumber) to High(TSNumber) do
-      Sender.StreamUByte('', FBoard[Row, Col]);
-    Sender.StreamArrayEnd(IntToStr(ArrayNum));
-    Inc(ArrayNum);
-  end;
-  Sender.StreamArrayEnd('Rows');
-end;
-
-procedure TSBoardState.CustomUnmarshal(Sender: TDefaultSSController);
-var
-  Row, Col: TSNumber;
-  BVal: Byte;
-  Count: integer;
-  ArrayNum: integer;
-begin
-  //Clear the board.
-  for Row := Low(TSNumber) to High(TSNumber) do
-    for Col := Low(TSNumber) to High(TSNumber) do
-      Entries[Row, Col] := 0;
-
-  Sender.UnStreamArrayStart('Rows', Count);
-  if Count <> Succ(High(TSNumber) - Low(TSNumber)) then
-    raise EStreamSystemError.Create(S_INVALID_CONFIGURATION);
-  ArrayNum := 0;
-  for Row := Low(TSNumber) to High(TSNumber) do
-  begin
-    Sender.UnStreamArrayStart('', Count);
-    if Count <> Succ(High(TSNumber) - Low(TSNumber)) then
-      raise EStreamSystemError.Create(S_INVALID_CONFIGURATION);
-    for Col := Low(TSNumber) to High(TSNumber) do
-    begin
-      if not Sender.UnStreamUByte('', BVal) then
-        raise EStreamSystemError.Create(S_INVALID_CONFIGURATION);
-      if (BVal > High(TSOptNumber)) then
-        raise EStreamSystemError.Create(S_INVALID_CONFIGURATION);
-      if BVal <> 0 then
-      begin
-        if not SetEntry(Row, Col, BVal) then
-          raise EStreamSystemError.Create(S_INVALID_CONFIGURATION);
-      end;
-    end;
-    Sender.UnStreamArrayEnd(IntToStr(ArrayNum));
-    Inc(ArrayNum);
-  end;
-  Sender.UnStreamArrayEnd('Rows');
-end;
+{ TSBoardState }
 
 
 function TSBoardState.GetComplete: boolean;
@@ -418,30 +213,6 @@ begin
   end;
 end;
 
-function TSBoardState.GenChildTree(Row, Col: TSNumber; NSet: TSNumberSet): TList;
-var
-  N: TSNumber;
-  NewBoard: TSBoardState;
-  SetOK: boolean;
-begin
-  result := nil;
-  for N := Low(TSNumber) to High(TSNumber) do
-  begin
-    if TSNumberIn(NSet, N) then
-    begin
-      if not Assigned(result) then
-        result := TList.Create;
-      NewBoard := TSBoardState.Create;
-      NewBoard.Assign(self);
-      SetOK := NewBoard.SetEntry(Row, Col, N);
-      Assert(SetOK);
-      result.Add(NewBoard);
-    end;
-  end;
-end;
-
-//TODO - Possibly a quicker way to do this iterating through
-//combinations of constraint sets, doing only non-full rows/cols/blocks
 function TSBoardState.FindNextMove(var Row, Col: TSNumber): TSNumberSet;
 var
   LRow, LCol: TSNumber;
@@ -566,24 +337,6 @@ begin
   result := FBoard[Row][Col];
 end;
 
-procedure TSBoardState.SetOptEntry(Row, Col: TSNumber; Entry: TSOptNumber);
-begin
-  SetOptEntryInt(Row, Col, Entry);
-end;
-
-procedure TSBoardState.SetOptEntryInt(Row, Col: TSNumber; Entry: TSOptNumber; Check: boolean = false);
-var
-  SetOK: boolean;
-begin
-  if Entry = 0 then
-    ClearEntry(Row, Col)
-  else
-  begin
-    SetOK := SetEntry(Row, Col, Entry);
-    Assert((not Check) or SetOk);
-  end;
-end;
-
 function TSBoardState.SetEntry(Row, Col, Entry: TSNumber): boolean;
 var
   OldEntry: TSOptNumber;
@@ -649,58 +402,4 @@ begin
   end;
 end;
 
-
-function TSBoardState.MapToBlockSetIdx(Row, Col: TSNumber): TSNumber;
-label error;
-begin
-  case Row of
-    1,2,3:
-      case Col of
-        1,2,3: result := 1;
-        4,5,6: result := 2;
-        7,8,9: result := 3;
-      else
-        goto error;
-      end;
-    4,5,6:
-      case Col of
-        1,2,3: result := 4;
-        4,5,6: result := 5;
-        7,8,9: result := 6;
-      else
-        goto error;
-      end;
-    7,8,9:
-      case Col of
-        1,2,3: result := 7;
-        4,5,6: result := 8;
-        7,8,9: result := 9;
-      else
-        goto error;
-      end;
-    else
-      goto error;
-  end;
-  exit;
-error:
-  Assert(false);
-  result := 1;
-end;
-
-procedure TSBoardState.Assign(Source: TObjStreamable);
-var
-  Src: TSBoardState;
-begin
-  Assert(Assigned(Source) and (Source is TSBoardState));
-  Src := TSBoardState(Source);
-  FBoard := Src.FBoard;
-  FRowExcludes := Src.FRowExcludes;
-  FColExcludes := Src.FColExcludes;
-  FBlockExcludes := Src.FBlockExcludes;
-end;
-
-initialization
-  SBoardHeirarchy := TObjDefaultHeirarchy;
-  SetLength(SBoardHeirarchy.MemberClasses, 1);
-  SBoardHeirarchy.MemberClasses[0] := TSBoardState;
 end.

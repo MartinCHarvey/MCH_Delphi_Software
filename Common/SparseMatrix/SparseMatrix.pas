@@ -2,7 +2,7 @@ unit SparseMatrix;
 
 {
 
-Copyright © 2020 Martin Harvey <martin_c_harvey@hotmail.com>
+Copyright © 2021 Martin Harvey <martin_c_harvey@hotmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the “Software”), to deal in
@@ -26,9 +26,7 @@ IN THE SOFTWARE.
 
 interface
 
-{
-  TODO - Review inlines after profiling.
-}
+//  TODO - Review inlines after profiling.
 
 uses
   DLList,

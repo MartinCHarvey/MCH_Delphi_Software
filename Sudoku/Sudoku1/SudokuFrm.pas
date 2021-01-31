@@ -1,12 +1,35 @@
 unit SudokuFrm;
+{
+
+Copyright © 2020 Martin Harvey <martin_c_harvey@hotmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the “Software”), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.
+
+}
 
 interface
 
 uses
   System.SysUtils, System.Types, System.UITypes, System.Rtti, System.Classes,
   System.Variants, FMX.Types, FMX.Controls, FMX.Forms, FMX.Dialogs,
-  FMX.StdCtrls, FMX.Layouts, FMX.Grid, SudokuBoard, StreamSysXML, SSAbstracts,
-  SSStreamables;
+  FMX.StdCtrls, FMX.Layouts, FMX.Grid, StreamSysXML, SSAbstracts,
+  SSStreamables, SudokuAbstracts, SudokuExactCover;
 
 type
   TSudokuSimpleForm = class(TForm)
@@ -19,6 +42,9 @@ type
     OpenDialog: TOpenDialog;
     SaveDialog: TSaveDialog;
     ClearBtn: TButton;
+    BottomLayout: TLayout;
+    SimpleSolver: TRadioButton;
+    DLXSolver: TRadioButton;
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
     procedure GridEditingDone(Sender: TObject; const Col, Row: Integer);
@@ -29,7 +55,7 @@ type
     procedure ClearBtnClick(Sender: TObject);
   private
     { Private declarations }
-    FBoard: TSBoardState;
+    FBoard: TSAbstractBoardState;
     procedure GridFromBoard;
     procedure ShowStats(Stats: TSSolverStats);
   public
@@ -42,6 +68,9 @@ var
 implementation
 
 {$R *.fmx}
+
+uses
+  SudokuStreaming, SudokuBoard;
 
 const
   S_MULTIPLE = 'Multiple next moves from this point, click solve instead.';
@@ -115,7 +144,7 @@ begin
       try
         Obj := SS.ReadStructureFromStream(FS) as TObjStreamable;
         try
-          if Assigned(Obj) and (Obj is TSBoardState) then
+          if Assigned(Obj) and (Obj is TSAbstractBoardState) then
             FBoard.Assign(Obj)
           else
             raise EStreamSystemError.Create(S_NOT_A_VALID_BOARD);
@@ -184,18 +213,23 @@ begin
     'DecisionPointsWithSolution: ' + IntToStr(Stats.DecisionPointsWithSolution) + #13 + #10 +
     'DecisionPointsAllDeadEnd: ' + IntToStr(Stats.DecisionPointsAllDeadEnd) + #13 + #10 +
     'CorrectSolutions: ' + IntToStr(Stats.CorrectSolutions) + #13 + #10 +
-    'DeadEnds: ' + IntToStr(Stats.DeadEnds) + #13 + #10;
+    'DeadEnds: ' + IntToStr(Stats.DeadEnds) + #13 + #10 +
+    'Elapsed Time: ' + FloatToStrF(Stats.ElapsedTime * (3600 * 24),
+    TFloatFormat.ffGeneral, 5, 10);
   ShowMessage(S);
 end;
 
 procedure TSudokuSimpleForm.SolveBtnClick(Sender: TObject);
 var
-  SSolver: TSSingleThreadSolver;
+  SSolver: TSAbstractSolver;
 begin
-  SSolver := TSSingleThreadSolver.Create;
+  if DLXSolver.IsChecked then
+    SSolver := TSExactCoverSolver.Create
+  else
+    SSolver := TSSimpleSolver.Create;
   try
     SSolver.BoardState := FBoard;
-    SSolver.SolveSingleThreaded;
+    SSolver.Solve;
     if Assigned(SSolver.UniqueSolution) then
       FBoard.Assign(SSolver.UniqueSolution)
     else
