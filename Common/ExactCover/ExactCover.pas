@@ -82,7 +82,7 @@ type
     FInclCellsCount: integer;
   protected
     function GetIncluded: boolean; inline;
-    procedure SetIncluded(NewIncluded: boolean); //Runtime include / exclude by row / col
+    procedure SetIncluded(NewIncluded: boolean); inline;//Runtime include / exclude by row / col
     procedure InitAllIncluded; //Startup IncludeAll
     function CheckAllIncluded: boolean;
     procedure GenericUnlinkAndFree; override;
@@ -106,7 +106,7 @@ type
   protected
     function GetIncluded: boolean; inline;//Both row and col linked, both row saves NIL.
 
-    procedure SetIncluded(NewIncluded: boolean; Row: boolean);  //Runtime include / exclude row / col
+    procedure SetIncluded(NewIncluded: boolean; Row: boolean); //Runtime include / exclude row / col
     procedure InitAllIncluded(Row: boolean); //Startup IncludeAll by Row / Col
     function CheckAllIncluded(Row: boolean): boolean;
     procedure GenericUnlinkAndFree; override;
@@ -408,18 +408,30 @@ const
 
 function TExactCoverHeader.FirstIncludedItem: TExactCoverCell;
 begin
+{$IFOPT C+}
   result := FInclCellsHead.FLink.Owner as TExactCoverCell;
+{$ELSE}
+  result := TExactCoverCell(FInclCellsHead.FLink.Owner);
+{$ENDIF}
 end;
 
 function TExactCoverHeader.LastIncludedItem: TExactCoverCell;
 begin
+{$IFOPT C+}
   result := FInclCellsHead.BLink.Owner as TExactCoverCell;
+{$ELSE}
+  result := TExactCoverCell(FInclCellsHead.BLink.Owner);
+{$ENDIF}
 end;
 
 function TExactCoverHeader.NextIncludedHeader: TExactCoverHeader;
 begin
   if not DLItemIsEmpty(@FInclHeaderLink) then
+{$IFOPT C+}
     result := FInclHeaderLink.FLink.Owner as TExactCoverHeader
+{$ELSE}
+    result := TExactCoverHeader(FInclHeaderLink.FLink.Owner)
+{$ENDIF}
   else
   begin
     Assert(false);
@@ -430,7 +442,11 @@ end;
 function TExactCoverHeader.PrevIncludedHeader: TExactCoverHeader;
 begin
   if not DLItemIsEmpty(@FInclHeaderLink) then
+{$IFOPT C+}
     result := FInclHeaderLink.BLink.Owner as TExactCoverHeader
+{$ELSE}
+    result := TExactCoverHeader(FInclHeaderLink.BLink.Owner)
+{$ENDIF}
   else
   begin
     Assert(false);
@@ -453,7 +469,11 @@ var
   C: TExactCoverCell;
 begin
   Assert(NewIncluded <> Included);
+{$IFOPT C+}
   M := Matrix as TExactCoverMatrix;
+{$ELSE}
+  M := TExactCoverMatrix(Matrix);
+{$ENDIF}
   //Only need to remove row /col links from included cells, since removal
   //re-insertion is a stack.
   if NewIncluded then
@@ -589,7 +609,11 @@ end;
 function TExactCoverCell.NextIncludedAlongRow: TExactCoverCell;
 begin
   if not DLItemIsEmpty(@FInclRowLink) then
+{$IFOPT C+}
     result := FInclRowLink.FLink.Owner as TExactCoverCell
+{$ELSE}
+    result := TExactCoverCell(FInclRowLink.FLink.Owner)
+{$ENDIF}
   else
   begin
     Assert(false);
@@ -600,7 +624,11 @@ end;
 function TExactCoverCell.NextIncludedDownColumn: TExactCoverCell;
 begin
   if not DLItemIsEmpty(@FInclColLink) then
+{$IFOPT C+}
     result := FInclColLink.FLink.Owner as TExactCoverCell
+{$ELSE}
+    result := TExactCoverCell(FInclColLink.FLink.Owner)
+{$ENDIF}
   else
   begin
     Assert(false);
@@ -611,7 +639,11 @@ end;
 function TExactCoverCell.PrevIncludedAlongRow: TExactCoverCell;
 begin
   if not DLItemIsEmpty(@FInclRowLink) then
+{$IFOPT C+}
     result := FInclRowLink.BLink.Owner as TExactCoverCell
+{$ELSE}
+    result := TExactCoverCell(FInclRowLink.BLink.Owner)
+{$ENDIF}
   else
   begin
     Assert(false);
@@ -622,7 +654,11 @@ end;
 function TExactCoverCell.PrevIncludedDownColumn: TExactCoverCell;
 begin
   if not DLItemIsEmpty(@FInclColLink) then
+{$IFOPT C+}
     result := FInclColLink.BLink.Owner as TExactCoverCell
+{$ELSE}
+    result := TExactCoverCell(FInclColLink.BLink.Owner)
+{$ENDIF}
   else
   begin
     Assert(false);
@@ -644,7 +680,11 @@ begin
       Assert(Assigned(FPrevColSave));
       DLItemInsertAfter(FPrevColSave, @FInclColLink);
       FPrevColSave := nil;
+{$IFOPT C+}
       Hdr := (ColHeader as TExactCoverHeader);
+{$ELSE}
+      Hdr := TExactCoverHeader(ColHeader);
+{$ENDIF}
       Inc(Hdr.FInclCellsCount);
     end
     else
@@ -652,7 +692,11 @@ begin
       Assert(Assigned(FPrevRowSave));
       DLItemInsertAfter(FPrevRowSave, @FInclRowLink);
       FPrevRowSave := nil;
+{$IFOPT C+}
       Hdr := (RowHeader as TExactCoverHeader);
+{$ELSE}
+      Hdr := TExactCoverHeader(RowHeader);
+{$ENDIF}
       Inc(Hdr.FInclCellsCount);
     end;
   end
@@ -663,7 +707,11 @@ begin
       Assert(not Assigned(FPrevColSave));
       FPrevColSave := FInclColLink.BLink;
       DLListRemoveObj(@FInclColLink);
+{$IFOPT C+}
       Hdr := (ColHeader as TExactCoverHeader);
+{$ELSE}
+      Hdr := TExactCoverHeader(ColHeader);
+{$ENDIF}
       Dec(Hdr.FInclCellsCount);
     end
     else
@@ -671,7 +719,11 @@ begin
       Assert(not Assigned(FPrevRowSave));
       FPrevRowSave := FInclRowLink.BLink;
       DLListRemoveObj(@FInclRowLink);
+{$IFOPT C+}
       Hdr := (RowHeader as TExactCoverHeader);
+{$ELSE}
+      Hdr := TExactCoverHeader(RowHeader);
+{$ENDIF}
       Dec(Hdr.FInclCellsCount);
     end;
   end;
@@ -759,22 +811,38 @@ end;
 
 function TExactCoverMatrix.FirstIncludedRow: TExactCoverHeader;
 begin
+{$IFOPT C+}
   result := Self.FIncludedRows.FLink.Owner as TExactCoverHeader;
+{$ELSE}
+  result := TExactCoverHeader(Self.FIncludedRows.FLink.Owner);
+{$ENDIF}
 end;
 
 function TExactCoverMatrix.LastIncludedRow: TExactCoverHeader;
 begin
+{$IFOPT C+}
   result := Self.FIncludedRows.BLink.Owner as TExactCoverHeader;
+{$ELSE}
+  result := TExactCoverHeader(Self.FIncludedRows.BLink.Owner);
+{$ENDIF}
 end;
 
 function TExactCoverMatrix.FirstIncludedColumn: TExactCoverHeader;
 begin
+{$IFOPT C+}
   result := Self.FIncludedCols.FLink.Owner as TExactCoverHeader;
+{$ELSE}
+  result := TExactCoverHeader(Self.FIncludedCols.FLink.Owner);
+{$ENDIF}
 end;
 
 function TExactCoverMatrix.LastIncludedColumn: TExactCoverHeader;
 begin
+{$IFOPT C+}
   result := Self.FIncludedCols.BLink.Owner as TExactCoverHeader;
+{$ELSE}
+  result := TExactCoverHeader(Self.FIncludedCols.BLink.Owner);
+{$ENDIF}
 end;
 
 procedure TExactCoverMatrix.InitAllIncluded; //Startup IncludeAll, and make assertions about structure.
@@ -868,7 +936,11 @@ begin
   if not DLItemIsEmpty(@FStackedExcludes) then
   begin
     Entry := FStackedExcludes.FLink;
+{$IFOPT C+}
     result := Entry.Owner as TExactCoverHeader;
+{$ELSE}
+    result := TExactCoverHeader(Entry.Owner);
+{$ENDIF}
     Assert(not result.Included); //Move this up because expects consistent state.
 {$IFOPT C+}
     TestEntry := Entry;
@@ -888,7 +960,11 @@ end;
 
 function TExactCoverMatrix.PeekTop: TExactCoverHeader;
 begin
+{$IFOPT C+}
   result := FStackedExcludes.FLink.Owner as TExactCoverHeader;
+{$ELSE}
+  result := TExactCoverHeader(FStackedExcludes.FLink.Owner);
+{$ENDIF}
 end;
 
 constructor TExactCoverMatrix.Create;
@@ -1109,42 +1185,74 @@ end;
 
 function TExactCoverProblem.FirstPossibility: TPossibility;
 begin
+{$IFOPT C+}
   result := FMatrix.FirstRow as TPossibility;
+{$ELSE}
+  result := TPossibility(FMatrix.FirstRow);
+{$ENDIF}
 end;
 
 function TExactCoverProblem.LastPossibility: TPossibility;
 begin
+{$IFOPT C+}
   result := FMatrix.LastRow as TPossibility;
+{$ELSE}
+  result := TPossibility(FMatrix.LastRow);
+{$ENDIF}
 end;
 
 function TExactCoverProblem.NextPossibility(Poss: TPossibility): TPossibility;
 begin
+{$IFOPT C+}
   result := FMatrix.NextRow(Poss) as TPossibility;
+{$ELSE}
+  result := TPossibility(FMatrix.NextRow(Poss));
+{$ENDIF}
 end;
 
 function TExactCoverProblem.PrevPossibility(Poss: TPossibility): TPossibility;
 begin
+{$IFOPT C+}
   result := FMatrix.PrevRow(Poss) as TPossibility;
+{$ELSE}
+  result := TPossibility(FMatrix.PrevRow(Poss));
+{$ENDIF}
 end;
 
 function TExactCoverProblem.FirstConstraint: TConstraint;
 begin
+{$IFOPT C+}
   result := FMatrix.FirstColumn as TConstraint;
+{$ELSE}
+  result := TConstraint(FMatrix.FirstColumn);
+{$ENDIF}
 end;
 
 function TExactCoverProblem.LastConstraint: TConstraint;
 begin
+{$IFOPT C+}
   result := FMatrix.LastColumn as TConstraint;
+{$ELSE}
+  result := TConstraint(FMatrix.LastColumn);
+{$ENDIF}
 end;
 
 function TExactCoverProblem.NextConstraint(Cons: TConstraint): TConstraint;
 begin
+{$IFOPT C+}
   result := FMatrix.NextColumn(Cons) as TConstraint;
+{$ELSE}
+  result := TConstraint(FMatrix.NextColumn(Cons));
+{$ENDIF}
 end;
 
 function TExactCoverProblem.PrevConstraint(Cons: TConstraint): TConstraint;
 begin
+{$IFOPT C+}
   result := FMatrix.PrevColumn(Cons) as TConstraint;
+{$ELSE}
+  result := TConstraint(FMatrix.PrevColumn(Cons));
+{$ENDIF}
 end;
 
 function TExactCoverProblem.AddPossibility: TPossibility;
@@ -1320,12 +1428,20 @@ end;
 
 function TExactCoverProblem.TopPartialSolutionPossibility: TPossibility;
 begin
+{$IFOPT C+}
   result := FPartSolutionStack.FLink.Owner as TPossibility;
+{$ELSE}
+  result := TPossibility(FPartSolutionStack.FLink.Owner);
+{$ENDIF}
 end;
 
 function TExactCoverProblem.NextPartialSolutionPossibility(Poss: TPossibility): TPossibility;
 begin
+{$IFOPT C+}
   result := Poss.FPartSolutionLink.FLink.Owner as TPossibility;
+{$ELSE}
+  result := TPossibility(Poss.FPartSolutionLink.FLink.Owner);
+{$ENDIF}
 end;
 
 procedure TExactCoverProblem.PushSolutionPossibility(Poss: TPossibility; NoBacktrack: boolean);
@@ -1351,12 +1467,20 @@ begin
     RowCell := Poss.FirstIncludedItem;
     if Assigned(RowCell) then
     begin
+{$IFOPT C+}
       Cons := RowCell.ColHeader as TConstraint;
+{$ELSE}
+      Cons := TConstraint(RowCell.ColHeader);
+{$ENDIF}
       Assert(Cons.Included);
       RowCell := RowCell.NextIncludedAlongRow;
       if Assigned(RowCell) then
       begin
+{$IFOPT C+}
         NextCons := RowCell.ColHeader as TConstraint;
+{$ELSE}
+        NextCons := TConstraint(RowCell.ColHeader);
+{$ENDIF}
         Assert(NextCons.Included);
       end
       else
@@ -1375,12 +1499,20 @@ begin
       ColCell := Cons.FirstIncludedItem;
       if Assigned(ColCell) then
       begin
+{$IFOPT C+}
         ExclPoss := ColCell.RowHeader as TPossibility;
+{$ELSE}
+        ExclPoss := TPossibility(ColCell.RowHeader);
+{$ENDIF}
         Assert(ExclPoss.Included);
         ColCell := ColCell.NextIncludedDownColumn;
         if Assigned(ColCell) then
         begin
+{$IFOPT C+}
           NextExclPoss := ColCell.RowHeader as TPossibility;
+{$ELSE}
+          NextExclPoss := TPossibility(ColCell.RowHeader);
+{$ENDIF}
           Assert(NextExclPoss.Included);
         end
         else
@@ -1406,7 +1538,11 @@ begin
           ColCell := ColCell.NextIncludedDownColumn;
           if Assigned(ColCell) then
           begin
+{$IFOPT C+}
             NextExclPoss := ColCell.RowHeader as TPossibility;
+{$ELSE}
+            NextExclPoss := TPossibility(ColCell.RowHeader);
+{$ENDIF}
             Assert(NextExclPoss.Included);
           end
           else
@@ -1424,7 +1560,11 @@ begin
         RowCell := RowCell.NextIncludedAlongRow;
         if Assigned(RowCell) then
         begin
+{$IFOPT C+}
           NextCons := RowCell.ColHeader as TConstraint;
+{$ELSE}
+          NextCons := TConstraint(RowCell.ColHeader);
+{$ENDIF}
           Assert(NextCons.Included);
         end
         else
@@ -1462,7 +1602,11 @@ begin
         FSolved := false;
 
       //Pop the possibility which was part of the solution.
+{$IFOPT C+}
       result := FPartSolutionStack.FLink.Owner as TPossibility;
+{$ELSE}
+      result := TPossibility(FPartSolutionStack.FLink.Owner);
+{$ENDIF}
       Assert(Assigned(result));
       if result.NoBackTrack and not OverBacktracks then
         result := nil;
@@ -1472,7 +1616,11 @@ begin
         DLListRemoveHead(@FPartSolutionStack);
         Dec(FPartSolutionStackCount);
 
+{$IFOPT C+}
         OtherPoss := FMatrix.PopAndInclude as TPossibility;
+{$ELSE}
+        OtherPoss := TPossibility(FMatrix.PopAndInclude);
+{$ENDIF}
         Assert(OtherPoss = result);
         //Now find the next possibility (maybe nil) that we should stop popping at.
         OtherPoss := TopPartialSolutionPossibility;
@@ -1556,7 +1704,11 @@ begin
         //from a set given same initial set of constraints to choose from.
         //If order of constraint picks changes result, then problem not well
         //specified.
+{$IFOPT C+}
         Cons := FConstraintPicker.PickOne(nil) as TConstraint;
+{$ELSE}
+        Cons := TConstraint(FConstraintPicker.PickOne(nil));
+{$ENDIF}
         Assert(Assigned(Cons));
         if Cons.InclCellsCount = 0 then
         begin
@@ -1572,7 +1724,11 @@ begin
         //Knuths algorithm picks one at random, but arguably, one could
         //iterate through all possibilities at each level, which allows one to
         //find all possible solutions in a subset of problems.
+{$IFOPT C+}
         Poss := FPossibilityPicker.PickOne(Cons) as TPossibility;
+{$ELSE}
+        Poss := TPossibility(FPossibilityPicker.PickOne(Cons));
+{$ENDIF}
         Pop := not Assigned(Poss);
       end;
       //Proceed forward...
@@ -1652,14 +1808,22 @@ begin
      result := FParentProblem.FMatrix.FirstIncludedColumn
   else
   begin
+{$IFOPT C+}
     Cons := FParentProblem.FMatrix.FirstIncludedColumn as TConstraint;
+{$ELSE}
+    Cons := TCOnstraint(FParentProblem.FMatrix.FirstIncludedColumn);
+{$ENDIF}
     LowestCons := nil;
     while Assigned(Cons) do
     begin
       if (not Assigned(LowestCons))
         or (LowestCons.InclCellsCount > Cons.InclCellsCount) then
         LowestCons := Cons;
+{$IFOPT C+}
       Cons := Cons.NextIncludedHeader as TConstraint;
+{$ELSE}
+      Cons := TConstraint(Cons.NextIncludedHeader);
+{$ENDIF}
     end;
     result := LowestCons;
   end;
@@ -1710,7 +1874,11 @@ begin
   FPickedStack[FStackIndex] := Cell;
   Assert((not Assigned(Cell)) or (Cell.ColHeader = Context));
   if Assigned(Cell) then
+{$IFOPT C+}
     result := Cell.RowHeader as TExactCoverHeader
+{$ELSE}
+    result := TExactCoverHeader(Cell.RowHeader)
+{$ENDIF}
   else
     result := nil;
 end;
