@@ -1,0 +1,23 @@
+From: https://codegolf.stackexchange.com/questions/190727/the-fastest-sudoku-solver
+
+Using Tdoku (code; design; benchmarks) gives these results:
+
+~/tdoku$ lscpu | grep Model.name
+Model name:            Intel(R) Core(TM) i7-4930K CPU @ 3.40GHz
+
+~/tdoku$ # build:
+~/tdoku$ CC=clang-8 CXX=clang++-8 ./BUILD.sh
+~/tdoku$ clang -o solve example/solve.c build/libtdoku.a 
+
+~/tdoku$ # adjust input format:
+~/tdoku$ sed -e "s/0/./g" all_17_clue_sudokus.txt > all_17_clue_sudokus.txt.in
+
+~/tdoku$ # solve:
+~/tdoku$ time ./solve 1 < all_17_clue_sudokus.txt.in > out.txt
+real    0m0.241s
+user    0m0.229s
+sys     0m0.012s
+
+~/tdoku$ # adjust output format and sha256sum:
+~/tdoku$ grep -v "^:0:$" out.txt | sed -e "s/:1:/,/" | tr . 0 | sha256sum
+0bc8dda364db7b99f389b42383e37b411d9fa022204d124cb3c8959eba252f05  -
