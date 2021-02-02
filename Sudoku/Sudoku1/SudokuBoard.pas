@@ -36,7 +36,7 @@ IN THE SOFTWARE.
 interface
 
 uses
-  Classes, SSStreamables, StreamingSystem, SudokuAbstracts;
+  Classes, SudokuAbstracts;
 
 type
   TSBoardState = class(TSAbstractBoardState)
@@ -50,12 +50,12 @@ type
 
     function GetOptEntry(Row, Col: TSNumber): TSOptNumber; override;
 
-    function SetEntry(Row, Col, Entry: TSNumber): boolean; override;
     procedure ClearEntry(Row, Col: TSNumber); override;
 
     function GetComplete: boolean; override;
     function GetProceedable: boolean; override;
   public
+    function SetEntry(Row, Col, Entry: TSNumber): boolean; override;
     //Find the minimally constrained position for a next move,
     //or return empty set if there is none.
     function FindNextMove(var Row, Col: TSNumber): TSNumberSet; override;
@@ -83,13 +83,14 @@ var
 implementation
 
 uses
-  SysUtils, SSAbstracts;
+  SysUtils;
 
 { TSSimpleSolver }
 
 function TSSimpleSolver.Solve: boolean;
 begin
   FStats.StartTime := Now;
+  FStats.Classification := scNone;
   result := SolveSingleThreadedInt;
   FStats.ElapsedTime := Now - FStats.StartTime;
 end;
@@ -100,6 +101,7 @@ var
   AppliedNumber: TSNumber;
   Row, Col: TSNumber;
   SetOK: boolean;
+  HaveSolution: boolean;
 begin
   NextSet := FBoardState.FindNextMove(Row, Col);
   if NextSet = EmptySet then
@@ -114,11 +116,13 @@ begin
           if not Assigned(FUniqueSolution) then
             FUniqueSolution := CreateBoardState;
           FUniqueSolution.Assign(FBoardState);
+          FStats.Classification := scOne;
         end;
         2:
         begin
           FUniqueSolution.Free;
           FUniqueSolution := nil;
+          FStats.Classification := scMany;
         end;
       end;
     end
@@ -153,6 +157,16 @@ begin
                 break; //Out of loop, not case.
             end;
             ssmFindAll: result := SolveSingleThreadedInt or result;
+            ssmClassify:
+            begin
+              HaveSolution := Assigned(FUniqueSolution);
+              result := SolveSingleThreadedInt;
+              if result and HaveSolution then
+              begin
+                Assert(not Assigned(FUniqueSolution));
+                break;
+              end;
+            end
           else
             Assert(false);
           end;

@@ -30,8 +30,13 @@ interface
 //{$DEFINE OPTIMISE_BLOCK_SET_MAP} Nope, makes it slower!
 //Testament to good branch prediction on modern CPU's.
 
+{$IFNDEF OMIT_STREAMING}
 uses
   SSStreamables, StreamingSystem;
+{$ELSE}
+uses
+  Trackables;
+{$ENDIF}
 
 type
   TSNumber = 1..9;
@@ -48,22 +53,32 @@ type
 
   TSAbstractSolver = class;
 
+{$IFNDEF OMIT_STREAMING}
   TSAbstractBoardState = class(TObjStreamable)
+{$ELSE}
+  TSAbstractBoardState = class(TTrackable)
+{$ENDIF}
   protected
+{$IFNDEF OMIT_STREAMING}
     procedure CustomMarshal(Sender: TDefaultSSController); override;
     procedure CustomUnmarshal(Sender: TDefaultSSController); override;
+{$ENDIF}
 
     function GetOptEntry(Row, Col: TSNumber): TSOptNumber; virtual; abstract;
     procedure SetOptEntry(Row, Col: TSNumber; Entry: TSOptNumber);
     procedure SetOptEntryInt(Row, Col: TSNumber; Entry: TSOptNumber; Check: boolean = false);
 
-    function SetEntry(Row, Col, Entry: TSNumber): boolean; virtual; abstract;
     procedure ClearEntry(Row, Col: TSNumber); virtual; abstract;
 
     function GetComplete: boolean; virtual; abstract;
     function GetProceedable: boolean;virtual; abstract;
   public
+    function SetEntry(Row, Col, Entry: TSNumber): boolean; virtual; abstract;
+{$IFNDEF OMIT_STREAMING}
     procedure Assign(Source: TObjStreamable); override;
+{$ELSE}
+    procedure Assign(Source: TTrackable); virtual;
+{$ENDIF}
 
     function FindNextMove(var Row, Col: TSNumber): TSNumberSet; virtual; abstract;
     function EvolveIfSingular(Row, Col: TSNumber; NSet: TSNumberSet): boolean; virtual; abstract;
@@ -75,6 +90,11 @@ type
     property Proceedable: boolean read GetProceedable;
   end;
 
+  TSClassification = (scInvalid,
+                      scNone,
+                      scOne,
+                      scMany);
+
   TSSolverStats = class
   public
     DecisionPoints: int64;
@@ -84,12 +104,15 @@ type
     DeadEnds: int64;
     StartTime: TDateTime;
     ElapsedTime: double;
+    Classification: TSClassification;
     procedure Zero;
     procedure Sum(OtherStats: TSSolverStats);
   end;
 
   TSSolveMode = (ssmFindOne,
-                 ssmFindAll);
+                 ssmFindAll,
+                 ssmClassify);
+
 
 {$IFDEF USE_TRACKABLES}
   TSAbstractSolver = class(TTrackable)
@@ -107,6 +130,7 @@ type
   public
     constructor Create;
     destructor Destroy; override;
+    procedure Clear;
     property BoardState: TSAbstractBoardState read FBoardState write SetInitialConfig;
     property UniqueSolution: TSAbstractBoardState read FUniqueSolution;
     property Stats: TSSolverStats read FStats;
@@ -137,7 +161,11 @@ const
 implementation
 
 uses
- SysUtils, SSAbstracts;
+ SysUtils
+{$IFNDEF OMIT_STREAMING}
+ , SSAbstracts
+{$ENDIF}
+ ;
 
 const
   S_INVALID_CONFIGURATION = 'Unstream board: Invalid configuration.';
@@ -145,6 +173,7 @@ const
 
 { TSAbstractBoardState }
 
+{$IFNDEF OMIT_STREAMING}
 procedure TSAbstractBoardState.CustomMarshal(Sender: TDefaultSSController);
 var
   Row, Col: TSNumber;
@@ -202,6 +231,7 @@ begin
   end;
   Sender.UnStreamArrayEnd('Rows');
 end;
+{$ENDIF}
 
 procedure TSAbstractBoardState.SetOptEntry(Row, Col: TSNumber; Entry: TSOptNumber);
 begin
@@ -221,7 +251,11 @@ begin
   end;
 end;
 
+{$IFNDEF OMIT_STREAMING}
 procedure TSAbstractBoardState.Assign(Source: TObjStreamable);
+{$ELSE}
+procedure TSAbstractBoardState.Assign(Source: TTrackable);
+{$ENDIF}
 var
   Src: TSAbstractBoardState;
   R,C: TSNumber;
@@ -244,6 +278,9 @@ begin
   DecisionPointsAllDeadEnd := 0;
   CorrectSolutions := 0;
   DeadEnds := 0;
+  Classification := scInvalid;
+  StartTime := 0;
+  ElapsedTime := 0;
 end;
 
 procedure TSSolverStats.Sum(OtherStats: TSSolverStats);
@@ -276,12 +313,19 @@ procedure TSAbstractSolver.SetInitialConfig(InitialConfig: TSAbstractBoardState)
 begin
   if not Assigned(FBoardState) then
     FBoardState := CreateBoardState;
+  FBoardState.Clear;
   FBoardState.Assign(InitialConfig);
   FUniqueSolution.Free;
   FUniqueSolution := nil;
   if not Assigned(FStats) then
     FStats := TSSolverStats.Create;
   FStats.Zero;
+end;
+
+procedure TSAbstractSolver.Clear;
+begin
+  if Assigned(FBoardState) then
+    FBoardState.Clear;
 end;
 
 { Misc functions }

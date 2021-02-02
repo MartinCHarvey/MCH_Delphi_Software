@@ -124,7 +124,6 @@ type
 
     //Routines to be implemented for sudoku abstract board.
     function GetOptEntry(Row, Col: TSNumber): TSOptNumber; override;
-    function SetEntry(Row, Col, Entry: TSNumber): boolean; override;
     procedure ClearEntry(Row, Col: TSNumber); override;
 
     function GetComplete: boolean; override;
@@ -133,7 +132,12 @@ type
     function FindNextMoveInt: TSSudokuPossibility;
     function FindNextMovePosInt(Row, Col: TSNumber):TSSudokuPossibility;
   public
+    function SetEntry(Row, Col, Entry: TSNumber): boolean; override;
+{$IFNDEF OMIT_STREAMING}
     constructor Create; override;
+{$ELSE}
+    constructor Create;
+{$ENDIF}
     destructor Destroy; override;
     //Routines to be implemented for exact cover.
     //Routines to be implemented for sudoku abstract board.
@@ -166,7 +170,7 @@ type
 implementation
 
 uses
-  SysUtils;
+  SysUtils, SudokuBoard; //For simple board state.
 
 { TSSudokuPossibility }
 
@@ -351,6 +355,7 @@ begin
       Assert(Poss.Row = Row);
       Assert(Poss.Col = Col);
       result := Poss.Number;
+      exit;
     end;
     Poss := Poss.FSimpleRepLink.FLink.Owner as TSSudokuPossibility;
   end;
@@ -410,11 +415,12 @@ begin
   //and then omit the entry we wish to clear when re-pushing.
   SetLength(SavedStack, FExactCover.PartialSolutionStackCount);
   SavedStackItems := 0;
-  Poss := FExactCover.PopTopSolutionPossibility(true) as TSSudokuPossibility;
+  Poss := FExactCover.TopPartialSolutionPossibility as TSSudokuPossibility;
   while Assigned(Poss) do
   begin
     Assert(Poss.StackedEliminated);
     Assert(Poss.PartOfSolution);
+    FExactCover.PopTopSolutionPossibility(true);
     if (Poss.Row = Row) and (Poss.Col = Col) then
       break
     else
@@ -564,16 +570,23 @@ begin
         begin
           if not Assigned(FUniqueSolution) then
           begin
-            FUniqueSolution := CreateBoardState;
-            (FUniqueSolution as TSExactCoverState).OnCoverNotify := nil;
+            //Create a simple board state. Assignment is much faster.
+            FUniqueSolution := TSBoardState.Create;
+            //(FUniqueSolution as TSExactCoverState).OnCoverNotify := nil;
           end;
           FUniqueSolution.Assign(FBoardState);
           Assert(FUniqueSolution.Complete);
+          FStats.Classification := scOne;
+          if FSolveMode = ssmFindOne then
+            Stop := true;
         end;
         2:
         begin
           FUniqueSolution.Free;
           FUniqueSolution := nil;
+          FStats.Classification := scMany;
+          if FSolveMode = ssmClassify then
+            Stop := true;
         end;
       end;
     end;
@@ -595,6 +608,7 @@ end;
 function TSExactCoverSolver.Solve: boolean;
 begin
   FStats.StartTime := Now;
+  FStats.Classification := scNone;
   FReturnSolved := false;
   (FBoardState as TSExactCoverState).FExactCover.AlgorithmX;
   FStats.ElapsedTime := Now - FStats.StartTime;
