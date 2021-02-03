@@ -47,5 +47,6 @@ Additional testapps and utility code.
 - FetchParse library testapp: PageMapper/
 - Sparse Matrix testapp Commmon/SparseMatrix/Test
 - ExactCover testapp Common/ExactCover/Test
+- Batch Sudoku solver (Sudoku/BatchThreadedSolver)
 
 Comments / queries to martin_c_harvey@hotmail.com
