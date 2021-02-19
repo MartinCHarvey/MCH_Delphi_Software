@@ -204,6 +204,23 @@ type
   TOnFreeConstraintEvent = procedure(Sender: TObject; Constraint: TConstraint) of object;
   TOnFreeCellEvent = procedure(Sender: TObject; Cell: TExactCoverCell) of object;
 
+{$IFDEF EXACT_COVER_LOGGING}
+  TEvtType = (tetConstraintSelected,
+              tetConstraintSatisfied,
+              tetPossibilitySelected,
+              tetPossibilityEliminated,
+              tetPossibilityIncluded,
+              tetBacktrackStart,
+              tetBacktrackEnd,
+              tetConstraintRestored,
+              tetPossibilityRestored);
+
+  TLogPossibilityEvent = procedure(Sender: TObject; Poss: TPossibility; EvtType: TEvtType) of object;
+  TLogConstraintEvent = procedure(Sender: TObject; Cons: TConstraint; EvtType: TEvtType) of object;
+  TLogOtherEvent = procedure(Sender: TObject; EvtType: TEvtType) of object;
+{$ENDIF}
+
+
   EExactCoverException = class(Exception);
 
   TCoverTerminationType =
@@ -239,6 +256,11 @@ type
     FOnFreePossibility: TOnFreePossibilityEvent;
     FOnFreeConstraint: TOnFreeConstraintEvent;
 
+{$IFDEF EXACT_COVER_LOGGING}
+    FOnLogPossibilityEvent: TLogPossibilityEvent;
+    FOnLogConstraintEvent: TLogConstraintEvent;
+    FOnLogOtherEvent: TLogOtherEvent;
+{$ENDIF}
     FOnCoverNotifyEvent: TCoverNotifyEvent;
     FGeneralResult: TCoverTerminationType;
     FCoverNotifySet: TCoverNotifySet;
@@ -250,6 +272,12 @@ type
     FPartSolutionStack: TDLEntry;
     FPartSolutionStackCount: integer;
   protected
+{$IFDEF EXACT_COVER_LOGGING}
+    procedure DoLogPossibility(Poss: TPossibility; EvtType: TEvtType);
+    procedure DoLogConstraint(Cons: TConstraint; EvtType: TEvtType);
+    procedure DoLogOther(EvtType: TEvtType);
+{$ENDIF}
+
     function GetRowsColsStacked: integer; inline;
 
     function DoAllocCell: TMatrixCell;
@@ -328,6 +356,13 @@ type
     property OnFreeCell: TOnFreeCellEvent read FOnFreeCell write FOnFreeCell;
     property OnFreePossibility:TOnFreePossibilityEvent read FOnFreePossibility write FOnFreePossibility;
     property OnFreeConstraint:TOnFreeConstraintEvent read FOnFreeConstraint write FOnFreeConstraint;
+
+{$IFDEF EXACT_COVER_LOGGING}
+    property OnLogPossibilityEvent: TLogPossibilityEvent read FOnLogPossibilityEvent write FOnLogPossibilityEvent;
+    property OnLogConstraintEvent: TLogConstraintEvent read FOnLogConstraintEvent write FOnLogConstraintEvent;
+    property OnLogOtherEvent: TLogOtherEvent read FOnLogOtherEvent write FOnLogOtherEvent;
+{$ENDIF}
+
     //See Top/Next partial solution possibility.
     property PartialSolutionStackCount: integer read FPartSolutionStackCount;
 
@@ -393,6 +428,20 @@ type
   to pick the constraints in another order for any particular stats.
 }
 
+{$IFDEF EXACT_COVER_LOGGING}
+  TEvtTypeStrs = array[TEvtType] of string;
+
+const
+  EvtTypeStrs:TEvtTypeStrs = ('ConstraintSelected',
+                              'ConstraintSatisfied',
+                              'PossibilitySelected',
+                              'PossibilityEliminated',
+                              'PossibilityIncluded',
+                              'BacktrackStart',
+                              'BacktrackEnd',
+                              'ConstraintRestored',
+                              'PossibilityRestored');
+{$ENDIF}
 
 implementation
 
@@ -1065,6 +1114,26 @@ end;
 
 { TExactCoverProblem }
 
+{$IFDEF EXACT_COVER_LOGGING}
+procedure TExactCoverProblem.DoLogPossibility(Poss: TPossibility; EvtType: TEvtType);
+begin
+  if Assigned(FOnLogPossibilityEvent) then
+    FOnLogPossibilityEvent(self, Poss, EvtType);
+end;
+
+procedure TExactCoverProblem.DoLogConstraint(Cons: TConstraint; EvtType: TEvtType);
+begin
+  if Assigned(FOnLogConstraintEvent) then
+    FOnLogConstraintEvent(self, Cons, EvtType);
+end;
+
+procedure TExactCoverProblem.DoLogOther(EvtType: TEvtType);
+begin
+  if Assigned(FOnLogOtherEvent) then
+    FOnLogOtherEvent(self, EvtType);
+end;
+{$ENDIF}
+
 function TExactCoverProblem.DoAllocCell: TMatrixCell;
 begin
   if Assigned(FOnAllocCell) then
@@ -1528,7 +1597,12 @@ begin
       begin
         //(2) Body
         if ExclPoss <> Poss then //Stack and remove excluded poss not that selected.
+        begin
           FMatrix.ExcludeAndPush(ExclPoss);
+{$IFDEF EXACT_COVER_LOGGING}
+          DoLogPossibility(ExclPoss, tetPossibilityEliminated);
+{$ENDIF}
+        end;
         //(2) End body.
         //Next possibility referenced by dependent constraint.
         ExclPoss := NextExclPoss;
@@ -1551,6 +1625,9 @@ begin
       end;
       //Stack and remove constraint satisfied.
       FMatrix.ExcludeAndPush(Cons);
+{$IFDEF EXACT_COVER_LOGGING}
+      DoLogConstraint(Cons, tetConstraintSatisfied);
+{$ENDIF}
       //(1) EndBody
       //Next constraint column for main stacked poss.
       Cons := NextCons;
@@ -1577,6 +1654,9 @@ begin
     FMatrix.ExcludeAndPush(Poss);
     DLListInsertHead(@FPartSolutionStack, @Poss.FPartSolutionLink);
     Inc(FPartSolutionStackCount);
+{$IFDEF EXACT_COVER_LOGGING}
+    DoLogPossibility(Poss, tetPossibilityIncluded);
+{$ENDIF}
 
     Assert(DlItemIsEmpty(@FPartSolutionStack) = (FPartSolutionStackCount = 0));
     Assert((FMatrix.StackedHeadersPushed = 0) = (FPartSolutionStackCount = 0));
@@ -1589,6 +1669,7 @@ end;
 function TExactCoverProblem.PopTopSolutionPossibility(OverBacktracks: boolean): TPossibility;
 var
   OtherPoss: TPossibility;
+  PoppedHdr: TExactCoverHeader;
 begin
   if (FConnectivityCurrent and FConnectivityComplete) then
   begin
@@ -1598,6 +1679,9 @@ begin
 
     if FPartSolutionStackCount > 0 then
     begin
+{$IFDEF EXACT_COVER_LOGGING}
+      DoLogOther(tetBacktrackStart);
+{$ENDIF}
       if OverBacktracks then
         FSolved := false;
 
@@ -1627,8 +1711,24 @@ begin
         //Now just pop headers (both constraints and possibilities)
         //until we get to the next partial soln possibility.
         while FMatrix.PeekTop <> OtherPoss do
-          FMatrix.PopAndInclude;
+        begin
+          PoppedHdr := FMatrix.PopAndInclude;
+          if Assigned(PoppedHdr) then
+          begin
+{$IFDEF EXACT_COVER_LOGGING}
+            if PoppedHdr is TPossibility then
+              DoLogPossibility(TPossibility(PoppedHdr), tetPossibilityRestored)
+            else if PoppedHdr is TConstraint then
+              DoLogConstraint(TConstraint(PoppedHdr), tetConstraintRestored)
+            else
+              Assert(false);
+{$ENDIF}
+          end;
+        end;
       end;
+{$IFDEF EXACT_COVER_LOGGING}
+      DoLogOther(tetBacktrackEnd);
+{$ENDIF}
     end
     else
       result := nil;
@@ -1710,6 +1810,9 @@ begin
         Cons := TConstraint(FConstraintPicker.PickOne(nil));
 {$ENDIF}
         Assert(Assigned(Cons));
+{$IFDEF EXACT_COVER_LOGGING}
+        DoLogConstraint(Cons, tetConstraintSelected);
+{$ENDIF}
         if Cons.InclCellsCount = 0 then
         begin
           //We have possibilities, but none of them seem to remove the constraint we have
@@ -1734,6 +1837,9 @@ begin
       //Proceed forward...
       if not Pop then
       begin
+{$IFDEF EXACT_COVER_LOGGING}
+        DoLogPossibility(Poss, tetPossibilitySelected);
+{$ENDIF}
         PushSolutionPossibility(Poss);
         FPossibilityPicker.PickerPostPush;
         FConstraintPicker.PickerPostPush;
