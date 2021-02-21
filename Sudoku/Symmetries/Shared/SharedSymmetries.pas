@@ -122,7 +122,7 @@ end;
 
 function TSymBoard.AmEqualTo(Other:TSymBoard): boolean;
 var
-  Row, Col: integer;
+  Row, Col: TRowColIdx;
 begin
   result := true;
   for Row := Low(Row) to High(Row) do

@@ -207,7 +207,6 @@ begin
   end;
 end;
 
-//TODO - This is broken.
 procedure IsomorphismsGraphGenerative(MaxGivens: integer);
 var
   IsoList, Tmp, PartialNxtIsoList: TObjectList;
@@ -224,7 +223,7 @@ begin
   PartialNxtIsoList.OwnsObjects := true;
   TestBoard := TGraphSymBoard.Create;
   try
-    while GivenCount < MaxGivens do
+    while GivenCount <= MaxGivens do
     begin
       if GivenCount = 0 then
         IsoList.Add(TGraphSymBoard.Create)
@@ -233,17 +232,21 @@ begin
         for Idx := 0 to Pred(IsoList.Count) do
         begin
           TestBoard.Assign(TGraphSymBoard(IsoList.Items[Idx]));
+          Assert(TestBoard.AmEqualTo(TGraphSymBoard(IsoList.Items[Idx])));
+
           for x := Low(x) to High(x) do
+          begin
             for y := Low(y) to High(y) do
             begin
               if TestBoard.Entries[x,y] = 0 then
               begin
                 TestBoard.Entries[x,y] := 1;
+
                 Idx2 := 0;
                 CanAdd := true;
                 while Idx2 < PartialNxtIsoList.Count do
                 begin
-                  if TestBoard.AmIsomorphicTo(PartialNxtIsoList.Items[idx] as TSymBoard) then
+                  if TestBoard.AmIsomorphicTo(PartialNxtIsoList.Items[Idx2] as TSymBoard) then
                   begin
                     CanAdd := false;
                     break;
@@ -259,6 +262,7 @@ begin
                 TestBoard.Entries[x,y] := 0;
               end;
             end;
+          end;
         end;
         Tmp := IsoList;
         IsoList := PartialNxtIsoList;
@@ -296,73 +300,8 @@ begin
 end;
 
 procedure Test3;
-var
-  NB1, NB2: TNaiveSymBoard;
-  GB1, GB2: TGraphSymBoard;
-
 begin
-{
-  We have a bug. The code thinks these two are not isomorphic, when in fact they
-  are.
-  X0X0
-  0000
-  0000
-  0000
-
-  X00X
-  0000
-  0000
-  0000
-}
-  NB1 := TNaiveSymBoard.Create;
-  NB2 := TNaiveSymBoard.Create;
-  GB1 := TGraphSymBoard.Create;
-  GB2 := TGraphSymBoard.Create;
-  try
-    //TODO - Reinstate some more interesting configs in a moment.
-    GB1.Entries[0,0] := 1;
-    GB1.Entries[0,2] := 1;
-
-    GB2.Entries[0,0] := 1;
-    GB2.Entries[0,3] := 1;
-
-//    GB1.Assign(NB1);
-//    GB2.Assign(NB2);
-
-    if NB1.AmIsomorphicTo(NB2) then
-      WriteLn('NB1 iso NB2')
-    else
-      WriteLn('NB1 diff NB2');
-    if NB2.AmIsomorphicTo(NB1) then
-      WriteLn('NB2 iso NB1')
-    else
-      WriteLn('NB2 diff NB1');
-
-    if GB1.AmIsomorphicTo(GB2) then
-      WriteLn('GB1 iso GB2')
-    else
-      WriteLn('GB1 diff GB2');
-    if GB2.AmIsomorphicTo(GB1) then
-      WriteLn('GB2 iso GB1')
-    else
-      WriteLn('GB2 diff GB1');
-
-  finally
-    NB1.Free;
-    NB2.Free;
-    GB1.Free;
-    GB2.Free;
-  end;
+  IsomorphismsGraphGenerative(MaxGivens);
 end;
-
-{ Not yet, but compare for speed eventually.
-procedure Test3;
-var
-  N: integer;
-begin
-  for N := 0 to MaxGivens do
-    IsomorphismsGraphBruteForce(N);
-end;
-}
 
 end.

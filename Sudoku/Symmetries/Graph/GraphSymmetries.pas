@@ -796,8 +796,13 @@ var
   Poss: TIsomorphicPossibility;
   Cons: TIsomorphicConstraint;
 begin
+{$IFOPT C+}
   Cons := Constraint as TIsomorphicConstraint;
   Poss := Possibility as TIsomorphicPossibility;
+{$ELSE}
+  Cons := TIsomorphicConstraint(Constraint);
+  Poss := TIsomorphicPossibility(Possibility);
+{$ENDIF}
   case Cons.FVarRec.ConsType of
     ictAllNodesMappedOnce:
     begin

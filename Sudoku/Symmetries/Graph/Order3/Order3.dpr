@@ -18,7 +18,7 @@ uses
 
 begin
   try
-    Test2;
+    Test3;
   except
     on E: Exception do
       Writeln(E.ClassName, ': ', E.Message);
