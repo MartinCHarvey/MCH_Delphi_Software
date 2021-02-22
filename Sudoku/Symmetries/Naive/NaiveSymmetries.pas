@@ -30,8 +30,8 @@ uses
   SharedSymmetries;
 
 type
-  TStackBandPermutations = array [boolean] of integer;
-  TRowColPermutations = array [TOrderIdx] of integer;
+  TStackBandPermutations = array [boolean] of TPermIdx;
+  TRowColPermutations = array [TOrderIdx] of TPermIdx;
   TAllRowColPermutations = array [boolean] of TRowColPermutations;
 
   TNaiveSymBoard = class (TSymBoard)
@@ -40,10 +40,10 @@ type
     FStackBandPermutation: TStackBandPermutations;
     FRowColPermutations: TAllRowColPermutations;
 
-    function GetStackBandPerms(Rows: boolean): integer;
-    procedure SetStackBandPerms(Rows: boolean; Val: integer);
-    function GetAllRowColPerms(Rows: boolean; StackBandIdx: TOrderIdx): integer;
-    procedure SetAllRowColPerms(Rows: boolean; StackBandIdx: TOrderIdx; Val: integer);
+    function GetStackBandPerms(Rows: boolean): TPermIdx;
+    procedure SetStackBandPerms(Rows: boolean; Val: TPermIdx);
+    function GetAllRowColPerms(Rows: boolean; StackBandIdx: TOrderIdx): TPermIdx;
+    procedure SetAllRowColPerms(Rows: boolean; StackBandIdx: TOrderIdx; Val: TPermIdx);
 
     procedure AbsToRelIndexed(AbsRowCol: TRowColIdx; var StackBand: TOrderIdx; var RowCol: TOrderIdx);
     procedure RelToAbsIndexed(StackBand, RowCol: TOrderIdx; var AbsRowCol: TRowColIdx);
@@ -59,21 +59,14 @@ public
     procedure Assign(Src: TSymBoard); override;
 
     property Reflect: boolean read FReflect write FReflect;
-    property StackBandPerms[Rows: boolean]: integer read GetStackBandPerms write SetStackBandPerms;
-    property AllRowColPerms[Rows: boolean; StackBandIdx: TOrderIdx]: integer read GetAllRowColPerms write SetAllRowColPerms;
+    property StackBandPerms[Rows: boolean]: TPermIdx read GetStackBandPerms write SetStackBandPerms;
+    property AllRowColPerms[Rows: boolean; StackBandIdx: TOrderIdx]: TPermIdx read GetAllRowColPerms write SetAllRowColPerms;
 
     property MappedEntries[Row, Col: TRowColIdx]: integer read GetMappedEntry write SetMappedEntry;
   end;
 
 
 implementation
-
-type
-  TPermutation = array [TOrderIdx] of TOrderIdx;
-  TPermutations = array of TPermutation;
-
-var
-  PermList: TPermutations;
 
 { TNaiveSymBoard }
 
@@ -91,23 +84,23 @@ begin
   inherited;
 end;
 
-function TNaiveSymBoard.GetStackBandPerms(Rows: boolean): integer;
+function TNaiveSymBoard.GetStackBandPerms(Rows: boolean): TPermIdx;
 begin
   result := FStackBandPermutation[Rows];
 end;
 
-procedure TNaiveSymBoard.SetStackBandPerms(Rows: boolean; Val: integer);
+procedure TNaiveSymBoard.SetStackBandPerms(Rows: boolean; Val: TPermIdx);
 begin
   Assert((Val >= 0) and (Val < Length(PermList)));
   FStackBandPermutation[Rows] := Val;
 end;
 
-function TNaiveSymBoard.GetAllRowColPerms(Rows: boolean; StackBandIdx: TOrderIdx): integer;
+function TNaiveSymBoard.GetAllRowColPerms(Rows: boolean; StackBandIdx: TOrderIdx): TPermIdx;
 begin
   result := FRowColPermutations[Rows, StackBandIdx];
 end;
 
-procedure TNaiveSymBoard.SetAllRowColPerms(Rows: boolean; StackBandIdx: TOrderIdx; Val: integer);
+procedure TNaiveSymBoard.SetAllRowColPerms(Rows: boolean; StackBandIdx: TOrderIdx; Val: TPermIdx);
 begin
   Assert((Val >= 0) and (Val < Length(PermList)));
   FRowColPermutations[Rows, StackBandIdx] := Val;
@@ -210,13 +203,13 @@ end;
 
 function TNaiveSymBoard.AmIsomorphicTo(Other: TSymBoard): boolean;
 var
-  OldIStack, OldIBand: integer;
+  OldIStack, OldIBand: TPermIdx;
   SReflect: boolean;
   SStackBandPermutation: TStackBandPermutations;
   SRowColPermutations: TAllRowColPermutations;
 
   IReflect: boolean;
-  IStack, IBand: integer;
+  IStack, IBand: TPermIdx;
 
 label
   done;
@@ -285,55 +278,4 @@ begin
   Entries[Row, Col] := Val;
 end;
 
-{ Misc functions }
-
-function Fact(i: integer): integer;
-begin
-  if i <= 1 then
-    result := 1
-  else
-    result := i * Fact(i-1);
-end;
-
-procedure InitPermList;
-var
-  ListIdx: integer;
-  PickedSet: TOrderSet;
-  CurPerm: TPermutation;
-
-  procedure AddPerms(Pos: integer);
-  var
-    Candidate: TOrderIdx;
-  begin
-    if Pos = ORDER then
-    begin
-      //Record permutation
-      PermList[ListIdx] := CurPerm;
-      Inc(ListIdx);
-    end
-    else
-    begin
-      for Candidate := Low(Candidate) to High(Candidate) do
-      begin
-        if not (Candidate in PickedSet) then
-        begin
-          CurPerm[Pos] := Candidate;
-          PickedSet := PickedSet + [Candidate];
-          AddPerms(Succ(Pos));
-          PickedSet := PickedSet - [Candidate];
-        end;
-      end;
-    end;
-  end;
-
-begin
-  SetLength(PermList, Fact(ORDER));
-  ListIdx := 0;
-  PickedSet := [];
-  AddPerms(0);
-  Assert(ListIdx = Length(PermList));
-end;
-
-initialization
-  InitPermList;
 end.

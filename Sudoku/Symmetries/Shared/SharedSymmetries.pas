@@ -34,9 +34,11 @@ uses Trackables;
 const
 {$IFDEF ORDER2}
   ORDER = 2;
+  FACT_ORDER = 2;
 {$ELSE}
 {$IFDEF ORDER3}
   ORDER = 3;
+  FACT_ORDER = 6;
 {$ELSE}
 ERROR Need to define board order.
 {$ENDIF}
@@ -76,6 +78,11 @@ type
   TOrderIdx = 0 .. Pred(ORDER);
   TOrderSet = set of TOrderIdx;
 
+  TPermIdxUT = 0..Pred(FACT_ORDER);
+  TPermIdx = type TPermIdxUT;
+  TPermutation = array[TOrderIdx] of TOrderIdx;
+  TPermList = array[TPermIdx] of TPermutation;
+
   TSymRow = array [Low(TRowColIdx) .. High(TRowColIdx)] of integer;
   TSymBoardState = array [Low(TRowColIdx) .. High(TRowColIdx)] of TSymRow;
 
@@ -97,6 +104,9 @@ type
     function AmIsomorphicTo(Other: TSymBoard): boolean; virtual; abstract;
     property Entries[Row, Col: TRowColIdx]: integer read GetBoardEntry write SetBoardEntry;
   end;
+
+var
+  PermList: TPermList;
 
 implementation
 
@@ -136,4 +146,44 @@ begin
       end;
 end;
 
+procedure InitPermList;
+var
+  ListIdx: integer;
+  PickedSet: TOrderSet;
+  CurPerm: TPermutation;
+
+  procedure AddPerms(Pos: integer);
+  var
+    Candidate: TOrderIdx;
+  begin
+    if Pos = ORDER then
+    begin
+      //Record permutation
+      PermList[ListIdx] := CurPerm;
+      Inc(ListIdx);
+    end
+    else
+    begin
+      for Candidate := Low(Candidate) to High(Candidate) do
+      begin
+        if not (Candidate in PickedSet) then
+        begin
+          CurPerm[Pos] := Candidate;
+          PickedSet := PickedSet + [Candidate];
+          AddPerms(Succ(Pos));
+          PickedSet := PickedSet - [Candidate];
+        end;
+      end;
+    end;
+  end;
+
+begin
+  ListIdx := 0;
+  PickedSet := [];
+  AddPerms(0);
+  Assert(ListIdx = Length(PermList));
+end;
+
+initialization
+  InitPermlist;
 end.

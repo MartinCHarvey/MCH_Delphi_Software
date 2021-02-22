@@ -109,7 +109,6 @@
         <DCCReference Include="..\NaiveSymmetries.pas"/>
         <DCCReference Include="..\..\..\..\Common\Tracking\Trackables.pas"/>
         <DCCReference Include="..\..\..\..\Common\Balanced Tree\BinaryTree.pas"/>
-        <DCCReference Include="..\..\Graph\GraphSymmetries.pas"/>
         <DCCReference Include="..\..\..\..\Common\DLList\DLList.pas"/>
         <DCCReference Include="..\..\..\..\Common\ExactCover\ExactCover.pas"/>
         <DCCReference Include="..\..\..\..\Common\SparseMatrix\SparseMatrix.pas"/>

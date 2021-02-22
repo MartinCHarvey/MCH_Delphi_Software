@@ -38,15 +38,12 @@ interface
   way of generating N+1 isomorphisms.
 }
 
-procedure BruteForceIsomorphismsPermutations(Givens: integer);
-procedure Test1;
-procedure Test2;
-procedure Test3;
+procedure Test;
 
 implementation
 
 uses
-  SharedSymmetries, NaiveSymmetries, Contnrs, SysUtils, GraphSymmetries;
+  SharedSymmetries, NaiveSymmetries, Contnrs, SysUtils;
 
 var
   LogFile: TextFile;
@@ -89,130 +86,12 @@ begin
   WriteLn('');
 end;
 
-procedure BruteForceIsomorphismsPermutations(Givens: integer);
-var
-  SymBoard: TNaiveSymBoard;
-  IsoList: TObjectList;
-
-  procedure Note;
-  var
-    BoardCopy: TNaiveSymBoard;
-    i: integer;
-
-  begin
-    for i := 0 to Pred(IsoList.Count) do
-    begin
-      if SymBoard.AmIsomorphicTo (IsoList[i] as TNaiveSymBoard) then
-        exit;
-    end;
-    BoardCopy := TNaiveSymBoard.Create;
-    BoardCopy.Assign(SymBoard);
-    IsoList.Add(BoardCopy);
-  end;
-
-  procedure Place(StartIdx, GivensLeft: integer);
-  var
-    NxtIdx: integer;
-    Row, Col: TRowColIdx;
-  begin
-    if GivensLeft > 0 then
-    begin
-      NxtIdx := StartIdx;
-      while NxtIdx < (Succ(High(Row)) * Succ(High(Col))) do
-      begin
-        Row := NxtIdx div (Succ(High(Col)));
-        Col := NxtIdx mod (Succ(High(Col)));
-        SymBoard.Entries[Row, Col] := 1;
-        Place(Succ(NxtIdx), Pred(GivensLeft));
-        SymBoard.Entries[Row, Col] := 0;
-        Inc(NxtIdx);
-      end;
-    end
-    else
-      Note;
-  end;
-
-begin
-  SymBoard := TNaiveSymBoard.Create;
-  try
-    IsoList := TObjectList.Create;
-    IsoList.OwnsObjects := true;
-    try
-      Place(0, Givens);
-      DumpIsoList(IsoList, Givens);
-    finally
-      IsoList.Free;
-    end;
-  finally
-    SymBoard.Free;
-  end;
-end;
-
-procedure BruteForceIsomorphismsGraph(Givens: integer);
-var
-  SymBoard: TGraphSymBoard;
-  IsoList: TObjectList;
-
-  procedure Note;
-  var
-    BoardCopy: TGraphSymBoard;
-    i: integer;
-
-  begin
-    for i := 0 to Pred(IsoList.Count) do
-    begin
-      if SymBoard.AmIsomorphicTo (IsoList[i] as TGraphSymBoard) then
-        exit;
-    end;
-    BoardCopy := TGraphSymBoard.Create;
-    BoardCopy.Assign(SymBoard);
-    IsoList.Add(BoardCopy);
-  end;
-
-  procedure Place(StartIdx, GivensLeft: integer);
-  var
-    NxtIdx: integer;
-    Row, Col: TRowColIdx;
-  begin
-    if GivensLeft > 0 then
-    begin
-      NxtIdx := StartIdx;
-      while NxtIdx < (Succ(High(Row)) * Succ(High(Col))) do
-      begin
-        Row := NxtIdx div (Succ(High(Col)));
-        Col := NxtIdx mod (Succ(High(Col)));
-        SymBoard.Entries[Row, Col] := 1;
-        Place(Succ(NxtIdx), Pred(GivensLeft));
-        SymBoard.Entries[Row, Col] := 0;
-        Inc(NxtIdx);
-      end;
-    end
-    else
-      Note;
-  end;
-
-begin
-  SymBoard := TGraphSymBoard.Create;
-  try
-    IsoList := TObjectList.Create;
-    IsoList.OwnsObjects := true;
-    try
-      Place(0, Givens);
-      DumpIsoList(IsoList, Givens);
-    finally
-      IsoList.Free;
-    end;
-  finally
-    SymBoard.Free;
-  end;
-end;
-
-procedure IsomorphismsGraphGenerative(MaxGivens: integer);
+procedure IsomorphismsGenerative(MaxGivens: integer);
 var
   IsoList, Tmp, PartialNxtIsoList: TObjectList;
   GivenCount: integer;
   Idx, Idx2: integer;
-  TestBoard, NewBoard: TGraphSymBoard;
+  TestBoard, NewBoard: TNaiveSymBoard;
   x,y: TRowColIdx;
   CanAdd: boolean;
 begin
@@ -221,18 +100,18 @@ begin
   IsoList.OwnsObjects := true;
   PartialNxtIsoList := TObjectList.Create;
   PartialNxtIsoList.OwnsObjects := true;
-  TestBoard := TGraphSymBoard.Create;
+  TestBoard := TNaiveSymBoard.Create;
   try
     while GivenCount <= MaxGivens do
     begin
       if GivenCount = 0 then
-        IsoList.Add(TGraphSymBoard.Create)
+        IsoList.Add(TNaiveSymBoard.Create)
       else
       begin
         for Idx := 0 to Pred(IsoList.Count) do
         begin
-          TestBoard.Assign(TGraphSymBoard(IsoList.Items[Idx]));
-          Assert(TestBoard.AmEqualTo(TGraphSymBoard(IsoList.Items[Idx])));
+          TestBoard.Assign(TNaiveSymBoard(IsoList.Items[Idx]));
+          Assert(TestBoard.AmEqualTo(TNaiveSymBoard(IsoList.Items[Idx])));
 
           for x := Low(x) to High(x) do
           begin
@@ -255,7 +134,7 @@ begin
                 end;
                 if CanAdd then
                 begin
-                  NewBoard := TGraphSymBoard.Create;
+                  NewBoard := TNaiveSymBoard.Create;
                   NewBoard.Assign(TestBoard);
                   PartialNxtIsoList.Add(NewBoard);
                 end;
@@ -283,25 +162,9 @@ const
 //  MaxGivens = 4;
   MaxGivens = (ORDER * ORDER * ORDER * ORDER);
 
-procedure Test1;
-var
-  N: integer;
+procedure Test;
 begin
-  for N := 0 to MaxGivens do
-    BruteForceIsomorphismsPermutations(N);
-end;
-
-procedure Test2;
-var
-  N: integer;
-begin
-  for N := 0 to MaxGivens do
-    BruteForceIsomorphismsGraph(N);
-end;
-
-procedure Test3;
-begin
-  IsomorphismsGraphGenerative(MaxGivens);
+  IsomorphismsGenerative(MaxGivens);
 end;
 
 end.
