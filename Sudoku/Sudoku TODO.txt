@@ -1,0 +1,12 @@
+
+1. Compare solver with fastest currently available.
+
+- Not bad - within 5x of the fastest, and it's portable.
+
+2. Re-read paper.
+
+3. OK new plan.
+
+a) Ditch graph symmetry code.
+b) Use an algorithm based on counting cells in stacks and bands / rows cols etc to narrow search tree.
+c) Find isomorphisms, and categorize existing solutions.
