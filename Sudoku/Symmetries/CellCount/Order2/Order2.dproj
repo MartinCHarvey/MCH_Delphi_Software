@@ -1,11 +1,11 @@
 ﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
     <PropertyGroup>
-        <ProjectGuid>{2BE6695E-3C9B-400D-962A-10D50518D787}</ProjectGuid>
+        <ProjectGuid>{E2B04404-D24D-43F4-AC75-8D823A98D0F2}</ProjectGuid>
         <ProjectVersion>14.6</ProjectVersion>
         <FrameworkType>None</FrameworkType>
         <MainSource>Order2.dpr</MainSource>
         <Base>True</Base>
-        <Config Condition="'$(Config)'==''">Release</Config>
+        <Config Condition="'$(Config)'==''">Debug</Config>
         <Platform Condition="'$(Platform)'==''">Win32</Platform>
         <TargetedPlatforms>1</TargetedPlatforms>
         <AppType>Console</AppType>
@@ -44,18 +44,12 @@
         <CfgParent>Base</CfgParent>
         <Base>true</Base>
     </PropertyGroup>
-    <PropertyGroup Condition="('$(Platform)'=='Win32' and '$(Cfg_2)'=='true') or '$(Cfg_2_Win32)'!=''">
-        <Cfg_2_Win32>true</Cfg_2_Win32>
-        <CfgParent>Cfg_2</CfgParent>
-        <Cfg_2>true</Cfg_2>
-        <Base>true</Base>
-    </PropertyGroup>
     <PropertyGroup Condition="'$(Base)'!=''">
-        <VerInfo_Keys>CompanyName=;FileDescription=;FileVersion=1.0.0.0;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=;ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
-        <VerInfo_Locale>2057</VerInfo_Locale>
         <DCC_Define>ORDER2;$(DCC_Define)</DCC_Define>
         <Manifest_File>None</Manifest_File>
         <DCC_Namespace>System;Xml;Data;Datasnap;Web;Soap;$(DCC_Namespace)</DCC_Namespace>
+        <VerInfo_Keys>CompanyName=;FileDescription=;FileVersion=1.0.0.0;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=;ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
+        <VerInfo_Locale>2057</VerInfo_Locale>
         <DCC_DcuOutput>.\$(Platform)\$(Config)</DCC_DcuOutput>
         <DCC_ExeOutput>.\$(Platform)\$(Config)</DCC_ExeOutput>
         <DCC_E>false</DCC_E>
@@ -71,9 +65,9 @@
     <PropertyGroup Condition="'$(Base_Win32)'!=''">
         <DCC_ConsoleTarget>true</DCC_ConsoleTarget>
         <DCC_Namespace>Winapi;System.Win;Data.Win;Datasnap.Win;Web.Win;Soap.Win;Xml.Win;Bde;$(DCC_Namespace)</DCC_Namespace>
-        <DCC_UsePackage>bindcompfmx;DBXSqliteDriver;frxDB18;vcldbx;fmx;rtl;dbrtl;DbxClientDriver;IndySystem;TeeDB;bindcomp;frx18;inetdbbde;vclib;DBXInterBaseDriver;Tee;DataSnapCommon;xmlrtl;svnui;ibxpress;DbxCommonDriver;vclimg;IndyProtocols;dbxcds;DBXMySQLDriver;frxe18;MetropolisUILiveTile;vclactnband;bindengine;vcldb;soaprtl;bindcompdbx;vcldsnap;bindcompvcl;FMXTee;TeeUI;vclie;vcltouch;CustomIPTransport;vclribbon;VclSmp;dsnap;IndyIPServer;Intraweb;fmxase;vcl;IndyCore;IndyIPCommon;CloudService;CodeSiteExpressPkg;dsnapcon;FmxTeeUI;inet;fmxobj;vclx;inetdbxpress;webdsnap;svn;fmxdae;bdertl;dbexpress;adortl;IndyIPClient;$(DCC_UsePackage)</DCC_UsePackage>
-        <VerInfo_Locale>1033</VerInfo_Locale>
         <VerInfo_Keys>CompanyName=;FileDescription=;FileVersion=1.0.0.0;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=;ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
+        <VerInfo_Locale>1033</VerInfo_Locale>
+        <DCC_UsePackage>bindcompfmx;DBXSqliteDriver;frxDB18;vcldbx;fmx;rtl;dbrtl;DbxClientDriver;IndySystem;TeeDB;bindcomp;frx18;inetdbbde;vclib;DBXInterBaseDriver;Tee;DataSnapCommon;xmlrtl;svnui;ibxpress;DbxCommonDriver;vclimg;IndyProtocols;dbxcds;DBXMySQLDriver;frxe18;MetropolisUILiveTile;vclactnband;bindengine;vcldb;soaprtl;bindcompdbx;vcldsnap;bindcompvcl;FMXTee;TeeUI;vclie;vcltouch;CustomIPTransport;vclribbon;VclSmp;dsnap;IndyIPServer;Intraweb;fmxase;vcl;IndyCore;IndyIPCommon;CloudService;CodeSiteExpressPkg;dsnapcon;FmxTeeUI;inet;fmxobj;vclx;inetdbxpress;webdsnap;svn;fmxdae;bdertl;dbexpress;adortl;IndyIPClient;$(DCC_UsePackage)</DCC_UsePackage>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Base_Win64)'!=''">
         <DCC_ConsoleTarget>true</DCC_ConsoleTarget>
@@ -88,8 +82,6 @@
         <DCC_RemoteDebug>true</DCC_RemoteDebug>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_1_Win32)'!=''">
-        <DCC_IntegerOverflowCheck>true</DCC_IntegerOverflowCheck>
-        <DCC_RangeChecking>true</DCC_RangeChecking>
         <VerInfo_Locale>1033</VerInfo_Locale>
         <DCC_RemoteDebug>false</DCC_RemoteDebug>
     </PropertyGroup>
@@ -99,22 +91,16 @@
         <DCC_SymbolReferenceInfo>0</DCC_SymbolReferenceInfo>
         <DCC_DebugInformation>false</DCC_DebugInformation>
     </PropertyGroup>
-    <PropertyGroup Condition="'$(Cfg_2_Win32)'!=''">
-        <VerInfo_Locale>1033</VerInfo_Locale>
-    </PropertyGroup>
     <ItemGroup>
         <DelphiCompile Include="$(MainSource)">
             <MainSource>MainSource</MainSource>
         </DelphiCompile>
         <DCCReference Include="..\..\Shared\SharedSymmetries.pas"/>
-        <DCCReference Include="..\NaiveSymmetries.pas"/>
         <DCCReference Include="..\..\Shared\SymmetryIterations.pas"/>
+        <DCCReference Include="..\..\Naive\NaiveSymmetries.pas"/>
+        <DCCReference Include="..\CellCountSymmetries.pas"/>
         <DCCReference Include="..\..\..\..\Common\Tracking\Trackables.pas"/>
         <DCCReference Include="..\..\..\..\Common\Balanced Tree\BinaryTree.pas"/>
-        <DCCReference Include="..\..\..\..\Common\DLList\DLList.pas"/>
-        <DCCReference Include="..\..\..\..\Common\ExactCover\ExactCover.pas"/>
-        <DCCReference Include="..\..\..\..\Common\SparseMatrix\SparseMatrix.pas"/>
-        <DCCReference Include="..\..\CellCount\CellCountSymmetries.pas"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>

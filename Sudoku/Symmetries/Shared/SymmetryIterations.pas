@@ -38,12 +38,13 @@ interface
   way of generating N+1 isomorphisms.
 }
 
-procedure Test;
+procedure TestNaive;
+procedure TestCellCount;
 
 implementation
 
 uses
-  SharedSymmetries, NaiveSymmetries, Contnrs, SysUtils;
+  SharedSymmetries, NaiveSymmetries, Contnrs, SysUtils, CellCountSymmetries;
 
 var
   LogFile: TextFile;
@@ -86,12 +87,12 @@ begin
   WriteLn('');
 end;
 
-procedure IsomorphismsGenerative(MaxGivens: integer);
+procedure IsomorphismsGenerative(MaxGivens: integer; BoardClass: TSymBoardClass);
 var
   IsoList, Tmp, PartialNxtIsoList: TObjectList;
   GivenCount: integer;
   Idx, Idx2: integer;
-  TestBoard, NewBoard: TNaiveSymBoard;
+  TestBoard, NewBoard: TSymBoard;
   x,y: TRowColIdx;
   CanAdd: boolean;
 begin
@@ -100,18 +101,18 @@ begin
   IsoList.OwnsObjects := true;
   PartialNxtIsoList := TObjectList.Create;
   PartialNxtIsoList.OwnsObjects := true;
-  TestBoard := TNaiveSymBoard.Create;
+  TestBoard := BoardClass.Create;
   try
     while GivenCount <= MaxGivens do
     begin
       if GivenCount = 0 then
-        IsoList.Add(TNaiveSymBoard.Create)
+        IsoList.Add(BoardClass.Create)
       else
       begin
         for Idx := 0 to Pred(IsoList.Count) do
         begin
-          TestBoard.Assign(TNaiveSymBoard(IsoList.Items[Idx]));
-          Assert(TestBoard.AmEqualTo(TNaiveSymBoard(IsoList.Items[Idx])));
+          TestBoard.Assign(TSymBoard(IsoList.Items[Idx]));
+          Assert(TestBoard.AmEqualTo(TSymBoard(IsoList.Items[Idx])));
 
           for x := Low(x) to High(x) do
           begin
@@ -134,7 +135,7 @@ begin
                 end;
                 if CanAdd then
                 begin
-                  NewBoard := TNaiveSymBoard.Create;
+                  NewBoard := BoardClass.Create;
                   NewBoard.Assign(TestBoard);
                   PartialNxtIsoList.Add(NewBoard);
                 end;
@@ -162,9 +163,14 @@ const
 //  MaxGivens = 4;
   MaxGivens = (ORDER * ORDER * ORDER * ORDER);
 
-procedure Test;
+procedure TestNaive;
 begin
-  IsomorphismsGenerative(MaxGivens);
+  IsomorphismsGenerative(MaxGivens, TNaiveSymBoard);
+end;
+
+procedure TestCellCount;
+begin
+  IsomorphismsGenerative(MaxGivens, TCellCountBoard);
 end;
 
 end.

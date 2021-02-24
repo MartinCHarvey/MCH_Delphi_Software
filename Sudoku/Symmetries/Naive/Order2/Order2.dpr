@@ -13,11 +13,12 @@ uses
   BinaryTree in '..\..\..\..\Common\Balanced Tree\BinaryTree.pas',
   DLList in '..\..\..\..\Common\DLList\DLList.pas',
   ExactCover in '..\..\..\..\Common\ExactCover\ExactCover.pas',
-  SparseMatrix in '..\..\..\..\Common\SparseMatrix\SparseMatrix.pas';
+  SparseMatrix in '..\..\..\..\Common\SparseMatrix\SparseMatrix.pas',
+  CellCountSymmetries in '..\..\CellCount\CellCountSymmetries.pas';
 
 begin
   try
-    Test;
+    TestNaive;
   except
     on E: Exception do
       Writeln(E.ClassName, ': ', E.Message);

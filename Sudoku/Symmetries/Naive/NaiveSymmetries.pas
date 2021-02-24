@@ -45,8 +45,6 @@ type
     function GetAllRowColPerms(Rows: boolean; StackBandIdx: TOrderIdx): TPermIdx;
     procedure SetAllRowColPerms(Rows: boolean; StackBandIdx: TOrderIdx; Val: TPermIdx);
 
-    procedure AbsToRelIndexed(AbsRowCol: TRowColIdx; var StackBand: TOrderIdx; var RowCol: TOrderIdx);
-    procedure RelToAbsIndexed(StackBand, RowCol: TOrderIdx; var AbsRowCol: TRowColIdx);
     procedure Map(Row, Col: TRowColIdx; var MapRow: TRowColIdx; Var MapCol: TRowColIdx);
 
     function GetMappedEntry(Row, Col: TRowColIdx): integer;
@@ -106,16 +104,6 @@ begin
   FRowColPermutations[Rows, StackBandIdx] := Val;
 end;
 
-procedure TNaiveSymBoard.AbsToRelIndexed(AbsRowCol: TRowColIdx; var StackBand: TOrderIdx; var RowCol: TOrderIdx);
-begin
-  StackBand := AbsRowCol div ORDER;
-  RowCol := AbsRowCol mod ORDER;
-end;
-
-procedure TNaiveSymBoard.RelToAbsIndexed(StackBand, RowCol: TOrderIdx; var AbsRowCol: TRowColIdx);
-begin
-  AbsRowCol := (StackBand * ORDER) + RowCol;
-end;
 
 procedure TNaiveSymBoard.Map(Row, Col: TRowColIdx; var MapRow: TRowColIdx; var MapCol: TRowColIdx);
 var

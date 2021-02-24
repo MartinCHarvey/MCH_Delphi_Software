@@ -97,6 +97,7 @@ type
     function GetBoardEntry(Row, Col: TRowColIdx): integer; virtual;
     procedure SetBoardEntry(Row, Col: TRowColIdx; Entry: integer); virtual;
   public
+    constructor Create; virtual;
     function AmEqualTo(Other:TSymBoard): boolean; virtual;
     procedure Assign(Src: TSymBoard); virtual;
     //TODO - individual isomorphic comparisons might or might not be the best
@@ -104,6 +105,11 @@ type
     function AmIsomorphicTo(Other: TSymBoard): boolean; virtual; abstract;
     property Entries[Row, Col: TRowColIdx]: integer read GetBoardEntry write SetBoardEntry;
   end;
+
+  TSymBoardClass = class of TSymBoard;
+
+procedure AbsToRelIndexed(AbsRowCol: TRowColIdx; var StackBand: TOrderIdx; var RowCol: TOrderIdx); inline;
+procedure RelToAbsIndexed(StackBand, RowCol: TOrderIdx; var AbsRowCol: TRowColIdx); inline;
 
 var
   PermList: TPermList;
@@ -146,6 +152,11 @@ begin
       end;
 end;
 
+constructor TSymBoard.Create;
+begin
+  inherited; //Yes, this is required....
+end;
+
 procedure InitPermList;
 var
   ListIdx: integer;
@@ -182,6 +193,17 @@ begin
   PickedSet := [];
   AddPerms(0);
   Assert(ListIdx = Length(PermList));
+end;
+
+procedure AbsToRelIndexed(AbsRowCol: TRowColIdx; var StackBand: TOrderIdx; var RowCol: TOrderIdx);
+begin
+  StackBand := AbsRowCol div ORDER;
+  RowCol := AbsRowCol mod ORDER;
+end;
+
+procedure RelToAbsIndexed(StackBand, RowCol: TOrderIdx; var AbsRowCol: TRowColIdx);
+begin
+  AbsRowCol := (StackBand * ORDER) + RowCol;
 end;
 
 initialization

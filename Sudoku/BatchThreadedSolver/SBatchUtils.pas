@@ -36,7 +36,7 @@ var
 implementation
 
 uses
-  SudokuExactCover, BufferedFileStream, SudokuAbstracts, SudokuBoard;
+  SudokuExactCover, BufferedFileStream, SudokuAbstracts, SudokuBoard, IdGlobal;
 
 var
   WorkFarm: TWorkFarm;
@@ -61,56 +61,16 @@ var
   PuzzleCount: integer;
   Idx: integer;
 
-  function ReadLn: string;
-  var
-    C: AnsiChar;
-    StartPos: int64;
-    EndLinePos: int64;
-    NextStartPos: int64;
-    AStr: AnsiString;
-  begin
-    result := '';
-    StartPos := FS.Position;
-    EndLinePos := StartPos;
-    //Find out where strings start and stop.
-    repeat
-      if FS.Position >= FS.Size then
-        break;
-      FS.Read(C, sizeof(C));
-      if not (C in [#13, #10]) then
-        Inc(EndLinePos);
-    until C in [#13, #10];
-    //String from startpos to pred(endlinepos).
-    NextStartPos := EndLinePos;
-    FS.Seek(NextStartPos, soFromBeginning);
-    //line terminators from endlinepos to pred(NextStartPos)
-    repeat
-      if FS.Position >= FS.Size then
-        break;
-      FS.Read(C, sizeof(C));
-      if (C in [#13, #10]) then
-        Inc(NextStartPos);
-    until C in [#13, #10];
-
-    Fs.Seek(StartPos, soFromBeginning);
-
-    SetLength(AStr, EndLinePos - StartPos);
-    Fs.ReadData(@AStr[1], EndLinePos - StartPos);
-
-    Fs.Seek(NextStartPos, soFromBeginning);
-    result := AStr;
-  end;
-
 begin
   FS := TReadOnlyCachedFileStream.Create(Filename, 1024 * 1024);
   try
-    Line := ReadLn;
+    Line := ReadLnFromStream(FS);
     Line := Line.Trim;
     PuzzleCount := StrToInt(Line); //Allow failures to fall out.
     WriteLn('Initial puzzle count: ' + IntToStr(PuzzleCount));
     for Idx := 0 to Pred(PuzzleCount) do
     begin
-      Line := ReadLn;
+      Line := ReadLnFromStream(FS);
       Line := Line.Trim;
       //Check that we have 81 numbers 0..9
       if Line.Length <> 81 then
@@ -161,7 +121,6 @@ label
 begin
   Solver := TSExactCoverSolver.Create;
   Solver.SolveMode := ssmFindOne;
-  //TmpBoardState := TSExactCoverState.Create;
   TmpBoardState := TSBoardState.Create;
   try
     PuzzleDesc := SpecList.InterlockedGetString;
@@ -213,10 +172,10 @@ next:
   finally
     Solver.Free;
     TmpBoardState.Free;
+    SolversRunning := TInterlocked.Decrement(WorkItemsOutstanding);
+    if SolversRunning = 0 then
+      WorkItemsDone.SetEvent;
   end;
-  SolversRunning := TInterlocked.Decrement(WorkItemsOutstanding);
-  if SolversRunning = 0 then
-    WorkItemsDone.SetEvent;
   result := 0;
 end;
 
