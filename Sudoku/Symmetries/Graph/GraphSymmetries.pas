@@ -125,7 +125,7 @@ type
     function GetBoardEntry(Row, Col: TRowColIdx): integer; override;
   public
     function AmIsomorphicTo(Other: TSymBoard): boolean; override;
-    constructor Create;
+    constructor Create; override;
     destructor Destroy; override;
     property Entries[Row, Col: TRowColIdx]: integer read GetBoardEntry write SetBoardEntry;
   end;

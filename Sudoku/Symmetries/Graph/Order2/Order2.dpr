@@ -14,12 +14,12 @@ uses
   GraphSymmetries in '..\GraphSymmetries.pas',
   DLList in '..\..\..\..\Common\DLList\DLList.pas',
   ExactCover in '..\..\..\..\Common\ExactCover\ExactCover.pas',
-  SparseMatrix in '..\..\..\..\Common\SparseMatrix\SparseMatrix.pas';
+  SparseMatrix in '..\..\..\..\Common\SparseMatrix\SparseMatrix.pas',
+  CellCountSymmetries in '..\..\CellCount\CellCountSymmetries.pas';
 
 begin
   try
-    //Test2;
-    Test3;
+    TestGraph;
   except
     on E: Exception do
       Writeln(E.ClassName, ': ', E.Message);

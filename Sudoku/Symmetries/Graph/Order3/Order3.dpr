@@ -14,11 +14,12 @@ uses
   ExactCover in '..\..\..\..\Common\ExactCover\ExactCover.pas',
   SparseMatrix in '..\..\..\..\Common\SparseMatrix\SparseMatrix.pas',
   Trackables in '..\..\..\..\Common\Tracking\Trackables.pas',
-  BinaryTree in '..\..\..\..\Common\Balanced Tree\BinaryTree.pas';
+  BinaryTree in '..\..\..\..\Common\Balanced Tree\BinaryTree.pas',
+  CellCountSymmetries in '..\..\CellCount\CellCountSymmetries.pas';
 
 begin
   try
-    Test3;
+    TestGraph;
   except
     on E: Exception do
       Writeln(E.ClassName, ': ', E.Message);

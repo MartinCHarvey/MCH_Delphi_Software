@@ -1,4 +1,4 @@
-program Order2;
+program Order3;
 
 {$APPTYPE CONSOLE}
 
@@ -6,20 +6,20 @@ program Order2;
 
 uses
   System.SysUtils,
-  SharedSymmetries in '..\..\Shared\SharedSymmetries.pas',
-  NaiveSymmetries in '..\NaiveSymmetries.pas',
   SymmetryIterations in '..\..\Shared\SymmetryIterations.pas',
-  Trackables in '..\..\..\..\Common\Tracking\Trackables.pas',
+  SharedSymmetries in '..\..\Shared\SharedSymmetries.pas',
+  NaiveSymmetries in '..\..\Naive\NaiveSymmetries.pas',
+  CellCountSymmetries in '..\CellCountSymmetries.pas',
+  GraphSymmetries in '..\..\Graph\GraphSymmetries.pas',
   BinaryTree in '..\..\..\..\Common\Balanced Tree\BinaryTree.pas',
+  Trackables in '..\..\..\..\Common\Tracking\Trackables.pas',
   DLList in '..\..\..\..\Common\DLList\DLList.pas',
-  ExactCover in '..\..\..\..\Common\ExactCover\ExactCover.pas',
   SparseMatrix in '..\..\..\..\Common\SparseMatrix\SparseMatrix.pas',
-  CellCountSymmetries in '..\..\CellCount\CellCountSymmetries.pas',
-  GraphSymmetries in '..\..\Graph\GraphSymmetries.pas';
+  ExactCover in '..\..\..\..\Common\ExactCover\ExactCover.pas';
 
 begin
   try
-    TestNaive;
+    TestCellCount;
   except
     on E: Exception do
       Writeln(E.ClassName, ': ', E.Message);

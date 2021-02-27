@@ -11,7 +11,11 @@ uses
   NaiveSymmetries in '..\..\Naive\NaiveSymmetries.pas',
   CellCountSymmetries in '..\CellCountSymmetries.pas',
   Trackables in '..\..\..\..\Common\Tracking\Trackables.pas',
-  BinaryTree in '..\..\..\..\Common\Balanced Tree\BinaryTree.pas';
+  BinaryTree in '..\..\..\..\Common\Balanced Tree\BinaryTree.pas',
+  GraphSymmetries in '..\..\Graph\GraphSymmetries.pas',
+  DLList in '..\..\..\..\Common\DLList\DLList.pas',
+  ExactCover in '..\..\..\..\Common\ExactCover\ExactCover.pas',
+  SparseMatrix in '..\..\..\..\Common\SparseMatrix\SparseMatrix.pas';
 
 begin
   try

@@ -78,10 +78,10 @@ type
   TOrderIdx = 0 .. Pred(ORDER);
   TOrderSet = set of TOrderIdx;
 
-  TPermIdxUT = 0..Pred(FACT_ORDER);
-  TPermIdx = type TPermIdxUT;
+  TPermIdx = 0..Pred(FACT_ORDER);
   TPermutation = array[TOrderIdx] of TOrderIdx;
   TPermList = array[TPermIdx] of TPermutation;
+  TPermIdxList = array[TPermIdx] of TPermIdx;
 
   TSymRow = array [Low(TRowColIdx) .. High(TRowColIdx)] of integer;
   TSymBoardState = array [Low(TRowColIdx) .. High(TRowColIdx)] of TSymRow;

@@ -40,11 +40,13 @@ interface
 
 procedure TestNaive;
 procedure TestCellCount;
+procedure TestGraph;
 
 implementation
 
 uses
-  SharedSymmetries, NaiveSymmetries, Contnrs, SysUtils, CellCountSymmetries;
+  SharedSymmetries, NaiveSymmetries, Contnrs, SysUtils, CellCountSymmetries,
+  GraphSymmetries;
 
 var
   LogFile: TextFile;
@@ -160,8 +162,8 @@ begin
 end;
 
 const
-//  MaxGivens = 4;
-  MaxGivens = (ORDER * ORDER * ORDER * ORDER);
+  MaxGivens = 6;
+//  MaxGivens = (ORDER * ORDER * ORDER * ORDER);
 
 procedure TestNaive;
 begin
@@ -171,6 +173,11 @@ end;
 procedure TestCellCount;
 begin
   IsomorphismsGenerative(MaxGivens, TCellCountBoard);
+end;
+
+procedure TestGraph;
+begin
+  IsomorphismsGenerative(MaxGivens, TGraphSymBoard);
 end;
 
 end.
