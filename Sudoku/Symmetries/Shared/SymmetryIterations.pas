@@ -42,6 +42,8 @@ procedure TestNaive;
 procedure TestCellCount;
 procedure TestGraph;
 
+//{$DEFINE OMIT_OUTPUT}
+
 implementation
 
 uses
@@ -152,7 +154,9 @@ begin
         Tmp.Clear;
         PartialNxtIsoList := Tmp;
       end;
+{$IFNDEF OMIT_OUTPUT}
       DumpIsoList(IsoList, GivenCount);
+{$ENDIF}
       Inc(GivenCount);
     end;
   finally
@@ -163,22 +167,46 @@ begin
 end;
 
 const
-//  MaxGivens = 6;
-  MaxGivens = (ORDER * ORDER * ORDER * ORDER);
+  MaxGivens = 6;
+//  MaxGivens = (ORDER * ORDER * ORDER * ORDER);
+
+var
+  StartTime: TDateTime;
+
+procedure StartTiming();
+begin
+  StartTime := Now;
+end;
+
+procedure StopTiming;
+var
+  StopTime: TDateTime;
+  ElapsedSecs: double;
+begin
+  StopTime := Now;
+  ElapsedSecs := (StopTime - StartTime) * (3600 * 24);
+  WriteLn('ElapsedTime: ' + FloatToStr(ElapsedSecs));
+end;
 
 procedure TestNaive;
 begin
+  StartTiming();
   IsomorphismsGenerative(MaxGivens, TNaiveSymBoard);
+  StopTiming();
 end;
 
 procedure TestCellCount;
 begin
+  StartTiming();
   IsomorphismsGenerative(MaxGivens, TCellCountBoard);
+  StopTiming();
 end;
 
 procedure TestGraph;
 begin
+  StartTiming();
   IsomorphismsGenerative(MaxGivens, TGraphSymBoard);
+  StopTiming();
 end;
 
 end.
