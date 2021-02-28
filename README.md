@@ -16,6 +16,9 @@ Files / Folders:
 - Sudoku: A sudoku solver.
   - Simple testapp for Exact cover DLX algorithm. Allows you to load, save, and solve sudoku problems fast.
 
+- Sudoku / Symmetries.
+  - Some ways of finding isomorpgic board configurations. Graph method has errors, but included for interest.
+
 Common: Common utility code, including:
 
 - Raw AVL tree.
