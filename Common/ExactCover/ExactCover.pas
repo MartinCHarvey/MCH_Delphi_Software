@@ -61,18 +61,20 @@ element from A,B,C,D,E,F.
 
 interface
 
-//  TODO - Review inlines and optimisations after profiling.
+uses SysUtils, SparseMatrix, Trackables, DLList, Classes;
 
-uses SysUtils, SparseMatrix, Trackables, DLList;
+{$IFOPT C+}
+{$DEFINE CHECK_FASTER_PICKER}
+{$ENDIF}
+//{$DEFINE USE_FASTER_PICKER}
 
 type
-
   TExactCoverCell = class;
+  TExactCoverHeader = class;
 
   //Just keep an included list.
   //Debug checks can check counts by using parent sparse matrix iterators.
   //Excluded nodes do not need to belong to an excluded list.
-
   TExactCoverHeader = class(THeader)
   private
     FStackLink,
@@ -80,7 +82,10 @@ type
     FInclCellsHead: TDLEntry;
     FPrevInclSave: PDLEntry;
     FInclCellsCount: integer;
+    FOnDirtyNotification: TNotifyEvent;
+    FMaskNotification: boolean;
   protected
+    procedure DoDirtyNotification; //TODO - Put inline back.
     function GetIncluded: boolean; inline;
     procedure SetIncluded(NewIncluded: boolean); inline;//Runtime include / exclude by row / col
     procedure InitAllIncluded; //Startup IncludeAll
@@ -97,6 +102,7 @@ type
 
     property Included: boolean read GetIncluded write SetIncluded;
     property InclCellsCount: integer read FInclCellsCount; //Included cells when row itself not excluded.
+    property OnDirtyNotification: TNotifyEvent read FOnDirtyNotification write FOnDirtyNotification;
   end;
 
   TExactCoverCell = class(TMatrixCell)
@@ -171,10 +177,23 @@ type
   //has been excluded from the matrix as a whole.
   TAbstractPicker = class;
 
+  TPickLocationHint = (tlhUndefined, tlhIncluded, tlhDirty, tlhExcluded);
+
+  //Data for "faster" picker to use.
+  TExactCoverHeaderPickData = record
+    //This is specific to picker.
+    FListEntry: TDLEntry;
+    FLocationHint: TPickLocationHint;
+  end;
+
   TConstraint = class (TExactCoverHeader)
+  private
+    FPickData: TExactCoverHeaderPickData;
   protected
     function GetStackedEliminated: boolean; inline;
   public
+    constructor Create;
+    destructor Destroy; override;
     property StackedEliminated: boolean read GetStackedEliminated;
   end;
 
@@ -203,6 +222,23 @@ type
   TOnFreePossibilityEvent = procedure(Sender: TObject; Possibility: TPossibility) of object;
   TOnFreeConstraintEvent = procedure(Sender: TObject; Constraint: TConstraint) of object;
   TOnFreeCellEvent = procedure(Sender: TObject; Cell: TExactCoverCell) of object;
+
+{$IFDEF EXACT_COVER_LOGGING}
+  TEvtType = (tetConstraintSelected,
+              tetConstraintSatisfied,
+              tetPossibilitySelected,
+              tetPossibilityEliminated,
+              tetPossibilityIncluded,
+              tetBacktrackStart,
+              tetBacktrackEnd,
+              tetConstraintRestored,
+              tetPossibilityRestored);
+
+  TLogPossibilityEvent = procedure(Sender: TObject; Poss: TPossibility; EvtType: TEvtType) of object;
+  TLogConstraintEvent = procedure(Sender: TObject; Cons: TConstraint; EvtType: TEvtType) of object;
+  TLogOtherEvent = procedure(Sender: TObject; EvtType: TEvtType) of object;
+{$ENDIF}
+
 
   EExactCoverException = class(Exception);
 
@@ -239,6 +275,11 @@ type
     FOnFreePossibility: TOnFreePossibilityEvent;
     FOnFreeConstraint: TOnFreeConstraintEvent;
 
+{$IFDEF EXACT_COVER_LOGGING}
+    FOnLogPossibilityEvent: TLogPossibilityEvent;
+    FOnLogConstraintEvent: TLogConstraintEvent;
+    FOnLogOtherEvent: TLogOtherEvent;
+{$ENDIF}
     FOnCoverNotifyEvent: TCoverNotifyEvent;
     FGeneralResult: TCoverTerminationType;
     FCoverNotifySet: TCoverNotifySet;
@@ -250,6 +291,12 @@ type
     FPartSolutionStack: TDLEntry;
     FPartSolutionStackCount: integer;
   protected
+{$IFDEF EXACT_COVER_LOGGING}
+    procedure DoLogPossibility(Poss: TPossibility; EvtType: TEvtType);
+    procedure DoLogConstraint(Cons: TConstraint; EvtType: TEvtType);
+    procedure DoLogOther(EvtType: TEvtType);
+{$ENDIF}
+
     function GetRowsColsStacked: integer; inline;
 
     function DoAllocCell: TMatrixCell;
@@ -328,6 +375,13 @@ type
     property OnFreeCell: TOnFreeCellEvent read FOnFreeCell write FOnFreeCell;
     property OnFreePossibility:TOnFreePossibilityEvent read FOnFreePossibility write FOnFreePossibility;
     property OnFreeConstraint:TOnFreeConstraintEvent read FOnFreeConstraint write FOnFreeConstraint;
+
+{$IFDEF EXACT_COVER_LOGGING}
+    property OnLogPossibilityEvent: TLogPossibilityEvent read FOnLogPossibilityEvent write FOnLogPossibilityEvent;
+    property OnLogConstraintEvent: TLogConstraintEvent read FOnLogConstraintEvent write FOnLogConstraintEvent;
+    property OnLogOtherEvent: TLogOtherEvent read FOnLogOtherEvent write FOnLogOtherEvent;
+{$ENDIF}
+
     //See Top/Next partial solution possibility.
     property PartialSolutionStackCount: integer read FPartSolutionStackCount;
 
@@ -336,6 +390,10 @@ type
 
     property IncludedPossibilityCount: integer read GetIncludedPossibilityCount;
     property IncludedConstraintCount: integer read GetIncludedConstraintCount;
+
+    property ConstraintPicker: TAbstractPicker read FConstraintPicker;
+    property PossibilityPicker: TAbstractPicker read FPossibilityPicker;
+
     property Solved: boolean read FSolved;
   end;
 
@@ -359,15 +417,90 @@ type
     property PickingPossibilities: boolean read FPickingPossibilities write FPickingPossibilities;
   end;
 
-//Pick first or lowest related possibs constraint at each stack level,
-//no iteration required, even if want to iter all possible solutions.
+  //Pick first or lowest related possibs constraint at each stack level,
+  //no iteration required, even if want to iter all possible solutions.
+
+  //Improve picking time with the use of a stack, so only need to traverse
+  //list when "pushing" not popping.
   TSimpleConstraintPicker = class(TAbstractPicker)
   private
     FPickLowest: boolean;
+    FPickedStack: array of TExactCoverHeader;
+    FStackIndex: integer;
   public
+    procedure PickerInitSolve; override;
+    procedure PickerFiniSolve; override;
+    procedure PickerPostPush; override;
+    procedure PickerPostPop; override;
+
     function PickOne(Context: TExactCoverHeader):TExactCoverHeader; override;
 
     property PickLowest: boolean read FPickLowest write FPickLowest;
+  end;
+
+//Pick first or lowest related possibs.
+//Optimised given the understanding that most of the time, relatively
+//few constraints change at any one moment.
+
+// N.B Care needs to be taken with this picker:
+// - as the algorithm proceeds, and then backtracks, the picker needs
+// - to return to picking the same constraint as it did the previous time
+// - so that the possibility picker can enumerate through all the various
+// - possibilities for the same constraint.
+
+// Two ways to do this:
+// 1) If we take care with first / last ordering, is it possible to make
+//    the operations stack-like such that the picker always has the same
+//    constraint at the start of the list? What about the order in which
+//    the matrix is traversed? This may also depend on the contents of the matrix.
+//
+// 2) Maintain an explicit stack, and check that upon rewind / pop,
+//    the constraint we choose is the same as before (with same # of poss).
+
+//TODO - Also need to consider how often we process the dirty list.
+
+  TPickedInfo = record
+    Picked: TExactCoverHeader;
+    PrevCellCount: integer;
+  end;
+
+  TFasterConstraintPicker = class(TAbstractPicker)
+  private
+    FPickedStack: array of TPickedInfo;
+    FStackIndex: integer;
+
+    FInitForNotifies: boolean;
+    FIndexList: TList;  //Pointers into list of cons with 1, 2, 3 etc poss.
+    FIncludedList: TDLEntry;
+    FDirtyList: TDLEntry;
+    FExcludedList: TDLEntry;
+  protected
+    procedure RemoveFromIncluded(Cons: TConstraint);
+    procedure AddToIncluded(Cons: TConstraint; AllowListGrow: boolean = false);
+
+    procedure AddToDirty(Cons: TConstraint);
+    procedure RemoveFromDirty(Cons: TConstraint);
+
+    procedure RemoveFromExcluded(Cons: TConstraint);
+    procedure AddToExcluded(Cons: TConstraint);
+
+    procedure ProcessDirtyList(Initial: boolean = false);
+{$IFDEF CHECK_FASTER_PICKER}
+    procedure ListConsistencyCheck;
+{$ENDIF}
+    function PickFromIncludedList: TExactCoverHeader;
+  public
+    procedure HandleDirtyNotification(Sender: TObject);
+
+    procedure PickerInitSolve; override;
+    procedure PickerFiniSolve; override;
+    procedure PickerPostPush; override;
+    procedure PickerPostPop; override;
+
+    constructor Create;
+    destructor Destroy;override;
+    function PickOne(Context: TExactCoverHeader):TExactCoverHeader; override;
+    //Always picks lowest.
   end;
 
 //Iterate through all possibilities at each stack level,
@@ -393,6 +526,20 @@ type
   to pick the constraints in another order for any particular stats.
 }
 
+{$IFDEF EXACT_COVER_LOGGING}
+  TEvtTypeStrs = array[TEvtType] of string;
+
+const
+  EvtTypeStrs:TEvtTypeStrs = ('ConstraintSelected',
+                              'ConstraintSatisfied',
+                              'PossibilitySelected',
+                              'PossibilityEliminated',
+                              'PossibilityIncluded',
+                              'BacktrackStart',
+                              'BacktrackEnd',
+                              'ConstraintRestored',
+                              'PossibilityRestored');
+{$ENDIF}
 
 implementation
 
@@ -405,6 +552,18 @@ const
   S_CANNOT_SOLVE_UNTIL_CONNECTIVITY_SETUP = 'Connectivity matrix needs to have been setup/updated before solving.';
 
 { TExactCoverHeader }
+
+procedure TExactCoverHeader.DoDirtyNotification;
+begin
+  if Assigned(FOnDirtyNotification) then
+  begin
+    if not FMaskNotification then
+    begin
+      FMaskNotification := true;
+      FOnDirtyNotification(self);
+    end;
+  end;
+end;
 
 function TExactCoverHeader.FirstIncludedItem: TExactCoverCell;
 begin
@@ -474,6 +633,8 @@ begin
 {$ELSE}
   M := TExactCoverMatrix(Matrix);
 {$ENDIF}
+  //Dirty notification just before we change state.
+  DoDirtyNotification;
   //Only need to remove row /col links from included cells, since removal
   //re-insertion is a stack.
   if NewIncluded then
@@ -685,6 +846,8 @@ begin
 {$ELSE}
       Hdr := TExactCoverHeader(ColHeader);
 {$ENDIF}
+      //Dirty notification before state change.
+      Hdr.DoDirtyNotification;
       Inc(Hdr.FInclCellsCount);
     end
     else
@@ -697,6 +860,8 @@ begin
 {$ELSE}
       Hdr := TExactCoverHeader(RowHeader);
 {$ENDIF}
+      //Dirty notification before state change.
+      Hdr.DoDirtyNotification;
       Inc(Hdr.FInclCellsCount);
     end;
   end
@@ -712,6 +877,8 @@ begin
 {$ELSE}
       Hdr := TExactCoverHeader(ColHeader);
 {$ENDIF}
+      //Dirty notification before state change.
+      Hdr.DoDirtyNotification;
       Dec(Hdr.FInclCellsCount);
     end
     else
@@ -724,6 +891,8 @@ begin
 {$ELSE}
       Hdr := TExactCoverHeader(RowHeader);
 {$ENDIF}
+      //Dirty notification before state change.
+      Hdr.DoDirtyNotification;
       Dec(Hdr.FInclCellsCount);
     end;
   end;
@@ -1031,6 +1200,20 @@ begin
   result := not Included;
 end;
 
+constructor TConstraint.Create;
+begin
+  inherited;
+  DLItemInitObj(self, @FPickData.FListEntry);
+end;
+
+destructor TConstraint.Destroy;
+begin
+  Assert(DLItemIsEmpty(@FPickData.FListEntry));
+  Assert(FPickData.FLocationHint = tlhUndefined);
+  inherited;
+end;
+
+
 { TPossibility }
 
 function TPossibility.GetStackedEliminated: boolean;
@@ -1064,6 +1247,26 @@ begin
 end;
 
 { TExactCoverProblem }
+
+{$IFDEF EXACT_COVER_LOGGING}
+procedure TExactCoverProblem.DoLogPossibility(Poss: TPossibility; EvtType: TEvtType);
+begin
+  if Assigned(FOnLogPossibilityEvent) then
+    FOnLogPossibilityEvent(self, Poss, EvtType);
+end;
+
+procedure TExactCoverProblem.DoLogConstraint(Cons: TConstraint; EvtType: TEvtType);
+begin
+  if Assigned(FOnLogConstraintEvent) then
+    FOnLogConstraintEvent(self, Cons, EvtType);
+end;
+
+procedure TExactCoverProblem.DoLogOther(EvtType: TEvtType);
+begin
+  if Assigned(FOnLogOtherEvent) then
+    FOnLogOtherEvent(self, EvtType);
+end;
+{$ENDIF}
 
 function TExactCoverProblem.DoAllocCell: TMatrixCell;
 begin
@@ -1128,9 +1331,13 @@ end;
 
 procedure TExactCoverProblem.CreatePickers;
 begin
+{$IFDEF USE_FASTER_PICKER}
+  FConstraintPicker := TFasterConstraintPicker.Create;
+{$ELSE}
   FConstraintPicker := TSimpleConstraintPicker.Create;
-  FConstraintPicker.FPickingPossibilities := false;
   (FConstraintPicker as TSimpleConstraintPicker).PickLowest := true;
+{$ENDIF}
+  FConstraintPicker.FPickingPossibilities := false;
   FPossibilityPicker := TSimplePossibilityPicker.Create;
   FPossibilityPicker.FPickingPossibilities := true;
   FConstraintPicker.FParentProblem := self;
@@ -1528,7 +1735,12 @@ begin
       begin
         //(2) Body
         if ExclPoss <> Poss then //Stack and remove excluded poss not that selected.
+        begin
           FMatrix.ExcludeAndPush(ExclPoss);
+{$IFDEF EXACT_COVER_LOGGING}
+          DoLogPossibility(ExclPoss, tetPossibilityEliminated);
+{$ENDIF}
+        end;
         //(2) End body.
         //Next possibility referenced by dependent constraint.
         ExclPoss := NextExclPoss;
@@ -1551,6 +1763,9 @@ begin
       end;
       //Stack and remove constraint satisfied.
       FMatrix.ExcludeAndPush(Cons);
+{$IFDEF EXACT_COVER_LOGGING}
+      DoLogConstraint(Cons, tetConstraintSatisfied);
+{$ENDIF}
       //(1) EndBody
       //Next constraint column for main stacked poss.
       Cons := NextCons;
@@ -1577,6 +1792,9 @@ begin
     FMatrix.ExcludeAndPush(Poss);
     DLListInsertHead(@FPartSolutionStack, @Poss.FPartSolutionLink);
     Inc(FPartSolutionStackCount);
+{$IFDEF EXACT_COVER_LOGGING}
+    DoLogPossibility(Poss, tetPossibilityIncluded);
+{$ENDIF}
 
     Assert(DlItemIsEmpty(@FPartSolutionStack) = (FPartSolutionStackCount = 0));
     Assert((FMatrix.StackedHeadersPushed = 0) = (FPartSolutionStackCount = 0));
@@ -1589,6 +1807,7 @@ end;
 function TExactCoverProblem.PopTopSolutionPossibility(OverBacktracks: boolean): TPossibility;
 var
   OtherPoss: TPossibility;
+  PoppedHdr: TExactCoverHeader;
 begin
   if (FConnectivityCurrent and FConnectivityComplete) then
   begin
@@ -1598,6 +1817,9 @@ begin
 
     if FPartSolutionStackCount > 0 then
     begin
+{$IFDEF EXACT_COVER_LOGGING}
+      DoLogOther(tetBacktrackStart);
+{$ENDIF}
       if OverBacktracks then
         FSolved := false;
 
@@ -1627,8 +1849,24 @@ begin
         //Now just pop headers (both constraints and possibilities)
         //until we get to the next partial soln possibility.
         while FMatrix.PeekTop <> OtherPoss do
-          FMatrix.PopAndInclude;
+        begin
+          PoppedHdr := FMatrix.PopAndInclude;
+          if Assigned(PoppedHdr) then
+          begin
+{$IFDEF EXACT_COVER_LOGGING}
+            if PoppedHdr is TPossibility then
+              DoLogPossibility(TPossibility(PoppedHdr), tetPossibilityRestored)
+            else if PoppedHdr is TConstraint then
+              DoLogConstraint(TConstraint(PoppedHdr), tetConstraintRestored)
+            else
+              Assert(false);
+{$ENDIF}
+          end;
+        end;
       end;
+{$IFDEF EXACT_COVER_LOGGING}
+      DoLogOther(tetBacktrackEnd);
+{$ENDIF}
     end
     else
       result := nil;
@@ -1710,6 +1948,9 @@ begin
         Cons := TConstraint(FConstraintPicker.PickOne(nil));
 {$ENDIF}
         Assert(Assigned(Cons));
+{$IFDEF EXACT_COVER_LOGGING}
+        DoLogConstraint(Cons, tetConstraintSelected);
+{$ENDIF}
         if Cons.InclCellsCount = 0 then
         begin
           //We have possibilities, but none of them seem to remove the constraint we have
@@ -1734,6 +1975,9 @@ begin
       //Proceed forward...
       if not Pop then
       begin
+{$IFDEF EXACT_COVER_LOGGING}
+        DoLogPossibility(Poss, tetPossibilitySelected);
+{$ENDIF}
         PushSolutionPossibility(Poss);
         FPossibilityPicker.PickerPostPush;
         FConstraintPicker.PickerPostPush;
@@ -1799,33 +2043,67 @@ end;
 
 { TSimpleConstraintPicker }
 
+procedure TSimpleConstraintPicker.PickerInitSolve;
+begin
+  Assert(FStackIndex = 0);
+  SetLength(FPickedStack, Succ(0));
+  Assert(FPickedStack[FStackIndex] = nil);
+  inherited;
+end;
+
+procedure TSimpleConstraintPicker.PickerFiniSolve;
+begin
+  Assert(FStackIndex = 0);
+  SetLength(FPickedStack, 0);
+  inherited;
+end;
+
+procedure TSimpleConstraintPicker.PickerPostPush;
+begin
+  Inc(FStackIndex);
+  if Length(FPickedStack) < Succ(FStackIndex) then
+    SetLength(FPickedStack, Succ(FStackIndex));
+  FPickedStack[FStackIndex] := nil;
+end;
+
+procedure TSimpleConstraintPicker.PickerPostPop;
+begin
+  Dec(FStackIndex);
+end;
+
 function TSimpleConstraintPicker.PickOne(Context: TExactCoverHeader):TExactCoverHeader;
 var
   Cons, LowestCons: TConstraint;
 begin
   Assert(not FPickingPossibilities);
-  if not PickLowest then
-     result := FParentProblem.FMatrix.FirstIncludedColumn
-  else
+  Assert(FStackIndex >= 0);
+  result := TExactCoverHeader(FPickedStack[FStackIndex]);
+  if not Assigned(result) then
   begin
-{$IFOPT C+}
-    Cons := FParentProblem.FMatrix.FirstIncludedColumn as TConstraint;
-{$ELSE}
-    Cons := TCOnstraint(FParentProblem.FMatrix.FirstIncludedColumn);
-{$ENDIF}
-    LowestCons := nil;
-    while Assigned(Cons) do
+    if not PickLowest then
+       result := FParentProblem.FMatrix.FirstIncludedColumn
+    else
     begin
-      if (not Assigned(LowestCons))
-        or (LowestCons.InclCellsCount > Cons.InclCellsCount) then
-        LowestCons := Cons;
-{$IFOPT C+}
-      Cons := Cons.NextIncludedHeader as TConstraint;
-{$ELSE}
-      Cons := TConstraint(Cons.NextIncludedHeader);
-{$ENDIF}
+  {$IFOPT C+}
+      Cons := FParentProblem.FMatrix.FirstIncludedColumn as TConstraint;
+  {$ELSE}
+      Cons := TCOnstraint(FParentProblem.FMatrix.FirstIncludedColumn);
+  {$ENDIF}
+      LowestCons := nil;
+      while Assigned(Cons) do
+      begin
+        if (not Assigned(LowestCons))
+          or (LowestCons.InclCellsCount > Cons.InclCellsCount) then
+          LowestCons := Cons;
+  {$IFOPT C+}
+        Cons := Cons.NextIncludedHeader as TConstraint;
+  {$ELSE}
+        Cons := TConstraint(Cons.NextIncludedHeader);
+  {$ENDIF}
+      end;
+      result := LowestCons;
     end;
-    result := LowestCons;
+    FPickedStack[FStackIndex] := result;
   end;
 end;
 
@@ -1882,5 +2160,353 @@ begin
   else
     result := nil;
 end;
+
+{ TFasterConstraintPicker }
+
+{
+    FIndexList: TList;  //Pointers into list of cons with 1, 2, 3 etc poss.
+    FIncludedList: TDLEntry;
+    FDirtyList: TDLEntry;
+    FExcludedList: TDLEntry;
+}
+
+procedure TFasterConstraintPicker.PickerPostPush;
+begin
+  Inc(FStackIndex);
+  if Length(FPickedStack) < Succ(FStackIndex) then
+    SetLength(FPickedStack, Succ(FStackIndex));
+  FillChar(FPickedStack[FStackIndex], sizeof(FPickedStack[FStackIndex]), 0);
+end;
+
+procedure TFasterConstraintPicker.PickerPostPop;
+begin
+  Dec(FStackIndex);
+end;
+
+function TFasterConstraintPicker.PickFromIncludedList: TExactCoverHeader;
+begin
+  Assert(FInitForNotifies);
+  ProcessDirtyList;
+  //Included list is lowest to highest.
+  if not DlItemIsEmpty(@FIncludedList) then
+{$IFOPT C+}
+    result := FIncludedList.FLink.Owner as TExactCoverHeader
+{$ELSE}
+    result := TExactCoverHeader(FIncludedList.FLink.Owner)
+{$ENDIF}
+  else
+    result := nil;
+end;
+
+function TFasterConstraintPicker.PickOne(Context: TExactCoverHeader):TExactCoverHeader;
+{$IFOPT C+}
+var
+  Idx: integer;
+{$ENDIF}
+begin
+  Assert(not FPickingPossibilities);
+  Assert(FStackIndex >= 0);
+  result := FPickedStack[FStackIndex].Picked;
+  if not Assigned(result) then
+  begin
+    result := PickFromIncludedList;
+    FPickedStack[FStackIndex].Picked := result;
+    FPickedStack[FStackIndex].PrevCellCount := result.InclCellsCount;
+  end
+  else
+  begin
+    //Use previous from stack.
+    //Check count the same
+    Assert(result.InclCellsCount = FPickedStack[FStackIndex].PrevCellCount);
+{$IFOPT C+}
+    //Check that there are indeed no constraints with a lower cell count.
+    for Idx := 0 to Pred(result.InclCellsCount) do
+      Assert(not Assigned(FIndexList.Items[Idx]));
+{$ENDIF}
+  end;
+end;
+
+{$IFDEF CHECK_FASTER_PICKER}
+procedure TFasterConstraintPicker.ListConsistencyCheck;
+var
+  CurIdx, PrevIdx: integer;
+  i: integer;
+  Cons, PrevCons: TConstraint;
+begin
+  PrevIdx := 0;
+  CurIdx := 0;
+  PrevCons := nil;
+  Cons := self.FIncludedList.FLink.Owner as TConstraint;
+  while Assigned(Cons) do
+  begin
+    if not Assigned(PrevCons) or (Cons.InclCellsCount <> PrevCons.InclCellsCount) then
+    begin
+      Assert(not Assigned(PrevCons) or (Cons.InclCellsCount >= PrevCons.InclCellsCount));
+      CurIdx := Cons.InclCellsCount;
+      for i := Succ(PrevIdx) to Pred(CurIdx) do
+        Assert(not Assigned(FIndexList.Items[i]));
+      Assert(FIndexList.Items[CurIdx] = Cons);
+      PrevIdx := CurIdx;
+    end;
+    PrevCons := Cons;
+    Cons := Cons.FPickData.FListEntry.FLink.Owner as TConstraint;
+  end;
+end;
+{$ENDIF}
+
+
+procedure TFasterConstraintPicker.AddToIncluded(Cons: TConstraint; AllowListGrow: boolean = false);
+var
+  InsAfterSameCount, InsBeforeHigherCount: TConstraint;
+  Idx: integer;
+  Tmp: Pointer;
+begin
+  Assert(Cons.Included);
+  Assert(Cons.FPickData.FLocationHint = tlhUndefined);
+  if (Cons.InclCellsCount >= FIndexList.Count) then
+    if AllowListGrow then
+      FIndexList.Count := Succ(Cons.InclCellsCount)
+    else
+      Assert(false);
+
+  //Other items in list already at this index?
+  InsAfterSameCount := TConstraint(FIndexList.Items[Cons.InclCellsCount]);
+  if Assigned(InsAfterSameCount) then
+  begin
+    Assert(InsAfterSameCount.InclCellsCount = Cons.InclCellsCount);
+    //No need to change index list or such, just insert after.
+    DLItemInsertAfter(@InsAfterSameCount.FPickData.FListEntry,
+                      @Cons.FPickData.FListEntry);
+  end
+  else
+  begin
+    //Nope, can insert just before higher index?
+    InsBeforeHigherCount := nil;
+    for Idx := Succ(Cons.InclCellsCount) to Pred(FIndexList.Count) do
+    begin
+      Tmp := FIndexList.Items[Idx];
+      if Assigned(Tmp) then
+      begin
+        InsBeforeHigherCount := TConstraint(Tmp);
+        Assert(InsBeforeHigherCount.InclCellsCount = Idx);
+        Assert(InsBeforeHigherCount.InclCellsCount > Cons.InclCellsCount);
+        break;
+      end;
+    end;
+    if Assigned(InsBeforeHigherCount) then
+      DlItemInsertBefore(@InsBeforeHigherCount.FPickData.FListEntry,
+                         @Cons.FPickData.FListEntry) //Insert before higher.
+    else
+      DLListInsertTail(@FIncludedList, @Cons.FPickData.FListEntry); //Insert at end.
+
+    FIndexList[Cons.InclCellsCount] := Cons;
+  end;
+  Cons.FPickData.FLocationHint := tlhIncluded;
+{$IFDEF CHECK_FASTER_PICKER}
+  ListConsistencyCheck;
+{$ENDIF}
+end;
+
+procedure TFasterConstraintPicker.RemoveFromIncluded(Cons: TConstraint);
+var
+  IndexListItem, Adjacent: TConstraint;
+begin
+  Assert(Cons.FPickData.FLocationHint = tlhIncluded);
+  IndexListItem := FIndexList.Items[Cons.InclCellsCount];
+  Assert(Assigned(IndexListItem));
+  if IndexListItem <> Cons then
+    DLListRemoveObj(@Cons.FPickData.FListEntry) //Just remove, no index list adjust
+  else
+  begin
+    //Need to adjust index list item
+    //Previous on list if it exists should have different count;
+{$IFOPT C+}
+    Adjacent := Cons.FPickData.FListEntry.BLink.Owner as TConstraint;
+    if Assigned(Adjacent) then
+      Assert(Adjacent.InclCellsCount < Cons.InclCellsCount);
+{$ENDIF}
+    //Next in list will have same or higher count.
+{$IFOPT C+}
+    Adjacent := Cons.FPickData.FListEntry.FLink.Owner as TConstraint;
+{$ELSE}
+    Adjacent := TConstraint(Cons.FPickData.FListEntry.FLink.Owner);
+{$ENDIF}
+    //Use index list item as dest tmp.
+    IndexListItem := nil;
+    if Assigned(Adjacent) then
+    begin
+      Assert(Adjacent.InclCellsCount >= Cons.InclCellsCount);
+      if Adjacent.InclCellsCount = Cons.InclCellsCount then
+        IndexListItem := Adjacent;
+    end;
+    FIndexList.Items[Cons.InclCellsCount] := IndexListItem;
+
+    DLListRemoveObj(@Cons.FPickData.FListEntry);
+  end;
+
+  Cons.FPickData.FLocationHint := tlhUndefined;
+{$IFDEF CHECK_FASTER_PICKER}
+  ListConsistencyCheck;
+{$ENDIF}
+end;
+
+
+procedure TFasterConstraintPicker.AddToDirty(Cons: TConstraint);
+begin
+  Assert(Cons.FPickData.FLocationHint = tlhUndefined);
+  Assert(DLItemIsEmpty(@Cons.FPickData.FListEntry));
+  DLListInsertTail(@FDirtyList, @Cons.FPickData.FListEntry);
+  Cons.FPickData.FLocationHint := tlhDirty;
+end;
+
+
+procedure TFasterConstraintPicker.RemoveFromDirty(Cons: TConstraint);
+begin
+  Assert(Cons.FPickData.FLocationHint = tlhDirty);
+  Assert(not DLItemIsEmpty(@Cons.FPickData.FListEntry));
+  DLListRemoveObj(@Cons.FPickData.FListEntry);
+  Cons.FPickData.FLocationHint := tlhUndefined;
+end;
+
+procedure TFasterConstraintPicker.AddToExcluded(Cons: TConstraint);
+begin
+  Assert(not Cons.Included);
+  Assert(Cons.FPickData.FLocationHint = tlhUndefined);
+  Assert(DLItemIsEmpty(@Cons.FPickData.FListEntry));
+  DLListInsertTail(@FExcludedList, @Cons.FPickData.FListEntry);
+  Cons.FPickData.FLocationHint := tlhExcluded;
+end;
+
+procedure TFasterConstraintPicker.RemoveFromExcluded(Cons: TConstraint);
+begin
+  Assert(Cons.FPickData.FLocationHint = tlhExcluded);
+  Assert(not DLItemIsEmpty(@Cons.FPickData.FListEntry));
+  DLListRemoveObj(@Cons.FPickData.FListEntry);
+  Cons.FPickData.FLocationHint := tlhUndefined;
+end;
+
+
+procedure TFasterConstraintPicker.ProcessDirtyList(Initial: boolean);
+var
+  Cons: TConstraint;
+begin
+  while not DLItemIsEmpty(@FDirtyList) do
+  begin
+{$IFOPT C+} //TODO - Make stack not queue, better mem locality?
+    Cons := FDirtyList.BLink.Owner as TConstraint;
+{$ELSE}
+    Cons := TConstraint(FDirtyList.FLink.Owner);
+{$ENDIF}
+    RemoveFromDirty(Cons);
+    //Allow dirty notifications again.
+    Cons.FMaskNotification := false;
+    if Cons.Included then
+      AddToIncluded(Cons, Initial)
+    else
+      AddToExcluded(Cons);
+  end;
+end;
+
+//TODO - InitAllIncluded - may get notifications at this point?
+//When is wired up?
+procedure TFasterConstraintPicker.HandleDirtyNotification(Sender: TObject);
+var
+  Cons: TConstraint;
+begin
+{$IFOPT C+}
+  Cons := Sender as TConstraint;
+{$ELSE}
+  Cons := TConstraint(Sender);
+{$ENDIF}
+  if FInitForNotifies then
+  begin
+    case Cons.FPickData.FLocationHint of
+      tlhUndefined: Assert(false); //By the time algo is running, should be in a list.
+      tlhIncluded: RemoveFromIncluded(Cons);
+      tlhDirty: Assert(false); //Should not get duplicate dirty notifications.
+      tlhExcluded: RemoveFromExcluded(Cons);
+    else
+      Assert(false);
+    end;
+    AddToDirty(Cons);
+  end
+end;
+
+
+procedure TFasterConstraintPicker.PickerInitSolve;
+var
+  Cons: TConstraint;
+begin
+  Assert(DlItemIsEmpty(@FIncludedList));
+  Assert(DLItemIsEmpty(@FExcludedList));
+  Assert(DLItemIsEmpty(@FDirtyList));
+  FIndexList.Count := 0;
+  Cons := FParentProblem.FirstConstraint;
+  while Assigned(Cons) do
+  begin
+    Assert(not Assigned(Cons.OnDirtyNotification));
+    Cons.OnDirtyNotification := self.HandleDirtyNotification;
+    AddToDirty(Cons);
+    Cons := FParentProblem.NextConstraint(Cons);
+  end;
+  ProcessDirtyList(true);
+  FInitForNotifies := true;
+
+  Assert(FStackIndex = 0);
+  SetLength(FPickedStack, Succ(0));
+  Assert(not Assigned(FPickedStack[FStackIndex].Picked));
+  Assert(FPickedStack[FStackIndex].PrevCellCount = 0);
+  inherited;
+end;
+
+procedure TFasterConstraintPicker.PickerFiniSolve;
+var
+  Cons: TConstraint;
+begin
+  FInitForNotifies := false;
+  while not DLItemIsEmpty(@FIncludedList) do
+    RemoveFromIncluded((FIncludedList.FLink.Owner) as TConstraint);
+  while not DLItemIsEmpty(@FExcludedList) do
+    RemoveFromExcluded((FExcludedList.FLink.Owner) as TConstraint);
+  while not DLItemIsEmpty(@FDirtyList) do
+    RemoveFromDirty((FDirtyList.FLink.Owner) as TConstraint);
+
+  Cons := FParentProblem.FirstConstraint;
+  while Assigned(Cons) do
+  begin
+//    Assert(Cons.FOnDirtyNotification = HandleDirtyNotification);
+    Cons.OnDirtyNotification := nil;
+    Cons := FParentProblem.NextConstraint(Cons);
+  end;
+
+  Assert(DlItemIsEmpty(@FIncludedList));
+  Assert(DLItemIsEmpty(@FExcludedList));
+  Assert(DLItemIsEmpty(@FDirtyList));
+  FIndexList.Count := 0;
+
+  Assert(FStackIndex = 0);
+  SetLength(FPickedStack, 0);
+  inherited;
+end;
+
+constructor TFasterConstraintPicker.Create;
+begin
+  inherited;
+  FIndexList := TList.Create;
+  DLItemInitList(@FIncludedList);
+  DLItemInitList(@FExcludedList);
+  DLItemInitList(@FDirtyList);
+end;
+
+destructor TFasterConstraintPicker.Destroy;
+begin
+  PickerFiniSolve;
+  Assert(DlItemIsEmpty(@FIncludedList));
+  Assert(DLItemIsEmpty(@FExcludedList));
+  Assert(DLItemIsEmpty(@FDirtyList));
+  FIndexList.Free;
+  inherited;
+end;
+
 
 end.
