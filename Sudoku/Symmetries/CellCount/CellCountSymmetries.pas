@@ -13,6 +13,7 @@ uses
 {$ENDIF}
 {$IFDEF ORDER3}
 {$DEFINE OPTIMISE_SMALL_SETS}
+{$DEFINE UNROLL_INNER_LOOP}
 {$ENDIF}
 
 type
@@ -165,10 +166,15 @@ end;
 
 { TCellCountIsomorphismChecker }
 
+
 procedure TCellCountIsomorphismChecker.SetupCounts(A,B: TCellCountBoard);
 var
-  Row, Board: boolean;
-  StackBandIdx, LineIdx: TOrderIdx;
+  Row:boolean;
+  Board: boolean;
+  StackBandIdx:TOrderIdx;
+{$IFNDEF UNROLL_INNER_LOOP}
+  LineIdx: TOrderIdx;
+{$ENDIF}
   AbsLineIdx: TRowColIdx;
   PCounts: PCountInfo;
   BoardSrc: TCellCountBoard;
@@ -192,6 +198,57 @@ begin
       begin
         with PCounts[Row] do
         begin
+{$IFDEF UNROLL_INNER_LOOP}
+///////////// 0
+          RelToAbsIndexed(StackBandIdx, 0, AbsLineIdx);
+          with UnpermutedLineInfo[StackBandIdx] do
+          begin
+            if Row then
+              Tmp := BoardSrc.FRowCounts[AbsLineIdx]
+            else
+              Tmp := BoardSrc.FColCounts[AbsLineIdx];
+            CellCounts[0] := Tmp;
+{$IFDEF OPTIMISE_SMALL_SETS}
+            CellCountSet := SmallSetUnion(CellCountSet, SmallSetUnitary(Tmp));
+{$ELSE}
+            CellCountSet := CellCountSet + [Tmp];
+{$ENDIF}
+          end;
+          Inc(CellCounts[StackBandIdx], Tmp);
+///////////// 1
+          RelToAbsIndexed(StackBandIdx, 1, AbsLineIdx);
+          with UnpermutedLineInfo[StackBandIdx] do
+          begin
+            if Row then
+              Tmp := BoardSrc.FRowCounts[AbsLineIdx]
+            else
+              Tmp := BoardSrc.FColCounts[AbsLineIdx];
+            CellCounts[1] := Tmp;
+{$IFDEF OPTIMISE_SMALL_SETS}
+            CellCountSet := SmallSetUnion(CellCountSet, SmallSetUnitary(Tmp));
+{$ELSE}
+            CellCountSet := CellCountSet + [Tmp];
+{$ENDIF}
+          end;
+          Inc(CellCounts[StackBandIdx], Tmp);
+///////////// 2
+          RelToAbsIndexed(StackBandIdx, 2, AbsLineIdx);
+          with UnpermutedLineInfo[StackBandIdx] do
+          begin
+            if Row then
+              Tmp := BoardSrc.FRowCounts[AbsLineIdx]
+            else
+              Tmp := BoardSrc.FColCounts[AbsLineIdx];
+            CellCounts[2] := Tmp;
+{$IFDEF OPTIMISE_SMALL_SETS}
+            CellCountSet := SmallSetUnion(CellCountSet, SmallSetUnitary(Tmp));
+{$ELSE}
+            CellCountSet := CellCountSet + [Tmp];
+{$ENDIF}
+          end;
+          Inc(CellCounts[StackBandIdx], Tmp);
+{$ELSE} //UNROLL_INNER_LOOP
+////////////////////////////////////////////
           for LineIdx := Low(LineIdx) to High(LineIdx) do
           begin
             RelToAbsIndexed(StackBandIdx, LineIdx, AbsLineIdx);
@@ -210,6 +267,7 @@ begin
             end;
             Inc(CellCounts[StackBandIdx], Tmp);
           end;
+{$ENDIF}
 {$IFDEF OPTIMISE_SMALL_SETS}
           CellCountSet := SmallSetUnion(CellCountSet, SmallSetUnitary(CellCounts[StackBandIdx]));
 {$ELSE}
