@@ -8,21 +8,40 @@ uses
 {$ENDIF}
   SharedSymmetries;
 
+{$IFDEF ORDER2}
+{$DEFINE OPTIMISE_SMALL_SETS}
+{$ENDIF}
+{$IFDEF ORDER3}
+{$DEFINE OPTIMISE_SMALL_SETS}
+{$ENDIF}
+
 type
   TCellCountBoard = class(TSymBoard)
   protected
+    FRowCounts, FColCounts: TSymRow;
+
+    function FastGetBoardEntry(Row, Col: TRowColIdx): integer; inline;
+    procedure SetBoardEntry(Row, Col: TRowColIdx; Entry: integer); override;
   public
-    function CountCellsLine(Row: boolean; Idx: TRowColIdx): integer; inline;
+    //No override assign needed, CellCount setter does the work
     function AmIsomorphicTo(Other: TSymBoard): boolean; override;
+    property FastEntries[Row, Col: TRowColIdx]: integer read FastGetBoardEntry;
   end;
 
   //////////////// Counts.
 
   TRowColCellCount = 0.. (ORDER * ORDER);
-  TRowColCellCountSet = set of TRowColCellCount;
-
   TStackBandCellCount = 0 .. (ORDER * ORDER * ORDER);
+
+{$IFDEF OPTIMISE_SMALL_SETS}
+  TSmallSet = type UInt32;
+
+  TStackBandCellCountSet = TSmallSet;
+  TRowColCellCountSet = TSMallSet;
+{$ELSE}
   TStackBandCellCountSet = set of TStackBandCellCount;
+  TRowColCellCountSet = set of TRowColCellCount;
+{$ENDIF}
 
   //Rows or cols in a stack or band.
   TRowColCountInfo = record
@@ -66,14 +85,14 @@ type
                         BBand, BRowInBand, BStack, BColInStack: TOrderIdx;
                         InitialReflect: boolean): boolean;
 
-    procedure SetupPermutations(InitialBandPerm, InitialStackPerm: TOrderIdx;
+    function SetupPermutations(InitialBandPerm, InitialStackPerm: TOrderIdx;
                                 InitialReflect: boolean;
                                 var RowPerms:TRowColAllowedPerms;
-                                var ColPerms:TRowColAllowedPerms);
+                                var ColPerms:TRowColAllowedPerms): boolean;
 
     procedure SetupCounts(A,B: TCellCountBoard);
-    procedure StackBandPermSet(PA, PB: PStackBandCountInfo; var PL: TAllowedPerms);
-    procedure RowColPermSet(PA, PB: PRowColCountInfo; var PL: TAllowedPerms);
+    function StackBandPermSet(PA, PB: PStackBandCountInfo; var PL: TAllowedPerms):boolean; //Returns any valid permutations.
+    function RowColPermSet(PA, PB: PRowColCountInfo; var PL: TAllowedPerms): boolean; //Returns any valid permutations.
     function IsomorphicRowCol(A,B: TCellCountBoard;
                               InitialReflect: boolean;
                               InitialBandPerm, InitialStackPerm: TPermIdx): boolean; //Band = Row
@@ -84,24 +103,52 @@ type
 
 implementation
 
-{ TCellCountBoard }
+{ Misc functions }
 
-function TCellCountBoard.CountCellsLine(Row: boolean; Idx: TRowColIdx): integer;
-var
-  VarIdx: TRowColIdx;
-  Contents: integer;
+{$IFDEF OPTIMISE_SMALL_SETS}
+function SmallSetUnion(A, B: TSmallSet): TSmallSet; inline;
+begin
+  result := A or B;
+end;
+function SmallSetUnitary(B: integer): TSmallSet; inline;
+begin
+  Assert(B < (sizeof(TSmallSet) * 8));
+  result := 1 shl B;
+end;
+function SmallSetEmpty: TSmallSet; inline;
 begin
   result := 0;
-  for VarIdx := Low(VarIdx) to High(VarIdx) do
-  begin
-    if Row then
-      Contents := Entries[Idx, VarIdx]
-    else
-      Contents := Entries[VarIdx, Idx];
-    if Contents <> 0 then
-      Inc(Result);
-  end;
 end;
+{$ENDIF}
+
+{ TCellCountBoard }
+
+procedure TCellCountBoard.SetBoardEntry(Row, Col: TRowColIdx; Entry: integer);
+begin
+  if FastEntries[Row, Col] <> 0 then
+  begin
+    if Entry = 0 then
+    begin
+      Dec(Self.FRowCounts[Row]);
+      Dec(Self.FColCounts[Col]);
+    end;
+  end
+  else
+  begin
+    if Entry <> 0 then
+    begin
+      Inc(Self.FRowCounts[Row]);
+      Inc(Self.FColCounts[Col]);
+    end;
+  end;
+  inherited;
+end;
+
+function TCellCountBoard.FastGetBoardEntry(Row, Col: TRowColIdx): integer;
+begin
+  result := FSymBoardState[Row, Col];
+end;
+
 
 function TCellCountBoard.AmIsomorphicTo(Other: TSymBoard): boolean;
 var
@@ -109,7 +156,8 @@ var
 begin
   C := TCellCountIsomorphismChecker.Create;
   try
-    result := C.AreIsomorphic(self, Other as TCellCountBoard);
+    Assert(Other is TCellCountBoard);
+    result := C.AreIsomorphic(self, TCellCountBoard(Other));
   finally
     C.Free;
   end;
@@ -124,6 +172,7 @@ var
   AbsLineIdx: TRowColIdx;
   PCounts: PCountInfo;
   BoardSrc: TCellCountBoard;
+  Tmp: TRowColCellCount;
 begin
   for Board := Low(Board) to High(Board) do
   begin
@@ -148,13 +197,24 @@ begin
             RelToAbsIndexed(StackBandIdx, LineIdx, AbsLineIdx);
             with UnpermutedLineInfo[StackBandIdx] do
             begin
-              CellCounts[LineIdx] := BoardSrc.CountCellsLine(Row, AbsLineIdx);
-              CellCountSet := CellCountSet + [CellCounts[LineIdx]];
+              if Row then
+                Tmp := BoardSrc.FRowCounts[AbsLineIdx]
+              else
+                Tmp := BoardSrc.FColCounts[AbsLineIdx];
+              CellCounts[LineIdx] := Tmp;
+{$IFDEF OPTIMISE_SMALL_SETS}
+              CellCountSet := SmallSetUnion(CellCountSet, SmallSetUnitary(Tmp));
+{$ELSE}
+              CellCountSet := CellCountSet + [Tmp];
+{$ENDIF}
             end;
-            CellCounts[StackBandIdx] := CellCounts[StackBandIdx] +
-              UnpermutedLineInfo[StackBandIdx].CellCounts[LineIdx];
+            Inc(CellCounts[StackBandIdx], Tmp);
           end;
+{$IFDEF OPTIMISE_SMALL_SETS}
+          CellCountSet := SmallSetUnion(CellCountSet, SmallSetUnitary(CellCounts[StackBandIdx]));
+{$ELSE}
           CellCountSet := CellCountSet+ [CellCounts[StackBandIdx]];
+{$ENDIF}
         end;
       end;
     end;
@@ -162,20 +222,28 @@ begin
 end;
 
 //TODO - Yuck yuck - so similar to stack band perm set, but not quite same types.
-procedure TCellCountIsomorphismChecker.RowColPermSet(PA, PB: PRowColCountInfo; var PL: TAllowedPerms);
+function TCellCountIsomorphismChecker.RowColPermSet(PA, PB: PRowColCountInfo; var PL: TAllowedPerms): boolean;
 var
   TestPermIdx: TPermIdx;
   OIdx: TOrderIdx;
-  PermutedBCounts: array[TOrderIdx] of TRowColCellCount;
   PGood: boolean;
   SelectedPerm: ^TPermutation;
 begin
   FillChar(PL, sizeof(PL), 0);
   if PA.CellCountSet <> PB.CellCountSet then
+  begin
+     result := false;
      exit; //No perm of the two is going to match.
+  end;
+  result := true;
 
+{$IFDEF OPTIMISE_SMALL_SETS}
+  if (PA.CellCountSet = SmallSetUnitary(0)) or
+     (PA.CellCountSet =  SmallSetUnitary(ORDER * ORDER)) then //No cells or all cells.
+{$ELSE}
   if (PA.CellCountSet = [0]) or
      (PA.CellCountSet =  [ORDER * ORDER]) then //No cells or all cells.
+{$ENDIF}
   begin
     //All perms should work, but we'll try just one.
     PL.PermIdxs[PL.Count] := 0;
@@ -188,9 +256,7 @@ begin
     PGood := true;
     SelectedPerm := @Permlist[TestPermIdx];
     for OIdx := Low(TOrderIdx) to High(TOrderIdx) do
-      PermutedBCounts[OIdx] := PB.CellCounts[SelectedPerm[OIdx]];
-    for OIdx := Low(TOrderIdx) to High(TOrderIdx) do
-      if PermutedBCounts[OIdx] <> PA.CellCounts[OIdx] then
+      if PB.CellCounts[SelectedPerm[OIdx]] <> PA.CellCounts[OIdx] then
       begin
         PGood := false;
         break;
@@ -203,8 +269,8 @@ begin
   end;
 end;
 
-function ResetPermIdxs(const RAllowed, CAllowed: TRowColAllowedPerms;
-                       var RSelected, CSelected: TRowColSelectedPerms): boolean;
+procedure ResetPermIdxs(const RAllowed, CAllowed: TRowColAllowedPerms;
+                       var RSelected, CSelected: TRowColSelectedPerms);
 var
   i: TOrderIdx;
 begin
@@ -214,13 +280,8 @@ begin
     CSelected[i] := 0;
     //Some of the rows or cols cannot be permuted to produce the
     //required result in a stack or band.
-    if (RAllowed[i].Count = 0) or (CAllowed[i].Count = 0) then
-    begin
-      result := false;
-      exit;
-    end;
+    Assert((RAllowed[i].Count <> 0) and (CAllowed[i].Count <> 0));
   end;
-  result := true;
 end;
 
 procedure IncPermIdxC(var Carry: boolean; const Perms: TAllowedPerms; var PermIdx: TPermIdx);
@@ -279,18 +340,18 @@ begin
   RelToAbsIndexed(AStack, AColInStack, AAbsCol);
   RelToAbsIndexed(BBand, BRowInBand, BAbsRow);
   RelToAbsIndexed(BStack, BColInStack, BAbsCol);
-  CellA := A.Entries[AAbsRow, AAbsCol];
+  CellA := A.FastEntries[AAbsRow, AAbsCol];
   if not InitialReflect then
-    CellB := B.Entries[BAbsRow, BAbsCol]
+    CellB := B.FastEntries[BAbsRow, BAbsCol]
   else
-    CellB := B.Entries[BAbsCol, BAbsRow];
+    CellB := B.FastEntries[BAbsCol, BAbsRow];
   result := CellA = CellB;
 end;
 
-procedure TCellCountIsomorphismChecker.SetupPermutations(InitialBandPerm, InitialStackPerm: TOrderIdx;
+function TCellCountIsomorphismChecker.SetupPermutations(InitialBandPerm, InitialStackPerm: TOrderIdx;
                                                          InitialReflect: boolean;
                                                          var RowPerms:TRowColAllowedPerms;
-                                                         var ColPerms:TRowColAllowedPerms);
+                                                         var ColPerms:TRowColAllowedPerms): boolean;
 var
   PACounts, PBCounts: PRowColCountInfo;
   ABand, BBand: TOrderIdx;
@@ -311,9 +372,11 @@ begin
       else
         PBCounts := @FCountsB[not Rows].UnpermutedLineInfo[BBand];
       if Rows then
-        RowColPermSet(PACounts, PBCounts, RowPerms[ABand])
+        result := RowColPermSet(PACounts, PBCounts, RowPerms[ABand])
       else
-        RowColPermSet(PACounts, PBCounts, ColPerms[ABand]);
+        result := RowColPermSet(PACounts, PBCounts, ColPerms[ABand]);
+      if not result then
+        exit;
     end;
   end;
 end;
@@ -329,7 +392,6 @@ var
   RowPerms, ColPerms: TRowColAllowedPerms;
   RowPermIdx, ColPermIdx: TRowColSelectedPerms;
 
-var
   ABand, BBand, AStack, BStack: TOrderIdx;
   ARowInBand, BRowInBand, AColInStack, BColInStack: TOrderIdx;
   MatchThisPerm: boolean;
@@ -339,13 +401,13 @@ label
   NextPermNoRefine, NextPermWithRefine;
 
 begin
-  SetupPermutations(InitialBandPerm, InitialStackPerm, InitialReflect,
-                    RowPerms, ColPerms);
-  if not ResetPermIdxs(RowPerms, ColPerms, RowPermIdx, ColPermIdx) then
+  if not SetupPermutations(InitialBandPerm, InitialStackPerm, InitialReflect,
+                    RowPerms, ColPerms) then
   begin
     result := false;
     exit;
   end;
+  ResetPermIdxs(RowPerms, ColPerms, RowPermIdx, ColPermIdx);
   //TODO - RefineColSets = true... ?
   if not RefineColSets then //Not sure which will be quicker / better.
   begin
@@ -395,20 +457,28 @@ NextPermNoRefine:
   result := false;
 end;
 
-procedure TCellCountIsomorphismChecker.StackBandPermSet(PA, PB: PStackBandCountInfo; var PL: TAllowedPerms);
+function TCellCountIsomorphismChecker.StackBandPermSet(PA, PB: PStackBandCountInfo; var PL: TAllowedPerms): boolean;
 var
   TestPermIdx: TPermIdx;
   OIdx: TOrderIdx;
-  PermutedBCounts: array[TOrderIdx] of TStackBandCellCount;
   PGood: boolean;
   SelectedPerm: ^TPermutation;
 begin
   FillChar(PL, sizeof(PL), 0);
   if PA.CellCountSet <> PB.CellCountSet then
+  begin
+     result := false;
      exit; //No perm of the two is going to match.
+  end;
+  result := true;
 
+{$IFDEF OPTIMISE_SMALL_SETS}
+  if (PA.CellCountSet = SmallSetUnitary(0)) or
+     (PA.CellCountSet =  SmallSetUnitary(ORDER * ORDER * ORDER)) then //No cells or all cells.
+{$ELSE}
   if (PA.CellCountSet = [0]) or
      (PA.CellCountSet =  [ORDER * ORDER * ORDER]) then //No cells or all cells.
+{$ENDIF}
   begin
     //All perms should work, but we'll try just one.
     PL.PermIdxs[PL.Count] := 0;
@@ -421,9 +491,7 @@ begin
     PGood := true;
     SelectedPerm := @Permlist[TestPermIdx];
     for OIdx := Low(TOrderIdx) to High(TOrderIdx) do
-      PermutedBCounts[OIdx] := PB.CellCounts[SelectedPerm[OIdx]];
-    for OIdx := Low(TOrderIdx) to High(TOrderIdx) do
-      if PermutedBCounts[OIdx] <> PA.CellCounts[OIdx] then
+      if PB.CellCounts[SelectedPerm[OIdx]] <> PA.CellCounts[OIdx] then
       begin
         PGood := false;
         break;
@@ -459,8 +527,9 @@ begin
       PBRowCounts := @FCountsB[false];
       PBColCounts := @FCountsB[true];
     end;
-    StackBandPermSet(PARowCounts, PBRowCounts, RowPerms);
-    StackBandPermSet(PAColCounts, PBColCounts, ColPerms);
+    if not (StackBandPermSet(PARowCounts, PBRowCounts, RowPerms)
+            and StackBandPermSet(PAColCounts, PBColCounts, ColPerms)) then
+      continue;
     for RowPermIdx := 0 to Pred(RowPerms.Count) do
     begin
       for ColPermIdx := 0 to Pred(ColPerms.Count) do

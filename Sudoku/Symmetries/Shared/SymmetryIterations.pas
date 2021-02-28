@@ -128,7 +128,8 @@ begin
                 CanAdd := true;
                 while Idx2 < PartialNxtIsoList.Count do
                 begin
-                  if TestBoard.AmIsomorphicTo(PartialNxtIsoList.Items[Idx2] as TSymBoard) then
+                  Assert(PartialNxtIsoList.Items[Idx2] is TSymBoard);
+                  if TestBoard.AmIsomorphicTo(TSymBoard(PartialNxtIsoList.Items[Idx2])) then
                   begin
                     CanAdd := false;
                     break;
@@ -162,8 +163,8 @@ begin
 end;
 
 const
-  MaxGivens = 6;
-//  MaxGivens = (ORDER * ORDER * ORDER * ORDER);
+//  MaxGivens = 6;
+  MaxGivens = (ORDER * ORDER * ORDER * ORDER);
 
 procedure TestNaive;
 begin

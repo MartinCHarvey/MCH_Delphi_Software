@@ -83,8 +83,8 @@ type
   TPermList = array[TPermIdx] of TPermutation;
   TPermIdxList = array[TPermIdx] of TPermIdx;
 
-  TSymRow = array [Low(TRowColIdx) .. High(TRowColIdx)] of integer;
-  TSymBoardState = array [Low(TRowColIdx) .. High(TRowColIdx)] of TSymRow;
+  TSymRow = array [TRowColIdx] of integer;
+  TSymBoardState = array [TRowColIdx] of TSymRow;
 
   //TODO - Might need loads and saves here at some point one day.
 {$IFDEF USE_TRACKABLES}
