@@ -5,8 +5,8 @@
         <FrameworkType>None</FrameworkType>
         <MainSource>Order3.dpr</MainSource>
         <Base>True</Base>
-        <Config Condition="'$(Config)'==''">Release</Config>
-        <Platform Condition="'$(Platform)'==''">Win64</Platform>
+        <Config Condition="'$(Config)'==''">Debug</Config>
+        <Platform Condition="'$(Platform)'==''">Win32</Platform>
         <TargetedPlatforms>3</TargetedPlatforms>
         <AppType>Console</AppType>
     </PropertyGroup>
@@ -128,6 +128,8 @@
         <DCCReference Include="..\..\..\..\Common\DLList\DLList.pas"/>
         <DCCReference Include="..\..\..\..\Common\SparseMatrix\SparseMatrix.pas"/>
         <DCCReference Include="..\..\..\..\Common\ExactCover\ExactCover.pas"/>
+        <DCCReference Include="..\..\..\..\Common\Indexed Store\IndexedStore.pas"/>
+        <DCCReference Include="..\..\Shared\CellCountShared.pas"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>

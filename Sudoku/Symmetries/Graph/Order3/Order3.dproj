@@ -106,6 +106,7 @@
         <DCCReference Include="..\..\..\..\Common\Tracking\Trackables.pas"/>
         <DCCReference Include="..\..\..\..\Common\Balanced Tree\BinaryTree.pas"/>
         <DCCReference Include="..\..\CellCount\CellCountSymmetries.pas"/>
+        <DCCReference Include="..\..\Shared\CellCountShared.pas"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>

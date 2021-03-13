@@ -86,6 +86,8 @@ type
   TSymRow = array [TRowColIdx] of integer;
   TSymBoardState = array [TRowColIdx] of TSymRow;
 
+  TLogFunction = procedure(S:string);
+
   //TODO - Might need loads and saves here at some point one day.
 {$IFDEF USE_TRACKABLES}
   TSymBoard = class (TTrackable)
@@ -103,6 +105,7 @@ type
     //TODO - individual isomorphic comparisons might or might not be the best
     //way to search our way thru the space.
     function AmIsomorphicTo(Other: TSymBoard): boolean; virtual; abstract;
+    procedure LogBoard(Fn: TLogFunction);
     property Entries[Row, Col: TRowColIdx]: integer read GetBoardEntry write SetBoardEntry;
   end;
 
@@ -115,6 +118,24 @@ var
   PermList: TPermList;
 
 implementation
+
+procedure TSymBoard.LogBoard(Fn: TLogFunction);
+var
+  j,k: TRowColIdx;
+  S: string;
+begin
+  for j := Low(j) to High(j) do
+  begin
+    S := '';
+    for k := Low(k) to High(k) do
+      if Entries[j,k] <> 0 then
+        S := S + 'X'
+      else
+        S := S + '0';
+    Fn(S);
+  end;
+  Fn('');
+end;
 
 procedure TSymBoard.Assign(Src: TSymBoard);
 var
