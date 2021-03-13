@@ -17,7 +17,9 @@ Files / Folders:
   - Simple testapp for Exact cover DLX algorithm. Allows you to load, save, and solve sudoku problems fast.
 
 - Sudoku / Symmetries.
-  - Some ways of finding isomorphic board configurations. Graph method has errors, but included for interest.
+  - Some ways of finding isomorphic board configurations.
+    - Graph method has errors, but included for interest.
+    - Fastest is "CellCountMT", still being optimised.
 
 Common: Common utility code, including:
 
