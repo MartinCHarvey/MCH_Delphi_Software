@@ -91,6 +91,7 @@ begin
   WriteLn('');
 end;
 
+//TODO - Put some comparisons / sec stats in here.
 procedure IsomorphismsGenerative(MaxGivens: integer; BoardClass: TSymBoardClass);
 var
   IsoList, Tmp, PartialNxtIsoList: TObjectList;
@@ -167,8 +168,8 @@ begin
 end;
 
 const
-  MaxGivens = 6;
-//  MaxGivens = (ORDER * ORDER * ORDER * ORDER);
+//  MaxGivens = 6;
+  MaxGivens = (ORDER * ORDER * ORDER * ORDER);
 
 var
   StartTime: TDateTime;
