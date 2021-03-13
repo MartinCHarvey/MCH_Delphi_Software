@@ -6,7 +6,7 @@ uses
 {$IFDEF USE_TRACKABLES}
   Trackables,
 {$ENDIF}
-  SharedSymmetries;
+  SharedSymmetries, CellCountShared;
 
 {$IFDEF ORDER2}
 {$DEFINE OPTIMISE_SMALL_SETS}
@@ -29,49 +29,7 @@ type
     property FastEntries[Row, Col: TRowColIdx]: integer read FastGetBoardEntry;
   end;
 
-  //////////////// Counts.
-
-  TRowColCellCount = 0.. (ORDER * ORDER);
-  TStackBandCellCount = 0 .. (ORDER * ORDER * ORDER);
-
-{$IFDEF OPTIMISE_SMALL_SETS}
-  TSmallSet = type UInt32;
-
-  TStackBandCellCountSet = TSmallSet;
-  TRowColCellCountSet = TSMallSet;
-{$ELSE}
-  TStackBandCellCountSet = set of TStackBandCellCount;
-  TRowColCellCountSet = set of TRowColCellCount;
-{$ENDIF}
-
-  //Rows or cols in a stack or band.
-  TRowColCountInfo = record
-    CellCounts: array[TOrderIdx] of TRowColCellCount;
-    CellCountSet: TRowColCellCountSet;
-  end;
-  PRowColCountInfo = ^TRowColCountInfo;
-
-  TStackBandCountInfo = record
-    CellCounts: array[TOrderIdx] of TStackBandCellCount;
-    CellCountSet: TStackBandCellCountSet;
-    UnpermutedLineInfo: array[TOrderIdx] of TRowColCountInfo;
-  end;
-  PStackBandCountInfo = ^TStackBandCountInfo;
-
-  TCountInfo = array [boolean] of TStackBandCountInfo;
-  PCountInfo = ^TCountInfo;
-
-  //TODO - Should I make this a set type. Faster?
-  TAllowedPerms = record
-    PermIdxs: TPermIdxList;
-    Count: TPermIdx;
-  end;
-
-  TRowColAllowedPerms = array[TOrderIdx] of TAllowedPerms;
-  TRowColSelectedPerms = array[TOrderIdx] of TPermIdx;
-
-  /////////////// Permutations.
-
+  
 {$IFDEF USE_TRACKABLES}
   TCellCountIsomorphismChecker = class(TTrackable)
 {$ELSE}
@@ -92,8 +50,8 @@ type
                                 var ColPerms:TRowColAllowedPerms): boolean;
 
     procedure SetupCounts(A,B: TCellCountBoard);
-    function StackBandPermSet(PA, PB: PStackBandCountInfo; var PL: TAllowedPerms):boolean; //Returns any valid permutations.
-    function RowColPermSet(PA, PB: PRowColCountInfo; var PL: TAllowedPerms): boolean; //Returns any valid permutations.
+    function StackBandPermSet(PA, PB: PStackBandCountInfo; var PL: TGenAllowedPerms):boolean; //Returns any valid permutations.
+    function RowColPermSet(PA, PB: PRowColCountInfo; var PL: TGenAllowedPerms): boolean; //Returns any valid permutations.
     function IsomorphicRowCol(A,B: TCellCountBoard;
                               InitialReflect: boolean;
                               InitialBandPerm, InitialStackPerm: TPermIdx): boolean; //Band = Row
@@ -103,24 +61,6 @@ type
   end;
 
 implementation
-
-{ Misc functions }
-
-{$IFDEF OPTIMISE_SMALL_SETS}
-function SmallSetUnion(A, B: TSmallSet): TSmallSet; inline;
-begin
-  result := A or B;
-end;
-function SmallSetUnitary(B: integer): TSmallSet; inline;
-begin
-  Assert(B < (sizeof(TSmallSet) * 8));
-  result := 1 shl B;
-end;
-function SmallSetEmpty: TSmallSet; inline;
-begin
-  result := 0;
-end;
-{$ENDIF}
 
 { TCellCountBoard }
 
@@ -280,7 +220,7 @@ begin
 end;
 
 //TODO - Yuck yuck - so similar to stack band perm set, but not quite same types.
-function TCellCountIsomorphismChecker.RowColPermSet(PA, PB: PRowColCountInfo; var PL: TAllowedPerms): boolean;
+function TCellCountIsomorphismChecker.RowColPermSet(PA, PB: PRowColCountInfo; var PL: TGenAllowedPerms): boolean;
 var
   TestPermIdx: TPermIdx;
   OIdx: TOrderIdx;
@@ -342,7 +282,7 @@ begin
   end;
 end;
 
-procedure IncPermIdxC(var Carry: boolean; const Perms: TAllowedPerms; var PermIdx: TPermIdx);
+procedure IncPermIdxC(var Carry: boolean; const Perms: TGenAllowedPerms; var PermIdx: TPermIdx);
 begin
   Carry := PermIdx >= Pred(Perms.Count);
   if not Carry then
@@ -515,7 +455,7 @@ NextPermNoRefine:
   result := false;
 end;
 
-function TCellCountIsomorphismChecker.StackBandPermSet(PA, PB: PStackBandCountInfo; var PL: TAllowedPerms): boolean;
+function TCellCountIsomorphismChecker.StackBandPermSet(PA, PB: PStackBandCountInfo; var PL: TGenAllowedPerms): boolean;
 var
   TestPermIdx: TPermIdx;
   OIdx: TOrderIdx;
@@ -566,7 +506,7 @@ function TCellCountIsomorphismChecker.IsomorphicStackBand(A,B: TCellCountBoard):
 var
   PARowCounts, PBRowCounts: PStackBandCountInfo;
   PAColCounts, PBColCounts: PStackBandCountInfo;
-  RowPerms, ColPerms: TAllowedPerms;
+  RowPerms, ColPerms: TGenAllowedPerms;
   RowPermIdx, ColPermIdx: TPermIdx;
   Reflect: boolean;
 begin

@@ -15,7 +15,8 @@ uses
   GraphSymmetries in '..\..\Graph\GraphSymmetries.pas',
   DLList in '..\..\..\..\Common\DLList\DLList.pas',
   ExactCover in '..\..\..\..\Common\ExactCover\ExactCover.pas',
-  SparseMatrix in '..\..\..\..\Common\SparseMatrix\SparseMatrix.pas';
+  SparseMatrix in '..\..\..\..\Common\SparseMatrix\SparseMatrix.pas',
+  CellCountShared in '..\..\Shared\CellCountShared.pas';
 
 begin
   try

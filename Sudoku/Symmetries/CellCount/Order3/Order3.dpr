@@ -15,7 +15,9 @@ uses
   Trackables in '..\..\..\..\Common\Tracking\Trackables.pas',
   DLList in '..\..\..\..\Common\DLList\DLList.pas',
   SparseMatrix in '..\..\..\..\Common\SparseMatrix\SparseMatrix.pas',
-  ExactCover in '..\..\..\..\Common\ExactCover\ExactCover.pas';
+  ExactCover in '..\..\..\..\Common\ExactCover\ExactCover.pas',
+  IndexedStore in '..\..\..\..\Common\Indexed Store\IndexedStore.pas',
+  CellCountShared in '..\..\Shared\CellCountShared.pas';
 
 begin
   try

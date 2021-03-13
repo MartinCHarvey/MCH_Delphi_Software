@@ -118,6 +118,7 @@
         <DCCReference Include="..\..\..\..\Common\ExactCover\ExactCover.pas"/>
         <DCCReference Include="..\..\..\..\Common\SparseMatrix\SparseMatrix.pas"/>
         <DCCReference Include="..\..\CellCount\CellCountSymmetries.pas"/>
+        <DCCReference Include="..\..\Shared\CellCountShared.pas"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>

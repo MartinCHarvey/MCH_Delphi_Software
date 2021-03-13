@@ -15,7 +15,8 @@ uses
   SparseMatrix in '..\..\..\..\Common\SparseMatrix\SparseMatrix.pas',
   Trackables in '..\..\..\..\Common\Tracking\Trackables.pas',
   BinaryTree in '..\..\..\..\Common\Balanced Tree\BinaryTree.pas',
-  CellCountSymmetries in '..\..\CellCount\CellCountSymmetries.pas';
+  CellCountSymmetries in '..\..\CellCount\CellCountSymmetries.pas',
+  CellCountShared in '..\..\Shared\CellCountShared.pas';
 
 begin
   try

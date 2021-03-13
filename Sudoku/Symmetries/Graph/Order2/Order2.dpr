@@ -15,7 +15,8 @@ uses
   DLList in '..\..\..\..\Common\DLList\DLList.pas',
   ExactCover in '..\..\..\..\Common\ExactCover\ExactCover.pas',
   SparseMatrix in '..\..\..\..\Common\SparseMatrix\SparseMatrix.pas',
-  CellCountSymmetries in '..\..\CellCount\CellCountSymmetries.pas';
+  CellCountSymmetries in '..\..\CellCount\CellCountSymmetries.pas',
+  CellCountShared in '..\..\Shared\CellCountShared.pas';
 
 begin
   try
