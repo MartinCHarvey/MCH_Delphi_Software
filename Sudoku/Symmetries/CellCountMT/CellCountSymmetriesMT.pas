@@ -838,9 +838,7 @@ procedure TCellCountMTBoard.Invalidate;
 begin
   FCountsSigValid := false;
   FCanonicalValid := false;
-  SetLength(FCanonicalString, 0);
   FMinlexValid := false;
-  SetLength(FMinlex, 0);
 end;
 
 procedure TCellCountMTBoard.TrimCanonical;
