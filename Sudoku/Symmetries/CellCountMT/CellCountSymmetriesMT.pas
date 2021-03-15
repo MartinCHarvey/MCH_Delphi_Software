@@ -62,8 +62,6 @@ type
     FSignature: TStackBandCellCountSet;
 
     FCanonicalValid: boolean;
-    FCanonicalAllowedPerms: TAllowedPerms;
-    FCanonicalSelectedPerms, FCurrentSelectedPerms: TSelectedPerms;
     FCanonicalString: string;
     FMinlexValid: boolean;
     FMinlex: string;
@@ -73,14 +71,15 @@ type
     procedure SetupCounts;
 {$IFDEF DEBUG_CELLCOUNTS}
     procedure DumpCounts;
-    procedure DumpAllowedPerms;
-    procedure DumpSelectedPerms;
+    procedure DumpAllowedPerms(const CanonicalAllowedPerms: TAllowedPerms);
+    procedure DumpSelectedPerms(const CanonicalAllowedPerms: TAllowedPerms;
+                                const CurrentSelectedPerms: TSelectedPerms);
 {$ENDIF}
-    procedure FindCanonicalPerms;
-    procedure FindCanonicalPermsSimpleGuess;
-    procedure MakeCanonicalString;
+    procedure FindCanonicalPerms(var CanonicalAllowedPerms: TAllowedPerms);
+    procedure MakeCanonicalString(var CanonicalAllowedPerms: TAllowedPerms);
     procedure CalcMinLex;
     procedure Invalidate;
+    procedure TrimCanonical;
     function GetCanonicalString: string;
     function GetSignature: TStackBandCellCountSet;
     function GetMinLex: string;
@@ -121,6 +120,8 @@ type
     FTravIrec: TItemRec;
     function GetCount: integer;
     function AddBoardInternal(Board: TCellCountMTBoard; Readonly: boolean; SV: TLexStrSearchVal): TSSAddBoardRet;
+    procedure ListStateCanonicalMode;
+    procedure ListStateMinlexMode;
   public
     constructor Create;
     destructor Destroy; override;
@@ -348,7 +349,7 @@ begin
 end;
 
 {$IFDEF DEBUG_CELLCOUNTS}
-procedure TCellCountMTBoard.DumpAllowedPerms;
+procedure TCellCountMTBoard.DumpAllowedPerms(const CanonicalAllowedPerms: TAllowedPerms);
 
   function DumpGenAllowed(const P: TGenAllowedPerms): string;
   var
@@ -375,19 +376,14 @@ begin
       WriteLn('Row allowed perms:')
     else
       WriteLn('Col allowed perms:');
-    WriteLn('StackBand: ' + DumpGenAllowed(FCanonicalAllowedPerms[Row].StackBandAllowed));
+    WriteLn('StackBand: ' + DumpGenAllowed(CanonicalAllowedPerms[Row].StackBandAllowed));
     for OIdx := Low(OIdx) to High(OIdx) do
       WriteLn('RowCol [' + IntToStr(OIdx) + ']:'
-        + DumpGenAllowed(FCanonicalAllowedPerms[Row].RowColAllowed[OIdx]));
+        + DumpGenAllowed(CanonicalAllowedPerms[Row].RowColAllowed[OIdx]));
   end;
 end;
 {$ENDIF}
 
-
-procedure TCellCountMTBoard.FindCanonicalPerms;
-begin
-  FindCanonicalPermsSimpleGuess;
-end;
 
 function MaskUnique(var AllPerm: TGenAllowedPerms; const PermMask: TPermMask):boolean;
 var
@@ -422,7 +418,7 @@ begin
   Inc(AllPerm.Count);
 end;
 
-procedure TCellCountMTBoard.FindCanonicalPermsSimpleGuess;
+procedure TCellCountMTBoard.FindCanonicalPerms(var CanonicalAllowedPerms: TAllowedPerms);
 
 const
   MaskNoCells = -1;
@@ -436,7 +432,7 @@ var
   PermMask: TPermMask;
   LastCount, Count: integer;
 begin
-  FillChar(FCanonicalAllowedPerms, sizeof(FCanonicalAllowedPerms), 0);
+  FillChar(CanonicalAllowedPerms, sizeof(CanonicalAllowedPerms), 0);
   for Row := Low(Row) to High(Row) do
   begin
     //Stack/band permutations.
@@ -470,12 +466,12 @@ begin
           else
             PermMask[Idx] := PermedIdx;
         end;
-        FoundPerm := MaskUnique(FCanonicalAllowedPerms[Row].StackBandAllowed, PermMask);
+        FoundPerm := MaskUnique(CanonicalAllowedPerms[Row].StackBandAllowed, PermMask);
       end;
       if FoundPerm then
-        GenAddPerm(FCanonicalAllowedPerms[Row].StackBandAllowed, Perm, PermMask);
+        GenAddPerm(CanonicalAllowedPerms[Row].StackBandAllowed, Perm, PermMask);
     end;
-    Assert(FCanonicalAllowedPerms[Row].StackBandAllowed.Count > 0);
+    Assert(CanonicalAllowedPerms[Row].StackBandAllowed.Count > 0);
     //Now row/col permutations for each stack/band.
     for StackBand := Low(StackBand) to High(StackBand) do
     begin
@@ -509,16 +505,16 @@ begin
             else
               PermMask[Idx] := PermedIdx;
           end;
-          FoundPerm := MaskUnique(FCanonicalAllowedPerms[Row].RowColAllowed[StackBand], PermMask);
+          FoundPerm := MaskUnique(CanonicalAllowedPerms[Row].RowColAllowed[StackBand], PermMask);
         end;
         if FoundPerm then
-          GenAddPerm(FCanonicalAllowedPerms[Row].RowColAllowed[StackBand], Perm, PermMask);
+          GenAddPerm(CanonicalAllowedPerms[Row].RowColAllowed[StackBand], Perm, PermMask);
       end;
-      Assert(FCanonicalAllowedPerms[Row].RowColAllowed[StackBand].Count > 0);
+      Assert(CanonicalAllowedPerms[Row].RowColAllowed[StackBand].Count > 0);
     end;
   end;
 {$IFDEF DEBUG_CELLCOUNTS}
-  DumpAllowedPerms;
+  DumpAllowedPerms(CanonicalAllowedPerms);
 {$ENDIF}
 end;
 
@@ -659,7 +655,8 @@ begin
 end;
 
 {$IFDEF DEBUG_CELLCOUNTS}
-procedure TCellCountMTBoard.DumpSelectedPerms;
+procedure TCellCountMTBoard.DumpSelectedPerms(const CanonicalAllowedPerms: TAllowedPerms;
+                            const CurrentSelectedPerms: TSelectedPerms);
 
   procedure DumpGenSelected(SelIdx: integer; const AllowedPerms: TGenAllowedPerms);
   begin
@@ -678,18 +675,18 @@ begin
       Write('Row perms: ')
     else
       Write('Col perms: ');
-    DumpGenSelected(FCurrentSelectedPerms.StackBandPerms[Row].StackBandPerm,
-                    FCanonicalAllowedPerms[Row].StackBandAllowed);
+    DumpGenSelected(CurrentSelectedPerms.StackBandPerms[Row].StackBandPerm,
+                    CanonicalAllowedPerms[Row].StackBandAllowed);
     WriteLn;
     for RowCol := Low(RowCol) to High(RowCol) do
     begin
-      DumpGenSelected(FCurrentSelectedPerms.StackBandPerms[Row].RowColPerms[RowCol],
-        FCanonicalAllowedPerms[Row].RowColAllowed[RowCol]);
+      DumpGenSelected(CurrentSelectedPerms.StackBandPerms[Row].RowColPerms[RowCol],
+        CanonicalAllowedPerms[Row].RowColAllowed[RowCol]);
       Write(' ');
     end;
     WriteLn;
   end;
-  if FCurrentSelectedPerms.Reflect then
+  if CurrentSelectedPerms.Reflect then
     WriteLn('Reflect.')
   else
     WriteLn('No reflect.');
@@ -699,7 +696,7 @@ end;
 const
   Sqs = ORDER * ORDER * ORDER * ORDER;
 
-procedure TCellCountMTBoard.MakeCanonicalString;
+procedure TCellCountMTBoard.MakeCanonicalString(var CanonicalAllowedPerms: TAllowedPerms);
 
 var
   Stack, Band, Row, Col: TOrderIdx;
@@ -710,6 +707,7 @@ var
   Ch: WideChar;
   B: boolean;
   S: string;
+  CurrentSelectedPerms: TSelectedPerms;
 {$IFDEF DEBUG_CELLCOUNTS}
   DbgState: TSymBoardState;
 
@@ -736,42 +734,42 @@ begin
   SetLength(S, Sqs);
   SetLength(FCanonicalString, 0);
   //There is always at least one permutation, even if all counts are the same.
-  InitPermIdxs(FCanonicalAllowedPerms, FCurrentSelectedPerms);
+  InitPermIdxs(CanonicalAllowedPerms, CurrentSelectedPerms);
   repeat
 {$IFDEF DEBUG_CELLCOUNTS}
-      DumpSelectedPerms;
+      DumpSelectedPerms(CanonicalAllowedPerms, CurrentSelectedPerms);
       FillChar(DbgState, sizeof(DbgState), 0);
 {$ENDIF}
     for AbsRow := Low(AbsRow) to High(AbsRow) do
     begin
       AbsToRelIndexed(AbsRow, Band, Row);
 
-      SelectedPermIdx := FCurrentSelectedPerms.StackBandPerms[true].StackBandPerm;
-      Assert(SelectedPermIdx < FCanonicalAllowedPerms[true].StackBandAllowed.Count);
-      PBand := PermList[FCanonicalAllowedPerms[true].StackBandAllowed.PermIdxs[SelectedPermIdx]][Band];
+      SelectedPermIdx := CurrentSelectedPerms.StackBandPerms[true].StackBandPerm;
+      Assert(SelectedPermIdx < CanonicalAllowedPerms[true].StackBandAllowed.Count);
+      PBand := PermList[CanonicalAllowedPerms[true].StackBandAllowed.PermIdxs[SelectedPermIdx]][Band];
 
       //Note, feed permuted band in here.
-      SelectedPermIdx := FCurrentSelectedPerms.StackBandPerms[true].RowColPerms[PBand];
-      Assert(SelectedPermIdx < FCanonicalAllowedPerms[true].RowColAllowed[PBand].Count);
-      PRow := PermList[FCanonicalAllowedPerms[true].RowColAllowed[PBand].PermIdxs[SelectedPermIdx]][Row];
+      SelectedPermIdx := CurrentSelectedPerms.StackBandPerms[true].RowColPerms[PBand];
+      Assert(SelectedPermIdx < CanonicalAllowedPerms[true].RowColAllowed[PBand].Count);
+      PRow := PermList[CanonicalAllowedPerms[true].RowColAllowed[PBand].PermIdxs[SelectedPermIdx]][Row];
 
       RelToAbsIndexed(PBand, PRow, AbsPRow);
       for AbsCol := Low(AbsCol) to High(AbsCol) do
       begin
         AbsToRelIndexed(AbsCol, Stack, Col);
 
-        SelectedPermIdx := FCurrentSelectedPerms.StackBandPerms[false].StackBandPerm;
-        Assert(SelectedPermIdx < FCanonicalAllowedPerms[false].StackBandAllowed.Count);
-        PStack := PermList[FCanonicalAllowedPerms[false].StackBandAllowed.PermIdxs[SelectedPermIdx]][Stack];
+        SelectedPermIdx := CurrentSelectedPerms.StackBandPerms[false].StackBandPerm;
+        Assert(SelectedPermIdx < CanonicalAllowedPerms[false].StackBandAllowed.Count);
+        PStack := PermList[CanonicalAllowedPerms[false].StackBandAllowed.PermIdxs[SelectedPermIdx]][Stack];
 
         //Note, feed permuted stack in here.
-        SelectedPermIdx := FCurrentSelectedPerms.StackBandPerms[false].RowColPerms[PStack];
-        Assert(SelectedPermIdx < FCanonicalAllowedPerms[false].RowColAllowed[PStack].Count);
-        PCol := PermList[FCanonicalAllowedPerms[false].RowColAllowed[PStack].PermIdxs[SelectedPermIdx]][Col];
+        SelectedPermIdx := CurrentSelectedPerms.StackBandPerms[false].RowColPerms[PStack];
+        Assert(SelectedPermIdx < CanonicalAllowedPerms[false].RowColAllowed[PStack].Count);
+        PCol := PermList[CanonicalAllowedPerms[false].RowColAllowed[PStack].PermIdxs[SelectedPermIdx]][Col];
 
         RelToAbsIndexed(PStack, PCol, AbsPCol);
 {$IFDEF DEBUG_CELLCOUNTS}
-        if FCurrentSelectedPerms.Reflect then
+        if CurrentSelectedPerms.Reflect then
           DbgState[AbsCol, AbsRow] := FastEntries[AbsPRow, AbsPCol]
         else
           DbgState[AbsRow, AbsCol] := FastEntries[AbsPRow, AbsPCol];
@@ -781,7 +779,7 @@ begin
           Ch := 'X'
         else
           Ch := '.';
-        if FCurrentSelectedPerms.Reflect then
+        if CurrentSelectedPerms.Reflect then
           S[Succ(AbsCol + (AbsRow * ORDER * ORDER))] :=  Ch
         else
           S[Succ(AbsRow + (AbsCol * ORDER * ORDER))] :=  Ch
@@ -791,11 +789,8 @@ begin
     DumpPermutedBoard;
 {$ENDIF}
     if IsLowerOrder(S, FCanonicalString) then
-    begin
       FCanonicalString := S;
-      FCanonicalSelectedPerms := FCurrentSelectedPerms;
-    end;
-  until IncPermIdxs(FCanonicalAllowedPerms, FCurrentSelectedPerms);
+  until IncPermIdxs(CanonicalAllowedPerms, CurrentSelectedPerms);
 end;
 
 procedure TCellCountMTBoard.CalcMinLex;
@@ -827,12 +822,14 @@ begin
 end;
 
 procedure TCellCountMTBoard.OptCalcCanonical;
+var
+  CanonicalAllowedPerms: TAllowedPerms;
 begin
   if not FCanonicalValid then
   begin
     OptCalcSig;
-    FindCanonicalPerms;
-    MakeCanonicalString;
+    FindCanonicalPerms(CanonicalAllowedPerms);
+    MakeCanonicalString(CanonicalAllowedPerms);
     FCanonicalValid := true;
   end;
 end;
@@ -841,7 +838,15 @@ procedure TCellCountMTBoard.Invalidate;
 begin
   FCountsSigValid := false;
   FCanonicalValid := false;
+  SetLength(FCanonicalString, 0);
   FMinlexValid := false;
+  SetLength(FMinlex, 0);
+end;
+
+procedure TCellCountMTBoard.TrimCanonical;
+begin
+  FCanonicalValid := false;
+  SetLength(FCanonicalString, 0);
 end;
 
 function TCellCountMTBoard.GetCanonicalString: string;
@@ -917,11 +922,37 @@ end;
 
 { TMTIsoList }
 
+procedure TMTIsoList.ListStateCanonicalMode;
+begin
+  if FStore.HasIndex(Ord(lsitMinlex)) then
+    FStore.DeleteIndex(Ord(lsitMinlex));
+  if not FStore.HasIndex(Ord(lsitCanonical)) then
+    FStore.AddIndex(TLexStrIndexNode, Ord(lsitCanonical));
+end;
+
+procedure TMTIsoList.ListStateMinlexMode;
+var
+  Rec: TItemRec;
+  Board: TCellCountMTBoard;
+begin
+  if FStore.HasIndex(Ord(lsitCanonical)) then
+    FStore.DeleteIndex(Ord(lsitCanonical));
+  Rec := FStore.GetAnItem;
+  while Assigned(Rec) do
+  begin
+    Board := TCellCountMTBoard(Rec.Item);
+    Board.TrimCanonical;
+    FStore.GetAnotherItem(Rec);
+  end;
+  if not FStore.HasIndex(Ord(lsitMinlex)) then
+    FStore.AddIndex(TLexStrIndexNode, Ord(lsitMinlex));
+end;
+
 constructor TMTIsoList.Create;
 begin
   inherited;
   FStore := TIndexedStore.Create;
-  FStore.AddIndex(TLexStrIndexNode, Ord(lsitCanonical));
+  ListStateCanonicalMode;
   FLock := TMultiReadExclusiveWriteSynchronizer.Create;
   FTraverseState := ttsAdding;
 end;
@@ -954,9 +985,11 @@ var
   Rec, Rec2: TItemRec;
   Obj: TObject;
 begin
+  if FStore.HasIndex(Ord(lsitCanonical)) then
+    FStore.DeleteIndex(Ord(lsitCanonical));
   if FStore.HasIndex(Ord(lsitMinlex)) then
     FStore.DeleteIndex(Ord(lsitMinlex));
-  FTraverseState := ttsAdding;
+
   Rec := FStore.GetAnItem;
   while Assigned(Rec) do
   begin
@@ -966,6 +999,8 @@ begin
     FStore.RemoveItem(Rec2);
     Obj.Free;
   end;
+  ListStateCanonicalMode;
+  FTraverseState := ttsAdding;
   inherited;
 end;
 
@@ -1087,21 +1122,6 @@ end;
 
 function TMTIsoList.GetInMinlexOrder: TCellCountMTBoard;
 
-  function SetupCompleteStore: boolean;
-  var
-    RV: TIsRetVal;
-  begin
-    if not FStore.HasIndex(Ord(lsitMinlex)) then
-    begin
-      RV := FStore.AddIndex(TLexStrIndexNode, Ord(lsitMinlex));
-      result := RV = rvOK;
-      Assert(result);
-    end
-    else
-      result := true;
-    FTraverseState := ttsTraversing;
-  end;
-
 var
   SRV: TIsRetVal;
 
@@ -1113,11 +1133,8 @@ begin
 
     if not FStore.HasIndex(Ord(lsitMinlex)) then
     begin
-      if not SetupCompleteStore then
-      begin
-        result := nil;
-        exit;
-      end;
+      ListStateMinlexMode;
+      FTraverseState := ttsTraversing;
     end;
 
     case FTraverseState of
