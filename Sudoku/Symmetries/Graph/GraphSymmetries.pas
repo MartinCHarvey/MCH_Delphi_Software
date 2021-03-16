@@ -115,7 +115,7 @@ type
   TBlockNodes = array [TRowColIdx] of TBlockNode;
   TCellNodes = array[TRowColIdx, TRowColIdx] of TCellNode;
 
-  TGraphSymBoard = class(TSymBoard)
+  TGraphSymBoard = class(TSymBoardUnpacked)
   protected
     FRowColNodes: TRowColNodes;
     FBlockNodes: TBlockNodes;
@@ -124,7 +124,7 @@ type
     procedure SetBoardEntry(Row, Col: TRowColIdx; Entry: integer); override;
     function GetBoardEntry(Row, Col: TRowColIdx): integer; override;
   public
-    function AmIsomorphicTo(Other: TSymBoard): boolean; override;
+    function AmIsomorphicTo(Other: TSymBoardAbstract): boolean; override;
     constructor Create; override;
     destructor Destroy; override;
     property Entries[Row, Col: TRowColIdx]: integer read GetBoardEntry write SetBoardEntry;
@@ -472,7 +472,7 @@ begin
   inherited;
 end;
 
-function TGraphSymBoard.AmIsomorphicTo(Other: TSymBoard): boolean;
+function TGraphSymBoard.AmIsomorphicTo(Other: TSymBoardAbstract): boolean;
 var
   Checker: TIsomorphicChecker;
 begin

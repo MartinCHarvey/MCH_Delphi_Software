@@ -81,11 +81,11 @@ function TCellCountMTWI.DoWork: integer;
 var
   TestBoard, ParentBoard: TCellCountMTBoard;
   x,y: TRowColIdx;
-  SV: TLexStrSearchVal;
+  SV: TPackedRepSearchVal;
 begin
   try
     TestBoard := FBoardClass.Create;
-    SV := TLexStrSearchVal.Create;
+    SV := TPackedRepSearchVal.Create;
     try
       ParentBoard := FOldIsoList.GetInMinlexOrder;
       while Assigned(ParentBoard) and not ErrFlag do
@@ -138,7 +138,7 @@ end;
 
 procedure DumpIsoListMT(IsoList: TMTIsoList; Givens: integer);
 var
-  Board: TSymBoard;
+  Board: TSymBoardAbstract;
 begin
   Log('-----');
   Log('There are ' + IntToStr(IsoList.Count) +
@@ -164,7 +164,7 @@ var
   LOutstanding: integer;
   i: integer;
   WI: TCellCountMTWI;
-  SV: TLexStrSearchVal;
+  SV: TPackedRepSearchVal;
 begin
   GivenCount := 0;
   IsoList := TMTIsoList.Create;
@@ -174,7 +174,7 @@ begin
     begin
       if GivenCount = 0 then
       begin
-        SV := TLexStrSearchVal.Create;
+        SV := TPackedRepSearchVal.Create;
         try
           IsoList.AddBoard(BoardClass.Create, SV);
         finally
@@ -204,6 +204,8 @@ begin
       end;
 {$IFNDEF OMIT_OUTPUT}
       DumpIsoListMT(IsoList, GivenCount);
+{$ELSE}
+      IsoList.SetTraversed;
 {$ENDIF}
       IsoList.ResetTraverse;
       Inc(GivenCount);
@@ -217,6 +219,7 @@ end;
 
 const
   MaxGivens = (ORDER * ORDER * ORDER * ORDER);
+//  MaxGivens = 8;
 
 var
   StartTime: TDateTime;
@@ -230,13 +233,10 @@ procedure StopTiming;
 var
   StopTime: TDateTime;
   ElapsedSecs: double;
-//  FCallsPerPerm: double;
 begin
   StopTime := Now;
   ElapsedSecs := (StopTime - StartTime) * (3600 * 24);
   WriteLn('ElapsedTime: ' + FloatToStr(ElapsedSecs));
-//  FCallsPerPerm := (TotalCanonicalPerms * 1.0) / (CanonicalCalls * 1.0);
-//  WriteLn('Permutations checked per board: ' + FloatToStr(FCallsPerPerm));
 end;
 
 procedure TestCellCountMT;
@@ -252,10 +252,12 @@ begin
   WriteLn('Sizeof TIndexNodeLink ', TIndexNodeLink.InstanceSize);
   WriteLn('Sizeof TTItemRec ', TItemRec.InstanceSize);
   WriteLn('Sizeof TCellCountMTBoard ', TCellCountMTBoard.InstanceSize);
-  WriteLn('Sizeof TSymBoardState ', sizeof(TSymBoardState));
+  WriteLn('Sizeof TSymBoardPackedState ', sizeof(TSymBoardPackedState));
   WriteLn('Sizeof TCountInfo ', sizeof(TCountInfo));
+  WriteLn('Sizeof TCountInfoMT ', sizeof(TCountInfoMT));
   WriteLn('Sizeof TAllowedPerms ', sizeof(TAllowedPerms));
   WriteLn('Sizeof TSelectedPerms ', sizeof(TSelectedPerms));
+  WriteLn('U64sPerBoard ', U64sPerBoard);
 end;
 
 initialization

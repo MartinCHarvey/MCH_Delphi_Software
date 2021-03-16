@@ -51,22 +51,20 @@ uses
 }
 
 
+const
+  CountsSigValidFlag = (1 shl 0);
+  CanonicalValidFlag = (1 shl 1);
+
 type
-  TCellCountMTBoard = class(TSymBoard)
+  TCellCountMTBoard = class(TSymBoardPacked)
   protected
+    FCanonicalRep: TSymBoardPackedState;
     FBoardLock: TCriticalSection;
-    FCountsSigValid: boolean;
-    FCountInfo: TCountInfo;
+    FCountInfo: TCountInfoMT;
+    FFlags: Byte;
     //Unpermuted line info (CellCounts) is primary information,
     //All other counts calculated from there.
-    FSignature: TStackBandCellCountSet;
 
-    FCanonicalValid: boolean;
-    FCanonicalString: string;
-    FMinlexValid: boolean;
-    FMinlex: string;
-
-    function FastGetBoardEntry(Row, Col: TRowColIdx): integer; inline;
     procedure SetBoardEntry(Row, Col: TRowColIdx; Entry: integer); override;
     procedure SetupCounts;
 {$IFDEF DEBUG_CELLCOUNTS}
@@ -76,26 +74,22 @@ type
                                 const CurrentSelectedPerms: TSelectedPerms);
 {$ENDIF}
     procedure FindCanonicalPerms(var CanonicalAllowedPerms: TAllowedPerms);
-    procedure MakeCanonicalString(var CanonicalAllowedPerms: TAllowedPerms);
-    procedure CalcMinLex;
+    procedure MakeCanonicalString(const CanonicalAllowedPerms: TAllowedPerms);
     procedure Invalidate;
-    procedure TrimCanonical;
-    function GetCanonicalString: string;
-    function GetSignature: TStackBandCellCountSet;
-    function GetMinLex: string;
+    function GetCanonicalRep: TSymBoardPackedState; inline;
+    function GetMinLexRep: TSymBoardPackedState; inline;
     procedure OptCalcSig;
     procedure OptCalcCanonical;
-
-    property FastEntries[Row, Col: TRowColIdx]: integer read FastGetBoardEntry;
+    function GetBoardEntryFast(Row, Col: TRowColIdx): boolean; inline;
+    property FastEntries[Row, Col: TRowColIdx]: boolean read GetBoardEntryFast;
   public
     constructor Create; override;
     destructor Destroy; override;
 
     //No override assign needed, CellCount setter does the work
-    function AmIsomorphicTo(Other: TSymBoard): boolean; override;
-    property CanonicalString: string read GetCanonicalString;
-    property Signature: TStackBandCellCountSet read GetSignature;
-    property Minlex: string read GetMinLex;
+    function AmIsomorphicTo(Other: TSymBoardAbstract): boolean; override;
+    property CanonicalRep: TSymBoardPackedState read GetCanonicalRep;
+    property MinlexRep: TSymBoardPackedState read GetMinLexRep;
   end;
 
   TCellCountBoardClass = class of TCellCountMTBoard;
@@ -105,7 +99,7 @@ type
   TSSAddBoardRet = (abrNotMinimal, abrCanAdd, abrAdded);
   TLexStrIndexNodeType = (lsitCanonical, lsitMinlex);
 
-  TLexStrSearchVal = class;
+  TPackedRepSearchVal = class;
 
 {$IFDEF USE_TRACKABLES}
   TMTIsoList = class(TTrackable)
@@ -119,7 +113,7 @@ type
     FTraverseState: TTraverseState;
     FTravIrec: TItemRec;
     function GetCount: integer;
-    function AddBoardInternal(Board: TCellCountMTBoard; Readonly: boolean; SV: TLexStrSearchVal): TSSAddBoardRet;
+    function AddBoardInternal(Board: TCellCountMTBoard; Readonly: boolean; SV: TPackedRepSearchVal): TSSAddBoardRet;
     procedure ListStateCanonicalMode;
     procedure ListStateMinlexMode;
   public
@@ -127,22 +121,23 @@ type
     destructor Destroy; override;
     //Pass in a LexStrSearchVal that is thread local.
     //Saves mem alloc costs.
-    function AddBoard(Board: TCellCountMTBoard; SV: TLexStrSearchVal): boolean;
+    function AddBoard(Board: TCellCountMTBoard; SV: TPackedRepSearchVal): boolean;
     function GetInMinlexOrder: TCellCountMTBoard;
     procedure Clear;
+    procedure SetTraversed;
     procedure ResetTraverse;
     property Count: integer read GetCount;
   end;
 
 
-  TLexStrIndexNode = class(TIndexNode)
+  TPackedRepIndexNode = class(TIndexNode)
   public
     function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;override;
   end;
 
-  TLexStrSearchVal = class(TLexStrIndexNode)
+  TPackedRepSearchVal = class(TPackedRepIndexNode)
   public
-    SearchVal: string;
+    SearchVal: TSymBoardPackedState;
     function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;override;
   end;
 
@@ -191,20 +186,20 @@ begin
   try
     AbsToRelIndexed(Row, Band, RelRow);
     AbsToRelIndexed(Col, Stack, RelCol);
-    if FastEntries[Row, Col] <> 0 then
+    if Entries[Row, Col] <> 0 then
     begin
       if Entry = 0 then
       begin
         Invalidate;
-        with FCountInfo[true].UnpermutedLineInfo[Band] do
+        with FCountInfo[true] do
         begin
-          Assert(CellCounts[RelRow] > 0);
-          Dec(CellCounts[RelRow]);
+          Assert(UnpermutedLineInfo[Band][RelRow] > 0);
+          Dec(UnpermutedLineInfo[Band][RelRow]);
         end;
-        with FCountInfo[false].UnpermutedLineInfo[Stack] do
+        with FCountInfo[false] do
         begin
-          Assert(CellCounts[RelCol] > 0);
-          Dec(CellCounts[RelCol]);
+          Assert(UnpermutedLineInfo[Stack][RelCol] > 0);
+          Dec(UnpermutedLineInfo[Stack][RelCol]);
         end;
       end;
     end
@@ -213,21 +208,14 @@ begin
       if Entry <> 0 then
       begin
         Invalidate;
-        with FCountInfo[true].UnpermutedLineInfo[Band] do
-          Inc(CellCounts[RelRow]);
-        with FCountInfo[false].UnpermutedLineInfo[Stack] do
-          Inc(CellCounts[RelCol]);
+        Inc(FCountInfo[true].UnpermutedLineInfo[Band][RelRow]);
+        Inc(FCountInfo[false].UnpermutedLineInfo[Stack][RelCol]);
       end;
     end;
     inherited;
   finally
     FBoardLock.Release;
   end;
-end;
-
-function TCellCountMTBoard.FastGetBoardEntry(Row, Col: TRowColIdx): integer;
-begin
-  result := FSymBoardState[Row, Col];
 end;
 
 function SBSetToStr(S: TStackBandCellCountSet): string;
@@ -280,15 +268,13 @@ begin
       WriteLn('Row counts:')
     else
       WriteLn('Col Counts:');
-    WriteLn('StackBand set: ' + SBSetToStr(FCountInfo[Row].CellCountSet));
     for OIdx := Low(OIdx) to High(OIdx) do
       WriteLn('SB CellCount [' , OIdx, ']: ' , FCountInfo[Row].CellCounts[OIdx]);
 
     for OIdx := Low(OIdx) to High(OIdx) do
     begin
-      WriteLn('RowCol set: ' + RCSetToStr(FCountInfo[Row].UnpermutedLineInfo[OIdx].CellCountSet));
       for LIdx := Low(LIdx) to High(LIdx) do
-        WriteLn('RC CellCount [' , LIdx , ']: ', FCountInfo[Row].UnpermutedLineInfo[OIdx].CellCounts[LIdx]);
+        WriteLn('RC CellCount [' , LIdx , ']: ', FCountInfo[Row].UnpermutedLineInfo[OIdx][LIdx]);
     end;
   end;
 end;
@@ -306,43 +292,18 @@ begin
   begin
     with FCountInfo[Row] do
     begin
-{$IFDEF OPTIMISE_SMALL_SETS}
-      CellCountSet := SmallSetEmpty;
-{$ELSE}
-      CellCountSet := [];
-{$ENDIF}
       for StackBand := Low(StackBand) to High(StackBand) do
       begin
         Tmp2 := 0;
-        with UnpermutedLineInfo[StackBand] do
+        for RowCol := Low(RowCol) to High(RowCol) do
         begin
-{$IFDEF OPTIMISE_SMALL_SETS}
-          CellCountSet := SmallSetEmpty;
-{$ELSE}
-          CellCountSet := [];
-{$ENDIF}
-          for RowCol := Low(RowCol) to High(RowCol) do
-          begin
-            Tmp := CellCounts[RowCol];
-{$IFDEF OPTIMISE_SMALL_SETS}
-            CellCountSet := SmallSetUnion(CellCountSet, SmallSetUnitary(Tmp));
-{$ELSE}
-            CellCountSet := CellCountSet + [Tmp];
-{$ENDIF}
-            Inc(Tmp2, Tmp);
-          end;
+          Tmp := UnpermutedLineInfo[StackBand][RowCol];
+          Inc(Tmp2, Tmp);
         end;
         CellCounts[StackBand] := Tmp2;
-{$IFDEF OPTIMISE_SMALL_SETS}
-        CellCountSet := SmallSetUnion(CellCountSet, SmallSetUnitary(Tmp2));
-{$ELSE}
-        CellCountSet := CellCountSet + [Tmp2];
-{$ENDIF}
       end;
     end;
   end;
-  FSignature := Self.FCountInfo[false].CellCountSet
-    + Self.FCountInfo[true].CellCountSet;
 {$IFDEF DEBUG_CELLCOUNTS}
   DumpCounts;
 {$ENDIF}
@@ -482,7 +443,7 @@ begin
         for Idx := Low(Idx) to High(Idx) do
         begin
           PermedIdx := PermList[Perm][Idx];
-          Count := FCountInfo[Row].UnpermutedLineInfo[StackBand].CellCounts[PermedIdx];
+          Count := FCountInfo[Row].UnpermutedLineInfo[StackBand][PermedIdx];
           if Count > LastCount then
           begin
             FoundPerm := false;
@@ -497,7 +458,7 @@ begin
           for Idx := Low(Idx) to High(Idx) do
           begin
             PermedIdx := PermList[Perm][Idx];
-            Count := FCountInfo[Row].UnpermutedLineInfo[StackBand].CellCounts[PermedIdx];
+            Count := FCountInfo[Row].UnpermutedLineInfo[StackBand][PermedIdx];
             if (Count = 0) then
               PermMask[Idx] := MaskNoCells
             else if (Count = ORDER * ORDER) then
@@ -614,42 +575,45 @@ begin
   result := false;
 end;
 
-function IsLowerOrder(Cand, Existing: string): boolean;
+function IsLowerOrder(const Cand:TSymBoardPackedState; const Existing: TSymBoardPackedState): boolean;
 var
-  i: integer;
+  i: TSymBoardPackedIdx;
 begin
-  result := Length(Existing) = 0;
-  if not result then
+  result := false;
+  for i := High(i) downto Low(i) do
   begin
-    Assert(Length(Cand) = Length(Existing));
-    for i := Length(Cand) downto 1 do
+    if Cand[i] <> Existing[i] then
     begin
-      //First one with an 'X' where the other does not,
-      //is the one with a higher order.
-      if Cand[i] <> Existing[i] then
-      begin
-        result := (Existing[i] = 'X');
-        exit;
-      end;
+      result := Cand[i] < Existing[i];
+      exit;
     end;
   end;
 end;
 
-function IsLowerPacked(Cand, Existing: string): boolean;
-var
-  i: integer;
+function IsLowerOrderReplaceZero(const Cand:TSymBoardPackedState; const Existing: TSymBoardPackedState): boolean;
 begin
-  Assert(Length(Cand) = Length(Existing));
-  Assert(Length(Existing) > 0);
+  result := IsZeroRep(Existing);
+  if not result then
+    result := IsLowerOrder(Cand, Existing);
+end;
+
+function IsLowerPacked(const Cand:TSymBoardPackedState; const Existing: TSymBoardPackedState): boolean;
+var
+  i: TSymBoardPackedIdx;
+  b: integer;
+  x: Uint64;
+begin
   result := false;
-  for i := 1 to Length(Cand) do
+  for i := Low(i) to High(i) do
   begin
-    //First one with an 'X' where the other does not,
-    //is the one with a higher order.
-    if Cand[i] <> Existing[i] then
+    for b := 0 to Pred(BitsPerU64) do
     begin
-      result := (Cand[i] = 'X');
-      exit;
+      x := (Cand[i] and (Uint64(1) shl b));
+      if x <> (Existing[i] and (Uint64(1) shl b)) then
+      begin
+        result := x <> 0;
+        exit;
+      end;
     end;
   end;
 end;
@@ -696,18 +660,61 @@ end;
 const
   Sqs = ORDER * ORDER * ORDER * ORDER;
 
-procedure TCellCountMTBoard.MakeCanonicalString(var CanonicalAllowedPerms: TAllowedPerms);
+procedure PermuteRowData(const CurrentSelectedPerms: TSelectedPerms; const CanonicalAllowedPerms: TAllowedPerms; const AbsRow: TRowColIdx; var AbsPRow: TRowColIdx);
+var
+  SelectedPermIdx: TPermIdx;
+  Band, Row: TOrderIdx;
+  PBand, PRow: TOrderIdx;
+begin
+  AbsToRelIndexed(AbsRow, Band, Row);
+
+  SelectedPermIdx := CurrentSelectedPerms.StackBandPerms[true].StackBandPerm;
+  Assert(SelectedPermIdx < CanonicalAllowedPerms[true].StackBandAllowed.Count);
+  PBand := PermList[CanonicalAllowedPerms[true].StackBandAllowed.PermIdxs[SelectedPermIdx]][Band];
+
+  //Note, feed permuted band in here.
+  SelectedPermIdx := CurrentSelectedPerms.StackBandPerms[true].RowColPerms[PBand];
+  Assert(SelectedPermIdx < CanonicalAllowedPerms[true].RowColAllowed[PBand].Count);
+  PRow := PermList[CanonicalAllowedPerms[true].RowColAllowed[PBand].PermIdxs[SelectedPermIdx]][Row];
+
+  RelToAbsIndexed(PBand, PRow, AbsPRow);
+end;
+
+procedure PermuteColData(const CurrentSelectedPerms: TSelectedPerms; const CanonicalAllowedPerms: TAllowedPerms; const AbsCol:TRowColIdx; var AbsPCol: TRowColIdx); inline;
+var
+  Stack, Col: TOrderIdx;
+  SelectedPermIdx: TPermIdx;
+  PStack, PCol: TOrderIdx;
+begin
+  AbsToRelIndexed(AbsCol, Stack, Col);
+
+  SelectedPermIdx := CurrentSelectedPerms.StackBandPerms[false].StackBandPerm;
+  Assert(SelectedPermIdx < CanonicalAllowedPerms[false].StackBandAllowed.Count);
+  PStack := PermList[CanonicalAllowedPerms[false].StackBandAllowed.PermIdxs[SelectedPermIdx]][Stack];
+
+  //Note, feed permuted stack in here.
+  SelectedPermIdx := CurrentSelectedPerms.StackBandPerms[false].RowColPerms[PStack];
+  Assert(SelectedPermIdx < CanonicalAllowedPerms[false].RowColAllowed[PStack].Count);
+  PCol := PermList[CanonicalAllowedPerms[false].RowColAllowed[PStack].PermIdxs[SelectedPermIdx]][Col];
+
+  RelToAbsIndexed(PStack, PCol, AbsPCol);
+end;
+
+function TCellCountMTBoard.GetBoardEntryFast(Row, Col: TRowColIdx): boolean;
+begin
+  result := GetPackedEntry(FSymBoardPackedState, Row, Col);
+end;
+
+procedure TCellCountMTBoard.MakeCanonicalString(const CanonicalAllowedPerms: TAllowedPerms);
 
 var
-  Stack, Band, Row, Col: TOrderIdx;
-  PStack, PBand, PRow, PCol: TOrderIdx;
+  CurrentSelectedPerms: TSelectedPerms;
+
+var
   AbsRow, AbsCol: TRowColIdx;
   AbsPRow, AbsPCol: TRowColIdx;
-  SelectedPermIdx: TPermIdx;
-  Ch: WideChar;
   B: boolean;
-  S: string;
-  CurrentSelectedPerms: TSelectedPerms;
+  TmpPackedRep: TSymBoardPackedState;
 {$IFDEF DEBUG_CELLCOUNTS}
   DbgState: TSymBoardState;
 
@@ -731,8 +738,8 @@ var
 
 {$ENDIF}
 begin
-  SetLength(S, Sqs);
-  SetLength(FCanonicalString, 0);
+  FillChar(TmpPackedRep, sizeof(TmpPackedRep), 0);
+  FillChar(FCanonicalRep, sizeof(FCanonicalRep), 0);
   //There is always at least one permutation, even if all counts are the same.
   InitPermIdxs(CanonicalAllowedPerms, CurrentSelectedPerms);
   repeat
@@ -742,82 +749,38 @@ begin
 {$ENDIF}
     for AbsRow := Low(AbsRow) to High(AbsRow) do
     begin
-      AbsToRelIndexed(AbsRow, Band, Row);
-
-      SelectedPermIdx := CurrentSelectedPerms.StackBandPerms[true].StackBandPerm;
-      Assert(SelectedPermIdx < CanonicalAllowedPerms[true].StackBandAllowed.Count);
-      PBand := PermList[CanonicalAllowedPerms[true].StackBandAllowed.PermIdxs[SelectedPermIdx]][Band];
-
-      //Note, feed permuted band in here.
-      SelectedPermIdx := CurrentSelectedPerms.StackBandPerms[true].RowColPerms[PBand];
-      Assert(SelectedPermIdx < CanonicalAllowedPerms[true].RowColAllowed[PBand].Count);
-      PRow := PermList[CanonicalAllowedPerms[true].RowColAllowed[PBand].PermIdxs[SelectedPermIdx]][Row];
-
-      RelToAbsIndexed(PBand, PRow, AbsPRow);
+      PermuteRowData(CurrentSelectedPerms, CanonicalAllowedPerms, AbsRow, AbsPRow);
       for AbsCol := Low(AbsCol) to High(AbsCol) do
       begin
-        AbsToRelIndexed(AbsCol, Stack, Col);
-
-        SelectedPermIdx := CurrentSelectedPerms.StackBandPerms[false].StackBandPerm;
-        Assert(SelectedPermIdx < CanonicalAllowedPerms[false].StackBandAllowed.Count);
-        PStack := PermList[CanonicalAllowedPerms[false].StackBandAllowed.PermIdxs[SelectedPermIdx]][Stack];
-
-        //Note, feed permuted stack in here.
-        SelectedPermIdx := CurrentSelectedPerms.StackBandPerms[false].RowColPerms[PStack];
-        Assert(SelectedPermIdx < CanonicalAllowedPerms[false].RowColAllowed[PStack].Count);
-        PCol := PermList[CanonicalAllowedPerms[false].RowColAllowed[PStack].PermIdxs[SelectedPermIdx]][Col];
-
-        RelToAbsIndexed(PStack, PCol, AbsPCol);
+        PermuteColData(CurrentSelectedPerms, CanonicalAllowedPerms, AbsCol, AbsPCol);
 {$IFDEF DEBUG_CELLCOUNTS}
         if CurrentSelectedPerms.Reflect then
-          DbgState[AbsCol, AbsRow] := FastEntries[AbsPRow, AbsPCol]
+          DbgState[AbsCol, AbsRow] := Entries[AbsPRow, AbsPCol]
         else
-          DbgState[AbsRow, AbsCol] := FastEntries[AbsPRow, AbsPCol];
+          DbgState[AbsRow, AbsCol] := Entries[AbsPRow, AbsPCol];
 {$ENDIF}
-        B := FastEntries[AbsPRow, AbsPCol] <> 0;
-        if B then
-          Ch := 'X'
-        else
-          Ch := '.';
+        B := FastEntries[AbsPRow, AbsPCol];
         if CurrentSelectedPerms.Reflect then
-          S[Succ(AbsCol + (AbsRow * ORDER * ORDER))] :=  Ch
+          SetPackedEntry(TmpPackedRep, AbsCol, AbsRow, B)
         else
-          S[Succ(AbsRow + (AbsCol * ORDER * ORDER))] :=  Ch
+          SetPackedEntry(TmpPackedRep, AbsRow, AbsCol, B);
       end;
     end;
 {$IFDEF DEBUG_CELLCOUNTS}
     DumpPermutedBoard;
 {$ENDIF}
-    if IsLowerOrder(S, FCanonicalString) then
-      FCanonicalString := S;
+    if IsLowerOrderReplaceZero(TmpPackedRep, FCanonicalRep) then
+      FCanonicalRep := TmpPackedRep;
   until IncPermIdxs(CanonicalAllowedPerms, CurrentSelectedPerms);
 end;
 
-procedure TCellCountMTBoard.CalcMinLex;
-var
-  B: boolean;
-  Row, Col: TRowColIdx;
-  Ch: WideChar;
-begin
-  SetLength(FMinlex, Sqs);
-  for Row := Low(Row) to High(Row) do
-    for Col := Low(Col) to High(Col) do
-    begin
-      B := FastEntries[Row, Col] <> 0;
-      if B then
-        Ch := 'X'
-      else
-        Ch := '.';
-      FMinlex[Succ(Col + (Row * ORDER * ORDER))] :=  Ch
-    end;
-end;
 
 procedure TCellCountMTBoard.OptCalcSig;
 begin
-  if not FCountsSigValid then
+  if (FFlags and CountsSigValidFlag) = 0 then
   begin
     SetupCounts;
-    FCountsSigValid := true;
+    FFlags := FFlags or CountsSigValidFlag;
   end;
 end;
 
@@ -825,60 +788,37 @@ procedure TCellCountMTBoard.OptCalcCanonical;
 var
   CanonicalAllowedPerms: TAllowedPerms;
 begin
-  if not FCanonicalValid then
+  if (FFlags and CanonicalValidFlag) = 0 then
   begin
     OptCalcSig;
     FindCanonicalPerms(CanonicalAllowedPerms);
     MakeCanonicalString(CanonicalAllowedPerms);
-    FCanonicalValid := true;
+    FFlags := FFlags or CanonicalValidFlag;
   end;
 end;
 
 procedure TCellCountMTBoard.Invalidate;
 begin
-  FCountsSigValid := false;
-  FCanonicalValid := false;
-  FMinlexValid := false;
+  FFlags := 0;
 end;
 
-procedure TCellCountMTBoard.TrimCanonical;
-begin
-  FCanonicalValid := false;
-  SetLength(FCanonicalString, 0);
-end;
 
-function TCellCountMTBoard.GetCanonicalString: string;
+function TCellCountMTBoard.GetCanonicalRep: TSymBoardPackedState;
 begin
   FBoardLock.Acquire;
   try
     OptCalcCanonical;
-    result := FCanonicalString;
+    result := FCanonicalRep;
   finally
     FBoardLock.Release;
   end;
 end;
 
-function TCellCountMTBoard.GetMinLex: string;
+function TCellCountMTBoard.GetMinLexRep: TSymBoardPackedState;
 begin
   FBoardLock.Acquire;
   try
-    if not FMinLexValid then
-    begin
-      CalcMinLex;
-      FMinLexValid := true;
-    end;
-    result := FMinlex;
-  finally
-    FBoardLock.Release;
-  end;
-end;
-
-function TCellCountMTBoard.GetSignature: TStackBandCellCountSet;
-begin
-  FBoardLock.Acquire;
-  try
-    OptCalcSig;
-    result := FSignature;
+    result := self.FSymBoardPackedState;
   finally
     FBoardLock.Release;
   end;
@@ -889,7 +829,7 @@ begin
   WriteLn(S);
 end;
 
-function TCellCountMTBoard.AmIsomorphicTo(Other: TSymBoard): boolean;
+function TCellCountMTBoard.AmIsomorphicTo(Other: TSymBoardAbstract): boolean;
 var
   O: TCellCountMTBoard;
 {$IFDEF DEBUG_CELLCOUNTS}
@@ -901,17 +841,16 @@ begin
   LogBoard(SWr);
   O.LogBoard(SWr);
   WriteLn('--------------');
-  WriteLn('S1: ');
-  S1 := CanonicalString;
+  WriteLn('S1: -TODO - Packed rep to string.');
+//  S1 := CanonicalString;
   WriteLn('--------------');
-  WriteLn('S2: ');
-  S2 := O.CanonicalString;
+  WriteLn('S2: -TODO - Packed rep to string.');
+//  S2 := O.CanonicalString;
   WriteLn('');
   WriteLn(S1);
   WriteLn(S2);
 {$ENDIF}
-  result := (Signature = O.Signature) and
-    (CanonicalString = O.CanonicalString);
+  result := IsEqualRep(CanonicalRep, O.CanonicalRep);
 {$IFDEF DEBUG_CELLCOUNTS}
   WriteLn(result);
   WriteLn('--------------');
@@ -925,25 +864,15 @@ begin
   if FStore.HasIndex(Ord(lsitMinlex)) then
     FStore.DeleteIndex(Ord(lsitMinlex));
   if not FStore.HasIndex(Ord(lsitCanonical)) then
-    FStore.AddIndex(TLexStrIndexNode, Ord(lsitCanonical));
+    FStore.AddIndex(TPackedRepIndexNode, Ord(lsitCanonical));
 end;
 
 procedure TMTIsoList.ListStateMinlexMode;
-var
-  Rec: TItemRec;
-  Board: TCellCountMTBoard;
 begin
   if FStore.HasIndex(Ord(lsitCanonical)) then
     FStore.DeleteIndex(Ord(lsitCanonical));
-  Rec := FStore.GetAnItem;
-  while Assigned(Rec) do
-  begin
-    Board := TCellCountMTBoard(Rec.Item);
-    Board.TrimCanonical;
-    FStore.GetAnotherItem(Rec);
-  end;
   if not FStore.HasIndex(Ord(lsitMinlex)) then
-    FStore.AddIndex(TLexStrIndexNode, Ord(lsitMinlex));
+    FStore.AddIndex(TPackedRepIndexNode, Ord(lsitMinlex));
 end;
 
 constructor TMTIsoList.Create;
@@ -1002,30 +931,37 @@ begin
   inherited;
 end;
 
+procedure TMTIsoList.SetTraversed;
+begin
+  Assert(FTraverseState = ttsAdding);
+  ListStateMinlexMode;
+  FTraverseState := ttsTraversed;
+end;
+
 procedure TMTIsoList.ResetTraverse;
 begin
   Assert(FTraverseState = ttsTraversed);
   FTraverseState := ttsTraversing;
 end;
 
-function TMTIsoList.AddBoardInternal(Board: TCellCountMTBoard; Readonly: boolean; SV: TLexStrSearchVal): TSSAddBoardRet;
+function TMTIsoList.AddBoardInternal(Board: TCellCountMTBoard; Readonly: boolean; SV: TPackedRepSearchVal): TSSAddBoardRet;
 var
   Rec: TItemRec;
   RV: TISRetVal;
   Existing: TCellCountMTBoard;
 begin
   Existing := nil;
-  SV.SearchVal := Board.CanonicalString;
+  SV.SearchVal := Board.CanonicalRep;
   RV := FStore.FindByIndex(Ord(lsitCanonical), SV, Rec);
   Assert(RV in [rvOK, rvNotFound]);
   if RV = rvOK then
   begin
     Assert(Rec.Item is TCellCountMTBoard);
     Existing := TCellCountMTBoard(Rec.Item);
-    if IsLowerPacked(Board.Minlex, Existing.Minlex) then
+    if IsLowerPacked(Board.MinlexRep, Existing.MinlexRep) then
     begin
       result := abrCanAdd;
-      Assert(Board.Minlex <> Existing.Minlex);
+      Assert(not IsEqualRep(Board.MinlexRep, Existing.MinlexRep));
     end
     else
       result := abrNotMinimal;
@@ -1047,7 +983,7 @@ begin
   end;
 end;
 
-function TMTIsoList.AddBoard(Board: TCellCountMTBoard; SV: TLexStrSearchVal): boolean;
+function TMTIsoList.AddBoard(Board: TCellCountMTBoard; SV: TPackedRepSearchVal): boolean;
 var
   AddRet: TSSAddBoardRet;
 begin
@@ -1061,7 +997,7 @@ begin
 
   //Precalc values for this board before trying to insert
   //so as not to waste time under lock.
-  Board.GetCanonicalString;
+  Board.GetCanonicalRep;
   FLock.BeginRead;
   try
     AddRet := AddBoardInternal(Board, true, SV);
@@ -1174,7 +1110,7 @@ end;
 type
   PUint32 = ^Uint32;
 
-function TLexStrIndexNode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
+function TPackedRepIndexNode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
 var
   OwnBoard, OtherBoard: TCellCountMTBoard;
 begin
@@ -1183,12 +1119,20 @@ begin
   OwnBoard := TCellCountMTBoard(OwnItem);
   OtherBoard := TCellCountMTBoard(OtherItem);
   case IndexTag of
-    Ord(lsitCanonical) : result := CompareStr(OwnBoard.CanonicalString, OtherBoard.CanonicalString);
+    Ord(lsitCanonical) :
+    begin
+      if IsLowerOrder(OwnBoard.CanonicalRep, OtherBoard.CanonicalRep) then
+        result := 1
+      else if IsEqualRep(OwnBoard.CanonicalRep, OtherBoard.CanonicalRep) then
+        result := 0
+      else
+        result := -1;
+    end;
     Ord(lsitMinlex):
     begin
-      if IsLowerPacked(OwnBoard.Minlex, OtherBoard.Minlex) then
+      if IsLowerPacked(OwnBoard.MinlexRep, OtherBoard.MinlexRep) then
         result := 1
-      else if (OwnBoard.Minlex = OtherBoard.Minlex) then
+      else if IsEqualRep(OwnBoard.MinlexRep, OtherBoard.MinlexRep) then
         result := 0
       else
         result := -1;
@@ -1199,19 +1143,27 @@ begin
   end;
 end;
 
-function TLexStrSearchVal.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
+function TPackedRepSearchVal.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
 var
   OtherBoard: TCellCountMTBoard;
 begin
   Assert(OtherItem is TCellCountMTBoard);
   OtherBoard := TCellCountMTBoard(OtherItem);
   case IndexTag of
-    Ord(lsitCanonical) : result := CompareStr(SearchVal, OtherBoard.CanonicalString);
+    Ord(lsitCanonical) :
+    begin
+      if IsLowerOrder(SearchVal, OtherBoard.CanonicalRep) then
+        result := 1
+      else if IsEqualRep(SearchVal, OtherBoard.CanonicalRep) then
+        result := 0
+      else
+        result := -1;
+    end;
     Ord(lsitMinlex):
     begin
-      if IsLowerPacked(SearchVal, OtherBoard.Minlex) then
+      if IsLowerPacked(SearchVal, OtherBoard.MinlexRep) then
         result := 1
-      else if (SearchVal = OtherBoard.Minlex) then
+      else if IsEqualRep(SearchVal, OtherBoard.MinlexRep) then
         result := 0
       else
         result := -1;

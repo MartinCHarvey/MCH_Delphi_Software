@@ -17,7 +17,7 @@ uses
 {$ENDIF}
 
 type
-  TCellCountBoard = class(TSymBoard)
+  TCellCountBoard = class(TSymBoardUnpacked)
   protected
     FRowCounts, FColCounts: TSymRow;
 
@@ -25,7 +25,7 @@ type
     procedure SetBoardEntry(Row, Col: TRowColIdx; Entry: integer); override;
   public
     //No override assign needed, CellCount setter does the work
-    function AmIsomorphicTo(Other: TSymBoard): boolean; override;
+    function AmIsomorphicTo(Other: TSymBoardAbstract): boolean; override;
     property FastEntries[Row, Col: TRowColIdx]: integer read FastGetBoardEntry;
   end;
 
@@ -91,7 +91,7 @@ begin
 end;
 
 
-function TCellCountBoard.AmIsomorphicTo(Other: TSymBoard): boolean;
+function TCellCountBoard.AmIsomorphicTo(Other: TSymBoardAbstract): boolean;
 var
   C: TCellCountIsomorphismChecker;
 begin
