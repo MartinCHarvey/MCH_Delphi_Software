@@ -19,7 +19,6 @@ uses
 begin
   try
     TestCellCountMT;
-    SizeCheck;
   except
     on E: Exception do
       Writeln(E.ClassName, ': ', E.Message);

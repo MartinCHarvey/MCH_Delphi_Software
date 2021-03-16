@@ -34,7 +34,7 @@ type
   TRowColPermutations = array [TOrderIdx] of TPermIdx;
   TAllRowColPermutations = array [boolean] of TRowColPermutations;
 
-  TNaiveSymBoard = class (TSymBoard)
+  TNaiveSymBoard = class (TSymBoardUnpacked)
   protected
     FReflect: boolean;
     FStackBandPermutation: TStackBandPermutations;
@@ -53,8 +53,8 @@ type
 public
     //TODO - individual isomorphic comparisons might or might not be the best
     //way to search our way thru the space.
-    function AmIsomorphicTo(Other: TSymBoard): boolean; override;
-    procedure Assign(Src: TSymBoard); override;
+    function AmIsomorphicTo(Other: TSymBoardAbstract): boolean; override;
+    procedure Assign(Src: TSymBoardAbstract); override;
 
     property Reflect: boolean read FReflect write FReflect;
     property StackBandPerms[Rows: boolean]: TPermIdx read GetStackBandPerms write SetStackBandPerms;
@@ -68,7 +68,7 @@ implementation
 
 { TNaiveSymBoard }
 
-procedure TNaiveSymBoard.Assign(Src: TSymBoard);
+procedure TNaiveSymBoard.Assign(Src: TSymBoardAbstract);
 var
   S: TNaiveSymBoard;
 begin
@@ -189,7 +189,7 @@ begin
 end;
 
 
-function TNaiveSymBoard.AmIsomorphicTo(Other: TSymBoard): boolean;
+function TNaiveSymBoard.AmIsomorphicTo(Other: TSymBoardAbstract): boolean;
 var
   OldIStack, OldIBand: TPermIdx;
   SReflect: boolean;

@@ -66,7 +66,7 @@ var
   i: integer;
   j, k: TRowColIdx;
   S: string;
-  Board: TSymBoard;
+  Board: TSymBoardAbstract;
 begin
   Log('-----');
   Log('There are ' + IntToStr(IsoList.Count) +
@@ -75,7 +75,7 @@ begin
   Log('');
   for i := 0 to Pred(IsoList.Count) do
   begin
-    Board := TSymBoard(IsoList[i]);
+    Board := TSymBoardAbstract(IsoList[i]);
     for j := Low(j) to High(j) do
     begin
       S := '';
@@ -97,7 +97,7 @@ var
   IsoList, Tmp, PartialNxtIsoList: TObjectList;
   GivenCount: integer;
   Idx, Idx2: integer;
-  TestBoard, NewBoard: TSymBoard;
+  TestBoard, NewBoard: TSymBoardAbstract;
   x,y: TRowColIdx;
   CanAdd: boolean;
 begin
@@ -116,8 +116,8 @@ begin
       begin
         for Idx := 0 to Pred(IsoList.Count) do
         begin
-          TestBoard.Assign(TSymBoard(IsoList.Items[Idx]));
-          Assert(TestBoard.AmEqualTo(TSymBoard(IsoList.Items[Idx])));
+          TestBoard.Assign(TSymBoardAbstract(IsoList.Items[Idx]));
+          Assert(TestBoard.AmEqualTo(TSymBoardAbstract(IsoList.Items[Idx])));
 
           for x := Low(x) to High(x) do
           begin
@@ -131,8 +131,8 @@ begin
                 CanAdd := true;
                 while Idx2 < PartialNxtIsoList.Count do
                 begin
-                  Assert(PartialNxtIsoList.Items[Idx2] is TSymBoard);
-                  if TestBoard.AmIsomorphicTo(TSymBoard(PartialNxtIsoList.Items[Idx2])) then
+                  Assert(PartialNxtIsoList.Items[Idx2] is TSymBoardAbstract);
+                  if TestBoard.AmIsomorphicTo(TSymBoardAbstract(PartialNxtIsoList.Items[Idx2])) then
                   begin
                     CanAdd := false;
                     break;

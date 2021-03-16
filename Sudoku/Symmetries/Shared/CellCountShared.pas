@@ -45,6 +45,21 @@ type
   TCountInfo = array [boolean] of TStackBandCountInfo;
   PCountInfo = ^TCountInfo;
 
+
+  TRowColCountInfoMT = array[TOrderIdx] of TRowColCellCount;
+  PRowColCountInfoMT = ^TRowColCountInfoMT;
+
+  TStackBandCountInfoMT = record
+    CellCounts: array[TOrderIdx] of TStackBandCellCount;
+    //Unpermuted line info (CellCounts) is primary information,
+    //All other counts calculated from there.
+    UnpermutedLineInfo: array[TOrderIdx] of TRowColCountInfoMT;
+  end;
+  PStackBandCountInfoMT = ^TStackBandCountInfoMT;
+
+  TCountInfoMT = array [boolean] of TStackBandCountInfoMT;
+  PCountInfoMT = ^TCountInfoMT;
+
   TRowColSelectedPerms = array[TOrderIdx] of TPermIdx;
 
   TStackBandSelectedPerms = record
