@@ -59,7 +59,6 @@ type
   TCellCountMTBoard = class(TSymBoardPacked)
   protected
     FCanonicalRep: TSymBoardPackedState;
-    FBoardLock: TCriticalSection;
     FCountInfo: TCountInfoMT;
     FFlags: Byte;
     //Unpermuted line info (CellCounts) is primary information,
@@ -169,12 +168,10 @@ end;
 constructor TCellCountMTBoard.Create;
 begin
   inherited;
-  FBoardLock := TCriticalSection.Create;
 end;
 
 destructor TCellCountMTBoard.Destroy;
 begin
-  FBoardLock.Free;
   inherited;
 end;
 
@@ -182,40 +179,35 @@ procedure TCellCountMTBoard.SetBoardEntry(Row, Col: TRowColIdx; Entry: integer);
 var
   Band, RelRow, Stack, RelCol: TOrderIdx;
 begin
-  FBoardLock.Acquire;
-  try
-    AbsToRelIndexed(Row, Band, RelRow);
-    AbsToRelIndexed(Col, Stack, RelCol);
-    if Entries[Row, Col] <> 0 then
+  AbsToRelIndexed(Row, Band, RelRow);
+  AbsToRelIndexed(Col, Stack, RelCol);
+  if Entries[Row, Col] <> 0 then
+  begin
+    if Entry = 0 then
     begin
-      if Entry = 0 then
+      Invalidate;
+      with FCountInfo[true] do
       begin
-        Invalidate;
-        with FCountInfo[true] do
-        begin
-          Assert(UnpermutedLineInfo[Band][RelRow] > 0);
-          Dec(UnpermutedLineInfo[Band][RelRow]);
-        end;
-        with FCountInfo[false] do
-        begin
-          Assert(UnpermutedLineInfo[Stack][RelCol] > 0);
-          Dec(UnpermutedLineInfo[Stack][RelCol]);
-        end;
+        Assert(UnpermutedLineInfo[Band][RelRow] > 0);
+        Dec(UnpermutedLineInfo[Band][RelRow]);
       end;
-    end
-    else
-    begin
-      if Entry <> 0 then
+      with FCountInfo[false] do
       begin
-        Invalidate;
-        Inc(FCountInfo[true].UnpermutedLineInfo[Band][RelRow]);
-        Inc(FCountInfo[false].UnpermutedLineInfo[Stack][RelCol]);
+        Assert(UnpermutedLineInfo[Stack][RelCol] > 0);
+        Dec(UnpermutedLineInfo[Stack][RelCol]);
       end;
     end;
-    inherited;
-  finally
-    FBoardLock.Release;
+  end
+  else
+  begin
+    if Entry <> 0 then
+    begin
+      Invalidate;
+      Inc(FCountInfo[true].UnpermutedLineInfo[Band][RelRow]);
+      Inc(FCountInfo[false].UnpermutedLineInfo[Stack][RelCol]);
+    end;
   end;
+  inherited;
 end;
 
 function SBSetToStr(S: TStackBandCellCountSet): string;
@@ -680,7 +672,7 @@ begin
   RelToAbsIndexed(PBand, PRow, AbsPRow);
 end;
 
-procedure PermuteColData(const CurrentSelectedPerms: TSelectedPerms; const CanonicalAllowedPerms: TAllowedPerms; const AbsCol:TRowColIdx; var AbsPCol: TRowColIdx); inline;
+procedure PermuteColData(const CurrentSelectedPerms: TSelectedPerms; const CanonicalAllowedPerms: TAllowedPerms; const AbsCol:TRowColIdx; var AbsPCol: TRowColIdx);
 var
   Stack, Col: TOrderIdx;
   SelectedPermIdx: TPermIdx;
@@ -715,6 +707,7 @@ var
   AbsPRow, AbsPCol: TRowColIdx;
   B: boolean;
   TmpPackedRep: TSymBoardPackedState;
+  ColPermute: array[TRowColIdx] of TRowColIdx;
 {$IFDEF DEBUG_CELLCOUNTS}
   DbgState: TSymBoardState;
 
@@ -747,12 +740,18 @@ begin
       DumpSelectedPerms(CanonicalAllowedPerms, CurrentSelectedPerms);
       FillChar(DbgState, sizeof(DbgState), 0);
 {$ENDIF}
+    for AbsCol := Low(AbsCol) to High(AbsCol) do
+    begin
+        PermuteColData(CurrentSelectedPerms, CanonicalAllowedPerms, AbsCol, AbsPCol);
+        ColPermute[AbsCol] := AbsPCol;
+    end;
+
     for AbsRow := Low(AbsRow) to High(AbsRow) do
     begin
       PermuteRowData(CurrentSelectedPerms, CanonicalAllowedPerms, AbsRow, AbsPRow);
       for AbsCol := Low(AbsCol) to High(AbsCol) do
       begin
-        PermuteColData(CurrentSelectedPerms, CanonicalAllowedPerms, AbsCol, AbsPCol);
+        AbsPCol := ColPermute[AbsCol];
 {$IFDEF DEBUG_CELLCOUNTS}
         if CurrentSelectedPerms.Reflect then
           DbgState[AbsCol, AbsRow] := Entries[AbsPRow, AbsPCol]
@@ -805,23 +804,13 @@ end;
 
 function TCellCountMTBoard.GetCanonicalRep: TSymBoardPackedState;
 begin
-  FBoardLock.Acquire;
-  try
-    OptCalcCanonical;
-    result := FCanonicalRep;
-  finally
-    FBoardLock.Release;
-  end;
+  OptCalcCanonical;
+  result := FCanonicalRep;
 end;
 
 function TCellCountMTBoard.GetMinLexRep: TSymBoardPackedState;
 begin
-  FBoardLock.Acquire;
-  try
-    result := self.FSymBoardPackedState;
-  finally
-    FBoardLock.Release;
-  end;
+  result := self.FSymBoardPackedState;
 end;
 
 procedure SWr(S:string);

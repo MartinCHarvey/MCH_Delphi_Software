@@ -218,8 +218,8 @@ end;
 
 
 const
-  MaxGivens = (ORDER * ORDER * ORDER * ORDER);
-//  MaxGivens = 8;
+//  MaxGivens = (ORDER * ORDER * ORDER * ORDER);
+  MaxGivens = 13;
 
 var
   StartTime: TDateTime;
