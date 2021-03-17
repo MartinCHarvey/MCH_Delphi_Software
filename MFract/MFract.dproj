@@ -1,0 +1,1084 @@
+﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+    <PropertyGroup>
+        <ProjectGuid>{1A4C6FC7-7563-4D53-9D8D-993798565298}</ProjectGuid>
+        <MainSource>MFract.dpr</MainSource>
+        <Base>True</Base>
+        <Config Condition="'$(Config)'==''">Release</Config>
+        <TargetedPlatforms>3</TargetedPlatforms>
+        <AppType>Application</AppType>
+        <FrameworkType>VCL</FrameworkType>
+        <ProjectVersion>14.6</ProjectVersion>
+        <Platform Condition="'$(Platform)'==''">Win64</Platform>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Config)'=='Base' or '$(Base)'!=''">
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="('$(Platform)'=='Win32' and '$(Base)'=='true') or '$(Base_Win32)'!=''">
+        <Base_Win32>true</Base_Win32>
+        <CfgParent>Base</CfgParent>
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="('$(Platform)'=='Win64' and '$(Base)'=='true') or '$(Base_Win64)'!=''">
+        <Base_Win64>true</Base_Win64>
+        <CfgParent>Base</CfgParent>
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Config)'=='Release' or '$(Cfg_1)'!=''">
+        <Cfg_1>true</Cfg_1>
+        <CfgParent>Base</CfgParent>
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="('$(Platform)'=='Win32' and '$(Cfg_1)'=='true') or '$(Cfg_1_Win32)'!=''">
+        <Cfg_1_Win32>true</Cfg_1_Win32>
+        <CfgParent>Cfg_1</CfgParent>
+        <Cfg_1>true</Cfg_1>
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="('$(Platform)'=='Win64' and '$(Cfg_1)'=='true') or '$(Cfg_1_Win64)'!=''">
+        <Cfg_1_Win64>true</Cfg_1_Win64>
+        <CfgParent>Cfg_1</CfgParent>
+        <Cfg_1>true</Cfg_1>
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Config)'=='Debug' or '$(Cfg_2)'!=''">
+        <Cfg_2>true</Cfg_2>
+        <CfgParent>Base</CfgParent>
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="('$(Platform)'=='Win32' and '$(Cfg_2)'=='true') or '$(Cfg_2_Win32)'!=''">
+        <Cfg_2_Win32>true</Cfg_2_Win32>
+        <CfgParent>Cfg_2</CfgParent>
+        <Cfg_2>true</Cfg_2>
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="('$(Platform)'=='Win64' and '$(Cfg_2)'=='true') or '$(Cfg_2_Win64)'!=''">
+        <Cfg_2_Win64>true</Cfg_2_Win64>
+        <CfgParent>Cfg_2</CfgParent>
+        <Cfg_2>true</Cfg_2>
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Base)'!=''">
+        <VerInfo_AutoIncVersion>true</VerInfo_AutoIncVersion>
+        <VerInfo_IncludeVerInfo>true</VerInfo_IncludeVerInfo>
+        <Manifest_File>None</Manifest_File>
+        <DCC_DcuOutput>.\$(Platform)\$(Config)</DCC_DcuOutput>
+        <DCC_BplOutput>.\$(Platform)\$(Config)</DCC_BplOutput>
+        <DCC_ExeOutput>.\$(Platform)\$(Config)</DCC_ExeOutput>
+        <DCC_DcpOutput>.\$(Platform)\$(Config)</DCC_DcpOutput>
+        <Icon_MainIcon>MFract_Icon.ico</Icon_MainIcon>
+        <DCC_MapFile>3</DCC_MapFile>
+        <VerInfo_Release>5</VerInfo_Release>
+        <DCC_ImageBase>00400000</DCC_ImageBase>
+        <DCC_K>false</DCC_K>
+        <DCC_Alignment>1</DCC_Alignment>
+        <DCC_S>false</DCC_S>
+        <DCC_UsePackage>Vcl50;Vclx50;VclSmp50;Vcldb50;vclado50;ibevnt50;Vclbde50;vcldbx50;Qrpt50;TeeUI50;TeeDB50;Tee50;Dss50;TeeQR50;VCLIB50;Vclmid50;vclie50;Inetdb50;Inet50;NMFast50;webmid50;dclocx50;dclaxserver50;$(DCC_UsePackage)</DCC_UsePackage>
+        <DCC_RangeChecking>true</DCC_RangeChecking>
+        <DCC_Namespace>Vcl;Vcl.Imaging;Vcl.Touch;Vcl.Samples;Vcl.Shell;System;Xml;Data;Datasnap;Web;Soap;Winapi;$(DCC_Namespace)</DCC_Namespace>
+        <DCC_IntegerOverflowCheck>true</DCC_IntegerOverflowCheck>
+        <VerInfo_Keys>CompanyName=Martin Harvey;FileDescription=Fractal Generator;FileVersion=1.0.5.0;InternalName=MFract;LegalCopyright=Copyright Martin Harvey 2010;LegalTrademarks=;OriginalFilename=MFract;ProductName=MFract;ProductVersion=1.0.3.0;Comments=Fractal Generator</VerInfo_Keys>
+        <DCC_E>false</DCC_E>
+        <DCC_N>true</DCC_N>
+        <DCC_F>false</DCC_F>
+        <VerInfo_Locale>2057</VerInfo_Locale>
+        <DCC_Optimize>false</DCC_Optimize>
+        <DCC_GenerateStackFrames>true</DCC_GenerateStackFrames>
+        <DebugSourcePath>$(DELPHI)\Source\Rtl\Sys;$(DELPHI)\Source\Rtl\Win;$(DELPHI)\Source\Rtll;$(DebugSourcePath)</DebugSourcePath>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Base_Win32)'!=''">
+        <VerInfo_Release>4</VerInfo_Release>
+        <VerInfo_Locale>1033</VerInfo_Locale>
+        <DCC_Namespace>System.Win;Data.Win;Datasnap.Win;Web.Win;Soap.Win;Xml.Win;Bde;$(DCC_Namespace)</DCC_Namespace>
+        <VerInfo_Keys>CompanyName=;FileDescription=;FileVersion=1.0.4.0;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=;ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
+        <Manifest_File>$(BDS)\bin\default_app.manifest</Manifest_File>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Base_Win64)'!=''">
+        <VerInfo_Release>4</VerInfo_Release>
+        <DCC_Namespace>System.Win;Data.Win;Datasnap.Win;Web.Win;Soap.Win;Xml.Win;$(DCC_Namespace)</DCC_Namespace>
+        <Manifest_File>$(BDS)\bin\default_app.manifest</Manifest_File>
+        <VerInfo_Locale>1033</VerInfo_Locale>
+        <VerInfo_Keys>CompanyName=;FileDescription=;FileVersion=1.0.4.0;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=;ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Cfg_1)'!=''">
+        <DCC_RangeChecking>false</DCC_RangeChecking>
+        <DCC_IntegerOverflowCheck>false</DCC_IntegerOverflowCheck>
+        <DCC_DebugInformation>false</DCC_DebugInformation>
+        <DCC_AssertionsAtRuntime>false</DCC_AssertionsAtRuntime>
+        <DCC_LocalDebugSymbols>false</DCC_LocalDebugSymbols>
+        <DCC_SymbolReferenceInfo>0</DCC_SymbolReferenceInfo>
+        <DCC_Define>RELEASE;$(DCC_Define)</DCC_Define>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Cfg_1_Win32)'!=''">
+        <VerInfo_Build>6</VerInfo_Build>
+        <DCC_Optimize>true</DCC_Optimize>
+        <VerInfo_Keys>CompanyName=;FileDescription=;FileVersion=1.0.5.6;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=;ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
+        <Manifest_File>$(BDS)\bin\default_app.manifest</Manifest_File>
+        <VerInfo_Locale>1033</VerInfo_Locale>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Cfg_1_Win64)'!=''">
+        <DCC_Optimize>true</DCC_Optimize>
+        <Manifest_File>$(BDS)\bin\default_app.manifest</Manifest_File>
+        <VerInfo_Build>20</VerInfo_Build>
+        <VerInfo_Locale>1033</VerInfo_Locale>
+        <VerInfo_Keys>CompanyName=;FileDescription=;FileVersion=1.0.5.20;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=;ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Cfg_2)'!=''">
+        <DCC_Define>DEBUG;USE_TRACKABLES;$(DCC_Define)</DCC_Define>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Cfg_2_Win32)'!=''">
+        <Manifest_File>$(BDS)\bin\default_app.manifest</Manifest_File>
+        <VerInfo_Keys>CompanyName=;FileDescription=;FileVersion=1.0.5.8;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=;ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
+        <VerInfo_Build>8</VerInfo_Build>
+        <VerInfo_Locale>1033</VerInfo_Locale>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Cfg_2_Win64)'!=''">
+        <Manifest_File>$(BDS)\bin\default_app.manifest</Manifest_File>
+        <VerInfo_Build>21</VerInfo_Build>
+        <VerInfo_Locale>1033</VerInfo_Locale>
+        <VerInfo_Keys>CompanyName=;FileDescription=;FileVersion=1.0.5.21;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=;ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
+    </PropertyGroup>
+    <ItemGroup>
+        <DelphiCompile Include="$(MainSource)">
+            <MainSource>MainSource</MainSource>
+        </DelphiCompile>
+        <DCCReference Include="MFMainFrm.pas">
+            <Form>MFMainForm</Form>
+        </DCCReference>
+        <DCCReference Include="..\Common\DLList\DLList.pas"/>
+        <DCCReference Include="..\Common\WorkItems\WorkItems.pas"/>
+        <DCCReference Include="..\Common\Tracking\Trackables.pas"/>
+        <DCCReference Include="..\Common\Balanced Tree\BinaryTree.pas"/>
+        <DCCReference Include="..\Common\StreamingSystem\TrivXMLDefs.pas"/>
+        <DCCReference Include="..\Common\StreamingSystem\SSAbstracts.pas"/>
+        <DCCReference Include="..\Common\StreamingSystem\SSIntermediates.pas"/>
+        <DCCReference Include="..\Common\StreamingSystem\SSStreamables.pas"/>
+        <DCCReference Include="..\Common\StreamingSystem\StreamingSystem.pas"/>
+        <DCCReference Include="..\Common\StreamingSystem\StreamSysXML.pas"/>
+        <DCCReference Include="..\Common\StreamingSystem\TrivXML.PAS"/>
+        <DCCReference Include="FractSettingsDialog.pas">
+            <Form>FractSettingsDlg</Form>
+        </DCCReference>
+        <DCCReference Include="PaletteSettingsDialog.pas">
+            <Form>PaletteSettingsDlg</Form>
+        </DCCReference>
+        <DCCReference Include="FractAboutDialog.pas">
+            <Form>FractAboutDlg</Form>
+        </DCCReference>
+        <DCCReference Include="..\Common\Version\AppVersionStr.pas"/>
+        <DCCReference Include="ExportOptsDialog.pas">
+            <Form>ExportOptsDlg</Form>
+        </DCCReference>
+        <DCCReference Include="ReRenderForm.pas">
+            <Form>ReRenderFrm</Form>
+        </DCCReference>
+        <DCCReference Include="DragHelperFrm.pas">
+            <Form>DragHelperForm</Form>
+        </DCCReference>
+        <DCCReference Include="..\Common\SizeableImage\SizeableImage.pas"/>
+        <DCCReference Include="..\Common\MonRadioButton\MonRadioButton.pas"/>
+        <DCCReference Include="..\Common\WorkItems\DLThreadQueue.pas"/>
+        <DCCReference Include="..\MFractCommon\FractRenderers.pas"/>
+        <DCCReference Include="..\MFractCommon\FractSettings.pas"/>
+        <DCCReference Include="..\MFractCommon\FractLegacy.pas"/>
+        <DCCReference Include="..\MFractCommon\FractMisc.pas"/>
+        <DCCReference Include="..\MFractCommon\FractStreaming.pas"/>
+        <DCCReference Include="..\CoCoDM\Distributable\Frames\CocoBase.pas"/>
+        <DCCReference Include="..\Common\Indexed Store\IndexedStore.pas"/>
+        <None Include="todo.txt">
+            <ContainerId>File</ContainerId>
+        </None>
+        <None Include="help\MFract.html">
+            <ContainerId>File</ContainerId>
+        </None>
+        <BuildConfiguration Include="Debug">
+            <Key>Cfg_2</Key>
+            <CfgParent>Base</CfgParent>
+        </BuildConfiguration>
+        <BuildConfiguration Include="Base">
+            <Key>Base</Key>
+        </BuildConfiguration>
+        <BuildConfiguration Include="Release">
+            <Key>Cfg_1</Key>
+            <CfgParent>Base</CfgParent>
+        </BuildConfiguration>
+    </ItemGroup>
+    <ProjectExtensions>
+        <Borland.Personality>Delphi.Personality.12</Borland.Personality>
+        <Borland.ProjectType/>
+        <BorlandProject>
+            <Delphi.Personality>
+                <Source>
+                    <Source Name="MainSource">MFract.dpr</Source>
+                </Source>
+                <Language>
+                    <Language Name="ProjectLang">$00000809</Language>
+                </Language>
+                <VersionInfo>
+                    <VersionInfo Name="IncludeVerInfo">True</VersionInfo>
+                    <VersionInfo Name="AutoIncBuild">True</VersionInfo>
+                    <VersionInfo Name="MajorVer">1</VersionInfo>
+                    <VersionInfo Name="MinorVer">0</VersionInfo>
+                    <VersionInfo Name="Release">2</VersionInfo>
+                    <VersionInfo Name="Build">123</VersionInfo>
+                    <VersionInfo Name="Debug">False</VersionInfo>
+                    <VersionInfo Name="PreRelease">False</VersionInfo>
+                    <VersionInfo Name="Special">False</VersionInfo>
+                    <VersionInfo Name="Private">False</VersionInfo>
+                    <VersionInfo Name="DLL">False</VersionInfo>
+                    <VersionInfo Name="Locale">2057</VersionInfo>
+                    <VersionInfo Name="CodePage">1252</VersionInfo>
+                </VersionInfo>
+                <VersionInfoKeys>
+                    <VersionInfoKeys Name="CompanyName">Martin Harvey</VersionInfoKeys>
+                    <VersionInfoKeys Name="FileDescription">Fractal Generator</VersionInfoKeys>
+                    <VersionInfoKeys Name="FileVersion">1.0.2.123</VersionInfoKeys>
+                    <VersionInfoKeys Name="InternalName">MFract</VersionInfoKeys>
+                    <VersionInfoKeys Name="LegalCopyright">Copyright Martin Harvey 2010</VersionInfoKeys>
+                    <VersionInfoKeys Name="LegalTrademarks"/>
+                    <VersionInfoKeys Name="OriginalFilename">MFract</VersionInfoKeys>
+                    <VersionInfoKeys Name="ProductName">MFract</VersionInfoKeys>
+                    <VersionInfoKeys Name="ProductVersion">1.0.2.0</VersionInfoKeys>
+                    <VersionInfoKeys Name="Comments">Fractal Generator</VersionInfoKeys>
+                </VersionInfoKeys>
+                <Excluded_Packages>
+                    <Excluded_Packages Name="$(BDSBIN)\dcloffice2k180.bpl">Microsoft Office 2000 Sample Automation Server Wrapper Components</Excluded_Packages>
+                    <Excluded_Packages Name="$(BDSBIN)\dclofficexp180.bpl">Microsoft Office XP Sample Automation Server Wrapper Components</Excluded_Packages>
+                </Excluded_Packages>
+            </Delphi.Personality>
+            <Platforms>
+                <Platform value="Win32">True</Platform>
+                <Platform value="Win64">True</Platform>
+            </Platforms>
+            <Deployment>
+                <DeployFile LocalName="Samples\swirl2.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>swirl2.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>swirl2.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\bubbles4.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>bubbles4.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>bubbles4.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\blues2.mfp" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>blues2.mfp</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>blues2.mfp</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Win64\Release\MFract.exe" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>MFract.exe</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>MFract.exe</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="All Platforms\Release\MFract.rsm" Configuration="Release" Class="DebugSymbols">
+                    <Platform Name="All Platforms">
+                        <RemoteName>MFract.rsm</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\bubbles inside bubbles.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>bubbles inside bubbles.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>bubbles inside bubbles.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\blues.mfp" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>blues.mfp</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>blues.mfp</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Win32\Release\MFract.exe" Configuration="Release" Class="ProjectOutput">
+                    <Platform Name="Win32"/>
+                </DeployFile>
+                <DeployFile LocalName="Samples\froth-o-rama.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>froth-o-rama.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>froth-o-rama.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\very swirly.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>very swirly.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>very swirly.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\green frothy swirl.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>green frothy swirl.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>green frothy swirl.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\frothy islands 3.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>frothy islands 3.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>frothy islands 3.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\riot_of_colour.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>riot_of_colour.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>riot_of_colour.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="help\hi_detail.png" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>hi_detail.png</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>hi_detail.png</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="help\main.png" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>main.png</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>main.png</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="help\palette4.png" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>palette4.png</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>palette4.png</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\blues3.mfp" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>blues3.mfp</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>blues3.mfp</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\greens3.mfp" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>greens3.mfp</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>greens3.mfp</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="help\MFract.html" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>MFract.html</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>MFract.html</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\bubbles_logarithmic.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>bubbles_logarithmic.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>bubbles_logarithmic.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\neon.mfp" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>neon.mfp</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>neon.mfp</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\green frothy swirl2.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>green frothy swirl2.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>green frothy swirl2.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\pink mandel.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>pink mandel.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>pink mandel.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\dusk2.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>dusk2.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>dusk2.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\frothy islands 2.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>frothy islands 2.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>frothy islands 2.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\leaves.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>leaves.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>leaves.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="help\pal_length1.png" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>pal_length1.png</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>pal_length1.png</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\leaves3.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>leaves3.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>leaves3.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\angular froth.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>angular froth.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>angular froth.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\red_green.mfp" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>red_green.mfp</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>red_green.mfp</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\baby_mandel.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>baby_mandel.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>baby_mandel.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\bubbles in spider julia.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>bubbles in spider julia.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>bubbles in spider julia.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\greens.mfp" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>greens.mfp</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>greens.mfp</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\bubbles4_logarithmic.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>bubbles4_logarithmic.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>bubbles4_logarithmic.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\swirl1.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>swirl1.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>swirl1.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\bubbles_contain_swirl.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>bubbles_contain_swirl.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>bubbles_contain_swirl.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\dusk.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>dusk.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>dusk.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\flame.mfp" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>flame.mfp</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>flame.mfp</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\swirl3.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>swirl3.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>swirl3.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\bubbles5_julia.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>bubbles5_julia.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>bubbles5_julia.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\triangles.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>triangles.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>triangles.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\leaves2.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>leaves2.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>leaves2.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\frothy swirl2.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>frothy swirl2.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>frothy swirl2.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\ferns.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>ferns.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>ferns.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\pinks.mfp" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>pinks.mfp</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>pinks.mfp</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\cushion_of_fire.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>cushion_of_fire.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>cushion_of_fire.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="help\palette3.png" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>palette3.png</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>palette3.png</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\stars in bubbles in spider julia.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>stars in bubbles in spider julia.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>stars in bubbles in spider julia.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\froth-o-rama2.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>froth-o-rama2.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>froth-o-rama2.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\archipelago.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>archipelago.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>archipelago.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="help\palette.png" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>palette.png</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>palette.png</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\spider julia.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>spider julia.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>spider julia.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\braided.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>braided.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>braided.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\lightning_bubbles.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>lightning_bubbles.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>lightning_bubbles.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="help\palette2.png" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>palette2.png</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>palette2.png</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\interlocked swirls.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>interlocked swirls.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>interlocked swirls.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="help\palette5.png" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>palette5.png</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>palette5.png</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\cushion_of_fire2.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>cushion_of_fire2.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>cushion_of_fire2.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\bubbles3.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>bubbles3.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>bubbles3.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\frost.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>frost.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>frost.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="help\lo_detail.png" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>lo_detail.png</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>lo_detail.png</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\bubbles2.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>bubbles2.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>bubbles2.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\bubbles5.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>bubbles5.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>bubbles5.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\bubbles.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>bubbles.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>bubbles.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\spider swirl.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>spider swirl.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>spider swirl.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\lightning_bubbles2.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>lightning_bubbles2.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>lightning_bubbles2.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\blue claws.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>blue claws.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>blue claws.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\greens2.mfp" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>greens2.mfp</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>greens2.mfp</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="All Platforms\Release\MFract" Configuration="Release" Class="ProjectOutput">
+                    <Platform Name="All Platforms"/>
+                </DeployFile>
+                <DeployFile LocalName="Samples\frothy swirl.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>frothy swirl.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>frothy swirl.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\claws.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>claws.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>claws.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\embers.mfp" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>embers.mfp</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>embers.mfp</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="help\settings.png" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>settings.png</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>settings.png</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\pink stripes.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>pink stripes.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>pink stripes.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Win32\Release\MFract.rsm" Configuration="Release" Class="DebugSymbols">
+                    <Platform Name="Win32">
+                        <RemoteName>MFract.rsm</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\frothy islands.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>frothy islands.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>frothy islands.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\frothy islands 4.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>frothy islands 4.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>frothy islands 4.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="help\pal_length2.png" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>pal_length2.png</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>pal_length2.png</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployClass Required="true" Name="DependencyPackage">
+                    <Platform Name="iOSDevice">
+                        <Operation>1</Operation>
+                        <Extensions>.dylib</Extensions>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <Operation>0</Operation>
+                        <Extensions>.bpl</Extensions>
+                    </Platform>
+                    <Platform Name="OSX32">
+                        <RemoteDir>Contents\MacOS</RemoteDir>
+                        <Operation>1</Operation>
+                        <Extensions>.dylib</Extensions>
+                    </Platform>
+                    <Platform Name="iOSSimulator">
+                        <Operation>1</Operation>
+                        <Extensions>.dylib</Extensions>
+                    </Platform>
+                </DeployClass>
+                <DeployClass Name="DependencyModule">
+                    <Platform Name="iOSDevice">
+                        <Operation>1</Operation>
+                        <Extensions>.dylib</Extensions>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <Operation>0</Operation>
+                        <Extensions>.dll;.bpl</Extensions>
+                    </Platform>
+                    <Platform Name="OSX32">
+                        <RemoteDir>Contents\MacOS</RemoteDir>
+                        <Operation>1</Operation>
+                        <Extensions>.dylib</Extensions>
+                    </Platform>
+                    <Platform Name="iOSSimulator">
+                        <Operation>1</Operation>
+                        <Extensions>.dylib</Extensions>
+                    </Platform>
+                </DeployClass>
+                <DeployClass Name="iPad_Launch2048">
+                    <Platform Name="iOSDevice">
+                        <Operation>1</Operation>
+                    </Platform>
+                    <Platform Name="iOSSimulator">
+                        <Operation>1</Operation>
+                    </Platform>
+                </DeployClass>
+                <DeployClass Name="ProjectOSXInfoPList">
+                    <Platform Name="OSX32">
+                        <RemoteDir>Contents</RemoteDir>
+                        <Operation>1</Operation>
+                    </Platform>
+                </DeployClass>
+                <DeployClass Name="ProjectiOSDeviceInfoPList">
+                    <Platform Name="iOSDevice">
+                        <Operation>1</Operation>
+                    </Platform>
+                </DeployClass>
+                <DeployClass Name="ProjectiOSDeviceDebug">
+                    <Platform Name="iOSDevice">
+                        <RemoteDir>..\$(PROJECTNAME).app.dSYM\Contents\Resources\DWARF</RemoteDir>
+                        <Operation>1</Operation>
+                    </Platform>
+                </DeployClass>
+                <DeployClass Name="iPad_Launch1024">
+                    <Platform Name="iOSDevice">
+                        <Operation>1</Operation>
+                    </Platform>
+                    <Platform Name="iOSSimulator">
+                        <Operation>1</Operation>
+                    </Platform>
+                </DeployClass>
+                <DeployClass Name="ProjectiOSResource">
+                    <Platform Name="iOSDevice">
+                        <Operation>1</Operation>
+                    </Platform>
+                    <Platform Name="iOSSimulator">
+                        <Operation>1</Operation>
+                    </Platform>
+                </DeployClass>
+                <DeployClass Name="ProjectiOSSimulatorInfoPList">
+                    <Platform Name="iOSSimulator">
+                        <Operation>1</Operation>
+                    </Platform>
+                </DeployClass>
+                <DeployClass Name="ProjectOSXEntitlements">
+                    <Platform Name="OSX32">
+                        <RemoteDir>Contents</RemoteDir>
+                        <Operation>1</Operation>
+                    </Platform>
+                </DeployClass>
+                <DeployClass Name="iPhone_Launch640">
+                    <Platform Name="iOSDevice">
+                        <Operation>1</Operation>
+                    </Platform>
+                    <Platform Name="iOSSimulator">
+                        <Operation>1</Operation>
+                    </Platform>
+                </DeployClass>
+                <DeployClass Name="ProjectOSXResource">
+                    <Platform Name="OSX32">
+                        <RemoteDir>Contents\Resources</RemoteDir>
+                        <Operation>1</Operation>
+                    </Platform>
+                </DeployClass>
+                <DeployClass Name="iPhone_Launch320">
+                    <Platform Name="iOSDevice">
+                        <Operation>1</Operation>
+                    </Platform>
+                    <Platform Name="iOSSimulator">
+                        <Operation>1</Operation>
+                    </Platform>
+                </DeployClass>
+                <DeployClass Name="iPad_Launch768">
+                    <Platform Name="iOSDevice">
+                        <Operation>1</Operation>
+                    </Platform>
+                    <Platform Name="iOSSimulator">
+                        <Operation>1</Operation>
+                    </Platform>
+                </DeployClass>
+                <DeployClass Required="true" Name="ProjectOutput">
+                    <Platform Name="iOSDevice">
+                        <Operation>1</Operation>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <Operation>0</Operation>
+                    </Platform>
+                    <Platform Name="OSX32">
+                        <RemoteDir>Contents\MacOS</RemoteDir>
+                        <Operation>1</Operation>
+                    </Platform>
+                    <Platform Name="iOSSimulator">
+                        <Operation>1</Operation>
+                    </Platform>
+                </DeployClass>
+                <DeployClass Name="ProjectiOSDeviceResourceRules">
+                    <Platform Name="iOSDevice">
+                        <Operation>1</Operation>
+                    </Platform>
+                </DeployClass>
+                <DeployClass Name="File">
+                    <Platform Name="iOSDevice">
+                        <Operation>0</Operation>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <Operation>0</Operation>
+                    </Platform>
+                    <Platform Name="OSX32">
+                        <RemoteDir>Contents\MacOS</RemoteDir>
+                        <Operation>0</Operation>
+                    </Platform>
+                    <Platform Name="iOSSimulator">
+                        <Operation>0</Operation>
+                    </Platform>
+                </DeployClass>
+                <DeployClass Name="DebugSymbols">
+                    <Platform Name="OSX32">
+                        <RemoteDir>Contents\MacOS</RemoteDir>
+                        <Operation>1</Operation>
+                    </Platform>
+                    <Platform Name="iOSSimulator">
+                        <Operation>1</Operation>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <Operation>0</Operation>
+                    </Platform>
+                </DeployClass>
+                <DeployClass Name="DependencyFramework">
+                    <Platform Name="OSX32">
+                        <RemoteDir>Contents\MacOS</RemoteDir>
+                        <Operation>1</Operation>
+                        <Extensions>.framework</Extensions>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <Operation>0</Operation>
+                    </Platform>
+                </DeployClass>
+                <DeployClass Name="iPhone_Launch640x1136">
+                    <Platform Name="iOSDevice">
+                        <Operation>1</Operation>
+                    </Platform>
+                    <Platform Name="iOSSimulator">
+                        <Operation>1</Operation>
+                    </Platform>
+                </DeployClass>
+                <DeployClass Name="ProjectiOSEntitlements">
+                    <Platform Name="iOSDevice">
+                        <Operation>1</Operation>
+                    </Platform>
+                </DeployClass>
+                <DeployClass Name="iPad_Launch1536">
+                    <Platform Name="iOSDevice">
+                        <Operation>1</Operation>
+                    </Platform>
+                    <Platform Name="iOSSimulator">
+                        <Operation>1</Operation>
+                    </Platform>
+                </DeployClass>
+                <DeployClass Name="AdditionalDebugSymbols">
+                    <Platform Name="OSX32">
+                        <RemoteDir>Contents\MacOS</RemoteDir>
+                        <Operation>1</Operation>
+                    </Platform>
+                    <Platform Name="iOSSimulator">
+                        <Operation>1</Operation>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteDir>Contents\MacOS</RemoteDir>
+                        <Operation>0</Operation>
+                    </Platform>
+                </DeployClass>
+                <ProjectRoot Platform="iOSDevice" Name="$(PROJECTNAME).app"/>
+                <ProjectRoot Platform="Win32" Name="$(PROJECTNAME)"/>
+                <ProjectRoot Platform="OSX32" Name="$(PROJECTNAME).app"/>
+                <ProjectRoot Platform="iOSSimulator" Name="$(PROJECTNAME).app"/>
+                <ProjectRoot Platform="Win64" Name="$(PROJECTNAME)"/>
+            </Deployment>
+        </BorlandProject>
+        <ProjectFileVersion>12</ProjectFileVersion>
+    </ProjectExtensions>
+    <Import Project="$(BDS)\Bin\CodeGear.Delphi.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Delphi.Targets')"/>
+    <Import Project="$(APPDATA)\Embarcadero\$(BDSAPPDATABASEDIR)\$(PRODUCTVERSION)\UserTools.proj" Condition="Exists('$(APPDATA)\Embarcadero\$(BDSAPPDATABASEDIR)\$(PRODUCTVERSION)\UserTools.proj')"/>
+    <Import Project="$(MSBuildProjectName).deployproj" Condition="Exists('$(MSBuildProjectName).deployproj')"/>
+</Project>
