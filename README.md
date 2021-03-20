@@ -21,7 +21,13 @@ Files / Folders:
     - Graph method has errors, but included for interest.
     - Fastest is "CellCountMT", still being optimised.
 
+- MFract.
+  - A simple fractal generator (Mandelbrot / Julia). Install MCHComponents bpl first.
+
 Common: Common utility code, including:
+
+- MCHComponents visual component library (required for MFract - TSizeableImage).
+  - Open project, right click MCHComponents.bpl, select "install" to add to IDE palette.
 
 - Raw AVL tree.
 - Read and Write cached memory streams.
