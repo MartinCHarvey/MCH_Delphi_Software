@@ -39,7 +39,6 @@ interface
 }
 
 procedure TestCellCountMT;
-procedure SizeCheck;
 
 //{$DEFINE OMIT_OUTPUT}
 
@@ -47,7 +46,7 @@ implementation
 
 uses
   SharedSymmetries, Contnrs, SysUtils, CellCountSymmetriesMT,
-  Classes, SyncObjs, WorkItems, IndexedStore, CellCountShared;
+  Classes, SyncObjs, WorkItems, CellCountShared;
 
 type
   TCellCountMTWI = class(TWorkItem)
@@ -244,20 +243,6 @@ begin
   StartTiming();
   IsomorphismsGenerativeMT(MaxGivens, TCellCountMTBoard);
   StopTiming();
-end;
-
-procedure SizeCheck;
-begin
-  WriteLn('Sizeof TIndexNode ', TIndexNode.InstanceSize);
-  WriteLn('Sizeof TIndexNodeLink ', TIndexNodeLink.InstanceSize);
-  WriteLn('Sizeof TTItemRec ', TItemRec.InstanceSize);
-  WriteLn('Sizeof TCellCountMTBoard ', TCellCountMTBoard.InstanceSize);
-  WriteLn('Sizeof TSymBoardPackedState ', sizeof(TSymBoardPackedState));
-  WriteLn('Sizeof TCountInfo ', sizeof(TCountInfo));
-  WriteLn('Sizeof TCountInfoMT ', sizeof(TCountInfoMT));
-  WriteLn('Sizeof TAllowedPerms ', sizeof(TAllowedPerms));
-  WriteLn('Sizeof TSelectedPerms ', sizeof(TSelectedPerms));
-  WriteLn('U64sPerBoard ', U64sPerBoard);
 end;
 
 initialization
