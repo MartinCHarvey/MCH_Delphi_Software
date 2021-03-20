@@ -300,6 +300,7 @@ end;
 
 procedure AbsToRelIndexed(AbsRowCol: TRowColIdx; var StackBand: TOrderIdx; var RowCol: TOrderIdx);
 begin
+{$IFDEF ORDER3}
   if Order = 3 then
   begin
     case AbsRowCol of
@@ -312,6 +313,7 @@ begin
     RowCol := AbsRowCol - (StackBand * ORDER);
   end
   else
+{$ENDIF}
   begin
     StackBand := AbsRowCol div ORDER;
     RowCol := AbsRowCol mod ORDER;
