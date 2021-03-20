@@ -1,0 +1,45 @@
+package MCHComponents;
+
+{$R *.res}
+{$IFDEF IMPLICITBUILDING This IFDEF should not be used by users}
+{$ALIGN 8}
+{$ASSERTIONS ON}
+{$BOOLEVAL OFF}
+{$DEBUGINFO ON}
+{$EXTENDEDSYNTAX ON}
+{$IMPORTEDDATA ON}
+{$IOCHECKS ON}
+{$LOCALSYMBOLS ON}
+{$LONGSTRINGS ON}
+{$OPENSTRINGS ON}
+{$OPTIMIZATION OFF}
+{$OVERFLOWCHECKS OFF}
+{$RANGECHECKS OFF}
+{$REFERENCEINFO ON}
+{$SAFEDIVIDE OFF}
+{$STACKFRAMES ON}
+{$TYPEDADDRESS OFF}
+{$VARSTRINGCHECKS ON}
+{$WRITEABLECONST OFF}
+{$MINENUMSIZE 1}
+{$IMAGEBASE $400000}
+{$DEFINE DEBUG}
+{$ENDIF IMPLICITBUILDING}
+{$DESCRIPTION 'MCH Components'}
+{$IMPLICITBUILD ON}
+
+requires
+  rtl,
+  //designide,
+  vcl,
+  vclactnband,
+  vclx,
+  xmlrtl;
+
+contains
+  ContainerItems in 'Components\ContainerItems.pas',
+  TabbedFormContainer in 'Components\TabbedFormContainer.pas',
+  MonRadioButton in 'MonRadioButton\MonRadioButton.pas',
+  SizeableImage in 'SizeableImage\SizeableImage.pas';
+
+end.
