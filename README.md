@@ -60,4 +60,12 @@ Additional testapps and utility code.
 - ExactCover testapp Common/ExactCover/Test
 - Batch Sudoku solver (Sudoku/BatchThreadedSolver)
 
+Future development plans:
+
+- Clean up parser error recovery code with a "standard" lexer.
+- MemDB: Segregate indexing to allow parallelism per-index when building.
+- Indexed Store: Equivalent using 2-3-4 trees?
+- MemDB: Query engine.
+- MemDB (long term): Store on disk, not mem, or is that a step to the past?
+
 Comments / queries to martin_c_harvey@hotmail.com
