@@ -67,5 +67,7 @@ Future development plans:
 - Indexed Store: Equivalent using 2-3-4 trees?
 - MemDB: Query engine.
 - MemDB (long term): Store on disk, not mem, or is that a step to the past?
+- Investigate compilability under FreePascal compiler.
+- Investigate portability to mobile apps.
 
 Comments / queries to martin_c_harvey@hotmail.com
