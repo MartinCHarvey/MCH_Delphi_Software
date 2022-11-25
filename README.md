@@ -37,7 +37,7 @@ Common: Common utility code, including:
 - Combined HTTP fetch and document parse.
 - Indexed store (see http://www.martincharvey.net/ for more info).
 - Logging code.
-- Lightweight in memory database engine.
+- Lightweight in memory database engine. Currently suitable for relatively small (in modern terms) datasets. E-mail me for an explanation of limitations. 
 - Ordinal set handling.
 - Reconfigurable lexer.
 - Custom object streaming system.
