@@ -1,0 +1,28 @@
+Delphi TODO.
+
+Initially: Indexed store changes:
+
+1. Change IndexStore so that it uses events instead of requiring overriden funcs?
+2. Make old index creation call deprecated, but leave it in for a few months. (To check).
+3. IndexedStore changes so tags can be pointers. (UINTPTR_T)?
+3. Work thru MemDB / MemDBTest to use new indexed store calls. (No change in actual logic).
+4. Re-run memdb testapp.
+5. Work thru other projects likewise (will have to go on a hunt).
+6. Change MemDB so index tags are actual metadata classes. Associated changes for finding indexes etc.
+
+Then: MemDB changes.
+
+1. See if we can address DB load times / index parallelism any better.
+2. Niceties to do with starting / ending transactions.
+3. Multi-changeset transactions:
+ - Requires changeset inverses, and auto "new changeset in stransaction".
+ - Multi changeset commit and rollback.
+ - Changes to persistence. Try to keep backward compatible if possible.
+
+ 4. Query engine. Not even sure where to start here.
+
+ Other stuff:
+1. Learn how TensorFlow works with python.
+2. Translate TensorFlow C API to Delphi.
+
+MH.
