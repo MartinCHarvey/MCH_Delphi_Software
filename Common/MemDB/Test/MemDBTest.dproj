@@ -5,8 +5,8 @@
         <FrameworkType>FMX</FrameworkType>
         <MainSource>MemDBTest.dpr</MainSource>
         <Base>True</Base>
-        <Config Condition="'$(Config)'==''">Debug</Config>
-        <Platform Condition="'$(Platform)'==''">Win32</Platform>
+        <Config Condition="'$(Config)'==''">Release</Config>
+        <Platform Condition="'$(Platform)'==''">Win64</Platform>
         <TargetedPlatforms>3</TargetedPlatforms>
         <AppType>Application</AppType>
     </PropertyGroup>
@@ -99,6 +99,7 @@
         <DCC_RemoteDebug>true</DCC_RemoteDebug>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_1_Win32)'!=''">
+        <DCC_Define>DEBUG_DATABASE;DEBUG_DATABASE_DELETE;DEBUG_DATABASE_NAVIGATE;$(DCC_Define)</DCC_Define>
         <VerInfo_IncludeVerInfo>true</VerInfo_IncludeVerInfo>
         <VerInfo_Locale>1033</VerInfo_Locale>
         <DCC_RemoteDebug>false</DCC_RemoteDebug>
@@ -143,6 +144,7 @@
         <DCCReference Include="..\..\CachedStream\BufferedFileStream.pas"/>
         <DCCReference Include="..\..\WorkItems\CommonPool.pas"/>
         <DCCReference Include="..\..\WorkItems\WorkItems.pas"/>
+        <DCCReference Include="..\..\Logging\GlobalLog.pas"/>
         <None Include="..\Ideas, and TODO.txt"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>

@@ -701,7 +701,7 @@ begin
     DBProfile := TKUSerProfile.Clone(UP) as TKUSerProfile;
     // Must clone, since we are adding to separate list.
 {$IFDEF DEBUG_BATCH_LOADER}
-    GLogLog(SV_INFO, 'Init load user tree add user profile: ' + DBProfile.Key);
+    GLogLog(SV_INFO, 'Init load user tree add user profile: ' + GUIDToString(DBProfile.Key));
 {$ENDIF}
     result := FUserKeysRemaining.Add(DBProfile);
     if not result then
@@ -766,13 +766,13 @@ begin
   if SearchKey <> TGuid.Empty then
   begin
 {$IFDEF DEBUG_BATCH_LOADER}
-    GLogLog(SV_INFO, 'Load user tree op completion for key: ' + SearchKey);
+    GLogLog(SV_INFO, 'Load user tree op completion for key: ' + GUIDToString(SearchKey));
 {$ENDIF}
     UserProfile := FUserKeysRemaining.SearchByInternalKeyOnly(SearchKey) as TKUSerProfile;
     if Assigned(UserProfile) then
     begin
 {$IFDEF DEBUG_BATCH_LOADER}
-      GLogLog(SV_INFO, 'Load user tree op completion found key: ' + SearchKey);
+      GLogLog(SV_INFO, 'Load user tree op completion found key: ' + GUIDToString(SearchKey));
 {$ENDIF}
       FUserKeysRemaining.Remove(UserProfile);
       UserProfile.Free;
@@ -780,7 +780,7 @@ begin
     else
     begin
 {$IFDEF DEBUG_BATCH_LOADER}
-      GLogLog(SV_INFO, 'Load user tree op completion key NOT found!: ' + SearchKey);
+      GLogLog(SV_INFO, 'Load user tree op completion key NOT found!: ' + GUIDToString(SearchKey));
 {$ENDIF}
     end;
   end;
@@ -836,7 +836,7 @@ begin
         while Assigned(UserProf) and result do
         begin
 {$IFDEF DEBUG_BATCH_LOADER}
-  GLogLog(SV_INFO, 'Batch loader: Issue ReadUserTree to datastore: ' +UserProf.Key);
+  GLogLog(SV_INFO, 'Batch loader: Issue ReadUserTree to datastore: ' + GUIDToString(UserProf.Key));
 {$ENDIF}
           Assert(FType = motDbLoadUserTrees);
           result := result and FParentLoader.FDataStore.ReadUserTreeToMem(UserProf, Self, nil);
@@ -857,7 +857,7 @@ begin
             UserProf := FUserKeysRemaining.AdjacentBySortVal(katNext, ksvPointer, UserProf)
               as TKUSerProfile;
 {$IFDEF DEBUG_BATCH_LOADER}
-  GLogLog(SV_INFO, 'Batch loader: Removing profile not started ' + OldUserProf.Key);
+  GLogLog(SV_INFO, 'Batch loader: Removing profile not started ' + GUIDToString(OldUserProf.Key));
 {$ENDIF}
             FUserKeysRemaining.Remove(OldUserProf);
             OldUserProf.Free;
@@ -1838,7 +1838,7 @@ begin
   if PreLoad then
   begin
 {$IFDEF DEBUG_BATCH_LOADER}
-    GLogLog(SV_INFO, 'Batch loader: UserImportRec: Preload ReadUserTreeToMem: ' + FAccumulatedTree.Key);
+    GLogLog(SV_INFO, 'Batch loader: UserImportRec: Preload ReadUserTreeToMem: ' + GUIDToString(FAccumulatedTree.Key));
 {$ENDIF}
     if FParentMultiOp.FParentLoader.FDataStore.ReadUserTreeToMem(FAccumulatedTree, FParentMultiOp,
       Self) then
@@ -1850,7 +1850,7 @@ begin
   else
   begin
 {$IFDEF DEBUG_BATCH_LOADER}
-    GLogLog(SV_INFO, 'Batch loader: UserImportRec: Preload not required or not possible. ' + FAccumulatedTree.Key);
+    GLogLog(SV_INFO, 'Batch loader: UserImportRec: Preload not required or not possible. ' + GUIDToString(FAccumulatedTree.Key));
 {$ENDIF}
   end;
 end;

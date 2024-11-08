@@ -56,13 +56,24 @@ type
     rvDuplicateKey,
     rvNilEvent,
     rvInsufficientResources,
-    rvBadIndex
+    rvBadIndex,
+    rvInvalidTag
     );
 
   TItemRec = class;
-  TIndexedStore = class;
+  TIndexedStoreG = class;
   TIndexNodeLink = class;
   TSIndex = class;
+
+  //Was tempted to put templates in here, but it then breaks the metaclassing,
+  //so to keep our sanity, will avoid template use.
+{$IF DEFINED(CPUX86)}
+  TTagType = type Int64;
+{$ELSEIF DEFINED(CPUX64)}
+  TTagType = type NativeInt;
+{$ELSE}
+{$ERROR Set the tag type up to be at least as big as a ptr}
+{$ENDIF}
 
   //Node in a particular index.
   TIndexNode = class(TBinTreeItem)
@@ -76,7 +87,7 @@ type
     procedure CopyFrom(Source: TBinTreeItem); override; // data
 
    // other < self :-1  other=self :0  other > self :+1
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer; virtual;
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer; virtual;
       abstract;
   public
 {$IFOPT C+}
@@ -141,24 +152,25 @@ type
   private
     FRoot: TBinTree;
     FNodeClassType: TIndexNodeClass;
-    FTag: Int64;
+    FTag: TTagType;
     FSiblingListEntry: TDLEntry;
   public
     constructor Create;
     destructor Destroy; override;
     property Root: TBinTree read FRoot;
     property NodeClassType: TIndexNodeClass read FNodeClassType write FNodeClassType;
-    property Tag: Int64 read FTag write FTag;
+    property Tag: TTagType read FTag write FTag;
     property SiblingListEntry: TDLEntry read FSiblingListEntry write FSiblingListEntry;
   end;
 
-  TStoreTraversalEvent = procedure(Store: TIndexedStore;
+  TStoreTraversalEvent = procedure(Store: TIndexedStoreG;
     Item: TItemRec) of object;
 
+//Generic indexed store.
 {$IFDEF USE_TRACKABLES}
-  TIndexedStore = class(TTrackable)
+  TIndexedStoreG = class(TTrackable)
 {$ELSE}
-  TIndexedStore = class
+  TIndexedStoreG = class
 {$ENDIF}
   private
     //List of AVL tree indices.
@@ -170,46 +182,102 @@ type
     FTraversalEvent: TStoreTraversalEvent;
   protected
     function CreateItemRec(Item: TObject): TItemRec; virtual;
-    function GetIndexByTag(Tag: Int64): TSIndex;
+    function GetIndexByTag(Tag: TTagType): TSIndex;
     function AddIndexNodeForItem(Index: TSIndex; Item: TItemRec): TISRetVal;
     function DeleteIndexNodeForItem(Index: TSIndex; Item: TItemRec): TISRetVal;
     function DeleteIndexInternal(Index: TSIndex):
       TISRetVal;
     procedure TraversalHandler(Tree: TBinTree; Item: TBinTreeItem; Level:
       integer);
-    function EdgeByIndex(IndexTag: Int64; var Res: TItemRec; First: boolean): TISRetVal;
-    function NeighbourByIndex(IndexTag:Int64; var Res: TItemRec; Lower: boolean): TISRetVal;
+    function EdgeByIndex(IndexTag: TTagType; var Res: TItemRec; First: boolean): TISRetVal;
+    function NeighbourByIndex(IndexTag:TTagType; var Res: TItemRec; Lower: boolean): TISRetVal;
+
+    function _IndexInfoByOrdinal(Idx: integer;
+                                var Tag: TTagType;
+                                var IndNodeClassType: TIndexNodeClass):TISRetVal;
+    function _HasIndex(Tag: TTagType): boolean;
+    function _AddIndex(IndNodeClassType: TIndexNodeClass; Tag: TTagType):
+      TISRetVal;
+    function _DeleteIndex(Tag: TTagType): TISRetVal;
+    function _AdjustIndexTag(OldTag, NewTag: TTagType): TISRetVal;
+    function _FindByIndex(IndexTag: TTagType; SearchVal: TIndexNode; var Res:
+      TItemRec): TISRetVal;
+    function _FindNearByIndex(IndexTag: TTagType; SearchVal: TIndexNode; var Res:
+      TItemRec): TISRetVal;
+    function _TraverseByIndex(IndexTag: TTagType; Event: TStoreTraversalEvent;
+      Forwards: boolean): TISRetVal;
+    function _FirstByIndex(IndexTag: TTagType; var Res: TItemRec): TISRetVal;
+    function _LastByIndex(IndexTag: TTagType; var Res: TItemRec): TISRetVal;
+    function _NextByIndex(IndexTag: TTagType; var Res: TItemRec): TISRetVal;
+    function _PreviousByIndex(IndexTag: TTagType; var Res: TItemRec): TISRetVal;
+
   public
     constructor Create;
     function IndexCount: integer;
-    function IndexInfoByOrdinal(Idx: integer;
-                                var Tag: Int64;
-                                var IndNodeClassType: TIndexNodeClass):TISRetVal;
-    function HasIndex(Tag: Int64): boolean;
-    function AddIndex(IndNodeClassType: TIndexNodeClass; Tag: Int64):
-      TISRetVal;
-    function DeleteIndex(Tag: Int64): TISRetVal;
-    function AdjustIndexTag(OldTag, NewTag: Int64): TISRetVal;
+
     function AddItem(NewItem: TObject; var Res: TItemRec): TISRetVal;
     function RemoveItem(ItemRec: TItemRec): TISRetVal;
-    function FindByIndex(IndexTag: Int64; SearchVal: TIndexNode; var Res:
-      TItemRec): TISRetVal;
-    function FindNearByIndex(IndexTag: Int64; SearchVal: TIndexNode; var Res:
-      TItemRec): TISRetVal;
-    function TraverseByIndex(IndexTag: Int64; Event: TStoreTraversalEvent;
-      Forwards: boolean): TISRetVal;
-    function FirstByIndex(IndexTag: Int64; var Res: TItemRec): TISRetVal;
-    function LastByIndex(IndexTag: Int64; var Res: TItemRec): TISRetVal;
-    function NextByIndex(IndexTag: Int64; var Res: TItemRec): TISRetVal;
-    function PreviousByIndex(IndexTag: Int64; var Res: TItemRec): TISRetVal;
     function GetAnItem: TItemRec;
     function GetAnotherItem(var AnItem: TItemRec): TISRetVal;
     function GetAnotherItemWraparound(var AnItem: TItemRec): TISRetVal;
+
     destructor Destroy; override;
     procedure DeleteChildren;
     property Count: integer read FCount;
   end;
 
+  //Yes, we could have templated these if it weren't for backward compatiblity
+  //and sanity. Trade a bit more verbosity for compatibility and simplicity.
+
+  //Indexed store with int tags (at least 64 bits wide)
+
+  TIndexedStore = class(TIndexedStoreG)
+  public
+    constructor Create; deprecated;
+    function IndexInfoByOrdinal(Idx: integer;
+                                var Tag: TTagType;
+                                var IndNodeClassType: TIndexNodeClass):TISRetVal; inline;
+    function HasIndex(Tag: TTagType): boolean; inline;
+    function AddIndex(IndNodeClassType: TIndexNodeClass; Tag: TTagType):TISRetVal; inline;
+    function DeleteIndex(Tag: TTagType): TISRetVal; inline;
+    function AdjustIndexTag(OldTag, NewTag: TTagType): TISRetVal; inline;
+    function FindByIndex(IndexTag: TTagType; SearchVal: TIndexNode; var Res:
+      TItemRec): TISRetVal; inline;
+    function FindNearByIndex(IndexTag: TTagType; SearchVal: TIndexNode; var Res:
+      TItemRec): TISRetVal; inline;
+    function TraverseByIndex(IndexTag: TTagType; Event: TStoreTraversalEvent;
+      Forwards: boolean): TISRetVal; inline;
+    function FirstByIndex(IndexTag: TTagType; var Res: TItemRec): TISRetVal; inline;
+    function LastByIndex(IndexTag: TTagType; var Res: TItemRec): TISRetVal; inline;
+    function NextByIndex(IndexTag: TTagType; var Res: TItemRec): TISRetVal; inline;
+    function PreviousByIndex(IndexTag: TTagType; var Res: TItemRec): TISRetVal; inline;
+  end;
+
+  //Indexed store with ptr tags
+  TIndexedStoreO = class(TIndexedStoreG)
+  private
+    FAllowNullTags: boolean;
+  public
+    function IndexInfoByOrdinal(Idx: integer;
+                                var Tag: pointer;
+                                var IndNodeClassType: TIndexNodeClass):TISRetVal;
+    function HasIndex(Tag: pointer): boolean;
+    function AddIndex(IndNodeClassType: TIndexNodeClass; Tag: pointer):TISRetVal;
+    function DeleteIndex(Tag: pointer): TISRetVal;
+    function AdjustIndexTag(OldTag, NewTag: pointer): TISRetVal;
+    function FindByIndex(IndexTag: pointer; SearchVal: TIndexNode; var Res:
+      TItemRec): TISRetVal;
+    function FindNearByIndex(IndexTag: pointer; SearchVal: TIndexNode; var Res:
+      TItemRec): TISRetVal;
+    function TraverseByIndex(IndexTag: pointer; Event: TStoreTraversalEvent;
+      Forwards: boolean): TISRetVal;
+    function FirstByIndex(IndexTag: pointer; var Res: TItemRec): TISRetVal;
+    function LastByIndex(IndexTag: pointer; var Res: TItemRec): TISRetVal;
+    function NextByIndex(IndexTag: pointer; var Res: TItemRec): TISRetVal;
+    function PreviousByIndex(IndexTag: pointer; var Res: TItemRec): TISRetVal;
+
+    property AllowNullTags: boolean read FAllowNulltags;
+  end;
 {
   And now some example index node classes, just to make things simple.
   For the purposes of speed, we have two separate classes:
@@ -231,14 +299,14 @@ type
 
   TPointerINode = class(TIndexNode)
   protected
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer; override;
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer; override;
   end;
 
   TSearchPointerINode = class(TPointerINode)
   private
     FSearchVal: TObject;
   protected
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer; override;
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer; override;
   public
     property SearchVal: TObject read FSearchVal write FSearchVal;
   end;
@@ -379,17 +447,17 @@ begin
 end;
 
 (************************************
- * TIndexedStore                    *
+ * TIndexedStoreG                   *
  ************************************)
 
-constructor TIndexedStore.Create;
+constructor TIndexedStoreG.Create;
 begin
   inherited;
   DLItemInitList(@FItemRecList);
   DLItemInitList(@FIndices);
 end;
 
-function TIndexedStore.CreateItemRec(Item: TObject): TItemRec;
+function TIndexedStoreG.CreateItemRec(Item: TObject): TItemRec;
 begin
   Assert(Assigned(Item), S_ITEMREC_NO_ITEM);
   result := TItemRec.Create;
@@ -398,7 +466,7 @@ begin
 end;
 
 
-function TIndexedStore.GetIndexByTag(Tag: Int64): TSIndex;
+function TIndexedStoreG.GetIndexByTag(Tag: TTagType): TSIndex;
 begin
   result := self.FIndices.FLink.Owner as TSIndex;
   while Assigned(result) do
@@ -410,7 +478,7 @@ begin
   result := nil;
 end;
 
-function TIndexedStore.IndexCount: integer;
+function TIndexedStoreG.IndexCount: integer;
 var
   Index: TSIndex;
 begin
@@ -423,8 +491,8 @@ begin
   end;
 end;
 
-function TIndexedStore.IndexInfoByOrdinal(Idx: integer;
-                            var Tag: Int64;
+function TIndexedStoreG._IndexInfoByOrdinal(Idx: integer;
+                            var Tag: TTagType;
                             var IndNodeClassType: TIndexNodeClass):TISRetVal;
 var
   i: integer;
@@ -453,12 +521,12 @@ begin
 end;
 
 
-function TIndexedStore.HasIndex(Tag: Int64): boolean;
+function TIndexedStoreG._HasIndex(Tag: TTagType): boolean;
 begin
   result := Assigned(GetIndexByTag(Tag));
 end;
 
-function TIndexedStore.AddIndexNodeForItem(Index: TSIndex; Item: TItemRec):
+function TIndexedStoreG.AddIndexNodeForItem(Index: TSIndex; Item: TItemRec):
   TISRetVal;
 var
   IndexNode: TIndexNode;
@@ -506,7 +574,7 @@ begin
   end;
 end;
 
-function TIndexedStore.DeleteIndexNodeForItem(Index: TSIndex; Item: TItemRec):
+function TIndexedStoreG.DeleteIndexNodeForItem(Index: TSIndex; Item: TItemRec):
   TISRetVal;
 var
   Link: TIndexNodeLink;
@@ -540,7 +608,7 @@ begin
 end;
 
 
-function TIndexedStore.DeleteIndexInternal(Index: TSIndex): TISRetVal;
+function TIndexedStoreG.DeleteIndexInternal(Index: TSIndex): TISRetVal;
 var
   CurItem: TItemRec;
   Link: TIndexNodeLink;
@@ -560,8 +628,8 @@ begin
   result := rvOK;
 end;
 
-function TIndexedStore.AddIndex(IndNodeClassType: TIndexNodeClass; Tag:
-  Int64): TISRetVal;
+function TIndexedStoreG._AddIndex(IndNodeClassType: TIndexNodeClass; Tag:
+  TTagType): TISRetVal;
 var
   NewIndex: TSIndex;
   CurItem: TItemRec;
@@ -624,7 +692,7 @@ begin
   end;
 end;
 
-function TIndexedStore.DeleteIndex(Tag: Int64): TISRetVal;
+function TIndexedStoreG._DeleteIndex(Tag: TTagType): TISRetVal;
 var
   Index: TSIndex;
 begin
@@ -637,7 +705,7 @@ begin
   result := DeleteIndexInternal(Index);
 end;
 
-function TIndexedStore.AdjustIndexTag(OldTag, NewTag: Int64): TISRetVal;
+function TIndexedStoreG._AdjustIndexTag(OldTag, NewTag: TTagType): TISRetVal;
 var
   Index: TSIndex;
 begin
@@ -657,7 +725,7 @@ begin
   //OK, all done!
 end;
 
-function TIndexedStore.AddItem(NewItem: TObject; var Res: TItemRec): TISRetVal;
+function TIndexedStoreG.AddItem(NewItem: TObject; var Res: TItemRec): TISRetVal;
 var
   Index: TSIndex;
 {$IFOPT C+}
@@ -712,7 +780,7 @@ begin
   Assert(DlItemIsEmpty(@FItemRecList) = (FCount = 0), S_COUNT_CORRUPTED_AFTER_ADD);
 end;
 
-function TIndexedStore.RemoveItem(ItemRec: TItemRec): TISRetVal;
+function TIndexedStoreG.RemoveItem(ItemRec: TItemRec): TISRetVal;
 var
   Link: TIndexNodeLink;
   Index: TSIndex;
@@ -749,7 +817,7 @@ begin
   Assert(DlItemIsEmpty(@FItemRecList) = (FCount = 0), S_COUNT_CORRUPTED_AFTER_DEL);
 end;
 
-function TIndexedStore.FindByIndex(IndexTag: Int64;
+function TIndexedStoreG._FindByIndex(IndexTag: TTagType;
   SearchVal: TIndexNode; var Res: TItemRec): TISRetVal;
 var
   Index: TSIndex;
@@ -801,7 +869,7 @@ begin
 end;
 
 //A bit of code duplication, but ... whatever (don't touch the working code!).
-function TIndexedStore.FindNearByIndex(IndexTag: Int64; SearchVal: TIndexNode; var Res:
+function TIndexedStoreG._FindNearByIndex(IndexTag: TTagType; SearchVal: TIndexNode; var Res:
   TItemRec): TISRetVal;
 var
   Index: TSIndex;
@@ -852,7 +920,7 @@ begin
   end;
 end;
 
-function TIndexedStore.TraverseByIndex(IndexTag: Int64; Event:
+function TIndexedStoreG._TraverseByIndex(IndexTag: TTagType; Event:
   TStoreTraversalEvent; Forwards: boolean): TISRetVal;
 var
   Order: TBinTraversalOrder;
@@ -878,7 +946,7 @@ begin
   result := rvOK;
 end;
 
-function TIndexedStore.EdgeByIndex(IndexTag: Int64; var Res: TItemRec; First: boolean): TISRetVal;
+function TIndexedStoreG.EdgeByIndex(IndexTag: TTagType; var Res: TItemRec; First: boolean): TISRetVal;
 var
   Index: TSIndex;
   Link: TIndexNodeLink;
@@ -920,17 +988,17 @@ begin
   end;
 end;
 
-function TIndexedStore.FirstByIndex(IndexTag: Int64; var Res: TItemRec): TISRetVal;
+function TIndexedStoreG._FirstByIndex(IndexTag: TTagType; var Res: TItemRec): TISRetVal;
 begin
   result := EdgeByIndex(IndexTag, Res, true);
 end;
 
-function TIndexedStore.LastByIndex(IndexTag: Int64; var Res: TItemRec): TISRetVal;
+function TIndexedStoreG._LastByIndex(IndexTag: TTagType; var Res: TItemRec): TISRetVal;
 begin
   result := EdgeByIndex(IndexTag, Res, false);
 end;
 
-function TIndexedStore.NeighbourByIndex(IndexTag: Int64; var Res: TItemRec; Lower: boolean): TISRetVal;
+function TIndexedStoreG.NeighbourByIndex(IndexTag: TTagType; var Res: TItemRec; Lower: boolean): TISRetVal;
 var
   Index: TSIndex;
   Link: TIndexNodeLink;
@@ -986,17 +1054,17 @@ begin
   result := rvOK;
 end;
 
-function TIndexedStore.NextByIndex(IndexTag: Int64; var Res: TItemRec): TISRetVal;
+function TIndexedStoreG._NextByIndex(IndexTag: TTagType; var Res: TItemRec): TISRetVal;
 begin
   result := NeighbourByIndex(IndexTag, Res, false);
 end;
 
-function TIndexedStore.PreviousByIndex(IndexTag: Int64; var Res: TItemRec): TISRetVal;
+function TIndexedStoreG._PreviousByIndex(IndexTag: TTagType; var Res: TItemRec): TISRetVal;
 begin
   result := NeighbourByIndex(IndexTag, res, true);
 end;
 
-procedure TIndexedStore.TraversalHandler(Tree: TBinTree; Item: TBinTreeItem;
+procedure TIndexedStoreG.TraversalHandler(Tree: TBinTree; Item: TBinTreeItem;
   Level: integer);
 var
   Link: TIndexNodeLink;
@@ -1011,12 +1079,12 @@ begin
   FTraversalEvent(self, Res);
 end;
 
-function TIndexedStore.GetAnItem: TItemRec;
+function TIndexedStoreG.GetAnItem: TItemRec;
 begin
   result := self.FItemRecList.FLink.Owner as TItemRec;
 end;
 
-function TIndexedStore.GetAnotherItem(var AnItem: TItemRec): TISRetVal;
+function TIndexedStoreG.GetAnotherItem(var AnItem: TItemRec): TISRetVal;
 begin
   if not Assigned(AnItem) then
   begin
@@ -1030,7 +1098,7 @@ begin
     result := rvNotFound;
 end;
 
-function TIndexedStore.GetAnotherItemWraparound(var AnItem: TItemRec): TISRetVal;
+function TIndexedStoreG.GetAnotherItemWraparound(var AnItem: TItemRec): TISRetVal;
 var
   NEnt: PDLEntry;
 begin
@@ -1049,7 +1117,7 @@ begin
   end;
 end;
 
-procedure TIndexedStore.DeleteChildren;
+procedure TIndexedStoreG.DeleteChildren;
 var
   Rec: TItemRec;
   Obj: TObject;
@@ -1064,7 +1132,7 @@ begin
   end;
 end;
 
-destructor TIndexedStore.Destroy;
+destructor TIndexedStoreG.Destroy;
 var
   Index: TSIndex;
   Rec: TItemRec;
@@ -1131,7 +1199,7 @@ var
   OtherNode: TIndexNode;
   OtherLink: TIndexNodeLink;
   OwnRec, OtherRec: TItemRec;
-  IndexTag: Int64;
+  IndexTag: TTagType;
 begin
   Assert(Assigned(Other) and (Other is TIndexNode), S_CORRUPTED_INDEX);
 {$IFOPT C+}
@@ -1208,7 +1276,7 @@ end;
  * TPointerINode                    *
  ************************************)
 
-function TPointerINode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
+function TPointerINode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 begin
   Assert(Assigned(OwnItem), S_INODE_COMPARE_NIL_PTRS);
   Assert(Assigned(OtherItem), S_INODE_COMPARE_NIL_PTRS);
@@ -1219,11 +1287,237 @@ end;
  * TSearchPointerINode              *
  ************************************)
 
-function TSearchPointerINode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
+function TSearchPointerINode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 begin
   Assert(not Assigned(OwnItem), S_SEARCH_INODE_COMPARE_ASSG_PTRS);
   Assert(Assigned(OtherItem), S_SEARCH_INODE_COMPARE_NIL_PTRS);
   result := inherited CompareItems(FSearchVal, OtherItem, IndexTag, OtherNode);
+end;
+
+
+(************************************
+ * TIndexedStore                    *
+ ************************************)
+
+constructor TIndexedStore.Create;
+begin
+  inherited;
+end;
+
+function TIndexedStore.IndexInfoByOrdinal(Idx: integer;
+                            var Tag: TTagType;
+                            var IndNodeClassType: TIndexNodeClass):TISRetVal;
+begin
+  result := _IndexInfoByOrdinal(Idx, Tag, IndNodeClassType);
+end;
+
+function TIndexedStore.HasIndex(Tag: TTagType): boolean;
+begin
+  result := _HasIndex(Tag);
+end;
+
+function TIndexedStore.AddIndex(IndNodeClassType: TIndexNodeClass; Tag: TTagType):
+  TISRetVal;
+begin
+  result := _AddIndex(IndNodeClassType, Tag);
+end;
+
+function TIndexedStore.DeleteIndex(Tag: TTagType): TISRetVal;
+begin
+  result := _DeleteIndex(Tag);
+end;
+
+function TIndexedStore.AdjustIndexTag(OldTag, NewTag: TTagType): TISRetVal;
+begin
+  result := _AdjustIndexTag(OldTag, NewTag);
+end;
+
+function TIndexedStore.FindByIndex(IndexTag: TTagType; SearchVal: TIndexNode; var Res:
+  TItemRec): TISRetVal;
+begin
+  result := _FindByIndex(IndexTag, SearchVal, Res);
+end;
+
+function TIndexedStore.FindNearByIndex(IndexTag: TTagType; SearchVal: TIndexNode; var Res:
+  TItemRec): TISRetVal;
+begin
+  result := _FindNearByIndex(IndexTag, SearchVal, Res);
+end;
+
+function TIndexedStore.TraverseByIndex(IndexTag: TTagType; Event: TStoreTraversalEvent;
+  Forwards: boolean): TISRetVal;
+begin
+  result := _TraverseByIndex(IndexTag, Event, Forwards);
+end;
+
+function TIndexedStore.FirstByIndex(IndexTag: TTagType; var Res: TItemRec): TISRetVal;
+begin
+  result := _FirstByIndex(IndexTag, Res);
+end;
+
+function TIndexedStore.LastByIndex(IndexTag: TTagType; var Res: TItemRec): TISRetVal;
+begin
+  result := _LastByIndex(IndexTag, Res);
+end;
+
+function TIndexedStore.NextByIndex(IndexTag: TTagType; var Res: TItemRec): TISRetVal;
+begin
+  result := _NextByIndex(IndexTag, Res);
+end;
+
+function TIndexedStore.PreviousByIndex(IndexTag: TTagType; var Res: TItemRec): TISRetVal;
+begin
+  result := _PreviousByIndex(IndexTag, Res);
+end;
+
+(************************************
+ * TIndexedStore                    *
+ ************************************)
+
+function TIndexedStoreO.IndexInfoByOrdinal(Idx: integer;
+                            var Tag: pointer;
+                            var IndNodeClassType: TIndexNodeClass):TISRetVal;
+var
+  OrdTag, BitsLost: TTagType;
+
+begin
+  if not (FAllowNullTags or Assigned(Tag)) then
+    result := rvInvalidTag
+  else
+  begin
+    result := _IndexInfoByOrdinal(Idx, OrdTag, IndNodeClassType);
+    Tag := pointer(OrdTag);
+    BitsLost := OrdTag and (not TTagType(Tag));
+    Assert(BitsLost = 0);
+  end;
+end;
+
+function TIndexedStoreO.HasIndex(Tag: pointer): boolean;
+begin
+  if not (FAllowNullTags or Assigned(Tag)) then
+  begin
+    Assert(false);
+    result := false;
+  end
+  else
+  begin
+    Assert(sizeof(Tag) <= sizeof(TTagType));
+    result := _HasIndex(TTagType(Tag));
+  end;
+end;
+
+function TIndexedStoreO.AddIndex(IndNodeClassType: TIndexNodeClass; Tag: pointer):TISRetVal;
+begin
+  if not (FAllowNullTags or Assigned(Tag)) then
+    result := rvInvalidTag
+  else
+  begin
+    Assert(sizeof(Tag) <= sizeof(TTagType));
+    result := _AddIndex(IndNodeClassType, TTagType(Tag));
+  end;
+end;
+
+function TIndexedStoreO.DeleteIndex(Tag: pointer): TISRetVal;
+begin
+  if not (FAllowNullTags or Assigned(Tag)) then
+    result := rvInvalidTag
+  else
+  begin
+    Assert(sizeof(Tag) <= sizeof(TTagType));
+    result := _DeleteIndex(TTagType(Tag));
+  end;
+end;
+
+function TIndexedStoreO.AdjustIndexTag(OldTag, NewTag: pointer): TISRetVal;
+begin
+  if not (FAllowNullTags or (Assigned(OldTag) and Assigned(NewTag))) then
+    result := rvInvalidTag
+  else
+  begin
+    Assert(sizeof(OldTag) <= sizeof(TTagType));
+    Assert(sizeof(NewTag) <= sizeof(TTagType));
+    result := _AdjustIndexTag(TTagType(OldTag), TTagType(NewTag));
+  end;
+end;
+
+function TIndexedStoreO.FindByIndex(IndexTag: pointer; SearchVal: TIndexNode; var Res:
+  TItemRec): TISRetVal;
+begin
+  if not (FAllowNullTags or Assigned(IndexTag)) then
+    result := rvInvalidTag
+  else
+  begin
+    Assert(sizeof(IndexTag) <= sizeof(TTagType));
+    result := _FindByIndex(TTagType(IndexTag), SearchVal, Res);
+  end;
+end;
+
+function TIndexedStoreO.FindNearByIndex(IndexTag: pointer; SearchVal: TIndexNode; var Res:
+  TItemRec): TISRetVal;
+begin
+  if not (FAllowNullTags or Assigned(IndexTag)) then
+    result := rvInvalidTag
+  else
+  begin
+    Assert(sizeof(IndexTag) <= sizeof(TTagType));
+    result := _FindNearByIndex(TTagType(IndexTag), SearchVal, Res);
+  end;
+end;
+
+function TIndexedStoreO.TraverseByIndex(IndexTag: pointer; Event: TStoreTraversalEvent;
+  Forwards: boolean): TISRetVal;
+begin
+  if not (FAllowNullTags or Assigned(IndexTag)) then
+    result := rvInvalidTag
+  else
+  begin
+    Assert(sizeof(IndexTag) <= sizeof(TTagType));
+    result := _TraverseByIndex(TTagType(IndexTag), Event, Forwards);
+  end;
+end;
+
+function TIndexedStoreO.FirstByIndex(IndexTag: pointer; var Res: TItemRec): TISRetVal;
+begin
+  if not (FAllowNullTags or Assigned(IndexTag)) then
+    result := rvInvalidTag
+  else
+  begin
+    Assert(sizeof(IndexTag) <= sizeof(TTagType));
+    result := _FirstByIndex(TTagType(IndexTag), Res);
+  end;
+end;
+
+function TIndexedStoreO.LastByIndex(IndexTag: pointer; var Res: TItemRec): TISRetVal;
+begin
+  if not (FAllowNullTags or Assigned(IndexTag)) then
+    result := rvInvalidTag
+  else
+  begin
+    Assert(sizeof(IndexTag) <= sizeof(TTagType));
+    result := _LastByIndex(TTagType(IndexTag), Res);
+  end;
+end;
+
+function TIndexedStoreO.NextByIndex(IndexTag: pointer; var Res: TItemRec): TISRetVal;
+begin
+  if not (FAllowNullTags or Assigned(IndexTag)) then
+    result := rvInvalidTag
+  else
+  begin
+    Assert(sizeof(IndexTag) <= sizeof(TTagType));
+    result := _NextByIndex(TTagType(IndexTag), Res);
+  end;
+end;
+
+function TIndexedStoreO.PreviousByIndex(IndexTag: pointer; var Res: TItemRec): TISRetVal;
+begin
+  if not (FAllowNullTags or Assigned(IndexTag)) then
+    result := rvInvalidTag
+  else
+  begin
+    Assert(sizeof(IndexTag) <= sizeof(TTagType));
+    result := _PreviousByIndex(TTagType(IndexTag), Res);
+  end;
 end;
 
 end.

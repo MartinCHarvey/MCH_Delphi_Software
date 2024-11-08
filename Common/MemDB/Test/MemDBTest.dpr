@@ -17,7 +17,8 @@ uses
   MemDBApi in '..\MemDBApi.pas',
   BufferedFileStream in '..\..\CachedStream\BufferedFileStream.pas',
   CommonPool in '..\..\WorkItems\CommonPool.pas',
-  WorkItems in '..\..\WorkItems\WorkItems.pas';
+  WorkItems in '..\..\WorkItems\WorkItems.pas',
+  GlobalLog in '..\..\Logging\GlobalLog.pas';
 
 {$R *.res}
 

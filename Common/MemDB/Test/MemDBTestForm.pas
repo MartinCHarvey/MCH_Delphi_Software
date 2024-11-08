@@ -76,7 +76,6 @@ var
   FieldIncrement: integer;
   NavOK: boolean;
   i,j: integer;
-  d: double;
 begin
   ResetClick(Sender);
   Trans := FSession.StartTransaction(amReadWrite);
@@ -134,10 +133,11 @@ begin
           end;
 
           // 3) Test row navigation by indernal index and field modification.
+          i:= 1;
           for DirectionUp := High(boolean) downto Low(boolean) do
           begin
             FieldIncrement := Pred(2 * Ord(DirectionUp)); // +1, -1
-            if DirectionUP then
+            if DirectionUp then
               i := 1;
             NavOK := TableData.Locate(ptFirst, '');
             while NavOK do

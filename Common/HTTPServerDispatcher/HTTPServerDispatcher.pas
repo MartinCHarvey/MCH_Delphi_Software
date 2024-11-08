@@ -169,19 +169,19 @@ type
 
   TUniqueDispatcherINode = class(TIndexNode)
   protected
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer; override;
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer; override;
   end;
 
   TDuplicateDispatcherINode = class(TDuplicateValIndexNode)
   protected
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer; override;
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer; override;
   end;
 
   TUniqueDispatcherSearchINode = class(TUniqueDispatcherINode)
   private
     FSearchString: string;
   protected
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer; override;
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer; override;
   public
     property SearchString: string read FSearchString write FSearchString;
   end;
@@ -190,7 +190,7 @@ type
   private
     FSearchString: string;
   protected
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer; override;
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer; override;
   public
     property SearchString: string read FSearchString write FSearchString;
   end;
@@ -674,19 +674,19 @@ begin
   end;
 end;
 
-function TUniqueDispatcherINode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
+function TUniqueDispatcherINode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 begin
   result := DispatcherCompareItems(OwnItem, OtherItem, IndexTag, OtherNode);
 end;
 
-function TDuplicateDispatcherINode.CompareItems(OwnItem: TObject; OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
+function TDuplicateDispatcherINode.CompareItems(OwnItem: TObject; OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 begin
   result := DispatcherCompareItems(OwnItem, OtherItem, IndexTag, OtherNode);
 end;
 
 { TUniqueDispatcherSearchINode, TDuplicateDispatcherSearchINode }
 
-function DispatcherSearchCompareItems(SearchString: string; OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
+function DispatcherSearchCompareItems(SearchString: string; OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 begin
   case IndexTag of
     Ord(idtSessionString):
@@ -718,12 +718,12 @@ begin
   end;
 end;
 
-function TUniqueDispatcherSearchINode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
+function TUniqueDispatcherSearchINode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 begin
   result := DispatcherSearchCompareItems(FSearchString, OtherItem, IndexTag, OtherNode);
 end;
 
-function TDuplicateDispatcherSearchINode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
+function TDuplicateDispatcherSearchINode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 begin
   result := DispatcherSearchCompareItems(FSearchString, OtherItem, IndexTag, OtherNode);
 end;

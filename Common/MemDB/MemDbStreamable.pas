@@ -142,12 +142,8 @@ type
     FIndexName: string;
     FFieldName: string;
     FFieldIndex: TFieldOffset;
-    FFieldDeconflict: TFieldDeconflict;
     FIndexAttrs: TMDBIndexAttrs;
   public
-{$IFOPT C+}
-    constructor Create;
-{$ENDIF}
     procedure Assign(Source: TMemDBStreamable); override;
     function Same(Other: TMemDBStreamable):boolean; override;
     procedure ToStreamV2(Stream: TStream); override;
@@ -156,7 +152,6 @@ type
     property IndexName: string read FIndexName write FIndexName;
     property FieldName: string read FFieldName write FFieldName;
     property FieldIndex: TFieldOffset read FFieldIndex write FFieldIndex;
-    property FieldDeconflict: TFieldDeconflict read FFieldDeconflict write FFieldDeconflict;
     property IndexAttrs: TMDBIndexAttrs read FIndexAttrs write FIndexAttrs;
   end;
 
@@ -231,11 +226,11 @@ type
     mstDblBufferedEnd,
     mstStreamableListStart,
     mstStreamableListEnd,
-    mstFieldDefStart,
+    DEPRECATED_mstFieldDefStart_V1,
     mstFieldDefEnd,
     mstFieldDataStart,
     mstFieldDataEnd,
-    mstIndexDefStart,
+    DEPRECATED_mstIndexDefStart_V1,
     mstIndexDefEnd,
     mstRowStart,
     mstRowEnd,
@@ -248,7 +243,9 @@ type
     mstTableMetadataEnd,
     mstFKMetadataStart,
     mstFKMetadataEnd,
-    mstIndexFieldDeconflict
+    DEPRECATED_mstIndexFieldDeconflict,
+    mstFieldDefStartV2,
+    mstIndexDefStartV2
   );
 
 {$IFOPT C+}
@@ -413,9 +410,9 @@ begin
   Tag := RdTag(Stream);
   //All the tags we can have for something in a list.
   case Tag of
-    mstFieldDefStart: result := TMemFieldDef.Create;
+    DEPRECATED_mstFieldDefStart_V1, mstFieldDefStartV2: result := TMemFieldDef.Create;
     mstFieldDataStart: result := TMemFieldData.Create;
-    mstIndexDefStart: result := TMemIndexDef.Create;
+    DEPRECATED_mstIndexDefStart_V1, mstIndexDefStartV2: result := TMemIndexDef.Create;
     mstDeleteSentinel: result := TMemDeleteSentinel.Create;
   else
     raise EMemDBException.Create(S_STREAMABLE_LIST_LOOKAHEAD_FAILED + IntToStr(Ord(Tag)));
@@ -550,7 +547,7 @@ end;
 
 procedure TMemFieldDef.ToStreamV2(Stream: TStream);
 begin
-  WrTag(Stream, mstFieldDefStart);
+  WrTag(Stream, mstFieldDefStartV2);
   Stream.Write(FFieldType, sizeof(FFieldType));
   WrStreamString(Stream, FFieldName);
   Stream.Write(FFieldIndex, sizeof(FFieldIndex));
@@ -558,15 +555,27 @@ begin
 end;
 
 procedure TMemFieldDef.FromStreamV2(Stream: TStream);
+var
+  Tag: TMemStreamTag;
+  OldFieldIndex: TOldFieldOffset;
 begin
-  ExpectTag(Stream, mstFieldDefStart);
+  Tag := RdTag(Stream);
+  if not (Tag in [mstFieldDefStartV2, DEPRECATED_mstFieldDefStart_V1]) then
+    raise EMemDBException.Create(S_WRONG_TAG);
+
   Stream.Read(FFieldType, sizeof(FFieldType));
   if not ((FFieldType >= Low(FFieldType))  and (FFieldType <= High(FFieldType))) then
     raise EMemDBException.Create(S_MEM_DB_UNSTREAM_OOR);
   FFieldName := RdStreamString(Stream);
-  Stream.Read(FFieldIndex, sizeof(FFieldIndex));
-  if not ((FFieldIndex >= Low(FFieldIndex))  and (FFieldIndex <= High(FFieldIndex))) then
-    raise EMemDBException.Create(S_MEM_DB_UNSTREAM_OOR);
+
+  if Tag = DEPRECATED_mstFieldDefStart_V1 then
+  begin
+    Stream.Read(OldFieldIndex, sizeof(OldFieldIndex));
+    FFieldIndex := OldFieldIndex;
+  end
+  else
+    Stream.Read(FFieldIndex, sizeof(FFieldIndex));
+
   ExpectTag(Stream, mstFieldDefEnd);
 end;
 
@@ -575,17 +584,31 @@ var
   StreamFieldType: TMDBFieldType;
   StreamFieldName: string;
   StreamFieldIndex: TFieldOffset;
+  StreamOldFieldIndex: TOldFieldOffset;
+  Tag: TMemStreamTag;
 begin
-  ExpectTag(Stream, mstFieldDefStart);
+  Tag := RdTag(Stream);
+  if not (Tag in [mstFieldDefStartV2, DEPRECATED_mstFieldDefStart_V1]) then
+    raise EMemDBException.Create(S_WRONG_TAG);
+
   Stream.Read(StreamFieldType, sizeof(StreamFieldType));
   if StreamFieldType <> FFieldType then
     raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
   StreamFieldName := RdStreamString(Stream);
   if CompareStr(StreamFieldName, FieldName) <> 0 then
     raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
-  Stream.Read(StreamFieldIndex, sizeof(StreamFieldIndex));
+
+  if Tag = DEPRECATED_mstFieldDefStart_V1 then
+  begin
+    Stream.Read(StreamOldFieldIndex, sizeof(StreamOldFieldIndex));
+    StreamFieldIndex := StreamOldFieldIndex;
+  end
+  else
+    Stream.Read(StreamFieldIndex, sizeof(StreamFieldIndex));
+
   if StreamFieldIndex <> FFieldIndex then
     raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
+
   ExpectTag(Stream, mstFieldDefEnd);
 end;
 
@@ -617,70 +640,87 @@ end;
 
 { TMemIndexDef }
 
-{$IFOPT C+}
-constructor TMemIndexDef.Create;
-begin
-  inherited;
-  FFieldDeconflict := High(FFieldDeconflict);
-end;
-{$ENDIF}
-
 procedure TMemIndexDef.ToStreamV2(Stream: TStream);
 begin
-  WrTag(Stream, mstIndexDefStart);
+  WrTag(Stream, mstIndexDefStartV2);
   WrStreamString(Stream, FIndexName);
   WrStreamString(Stream, FFieldName);
   Stream.Write(FFieldIndex, sizeof(FFieldIndex));
   Stream.Write(FIndexAttrs, sizeof(FIndexAttrs));
-  WrTag(Stream, mstIndexFieldDeconflict);
-  Stream.Write(FFieldDeconflict, sizeof(FFieldDeconflict));
   WrTag(Stream, mstIndexDefEnd);
 end;
 
 procedure TMemIndexDef.FromStreamV2(Stream: TStream);
 var
   CurPos: Int64;
-  Tag: TMemStreamTag;
+  DepTag, InitialTag: TMemStreamTag;
+  DEPRECATED_Deconflict: byte;
+  OldFieldIndex: TOldFieldOffset;
 begin
-  ExpectTag(Stream, mstIndexDefStart);
+  InitialTag := RdTag(Stream);
+  if not (InitialTag in [mstIndexDefStartV2, DEPRECATED_mstIndexDefStart_V1]) then
+    raise EMemDBException.Create(S_WRONG_TAG);
+
   FIndexName := RdStreamString(Stream);
   FFieldName := RdStreamString(Stream);
-  Stream.Read(FFieldIndex, sizeof(FFieldIndex));
-  if not ((FFieldIndex >= Low(FFieldIndex)) and (FFieldIndex <= High(FFieldIndex))) then
-    raise EMemDBException.Create(S_MEM_DB_UNSTREAM_OOR);
+
+  if InitialTag = DEPRECATED_mstIndexDefStart_V1 then
+  begin
+    Stream.Read(OldFieldIndex, sizeof(OldFieldIndex));
+    FFieldIndex := OldFieldIndex;
+  end
+  else
+    Stream.Read(FFieldIndex, sizeof(FFieldIndex));
+
   Stream.Read(FIndexAttrs, sizeof(FIndexAttrs));
   if FIndexAttrs - AllIndexAttrs <> [] then
     raise EMemDBException.Create(S_MEM_DB_UNSTREAM_OOR);
   //Lookahead - field deconflict currently optional.
+  //Remove deconflict from stream rd/wr in a while.
   CurPos := Stream.Position;
-  Tag := RdTag(Stream);
-  if not (Tag in [mstIndexDefEnd, mstIndexFieldDeconflict]) then
-    raise EMemDBException.Create(S_INDEX_DEF_LOOKAHEAD_FAILED + IntToStr(Ord(Tag)));
-  if Tag = mstIndexFieldDeconflict then
-    Stream.Read(FFieldDeconflict, sizeof(FFieldDeconflict))
+  DepTag := RdTag(Stream);
+  if not (DepTag in [mstIndexDefEnd, DEPRECATED_mstIndexFieldDeconflict]) then
+    raise EMemDBException.Create(S_INDEX_DEF_LOOKAHEAD_FAILED + IntToStr(Ord(DepTag)));
+
+  if DepTag = DEPRECATED_mstIndexFieldDeconflict then
+    Stream.Read(DEPRECATED_Deconflict, sizeof(DEPRECATED_Deconflict))
   else
     Stream.Seek(CurPos, soFromBeginning);
-  ExpectTag(Stream, mstIndexDefEnd);
+
+    ExpectTag(Stream, mstIndexDefEnd);
 end;
 
 procedure TMemIndexDef.CheckSameAsStreamV2(Stream: TStream);
 var
   LclIndexName: string;
   LclFieldName: string;
+  OldLclFieldIndex: TOldFieldOffset;
   LclFieldIndex: TFieldOffset;
   LclIndexAttrs: TMDBIndexAttrs;
-  LclFieldDeconflict: TFieldDeconflict;
   Tag: TMemStreamTag;
   CurPos: Int64;
+  DEPRECATED_Deconflict: byte;
+  InitialTag: TMemStreamTag;
 begin
-  ExpectTag(Stream, mstIndexDefStart);
+  InitialTag := RdTag(Stream);
+  if not (InitialTag in [mstIndexDefStartV2, DEPRECATED_mstIndexDefStart_V1]) then
+    raise EMemDBException.Create(S_WRONG_TAG);
+
   LclIndexName := RdStreamString(Stream);
   if CompareStr(FIndexName, LclIndexName) <> 0 then
     raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
   LclFieldName := RdStreamString(Stream);
   if CompareStr(FFieldName, LclFieldName) <> 0 then
     raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
+
+  if InitialTag = DEPRECATED_mstIndexDefStart_V1 then
+  begin
+    Stream.Read(OldLclFieldIndex, sizeof(OldLclFieldIndex));
+    LclFieldIndex := OldLclFieldIndex;
+  end
+  else
   Stream.Read(LclFieldIndex, sizeof(LclFieldIndex));
+
   if LclFieldIndex <> FFieldIndex then
     raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
   Stream.Read(LclIndexAttrs, sizeof(LclIndexAttrs));
@@ -689,14 +729,10 @@ begin
   //Lookahead - field deconflict currently optional.
   CurPos := Stream.Position;
   Tag := RdTag(Stream);
-  if not (Tag in [mstIndexDefEnd, mstIndexFieldDeconflict]) then
+  if not (Tag in [mstIndexDefEnd, DEPRECATED_mstIndexFieldDeconflict]) then
     raise EMemDBException.Create(S_INDEX_DEF_LOOKAHEAD_FAILED + IntToStr(Ord(Tag)));
-  if Tag = mstIndexFieldDeconflict then
-  begin
-    Stream.Read(LclFieldDeconflict, sizeof(LclFieldDeconflict));
-    if LclFieldDeconflict <> FFieldDeconflict then
-      raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
-  end
+  if Tag = DEPRECATED_mstIndexFieldDeconflict then
+    Stream.Read(DEPRECATED_Deconflict, sizeof(DEPRECATED_Deconflict))
   else
     Stream.Seek(CurPos, soFromBeginning);
   ExpectTag(Stream, mstIndexDefEnd);
@@ -712,7 +748,6 @@ begin
   FFieldName := S.FFieldName;
   FFieldIndex := S.FFieldIndex;
   FIndexAttrs := S.FIndexAttrs;
-  FFieldDeconflict := S.FFieldDeconflict;
 end;
 
 function TMemIndexDef.Same(Other: TMemDBStreamable): boolean;
@@ -727,8 +762,7 @@ begin
       (FIndexName = O.FIndexName) and
       (FFieldName = O.FFieldName) and
       (FFieldIndex = O.FFieldIndex) and
-      (FIndexAttrs = O.FIndexAttrs) and
-      (FFieldDeconflict = O.FFieldDeconflict);
+      (FIndexAttrs = O.FIndexAttrs);
   end;
 end;
 

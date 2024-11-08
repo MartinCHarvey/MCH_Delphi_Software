@@ -191,7 +191,7 @@ type
     procedure CheckNoFieldLayoutChanges;
     procedure CheckNoUncommitedData;
     function GetFieldDefList: TMemStreamableList;
-    function IndexNameToIndexAndTag(Iso: TMDBIsolationLevel;  var Idx:TMemIndexDef; Name: string): Int64;
+    function IndexNameToIndexAndTag(Iso: TMDBIsolationLevel;  var Idx:TMemIndexDef; Name: string): PITagStruct;
     procedure IndexDefToFieldDef(IndexDef: TMemIndexDef; var FieldDef: TMemFieldDef; var FieldAbsIdx: integer);
   public
     procedure API_CreateField(Name: string; FieldType: TMDBFieldType);
@@ -660,6 +660,7 @@ const
   S_API_INTERNAL_ERROR = 'API implementation internal error.';
   S_API_INDEX_NAME_CONFLICT = 'An index already exists with that name. Perhaps commit previous renames / deletions?';
   S_API_INDEX_NAME_NOT_FOUND = 'Index name not found.';
+  S_API_INTERNAL_TAG_DATA_BAD = 'Index does not correspond with a valid tag';
   S_API_INTERNAL_READING_ROW = 'Internal error reading row data.';
   S_API_TABLE_METADATA_NOT_COMMITED = 'No committed metadata for this table';
   S_API_INTERNAL_CHANGING_ROW = 'Internal error changing row data.';
@@ -959,13 +960,10 @@ procedure TMemDBTable.API_CreateIndex(Name: string;
                       IndexAttrs: TMDbIndexAttrs);
 var
   M: TMemDbTableMetadata;
-  MetadataCopy: TMemTableMetadataItem;
-  Index, OtherIndex: TMemIndexDef;
+  Index: TMemIndexDef;
   IndexIdx: integer;
   Field: TMemFieldDef;
   FieldIdx: integer;
-  ProposedDeconflict: TFieldDeconflict;
-  Up, Found: boolean;
 begin
   M := Metadata as TMemDBTableMetadata;
   if Assigned(M.IndexByName(abLatest, Name, IndexIdx)) then
@@ -977,39 +975,6 @@ begin
   Index.IndexName := Name;
   Index.FieldName := IndexedField;
   Index.FieldIndex := Field.FieldIndex;
-  Up := not (Index.FieldDeconflict = High(TFieldDeconflict));
-  ProposedDeconflict := Index.FieldDeconflict;
-  MetadataCopy := M.ABData[abLatest] as TMemTableMetadataItem;
-  Assert(Assigned(MetadataCopy));
-  while True do
-  begin
-    Found := false;
-    for IndexIdx := 0 to Pred(MetadataCopy.IndexDefs.Count) do
-    begin
-      Assert(Assigned(MetadataCopy.IndexDefs.Items[IndexIdx]));
-      if AssignedNotSentinel(MetadataCopy.IndexDefs.Items[IndexIdx]) then
-      begin
-        OtherIndex := MetadataCopy.IndexDefs.Items[IndexIdx] as TMemIndexDef;
-        if (OtherIndex.FieldIndex = Index.FieldIndex) and
-           (OtherIndex.FieldDeconflict = ProposedDeconflict) then
-        begin
-          Found := true;
-          break;
-        end;
-      end;
-    end;
-    if not Found then break; //ProposedDeconflict OK.
-
-    if (Up and (ProposedDeconflict = High(ProposedDeconflict))) or
-       ((not Up) and (ProposedDeconflict = Low(ProposedDeconflict))) then
-       raise EMemDBAPIException.Create(S_API_TOO_MANY_INDICES);
-    if Up then
-      Inc(ProposedDeconflict)
-    else
-      Dec(ProposedDeconflict)
-  end;
-  Index.FieldDeconflict := ProposedDeconflict;
-
   //TODO - Any checking of index attributes?
   Index.IndexAttrs := IndexAttrs;
   IndexIdx := IndexHelper.Add(Index);
@@ -1131,11 +1096,12 @@ begin
   end;
 end;
 
-function TMemDBTable.IndexNameToIndexAndTag(Iso: TMDBIsolationLevel;  var Idx:TMemIndexDef; Name: string): Int64;
+function TMemDBTable.IndexNameToIndexAndTag(Iso: TMDBIsolationLevel;  var Idx:TMemIndexDef; Name: string): PITagStruct;
 var
   M: TMemDBTableMetadata;
   IdxIdx: integer;
-  IC: TIndexClass;
+  Sic: TSubIndexClass;
+  TagData: TMemDbITagData;
 begin
   if Length(Name) > 0 then
   begin
@@ -1145,21 +1111,24 @@ begin
     Idx := M.IndexByName(abCurrent, Name, IdxIdx);
     if not Assigned(Idx) then
       raise EMemDBAPIException.Create(S_API_INDEX_NAME_NOT_FOUND);
+    TagData := TagDataArray[IdxIdx];
+    CheckTagAgreesWithMetadata(IdxIdx, TagData, tciPermanentAgreesCurrent, tcpProgrammed);
     //Indices are never in transient state in abCurrent, so no difference
     //between ND field index and absolute field index... we hope.
-    IC := IsoToIndexClass(Iso);
+    Sic := IsoToSubIndexClass(Iso);
+
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
   GLogLog(SV_INFO, 'Encode index tag: ' +
-    IndexClassStrings[IC] + 'Field index: ' + IntToStr(Idx.FieldIndex));
+    SubIndexClassStrings[Sic] + 'Field index: ' + IntToStr(Idx.FieldIndex));
 {$ENDIF}
-    EncodeIndexTag(result, IC, IC, Idx.FieldIndex, 0,Idx.FieldDeconflict);
+    result := TagData.TagStructs[Sic];
   end
   else
   begin
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
     GLogLog(SV_INFO, 'Encode index tag: InternalRowId.');
 {$ENDIF}
-    result := MDBInternalIndexRowId;
+    result := MDBInternalIndexRowId.TagStructs[sicCurrent];
     Idx := nil;
   end;
 end;
@@ -1182,14 +1151,14 @@ function TMemDBTable.API_DataLocate(Iso: TMDBIsolationLevel;
                         Pos: TMemAPIPosition;
                         IdxName: string): TObject; //Returns cursor.
 var
-  ITag: Int64;
+  PTagStruct: PITagStruct;
   Idx: TMemIndexDef;
 begin
   if Length(IdxName) = 0 then
-    ITag := MDBInternalIndexRowId
+    PTagStruct := MDBInternalIndexRowId.TagStructs[sicCurrent]
   else
   begin
-    ITag := IndexNameToIndexAndTag(Iso, Idx, IdxName);
+    PTagStruct := IndexNameToIndexAndTag(Iso, Idx, IdxName);
     if not Assigned(Idx) then
       raise EMemDBAPIException.Create(S_API_SEARCH_REQUIRES_INDEX);
   end;
@@ -1207,7 +1176,7 @@ begin
       + ' Index name: ' + IdxName);
   end;
 {$ENDIF}
-  result := Data.MoveToRowByIndexTag(Iso, ITag,
+  result := Data.MoveToRowByIndexTag(Iso, PTagStruct,
                                      Cursor as TMemDBRow,
                                      Pos);
 end;
@@ -1216,7 +1185,7 @@ function TMemDBTable.API_DataFindByIndex(Iso: TMDBIsolationLevel;
                             IdxName: string;
                             const Data: TMemDbFieldDataRec): TObject; //Returns cursor
 var
-  ITag: Int64;
+  ITagStruct: PITagStruct;
   Idx: TMemIndexDef;
   Field: TMemFieldDef;
   FieldAbsIdx: integer;
@@ -1224,7 +1193,7 @@ begin
   //Cannot find by internal index.
   if Length(IdxName) = 0 then
     raise EMemDBAPIException.Create(S_API_SEARCH_REQUIRES_INDEX);
-  ITag := IndexNameToIndexAndTag(Iso, Idx, IdxName);
+  ITagStruct := IndexNameToIndexAndTag(Iso, Idx, IdxName);
   if not Assigned(Idx) then
     raise EMemDBAPIException.Create(S_API_SEARCH_REQUIRES_INDEX);
   IndexDefToFieldDef(Idx, Field, FieldAbsIdx);
@@ -1233,7 +1202,7 @@ begin
     ' FieldName: ' + Field.FieldName + ' FieldNDIndex: ' +
     IntToStr(Field.FieldIndex) + ' FieldAbsIdx: ' + IntToStr(FieldAbsIdx));
 {$ENDIF}
-  result := self.Data.FindRowByIndexTag(Iso, Idx, Field, ITag, Data);
+  result := self.Data.FindRowByIndexTag(Iso, Idx, Field, ITagStruct, Data);
 end;
 
 function TMemDBTable.API_DataFindEdgeByIndex(Iso: TMDBIsolationLevel;
@@ -1241,7 +1210,7 @@ function TMemDBTable.API_DataFindEdgeByIndex(Iso: TMDBIsolationLevel;
                                              const Data: TMemDbFieldDataRec;
                                              Pos: TMemAPIPosition): TObject;
 var
-  ITag: Int64;
+  ITagStruct: PITagStruct;
   Idx: TMemIndexDef;
   Field: TMemFieldDef;
   Next: TObject;
@@ -1252,7 +1221,7 @@ var
 begin
   if Length(IdxName) = 0 then
     raise EMemDBAPIException.Create(S_API_SEARCH_REQUIRES_INDEX);
-  ITag := IndexNameToIndexAndTag(Iso, Idx, IdxName);
+  ITagStruct := IndexNameToIndexAndTag(Iso, Idx, IdxName);
   if not Assigned(Idx) then
     raise EMemDBAPIException.Create(S_API_SEARCH_REQUIRES_INDEX);
   if not (Pos in [ptFirst, ptLast]) then
@@ -1263,7 +1232,7 @@ begin
     ' FieldName: ' + Field.FieldName + ' FieldNDIndex: ' +
     IntToStr(Field.FieldIndex) + ' FieldAbsIdx: ' + IntToStr(FieldAbsIdx));
 {$ENDIF}
-  Result := self.Data.FindRowByIndexTag(Iso, Idx, Field, ITag, Data);
+  Result := self.Data.FindRowByIndexTag(Iso, Idx, Field, ITagStruct, Data);
   AB := IsoToAB(Iso);
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
   if Assigned(Result) then
@@ -1289,7 +1258,7 @@ begin
     GLogLog(SV_INFO, 'EDGE by Index, move extremity ' + MemAPIPositionStrings[Pos]);
 {$ENDIF}
     repeat
-      Next := self.Data.MoveToRowByIndexTag(Iso, ITag,
+      Next := self.Data.MoveToRowByIndexTag(Iso, ITagStruct,
                                          result as TMemDBRow,
                                          Pos);
       if Assigned(Next) then
