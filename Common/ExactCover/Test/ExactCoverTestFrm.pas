@@ -1,7 +1,5 @@
 unit ExactCoverTestFrm;
 
-{$C+}
-
 interface
 
 uses

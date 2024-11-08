@@ -117,12 +117,14 @@ begin
   Log('-----');
   Log('There are ' + IntToStr(IsoList.Count) + ' isomorphisms');
   Log('');
+{
   Board := IsoList.GetInMinlexOrder;
   while Assigned(Board) do
   begin
     Board.LogBoard(Log);
     Board := IsoList.GetInMinlexOrder;
   end;
+}
   Log('');
   if ErrFlag then
     Log('There was an exception calculating set of isomorphisms.');

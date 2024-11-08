@@ -198,12 +198,12 @@ type
 
   TReconcileINode = class(TDuplicateValIndexNode)
   protected
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer; override;
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer; override;
   end;
 
   TReconcileSearchVal= class(TReconcileINode)
   protected
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer; override;
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer; override;
   public
     GuidSearchVal: TGuid;
     IntSearchVal: Integer;
@@ -218,7 +218,7 @@ begin
   FinalIndex := -1;
 end;
 
-function TReconcileINode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
+function TReconcileINode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 var
   OtherReconcile, OwnReconcile: TItemReconcile;
 begin
@@ -236,7 +236,7 @@ begin
   end;
 end;
 
-function TReconcileSearchVal.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
+function TReconcileSearchVal.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 var
   OtherReconcile: TItemReconcile;
 begin

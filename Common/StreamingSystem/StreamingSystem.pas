@@ -252,23 +252,23 @@ type
   //DupVal because in the unstream case, can have multiple classes unstream to NULL.
   TInstanceINode = class(TDuplicateValIndexNode)
   protected
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer; override;
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer; override;
   end;
 
   TIRepIndexINode = class(TIndexNode)
   protected
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer; override;
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer; override;
   end;
 
   TUnstreamNextINode = class(TDuplicateValIndexNode)
   protected
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer; override;
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer; override;
   end;
 
   TInstanceSearchVal = class(TInstanceINode)
   protected
     FSearchVal: TObject;
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer; override;
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer; override;
   public
     property SearchVal: TObject read FSearchVal write FSearchVal;
   end;
@@ -276,7 +276,7 @@ type
   TIRepIndexSearchVal = class(TIRepIndexINode)
   protected
     FSearchVal: integer;
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer; override;
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer; override;
   public
     property SearchVal: integer read FSearchVal write FSearchVal;
   end;
@@ -2142,7 +2142,7 @@ end;
 
 { TInstanceINode }
 
-function TInstanceINode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
+function TInstanceINode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 var
   Own, Other: TObjectCrossRef;
 begin
@@ -2157,7 +2157,7 @@ end;
 
 { TIRepIndexINode }
 
-function TIRepIndexINode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
+function TIRepIndexINode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 var
   Own, Other: TObjectCrossRef;
 begin
@@ -2177,7 +2177,7 @@ end;
 
 { TUnstreamNextINode }
 
-function TUnstreamNextINode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
+function TUnstreamNextINode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 var
   OwnUnstreamReady, OtherUnstreamReady: integer;
   Own, Other: TObjectCrossRef;
@@ -2201,7 +2201,7 @@ end;
 
 { TInstanceSearchVal }
 
-function TInstanceSearchVal.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
+function TInstanceSearchVal.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 var
   Other: TObjectCrossRef;
 begin
@@ -2214,7 +2214,7 @@ end;
 
 { TIRepIndexSearchVal }
 
-function TIRepIndexSearchVal.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
+function TIRepIndexSearchVal.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 var
   Other: TObjectCrossRef;
 begin

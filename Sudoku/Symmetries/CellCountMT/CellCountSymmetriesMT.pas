@@ -131,13 +131,13 @@ type
 
   TPackedRepIndexNode = class(TIndexNode)
   public
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;override;
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;override;
   end;
 
   TPackedRepSearchVal = class(TPackedRepIndexNode)
   public
     SearchVal: TSymBoardPackedState;
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;override;
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;override;
   end;
 
 implementation
@@ -1099,7 +1099,7 @@ end;
 type
   PUint32 = ^Uint32;
 
-function TPackedRepIndexNode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
+function TPackedRepIndexNode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 var
   OwnBoard, OtherBoard: TCellCountMTBoard;
 begin
@@ -1132,7 +1132,7 @@ begin
   end;
 end;
 
-function TPackedRepSearchVal.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
+function TPackedRepSearchVal.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 var
   OtherBoard: TCellCountMTBoard;
 begin

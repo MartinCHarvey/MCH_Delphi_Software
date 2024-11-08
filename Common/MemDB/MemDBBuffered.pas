@@ -208,7 +208,7 @@ type
   //TODO - Collapse next two classes into one.
   TMemDBIndexedList = class(TMemDBJournalCreator)
   protected
-    FStore: TIndexedStore;
+    FStore: TIndexedStoreO;
 
     //IRec is assigned if row already in list.
     function LookaheadHelper(Stream: TStream; var IRec: TItemRec): TMemDBRow;
@@ -220,11 +220,11 @@ type
     procedure FromJournalV2(Stream: TStream); override;
     procedure FromScratchV2(Stream: TStream); override;
 
-    property Store: TIndexedStore read FStore write FStore;
+    property Store: TIndexedStoreO read FStore write FStore;
   end;
 
   TSelectiveRowHandler = procedure(Row: TMemDBRow;
-                                   IRec: TItemRec; Ref1, Ref2: TObject; Store: TIndexedStore) of object;
+                                   IRec: TItemRec; Ref1, Ref2: TObject; Store: TIndexedStoreO) of object;
 
 {$IFDEF USE_TRACKABLES}
   TEditRec = class(TTrackable)
@@ -240,9 +240,9 @@ type
   protected
     //Handle child items when we know they're
     //TMemDBRow.
-    procedure WriteRowToJournalV2(Row: TMemDBRow; IRec: TItemRec;  Ref1, Ref2: TObject; Store: TIndexedStore);
-    procedure CommitRollbackChangedRow(Row: TMemDBRow; IRec: TItemRec; Ref1, Ref2: TObject; Store: TIndexedStore);
-    procedure RemoveEmptyRow(Row: TMemDBRow; IRec: TItemRec; Ref1, Ref2: TObject; Store: TIndexedStore);
+    procedure WriteRowToJournalV2(Row: TMemDBRow; IRec: TItemRec;  Ref1, Ref2: TObject; Store: TIndexedStoreO);
+    procedure CommitRollbackChangedRow(Row: TMemDBRow; IRec: TItemRec; Ref1, Ref2: TObject; Store: TIndexedStoreO);
+    procedure RemoveEmptyRow(Row: TMemDBRow; IRec: TItemRec; Ref1, Ref2: TObject; Store: TIndexedStoreO);
 
     procedure ForEachChangedRow(Handler: TSelectiveRowHandler;
                                 Ref1, Ref2: TObject);
@@ -271,13 +271,13 @@ type
 
     //Navigation and change functions for user API.
     function MoveToRowByIndexTag(Iso: TMDBIsolationLevel;
-                                 Tag: Int64;
+                                 TagStruct: PITagStruct;
                                  CurRow: TMemDBRow;
                                  Pos: TMemAPIPosition): TMemDBRow;
     function FindRowByIndexTag(Iso: TMDBIsolationLevel;
                                IndexDef: TMemIndexDef;
                                FieldDef: TMemFieldDef;
-                               Tag: Int64;
+                               ITagStruct: PITagStruct;
                                const Data: TMemDbFieldDataRec): TMemDBRow;
 
     procedure ReadRowData(Row: TMemDBRow; Iso: TMDBIsolationLevel;
@@ -425,20 +425,19 @@ type
   TMemDBForeignKeyPersistent = class(TMemDBEntity)
   private
     FReferringAdded,
-    FReferredDeleted, FReferredAdded: TIndexedStore;
+    FReferredDeleted, FReferredAdded: TIndexedStoreO;
   protected
-    function FindIndexTag(Metadata: TMemDBTableMetadata;
-                          FieldHelper: TMemDblBufListHelper;
+
+    function FindIndexTag(Table: TMemDbTablePersistent;
                           IndexDef: TMemIndexDef;
-                          const IndexChangesets:TIndexChangeArray;
                           var OutChangeset: TIndexChangeset;
-                          IndexClass:TIndexClass): Int64;
+                          SubIndexClass: TSubIndexClass): PITagStruct;
 
     procedure ProcessRow(Row: TMemDBRow;
-                         IRec: TItemRec; Ref1, Ref2: TObject; Store: TIndexedStore);
+                         IRec: TItemRec; Ref1, Ref2: TObject; Store: TIndexedStoreO);
 
     procedure CreateCheckForeignKeyRowSets(const Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
-    procedure ClearLookaside(Store: TIndexedStore; AlsoFree: boolean);
+    procedure ClearLookaside(Store: TIndexedStoreO; AlsoFree: boolean);
     procedure CreateReferringAddedList(const Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
     procedure TrimReferringAddedList(const Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
 
@@ -468,12 +467,23 @@ type
                       fctChangedFieldNumber);
 
   TFieldChangeSet = set of TFieldChangeType;
-
-
   TFieldChangeArray = array of TFieldChangeSet;
 
-  TCommitChangeMade = (ccmDeleteUnusedIndices,
-                        ccmAdjustTableStructure,
+  //Could have had refcounted tags off metadata,
+  //but this is more in keeping with with having the table internals properly
+  //internal.
+
+  //When data not modified, TagArray correspons to current copy of indices.
+  //When modified, TagArray correspnds to index changeset indexing, i.e,
+  //between modify and commit, added indexes at higher IdxIdx, and
+  //delete sentinels for intermediately deleted indices.
+
+  //TODO maintenance of this array, check added then redeleted,
+  //check tag cleanup after commit and rollback.
+  TTagDataArray = array of TMemDBITagData;
+
+  TCommitChangeMade = ( ccmAddedNewTagStructs,
+                        ccmDeleteUnusedIndices,
                         ccmIndexesToTemporary);
   TCommitChangesMade = set of TCommitChangeMade;
 
@@ -485,6 +495,7 @@ type
     FIndexHelper, FFieldHelper: TMemDblBufListHelper;
     FIndexChangesets: TIndexChangeArray;
     FFieldChangesets: TFieldChangeArray;
+    FTagDataArray: TTagDataArray;
     FIndexingChangeRequired, FDataChangeRequired: boolean;
 
     FEmptyList: TMemStreamableList;
@@ -494,24 +505,34 @@ type
                                                NCFieldCount, NCINdexCount: integer);
     procedure GetCurrNxtMetaCopies(var CC, NC: TMemTableMetadataItem);
     function GetDataChanged: boolean;
+
+    //IdxIdx here the same as changesets.
+    //All errors here internal exceptions.
+    procedure CheckTagAgreesWithMetadata(IdxIdx: integer;
+                            TagData: TMemDBITagData;
+                            IndexState: TTagCheckIndexState;
+                            ProgState: TTagCheckProgrammedState);
+
     //Actions at change or commit check time.
     procedure HandleHelperChangeRequest(Sender: TObject);
     procedure UpdateListHelpers;
     procedure DimensionChangesets;
     procedure ReGenChangesets;
     //Actions made in commit / rollback.
+    procedure AddNewTagStructs;
+    procedure RemoveNewlyAddedTagStructs;
+    procedure RemoveOldTagStructs(DeleteAll: boolean = false);
     procedure DeleteUnusedIndices;
     procedure ReinstateDeletedIndices;
     procedure AdjustTableStructureForMetadata;
-    procedure UnAdjustTableStructureForMetadata;
     procedure CommitAdjustIndicesToTemporary;
     procedure CommitRestoreIndicesToPermanent;
     procedure RollbackRestoreIndicesToPermanent;
 
     procedure RevalidateEntireUserIndex(RawIndexDefNumber: integer);
     procedure CheckStreamedInTableRowCount;
-    procedure CheckStreamedInRowStructure(Row: TMemDBRow; IRec: TItemRec;  Ref1, Ref2: TObject;  Store: TIndexedStore);
-    procedure CheckStreamedInRowIndexing(Row: TMemDBRow; IRec: TItemRec;  Ref1, Ref2: TObject;  Store: TIndexedStore);
+    procedure CheckStreamedInRowStructure(Row: TMemDBRow; IRec: TItemRec;  Ref1, Ref2: TObject;  Store: TIndexedStoreO);
+    procedure CheckStreamedInRowIndexing(Row: TMemDBRow; IRec: TItemRec;  Ref1, Ref2: TObject;  Store: TIndexedStoreO);
 
     procedure LookaheadHelper(Stream: TStream;
                               var MetadataInStream: boolean;
@@ -539,6 +560,7 @@ type
     property LayoutChangeRequired: boolean read FDataChangeRequired;
     property IndexHelper: TMemDblBufListHelper read FIndexHelper;
     property FieldHelper: TMemDblBufListHelper read FFieldHelper;
+    property TagDataArray:  TTagDataArray read FTagDataArray;
   end;
 
   TDBObjList = class(TList)
@@ -774,6 +796,14 @@ const
   S_DATABASE_LOOKAHEAD_FAILED = 'Main DB lookahead failed, tag: ';
   S_ASYNC_PROCESS_CANCELLED = 'Asynchronous computation cancelled in pre-commit step';
   S_INTERNAL_PARALLEL_OP = 'Internal error scheduling parallel operation';
+  S_CHECK_TAGDATA_NO_TAG = 'Check Index Tag Data: does not exist';
+  S_CHECK_TAGDATA_ARRAYSIZE = 'Check Index Tag Data: Tag lookaside bad size or out of date.';
+  S_CHECK_TAGDATA_NOT_EXPECTED = 'Check Index Tag Data: Index tag to be checked not the one we expected at this IndexIndex.';
+  S_CHECK_TAGDATA_NO_META = 'Check Index Tag Data: Expected current or next metadata copy to be available at this time.';
+  S_TAG_FAILED_INDEX_CLASS_CHECK = 'Check Index Tag Data: Index tag did not have the expected index class set';
+  S_TAG_FAILED_DEFAULT_OFFSET_CHECK = 'Check Index Tag Data: Default field index in tag does not agree with metadata';
+  S_TAG_FAILED_EXTRA_OFFSET_CHECK = 'Check Index Tag Data: Extra field index in tag does not agree with metadata';
+  S_TAG_INDEX_BUILT_NOT_AS_EXPECTED = 'Check Index Tag Data: Index has not been built or destroyed when expected.';
 
 {$IFDEF PRE_COMMIT_PARALLEL}
 type
@@ -1244,7 +1274,7 @@ end;
 constructor TMemDBIndexedList.Create;
 begin
   inherited;
-  FStore := TIndexedStore.Create;
+  FStore := TIndexedStoreO.Create;
 end;
 
 destructor TMemDBIndexedList.Destroy;
@@ -1257,6 +1287,7 @@ procedure TMemDBIndexedList.ToScratchV2(Stream: TStream);
 var
   IRec: TItemRec;
   Item: TMemDBJournalCreator;
+  RV: TIsRetVal;
 begin
   WrTag(Stream, mstIndexedListStart);
   IRec := FStore.GetAnItem;
@@ -1264,7 +1295,8 @@ begin
   begin
     Item := IRec.Item as TMemDBJournalCreator;
     Item.ToScratchV2(Stream);
-    FStore.GetAnotherItem(IRec);
+    RV := FStore.GetAnotherItem(IRec);
+    Assert(RV in [rvOK, rvNotFound]);
   end;
   WrTag(Stream, mstIndexedListEnd);
 end;
@@ -1333,7 +1365,7 @@ begin
       SV := TMemDBIndexNodeSearchVal.Create;
       try
         SV.IdSearchVal := RowId;
-        RV := Store.FindByIndex(MDBInternalIndexRowId, SV, IRec);
+        RV := Store.FindByIndex(MDBInternalIndexRowId.TagStructs[sicCurrent], SV, IRec);
       finally
         SV.Free;
       end;
@@ -1360,13 +1392,13 @@ var
   RV: TIsRetVal;
 begin
   inherited;
-  RV := FStore.AddIndex(TMemDBIndexNode, MDBInternalIndexPtr);
+  RV := FStore.AddIndex(TMemDBIndexNode, MDBInternalIndexPtr.TagStructs[sicCurrent]);
   Assert(RV = rvOK);
-  RV := FStore.AddIndex(TMemDBIndexNode, MDBInternalIndexRowId);
+  RV := FStore.AddIndex(TMemDBIndexNode, MDBInternalIndexRowId.TagStructs[sicCurrent]);
   Assert(RV = rvOK);
-  RV := FStore.AddIndex(TMemDBIndexNode, MDBInternalIndexCurrCopy);
+  RV := FStore.AddIndex(TMemDBIndexNode, MDBInternalIndexCurrCopy.TagStructs[sicCurrent]);
   Assert(RV = rvOK);
-  RV := FStore.AddIndex(TMemDBIndexNode, MDBInternalIndexNextCopy);
+  RV := FStore.AddIndex(TMemDBIndexNode, MDBInternalIndexNextCopy.TagStructs[sicCurrent]);
   Assert(RV = rvOK);
 end;
 
@@ -1374,7 +1406,7 @@ destructor TMemDBTableList.Destroy;
 var
   IRec: TItemRec;
   O: TObject;
-  Tag: Int64;
+  Tag: pointer;
   NodeClass: TIndexNodeClass;
   RV: TIsRetVal;
 begin
@@ -1392,7 +1424,8 @@ begin
   begin
     IRec := FStore.GetAnItem;
     O := IRec.Item;
-    FStore.RemoveItem(IRec);
+    RV := FStore.RemoveItem(IRec);
+    Assert(RV = rvOK);
     O.Free;
   end;
   inherited;
@@ -1402,9 +1435,11 @@ function TMemDBTableList.GetChanged: boolean;
 var
   IRec: TItemRec;
   Row: TMemDBRow;
+  RV: TIsRetVal;
 begin
   result := false;
-  Store.FirstByIndex(MDBInternalIndexNextCopy, IRec);
+  RV := Store.FirstByIndex(MDBInternalIndexNextCopy.TagStructs[sicCurrent], IRec);
+  Assert(RV in [rvOK, rvNotFound]);
   if Assigned(IRec) then
   begin
     Row := IRec.Item as TMemDbRow;
@@ -1414,7 +1449,8 @@ begin
       exit;
     end;
   end;
-  Store.LastByIndex(MDBInternalIndexNextCopy, IRec);
+  RV := Store.LastByIndex(MDBInternalIndexNextCopy.TagStructs[sicCurrent], IRec);
+  Assert(RV in [rvOK, rvNotFound]);
   if Assigned(IRec) then
   begin
     Row := IRec.Item as TMemDbRow;
@@ -1439,9 +1475,11 @@ var
   Current, Next: TItemRec;
   CurrentRow: TMemDBRow;
   Down: boolean;
+  RV: TIsRetVal;
 begin
   Down := true;
-  Store.FirstByIndex(MDBInternalIndexNextCopy, Current);
+  RV := Store.FirstByIndex(MDBInternalIndexNextCopy.TagStructs[sicCurrent], Current);
+  Assert(RV in [rvOK, rvNotFound]);
   if not Assigned(Current) then
     exit;
   CurrentRow := Current.Item as TMemDBRow;
@@ -1449,7 +1487,8 @@ begin
   begin
     //Humm, thought we started at lowest poss value, go up instead.
     Down := false;
-    Store.LastByIndex(MDBInternalIndexNextCopy, Current);
+    RV := Store.LastByIndex(MDBInternalIndexNextCopy.TagStructs[sicCurrent], Current);
+    Assert(RV in [rvOK, rvNotFound]);
     if not Assigned(Current) then
     begin
       Assert(false);
@@ -1464,9 +1503,10 @@ begin
     //Just in case handler deletes.
     Next := Current;
     if Down then
-      Store.NextByIndex(MDBInternalIndexNextCopy, Next)
+      RV := Store.NextByIndex(MDBInternalIndexNextCopy.TagStructs[sicCurrent], Next)
     else
-      Store.PreviousByIndex(MDBInternalIndexNextCopy, Next);
+      RV := Store.PreviousByIndex(MDBInternalIndexNextCopy.TagStructs[sicCurrent], Next);
+    Assert(RV in [rvOK, rvNotFound]);
     Handler(CurrentRow, Current, Ref1, Ref2, Store);
     Current := Next;
     if Assigned(Current) then
@@ -1486,9 +1526,11 @@ var
   Current, Next: TItemRec;
   CurrentRow: TMemDBRow;
   Down: boolean;
+  RV: TIsRetVal;
 begin
   Down := true;
-  Store.FirstByIndex(MDBInternalIndexCurrCopy, Current);
+  RV := Store.FirstByIndex(MDBInternalIndexCurrCopy.TagStructs[sicCurrent], Current);
+  Assert(RV in [rvOK, rvNotFound]);
   if not Assigned(Current) then
     exit;
   CurrentRow := Current.Item as TMemDBRow;
@@ -1496,7 +1538,8 @@ begin
   begin
     //Humm, thought we started at lowest poss value, go up instead.
     Down := false;
-    Store.LastByIndex(MDBInternalIndexCurrCopy, Current);
+    RV := Store.LastByIndex(MDBInternalIndexCurrCopy.TagStructs[sicCurrent], Current);
+    Assert(RV in [rvOK, rvNotFound]);
     if not Assigned(Current) then
     begin
       Assert(false);
@@ -1511,9 +1554,10 @@ begin
     //Just in case handler deletes.
     Next := Current;
     if Down then
-      Store.NextByIndex(MDBInternalIndexCurrCopy, Next)
+      RV := Store.NextByIndex(MDBInternalIndexCurrCopy.TagStructs[sicCurrent], Next)
     else
-      Store.PreviousByIndex(MDBInternalIndexCurrCopy, Next);
+      RV := Store.PreviousByIndex(MDBInternalIndexCurrCopy.TagStructs[sicCurrent], Next);
+    Assert(RV in [rvOK, rvNotFound]);
     Handler(CurrentRow, Current, Ref1, Ref2, Store);
     Current:= Next;
     if Assigned(Current) then
@@ -1523,7 +1567,7 @@ begin
   end;
 end;
 
-procedure TMemDBTableList.WriteRowToJournalV2(Row: TMemDBRow; IRec: TItemRec; Ref1, Ref2: TObject; Store: TIndexedStore);
+procedure TMemDBTableList.WriteRowToJournalV2(Row: TMemDBRow; IRec: TItemRec; Ref1, Ref2: TObject; Store: TIndexedStoreO);
 var
   Stream: TStream;
 begin
@@ -1542,7 +1586,7 @@ begin
   end;
 end;
 
-procedure TMemDBTableList.CommitRollbackChangedRow(Row: TMemDBRow; IRec: TItemRec; Ref1, Ref2: TObject;  Store: TIndexedStore);
+procedure TMemDBTableList.CommitRollbackChangedRow(Row: TMemDBRow; IRec: TItemRec; Ref1, Ref2: TObject;  Store: TIndexedStoreO);
 var
   rv: TIsRetVal;
 begin
@@ -1562,7 +1606,7 @@ begin
   Assert(Assigned(IRec));
 end;
 
-procedure TMemDBTableList.RemoveEmptyRow(Row: TMemDBRow; IRec: TItemRec; Ref1, Ref2: TObject; Store: TIndexedStore);
+procedure TMemDBTableList.RemoveEmptyRow(Row: TMemDBRow; IRec: TItemRec; Ref1, Ref2: TObject; Store: TIndexedStoreO);
 begin
   FStore.RemoveItem(IRec);
   Row.Free;
@@ -1588,13 +1632,13 @@ var
   IRec: TItemRec;
   rv: TISRetVal;
 begin
-  rv := FStore.FirstByIndex(MDBInternalIndexRowId, IRec);
+  rv := FStore.FirstByIndex(MDBInternalIndexRowId.TagStructs[sicCurrent], IRec);
   Assert(rv in [rvOk, rvNotFound]);
   if Assigned(IRec) then
   begin
     result := TEditRec.Create;
     result.IRec := IRec;
-    rv := FStore.NextByIndex(MDBInternalIndexRowId, IRec);
+    rv := FStore.NextByIndex(MDBInternalIndexRowId.TagStructs[sicCurrent], IRec);
     Assert(rv in [rvOk, rvNotFound]);
     result.NextIRec := IRec;
   end
@@ -1613,7 +1657,7 @@ begin
   begin
     result := EditRec;
     IRec := EditRec.IRec;
-    rv := FStore.NextByIndex(MDBInternalIndexRowId, IRec);
+    rv := FStore.NextByIndex(MDBInternalIndexRowId.TagStructs[sicCurrent], IRec);
     Assert(rv in [rvOk, rvNotFound]);
     result.NextIRec := IRec;
   end
@@ -1653,7 +1697,7 @@ begin
   //by a new "get next" call.
 end;
 
-function TMemDBTableList.MoveToRowByIndexTag(Iso: TMDBIsolationLevel; Tag: Int64;
+function TMemDBTableList.MoveToRowByIndexTag(Iso: TMDBIsolationLevel; TagStruct: PITagStruct;
                              CurRow: TMemDBRow;
                              Pos: TMemAPIPosition): TMemDBRow;
 var
@@ -1667,19 +1711,19 @@ begin
   begin
     GLogLog(SV_INFO, 'MoveToRowByIndexTag, with starting row ' +
       MDBIsoStrings[Iso] + ' ' + MemAPIPositionStrings[Pos] +
-      ' Tag: ' + IntToStr(Tag));
+      ' TagStruct: ' + IntToStr(NativeInt(TagStruct)));
   end
   else
   begin
     GLogLog(SV_INFO, 'MoveToRowByIndexTag, no starting row ' +
       MDBIsoStrings[Iso] + ' ' + MemAPIPositionStrings[Pos] +
-      ' Tag: ' + IntToStr(Tag));
+      ' TagStruct: ' + IntToStr(NativeInt(TagStruct)));
   end;
 {$ENDIF}
   RV := rvInternalError;
   case Pos of
-    ptFirst: RV := FStore.FirstByIndex(Tag, Res);
-    ptLast: RV := FStore.LastByIndex(Tag, Res);
+    ptFirst: RV := FStore.FirstByIndex(TagStruct, Res);
+    ptLast: RV := FStore.LastByIndex(TagStruct, Res);
     ptNext, ptPrevious:
     begin
       if not Assigned(CurRow) then
@@ -1687,16 +1731,16 @@ begin
       SearchVal := TMemDBIndexNodeSearchVal.Create;
       try
         SearchVal.PointerSearchVal := CurRow;
-        RV := FStore.FindByIndex(MDBInternalIndexPtr, SearchVal, Res);
+        RV := FStore.FindByIndex(MDBInternalIndexPtr.TagStructs[sicCurrent], SearchVal, Res);
         if RV <> rvOK then
           raise EMemDBInternalException.Create(S_API_NEXT_PREV_INTERNAL_ERROR);
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
         GLogLog(SV_INFO, 'MoveToRowByIndexTag, find of previous cursor OK.');
 {$ENDIF}
         if Pos = ptNext then
-          RV := FStore.NextByIndex(Tag, Res)
+          RV := FStore.NextByIndex(TagStruct, Res)
         else
-          RV := FStore.PreviousByIndex(Tag, Res);
+          RV := FStore.PreviousByIndex(TagStruct, Res);
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
         if RV = rvOK then
           GLogLog(SV_INFO, 'MoveToRowByIndexTag, move by 1 from previous cursor OK.')
@@ -1738,8 +1782,8 @@ begin
     GLogLog(SV_INFO, 'MoveToRowByIndexTag, row is sentinel, skip ' + MDBABStrings[AB]);
 {$ENDIF}
     case Pos of
-      ptFirst, ptNext: RV := FStore.NextByIndex(Tag, Res);
-      ptLast, ptPrevious: RV := FStore.PreviousByIndex(Tag, Res);
+      ptFirst, ptNext: RV := FStore.NextByIndex(TagStruct, Res);
+      ptLast, ptPrevious: RV := FStore.PreviousByIndex(TagStruct, Res);
     else
       Assert(false);
     end;
@@ -1761,7 +1805,7 @@ end;
 function TMemDBTableList.FindRowByIndexTag(Iso: TMDBIsolationLevel;
                                            IndexDef: TMemIndexDef;
                                            FieldDef: TMemFieldDef;
-                                           Tag: Int64;
+                                           ITagStruct: PITagStruct;
                                            const Data: TMemDbFieldDataRec): TMemDBRow;
 var
   RV: TIsRetVal;
@@ -1775,7 +1819,7 @@ begin
     raise EMemDBAPIException.Create(S_API_SEARCH_VAL_BAD_TYPE);
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
     GLogLog(SV_INFO, 'FindRowByIndexTag ' +
-      MDBIsoStrings[Iso] + ' Tag: ' + IntToStr(Tag));
+      MDBIsoStrings[Iso] + ' Tag: ' + IntToStr(NativeInt(ITagStruct)));
     if Data.FieldType = ftUnicodeString then
     begin
       GLogLog(SV_INFO, 'FindRowByIndexTag SearchVal: ' + Data.sVal);
@@ -1784,7 +1828,7 @@ begin
   SearchVal := TMemDBIndexNodeSearchVal.Create;
   try
     SearchVal.FieldSearchVal := Data; //Sidestepping pointerisms.
-    RV := Store.FindByIndex(Tag, SearchVal, IRec);
+    RV := Store.FindByIndex(ITagStruct, SearchVal, IRec);
     if not (RV in [rvOK, rvNotFound]) then
     begin
       if RV = rvTagNotFound then
@@ -1862,7 +1906,7 @@ begin
     SearchVal := TMemDBIndexNodeSearchVal.Create;
     try
       SearchVal.PointerSearchVal := Row;
-      IRet := Store.FindByIndex(MDBInternalIndexPtr, SearchVal, IRec);
+      IRet := Store.FindByIndex(MDBInternalIndexPtr.TagStructs[sicCurrent], SearchVal, IRec);
       if IRet <> rvOK then
         raise EMemDBInternalException.Create(S_API_POST_INTERNAL);
       IRet := Store.RemoveItem(IRec);
@@ -1898,7 +1942,7 @@ begin
   SearchVal := TMemDBIndexNodeSearchVal.Create;
   try
     SearchVal.PointerSearchVal := Row;
-    IRet := Store.FindByIndex(MDBInternalIndexPtr, SearchVal, IRec);
+    IRet := Store.FindByIndex(MDBInternalIndexPtr.TagStructs[sicCurrent], SearchVal, IRec);
     if IRet <> rvOK then
       raise EMemDBInternalException.Create(S_API_DELETE_INTERNAL);
     IRet := Store.RemoveItem(IRec);
@@ -2033,6 +2077,7 @@ end;
 
 destructor TMemDBTablePersistent.Destroy;
 begin
+  RemoveOldTagStructs(true);
   FMetadata.Free;
   FData.Free;
   FIndexHelper.Free;
@@ -2241,6 +2286,120 @@ begin
   GetCurrNxtMetaCopiesEx(CC,NC, CCFieldCount, NCFieldCount, CCIndexCount, NCIndexCount);
 end;
 
+
+procedure TMemDBTablePersistent.CheckTagAgreesWithMetadata(IdxIdx: integer;
+                        TagData: TMemDBITagData;
+                        IndexState: TTagCheckIndexState;
+                        ProgState: TTagCheckProgrammedState);
+var
+  CC,NC: TMemTableMetadataItem;
+  CCFieldCount, CCIndexCount, NCFieldCount, NCIndexCount: integer;
+  IndexDefCC, IndexDefNC: TMemIndexDef;
+  MSTemp: TMemDBStreamable;
+  NeedCurrent, NeedNext:boolean;
+begin
+  //UpdateListHelpers - already done at all points where metadata undergoes
+  //major rearrangement.
+  GetCurrNxtMetaCopiesEx(CC, NC, CCFieldCount, CCIndexCount, NCFieldCount, NCIndexCount);
+  //Check tag exists and is where we expect.
+  if not Assigned(TagData) then
+    raise EMemDBInternalException.Create(S_CHECK_TAGDATA_NO_TAG);
+  if (IdxIdx < 0) or (IdxIdx >= Length(FTagDataArray)) then
+    raise EMemDbInternalException.Create(S_CHECK_TAGDATA_ARRAYSIZE);
+  if (TagData <> FTagDataArray[IdxIdx]) then
+    raise EMemDbInternalException.Create(S_CHECK_TAGDATA_NOT_EXPECTED);
+  //Consistency with current/next metadata, indexes and fields,
+  //specifically field numbers is checked elsewhere (re-gen changesets).
+  //Assume field indexes (which are ND indexes) are esentially correct.
+  IndexDefCC := nil;
+  IndexDefNC := nil;
+  NeedCurrent := false;
+  NeedNext := false;
+  case IndexState of
+    tciPermanentAgreesCurrent: NeedCurrent := true;
+    tciTemporaryAgreesNextOnly, tciPermanentAgreesNext: NeedNext := true;
+    tciTemporaryAgreesBoth:
+    begin
+      NeedCurrent := true;
+      NeedNext := true;
+    end;
+  else
+    Assert(false);
+  end;
+  if NeedCurrent then
+  begin
+    if not Assigned(CC) or (IdxIdx >= CCIndexCount) then
+      raise EMemDbInternalException.Create(S_CHECK_TAGDATA_NO_META);
+    MSTemp := CC.IndexDefs.Items[IdxIdx];
+    if NotAssignedOrSentinel(MSTemp) then
+      raise EMemDbInternalException.Create(S_CHECK_TAGDATA_NO_META);
+    IndexDefCC := MSTemp as TMemIndexDef;
+  end;
+  if NeedNext then
+  begin
+    if not Assigned(NC) or (IdxIdx >= NCIndexCount) then
+      raise EMemDbInternalException.Create(S_CHECK_TAGDATA_NO_META);
+    MSTemp := NC.IndexDefs.Items[IdxIdx];
+    if NotAssignedOrSentinel(MSTemp) then
+      raise EMemDbInternalException.Create(S_CHECK_TAGDATA_NO_META);
+    IndexDefNC := MSTemp as TMemIndexDef;
+  end;
+  case IndexState of
+    tciPermanentAgreesCurrent:
+    //Permanent index, default field offset which agrees with CC.IndexDef.FieldNumber
+    begin
+      if TagData.MainIndexClass <> micPermanent then
+        raise EMemDbInternalException.Create(S_TAG_FAILED_INDEX_CLASS_CHECK);
+      if (TagData.DefaultFieldOffset <> IndexDefCC.FieldIndex) then
+        raise EMemDbInternalException.Create(S_TAG_FAILED_DEFAULT_OFFSET_CHECK);
+    end;
+    tciPermanentAgreesNext:
+    //Permanent index, default field offset which agrees with NC.IndexDef.FieldNumber
+    begin
+      if TagData.MainIndexClass <> micPermanent then
+        raise EMemDbInternalException.Create(S_TAG_FAILED_INDEX_CLASS_CHECK);
+      if (TagData.DefaultFieldOffset <> IndexDefNC.FieldIndex) then
+        raise EMemDbInternalException.Create(S_TAG_FAILED_DEFAULT_OFFSET_CHECK);
+    end;
+    tciTemporaryAgreesBoth:
+    //Temporary index, default field offset agreeds with NC.IndexDef.FieldNumber,
+    //which should prob be the NDIndex of the field, extra field offset is the
+    //"old" offset in CC.
+    begin
+      if TagData.MainIndexClass <> micTemporary then
+        raise EMemDbInternalException.Create(S_TAG_FAILED_INDEX_CLASS_CHECK);
+      if (TagData.DefaultFieldOffset <> IndexDefNC.FieldIndex) then
+        raise EMemDbInternalException.Create(S_TAG_FAILED_DEFAULT_OFFSET_CHECK);
+      if (TagData.ExtraFieldOffset <> IndexDefCC.FieldIndex) then
+        raise EMemDbInternalException.Create(S_TAG_FAILED_EXTRA_OFFSET_CHECK);
+    end;
+    //Temporary index, default field offset agreeds with NC.IndexDef.FieldNumber,
+    //which should prob be the NDIndex of the field, extra field offset is the
+    //ND index of the field before any possible rearrangement, which is academic,
+    //cos the index didn't exist then.
+    tciTemporaryAgreesNextOnly:
+    begin
+      if TagData.MainIndexClass <> micTemporary then
+        raise EMemDbInternalException.Create(S_TAG_FAILED_INDEX_CLASS_CHECK);
+      if (TagData.DefaultFieldOffset <> IndexDefNC.FieldIndex) then
+        raise EMemDbInternalException.Create(S_TAG_FAILED_DEFAULT_OFFSET_CHECK);
+    end;
+  else
+    Assert(false);
+  end;
+  case ProgState of
+    tcpNotProgrammed:
+      if TagData.IdxsSetToStore then
+        raise EMemDbInternalException.Create(S_TAG_INDEX_BUILT_NOT_AS_EXPECTED);
+    tcpProgrammed:
+      if not TagData.IdxsSetToStore then
+        raise EMemDbInternalException.Create(S_TAG_INDEX_BUILT_NOT_AS_EXPECTED);
+    tcpDontCare: ;
+  else
+    Assert(false);
+  end;
+end;
+
 procedure TMemDBTablePersistent.ReGenChangesets;
 var
   i, j, NDIndex: integer;
@@ -2307,10 +2466,6 @@ begin
           IndexDef2 := NC.IndexDefs.Items[j] as TMemIndexDef;
           if IndexDef1.IndexName = IndexDef2.IndexName then
             raise EMemDBConsistencyException.Create(S_DUP_INDEX_NAMES);
-          //Check unique field deconfliction info (index tag clash).
-          if (IndexDef1.FieldIndex = IndexDef2.FieldIndex)
-            and (IndexDef1.FieldDeconflict = IndexDef2.FieldDeconflict) then
-            raise EMemDBInternalException.Create(S_INDEX_TAG_CONFLICT);
         end;
       end;
       //Indexes not numbered, might reconsider with foreign keys.
@@ -2381,10 +2536,6 @@ begin
         if FieldDef1.FieldType <> FieldDef2.FieldType then
           raise EMemDBConsistencyException.Create(S_INDEXED_FIELD_CHANGED_TYPE);
 
-        //Do not expect deconfliction info to change over the lifetime of the index.
-        if IndexDef1.FieldDeconflict <> IndexDef2.FieldDeconflict then
-          raise EMemDBInternalException.Create(S_DECONFLICTION_INFO_CHANGED);
-
         if IndexDef1.IndexName <> IndexDef2.IndexName then
           FIndexChangesets[i] := FIndexChangesets[i] + [ictChangedName];
         if IndexDef1.IndexAttrs <> IndexDef2.IndexAttrs then
@@ -2434,20 +2585,20 @@ begin
   begin
     //If other checking has worked, expect not to have to go round this loop
     //at all. - Field change count should have implicit data changes.
-    RV := FData.Store.FirstByIndex(MDBInternalIndexRowId, Res);
+    RV := FData.Store.FirstByIndex(MDBInternalIndexRowId.TagStructs[sicCurrent], Res);
     while (RV = rvOK) do
     begin
       Row := Res.Item as TMemDBRow;
       if not Row.Deleted then
         raise EMemDBConsistencyException.Create(S_TABLE_WITH_NO_FIELDS_HAS_ROWS);
-      RV := FData.Store.NextByIndex(MDBInternalIndexRowId, Res)
+      RV := FData.Store.NextByIndex(MDBInternalIndexRowId.TagStructs[sicCurrent], Res)
     end;
     Assert(RV = rvNotFound);
   end;
 end;
 
 
-procedure TMemDbTablePersistent.CheckStreamedInRowStructure(Row: TMemDBRow; IRec: TItemRec;  Ref1, Ref2: TObject; Store: TIndexedStore);
+procedure TMemDbTablePersistent.CheckStreamedInRowStructure(Row: TMemDBRow; IRec: TItemRec;  Ref1, Ref2: TObject; Store: TIndexedStoreO);
 var
   MostRecent: TMemTableMetadataItem;
   RowFields: TMemStreamableList;
@@ -2499,61 +2650,171 @@ end;
 
 procedure TMemDBTablePersistent.DeleteUnusedIndices;
 var
-  CC, NC: TMemTableMetadataItem;
   i: integer;
-  IndexDef: TMemIndexDef;
-  ITag: Int64;
-  IRet: TISRetVal;
-  IndexClass: TIndexClass;
+  TagData: TMemDBITagData;
 begin
   if FIndexingChangeRequired then
   begin
-    //GetCurrentNextMetadataCopies(CC, NC, CCFieldCount, CCIndexCount, NCFieldCount, NCIndexCount);
-    GetCurrNxtMetaCopies(CC,NC);
     for i := 0 to Pred(Length(FIndexChangesets)) do
     begin
       if ictDeleted in FIndexChangesets[i] then
       begin
-        IndexDef := CC.IndexDefs.Items[i] as TMemIndexDef;
-        for IndexClass := icCurrent to icMostRecent do
-        begin
-          EncodeIndexTag(ITag, IndexClass, IndexClass, IndexDef.FieldIndex, 0, IndexDef.FieldDeconflict);
-          if not FData.Store.HasIndex(ITag) then
-            raise EMemDBInternalException.Create(S_INDEX_TAG_NOT_FOUND);
-          IRet := FData.Store.DeleteIndex(ITag);
-          Assert(IRet = rvOK);
-        end;
+        TagData := FTagDataArray[i];
+        CheckTagAgreesWithMetadata(i, TagData, tciPermanentAgreesCurrent, tcpProgrammed);
+        TagData.CommitRmIdxsFromStore;
         FCommitChangesMade := FCommitChangesMade + [ccmDeleteUnusedIndices];
+        CheckTagAgreesWithMetadata(i, TagData, tciPermanentAgreesCurrent, tcpNotProgrammed);
       end;
     end;
   end;
 end;
 
-procedure TMemDBTablePersistent.ReinstateDeletedIndices;
+const
+  S_NEW_TAGS_UNEXPECTED_COUNT = 'Unexpected count of tags checking tag arrays.';
+  S_NEW_TAGS_UNEXPECTED_OBJECT = 'Unexpected object encountered checking tag arrays';
+
+//Just create new tags.Don't need to set new fields or anything yet.
+procedure TMemDBTablePersistent.AddNewTagStructs;
 var
-  CC, NC: TMemTableMetadataItem;
-  i: integer;
-  IndexDef: TMemIndexDef;
-  ITag: Int64;
-  IRet: TISRetVal;
-  IndexClass: TIndexClass;
+ CC,NC:TMemTableMetadataItem;
+ CCFieldCount, CCIndexCount, NCFieldCount, NCINdexCount, i:integer;
 begin
   if FIndexingChangeRequired then
   begin
-    //GetCurrentNextMetadataCopies(CC, NC, CCFieldCount, CCIndexCount, NCFieldCount, NCIndexCount);
-    GetCurrNxtMetaCopies(CC,NC);
-    for i := 0 to Pred(Length(FIndexChangesets)) do
+    GetCurrNxtMetaCopiesEx(CC,NC, CCFieldCount, CCIndexCount, NCFieldCount, NCIndexCount);
+    //These counts include items which are delete sentinels.
+    Assert(NCIndexCount >= CCIndexCount);
+    if Length(FTagDataArray) <> CCIndexCount then
+      raise EMemDBInternalException.Create(S_NEW_TAGS_UNEXPECTED_COUNT);
+
+    for i := 0 to Pred(CCIndexCount) do
     begin
-      if ictDeleted in FIndexChangesets[i] then
+      if not (Assigned(FTagDataArray[i]) and (FTagDataArray[i] is TMemDBITagData)) then
+        raise EMemDBInternalException.Create(S_NEW_TAGS_UNEXPECTED_OBJECT);
+    end;
+    if NCIndexCount > CCIndexCount then
+    begin
+      SetLength(FTagDataArray, NCIndexCount);
+      FCommitChangesMade := FCommitChangesMade + [ccmAddedNewTagStructs];
+      for i := CCIndexCount to Pred(NCIndexCount) do
       begin
-        IndexDef := CC.IndexDefs.Items[i] as TMemIndexDef;
-        for IndexClass := icCurrent to icMostRecent do
+        Assert(FIndexChangesets[i] = [ictAdded]);
+        FTagDataArray[i] := TMemDBITagData.Create;
+      end;
+      //No need to init fields here.
+    end;
+  end;
+end;
+
+procedure TMemDBTablePersistent.RemoveNewlyAddedTagStructs;
+var
+ CC,NC:TMemTableMetadataItem;
+ CCFieldCount, CCIndexCount, NCFieldCount, NCINdexCount, i:integer;
+begin
+  GetCurrNxtMetaCopiesEx(CC,NC, CCFieldCount, CCIndexCount, NCFieldCount, NCIndexCount);
+  Assert(NCIndexCount >= CCIndexCount);
+  Assert(Length(FTagDataArray) = NCIndexCount);
+  if NCIndexCount > CCIndexCount then
+  begin
+    for i := CCIndexCount to Pred(NCIndexCount) do
+    begin
+      Assert(FIndexChangesets[i] = [ictAdded]);
+      FTagDataArray[i].Free;
+    end;
+    SetLength(FTagDataArray, CCIndexCount);
+  end;
+end;
+
+procedure TMemDbTablePersistent.RemoveOldTagStructs(DeleteAll: boolean);
+var
+  Idx, DstIdx: integer;
+  NewTags: TTagDataArray;
+  i, Deleted, ToCopy: Integer;
+  TagStruct: TMemDBITagData;
+  CC,NC:TMemTableMetadataItem;
+  CCFieldCount, CCIndexCount, NCFieldCount, NCINdexCount:integer;
+
+begin
+  //If deleted, then very next commit which happens next will make it
+  //null, table will be blown away.
+  if FMetadata.Deleted or FMetadata.Null then
+    DeleteAll := true;
+  if DeleteAll then
+  begin
+    for i := 0 to Pred(Length(FTagDataArray)) do
+    begin
+      //Minimal fuss cleardown when next copy of metadata
+      //blown away, as opposed to individual index rearrangement.
+      if FTagDataArray[i].IdxsSetToStore then
+        FTagDataArray[i].RollbackRmIdxsFromStore;
+      FTagDataArray[i].Free;
+    end;
+    SetLength(FTagDataArray, 0);
+  end
+  else
+  begin
+    if FMetadata.Added or FMetadata.Changed then
+    begin
+      //List helpers are in fact valid at this point.
+      //Was torn on whether to use them but we won't
+      GetCurrNxtMetaCopiesEx(CC,NC, CCFieldCount, CCIndexCount, NCFieldCount, NCIndexCount);
+      Assert(NCIndexCount >= CCIndexCount);
+      Deleted := 0;
+      for i := 0 to Pred(CCIndexCount) do
+      begin
+        if NC.IndexDefs.Items[i] is TMemDeleteSentinel then
         begin
-          EncodeIndexTag(ITag, IndexClass, IndexClass, IndexDef.FieldIndex, 0, IndexDef.FieldDeconflict);
-          IRet := FData.Store.AddIndex(TMemDBIndexNode, ITag);
-          Assert(IRet = rvOK);
+          Assert(FIndexChangesets[i] = [ictDeleted]);
+          TagStruct := FTagDataArray[i];
+          CheckTagAgreesWithMetadata(i, TagStruct, tciPermanentAgreesCurrent, tcpNotProgrammed);
+          TagStruct.Free;
+          FTagDataArray[i] := nil;
+          Inc(Deleted);
         end;
       end;
+      if Deleted > 0 then
+      begin
+        ToCopy := NCIndexCount - Deleted;
+        Assert(ToCopy >= 0);
+        SetLength(NewTags, ToCopy);
+        DstIdx := 0;
+        if ToCopy > 0 then
+        begin
+          for i := 0 to Pred(NCIndexCount) do
+          begin
+            if Assigned(FTagDataArray[i]) then
+            begin
+              Assert(not (ictDeleted in FIndexChangesets[i]));
+              NewTags[DstIdx] := FTagDataArray[i];
+              Inc(DstIdx);
+              Dec(ToCopy);
+            end
+            else
+              Assert(FIndexChangesets[i] = [ictDeleted]);
+          end;
+        end;
+        Assert(ToCopy = 0);
+        Assert(DstIdx = Length(NewTags));
+        FTagDataArray := NewTags;
+      end;
+    end;
+  end;
+end;
+
+
+procedure TMemDBTablePersistent.ReinstateDeletedIndices;
+var
+  i: integer;
+  TagData: TMemDBITagData;
+begin
+  for i := 0 to Pred(Length(FIndexChangesets)) do
+  begin
+    if ictDeleted in FIndexChangesets[i] then
+    begin
+      TagData := FTagDataArray[i];
+      CheckTagAgreesWithMetadata(i, TagData, tciPermanentAgreesCurrent, tcpNotProgrammed);
+      TagData.RollbackRestoreIdxsToStore(FData.Store);
+      CheckTagAgreesWithMetadata(i, TagData, tciPermanentAgreesCurrent, tcpProgrammed);
     end;
   end;
 end;
@@ -2636,27 +2897,19 @@ begin
     end;
     EditRec := FData.MetaEditNext(EditRec);
   end;
-  FCommitChangesMade := FCommitChangesMade + [ccmAdjustTableStructure];
 end;
 
-procedure TMemDBTablePersistent.UnAdjustTableStructureForMetadata;
-begin
-  //This should happen as part of the a/b rollback anyway, no action required?
-end;
 
 procedure TMemDbTablePersistent.CommitAdjustIndicesToTemporary;
 var
   CC, NC: TMemTableMetadataItem;
   i: integer;
-  IndexDef1, IndexDef2: TMemIndexDef;
-  IndexClass: TIndexClass;
-  ITag, NewTag: Int64;
-  IRet: TISRetVal;
+  IndexDef1: TMemIndexDef;
+  TagData: TMemDbITagData;
 begin
-  GetCurrNxtMetaCopies(CC,NC);
   if FIndexingChangeRequired then
   begin
-    FCommitChangesMade := FCommitChangesMade + [ccmIndexesToTemporary];
+    GetCurrNxtMetaCopies(CC,NC);
     FTemporaryIndexLimit := 0;
 
     for i := 0 to Pred(Length(FIndexChangesets)) do
@@ -2666,39 +2919,28 @@ begin
         FTemporaryIndexLimit := Succ(i);
         continue; //Index already blown away.
       end;
-
+      TagData := FTagDataArray[i];
       //Revalidate indexes unique after changing field numbers.
       IndexDef1 := NC.IndexDefs.Items[i] as TMemIndexDef;
+      FCommitChangesMade := FCommitChangesMade + [ccmIndexesToTemporary];
+
       if ictChangedFieldNumber  in FIndexChangesets[i] then
       begin
         Assert(not (ictAdded in FIndexChangesets[i]));
-        IndexDef2 := CC.IndexDefs.Items[i] as TMemIndexDef;
-
-        for IndexClass := icCurrent to icMostRecent do
-        begin
-          Assert(IndexDef1.FieldIndex <= IndexDef2.FieldIndex);
-          EncodeIndexTag(ITag, IndexClass, IndexClass, IndexDef2.FieldIndex, 0, IndexDef2.FieldDeconflict);
-          EncodeIndexTag(NewTag, icTemporary, IndexClass, IndexDef1.FieldIndex, IndexDef2.FieldIndex, IndexDef1.FieldDeconflict);
-          if not FData.Store.HasIndex(ITag) then
-            raise EMemDBInternalException.Create(S_INDEX_TAG_NOT_FOUND);
-          if FData.Store.HasIndex(NewTag) then
-            raise EMemDBInternalException.Create(S_INDEX_TAG_DUPLICATE);
-          IRet := FData.Store.AdjustIndexTag(ITag, NewTag);
-          Assert(IRet = rvOK);
-        end;
+        CheckTagAgreesWithMetadata(i, TagData, tciPermanentAgreesCurrent, tcpProgrammed);
+        TagData.MakePermanentTemporary(IndexDef1.FieldIndex);
+        CheckTagAgreesWithMetadata(i, TagData, tciTemporaryAgreesBoth, tcpProgrammed);
       end
       else if ictAdded in FIndexChangesets[i] then
       begin
-        for IndexClass := icCurrent to icMostRecent do
-        begin
-          Assert(IndexDef1.FieldIndex <= FFieldHelper.NdIndexToRawIndex(IndexDef1.FieldIndex));
-          EncodeIndexTag(NewTag, icTemporary, IndexClass,
-            IndexDef1.FieldIndex, FFieldHelper.NdIndexToRawIndex(IndexDef1.FieldIndex), IndexDef1.FieldDeconflict);
-          if FData.Store.HasIndex(NewTag) then
-            raise EMemDBInternalException.Create(S_INDEX_TAG_DUPLICATE);
-          IRet := FData.Store.AddIndex(TMemDBIndexNode, NewTag);
-          Assert(IRet = rvOK);
-        end;
+        //Newly created tag needs to be made temporary, and we create the
+        //"previous" field index to take into account possible field rearrangements.
+        Assert(IndexDef1.FieldIndex <= FFieldHelper.NdIndexToRawIndex(IndexDef1.FieldIndex));
+        TagData.InitPermanent(FFieldHelper.NdIndexToRawIndex(IndexDef1.FieldIndex));
+        TagData.MakePermanentTemporary(IndexDef1.FieldIndex);
+        CheckTagAgreesWithMetadata(i, TagData, tciTemporaryAgreesNextOnly, tcpNotProgrammed);
+        TagData.CommitAddIdxsToStore(FData.Store);
+        CheckTagAgreesWithMetadata(i, TagData, tciTemporaryAgreesNextOnly, tcpProgrammed);
       end;
       FTemporaryIndexLimit := Succ(i);
     end;
@@ -2714,6 +2956,7 @@ begin
         //Handle index validation.
         if IndexDef1.IndexAttrs * [iaUnique, iaNotEmpty] <> [] then
           RevalidateEntireUserIndex(i);
+          //TODO - Test corner caes here.
       end;
     end;
     //Index revalidation where data changes is done earlier.
@@ -2722,86 +2965,43 @@ end;
 
 procedure TMemDbTablePersistent.CommitRestoreIndicesToPermanent;
 var
-  CC, NC: TMemTableMetadataItem;
-  IndexDef1, IndexDef2: TMemIndexDef;
   i: integer;
-  IndexClass: TIndexClass;
-  ITag, NewTag: Int64;
-  IRet: TISRetVal;
   Limit: integer;
+  TagData: TMemDBITagData;
 begin
-  GetCurrNxtMetaCopies(CC,NC);
   //Adjust temporary indices back to permanent ones.
   //Temporary index tags are such that commit removal and addition should have
   //gone OK.
-  if FIndexingChangeRequired then
+  Limit := FTemporaryIndexLimit;
+  FTemporaryIndexLimit := 0;
+  for i := 0 to Pred(Limit) do
   begin
-    Limit := FTemporaryIndexLimit;
-    FTemporaryIndexLimit := 0;
-    for i := 0 to Pred(Limit) do
+    if ictDeleted in FIndexChangesets[i] then
+      continue; //Index already blown away.
+
+    TagData := FTagDataArray[i];
+    if ictChangedFieldNumber  in FIndexChangesets[i] then
     begin
-      if ictDeleted in FIndexChangesets[i] then
-        continue; //Index already blown away.
-
-      IndexDef1 := NC.IndexDefs.Items[i] as TMemIndexDef;
-      if ictChangedFieldNumber  in FIndexChangesets[i] then
-      begin
-        Assert(not (ictAdded in FIndexChangesets[i]));
-        IndexDef2 := CC.IndexDefs.Items[i] as TMemIndexDef;
-
-        for IndexClass := icCurrent to icMostRecent do
-        begin
-//Before commit we did, move from IndexDef2 to IndexDef1: (Current to next).
-//Changed indexes:
-//EncodeIndexTag(ITag, IndexClass, IndexClass, IndexDef2.FieldIndex, 0);
-//EncodeIndexTag(NewTag, icTemporary, IndexClass, IndexDef1.FieldIndex, IndexDef2.FieldIndex);
-          Assert(IndexDef1.FieldIndex <= IndexDef2.FieldIndex);
-//Now we do Temporary IndexDef1 to Permanent IndexDef1.
-          EncodeIndexTag(ITag, icTemporary, IndexClass, IndexDef1.FieldIndex, IndexDef2.FieldIndex, IndexDef1.FieldDeconflict);
-          EncodeIndexTag(NewTag, IndexClass, IndexClass, IndexDef1.FieldIndex, 0, IndexDef1.FieldDeconflict);
-          if not FData.Store.HasIndex(ITag) then
-            raise EMemDBInternalException.Create(S_INDEX_TAG_NOT_FOUND);
-          if FData.Store.HasIndex(NewTag) then
-            raise EMemDBInternalException.Create(S_INDEX_TAG_DUPLICATE);
-          IRet := FData.Store.AdjustIndexTag(ITag, NewTag);
-          Assert(IRet = rvOK);
-        end;
-      end
-      else if ictAdded in FIndexChangesets[i] then
-      begin
-        for IndexClass := icCurrent to icMostRecent do
-        begin
-//Before commit we did, move from (calculated IndexDef2) to IndexDef1: (Current to next).
-//Added indexes:
-//EncodeIndexTag(NewTag, icTemporary, IndexClass, IndexDef1.FieldIndex, FFieldHelper.NdIndexToRawIndex(IndexDef1.FieldIndex));
-          Assert(IndexDef1.FieldIndex <= FFieldHelper.NdIndexToRawIndex(IndexDef1.FieldIndex));
-//Now we do Temporary IndexDef1 to Permanent IndexDef1.
-          EncodeIndexTag(ITag, icTemporary, IndexClass,
-            IndexDef1.FieldIndex, FFieldHelper.NdIndexToRawIndex(IndexDef1.FieldIndex), IndexDef1.FieldDeconflict);
-          EncodeIndexTag(NewTag, IndexClass, IndexClass, IndexDef1.FieldIndex, 0, IndexDef1.FieldDeconflict);
-          if not FData.Store.HasIndex(ITag) then
-            raise EMemDBInternalException.Create(S_INDEX_TAG_NOT_FOUND);
-          if FData.Store.HasIndex(NewTag) then
-            raise EMemDBInternalException.Create(S_INDEX_TAG_DUPLICATE);
-          IRet := FData.Store.AdjustIndexTag(ITag, NewTag);
-          Assert(IRet = rvOK);
-        end;
-      end;
+      Assert(not (ictAdded in FIndexChangesets[i]));
+      CheckTagAgreesWithMetadata(i, TagData, tciTemporaryAgreesBoth, tcpProgrammed);
+      TagData.CommitRestoreToPermanent;
+      CheckTagAgreesWithMetadata(i, TagData, tciPermanentAgreesNext, tcpProgrammed);
+    end
+    else if ictAdded in FIndexChangesets[i] then
+    begin
+      CheckTagAgreesWithMetadata(i, TagData, tciTemporaryAgreesNextOnly, tcpProgrammed);
+      TagData.CommitRestoreToPermanent;
+      CheckTagAgreesWithMetadata(i, TagData, tciPermanentAgreesNext, tcpProgrammed);
     end;
   end;
 end;
 
 procedure TMemDBTablePersistent.RollbackRestoreIndicesToPermanent;
 var
-  CC, NC: TMemTableMetadataItem;
-  IndexDef1, IndexDef2: TMemIndexDef;
   i: integer;
-  IndexClass: TIndexClass;
-  ITag, NewTag: Int64;
-  RV: TIsRetVal;
   Limit: integer;
+  TagData: TMemDBITagData;
 begin
-  GetCurrNxtMetaCopies(CC, NC);
   //Adjust temporary indices back to permanent ones.
   //Temporary index tags are such that commit removal and addition should have
   //gone OK.
@@ -2814,51 +3014,26 @@ begin
       if ictDeleted in FIndexChangesets[i] then
         continue; //Index already blown away.
 
-      IndexDef1 := NC.IndexDefs.Items[i] as TMemIndexDef;
+      TagData := FTagDataArray[i];
       if ictChangedFieldNumber  in FIndexChangesets[i] then
       begin
         Assert(not (ictAdded in FIndexChangesets[i]));
-        IndexDef2 := CC.IndexDefs.Items[i] as TMemIndexDef;
-
-        for IndexClass := icCurrent to icMostRecent do
-        begin
-//Before commit we did, move from IndexDef2 to IndexDef1: (Current to next).
-//Changed indexes:
-//EncodeIndexTag(ITag, IndexClass, IndexClass, IndexDef2.FieldIndex, 0);
-//EncodeIndexTag(NewTag, icTemporary, IndexClass, IndexDef1.FieldIndex, IndexDef2.FieldIndex);
-          Assert(IndexDef1.FieldIndex <= IndexDef2.FieldIndex);
-//Now we do exactly the reverse.
-          EncodeIndexTag(ITag, icTemporary, IndexClass, IndexDef1.FieldIndex, IndexDef2.FieldIndex, IndexDef1.FieldDeconflict);
-          EncodeIndexTag(NewTag, IndexClass, IndexClass, IndexDef2.FieldIndex, 0, IndexDef2.FieldDeconflict);
-          if not FData.Store.HasIndex(ITag) then
-            raise EMemDBInternalException.Create(S_INDEX_TAG_NOT_FOUND);
-          if FData.Store.HasIndex(NewTag) then
-            raise EMemDBInternalException.Create(S_INDEX_TAG_DUPLICATE);
-          RV := FData.Store.AdjustIndexTag(ITag, NewTag);
-          Assert(RV = rvOK);
-        end;
+        CheckTagAgreesWithMetadata(i, TagData, tciTemporaryAgreesBoth, tcpProgrammed);
+        TagData.RollbackRestoreToPermanent;
+        CheckTagAgreesWithMetadata(i, TagData, tciPermanentAgreesCurrent, tcpProgrammed);
       end
       else if ictAdded in FIndexChangesets[i] then
       begin
-        for IndexClass := icCurrent to icMostRecent do
-        begin
-//Before commit we did, move from (calculated IndexDef2) to IndexDef1: (Current to next).
-//Added indexes:
-//EncodeIndexTag(NewTag, icTemporary, IndexClass, IndexDef1.FieldIndex, FFieldHelper.NdIndexToRawIndex(IndexDef1.FieldIndex));
-          Assert(IndexDef1.FieldIndex <= FFieldHelper.NdIndexToRawIndex(IndexDef1.FieldIndex));
-//Now we remove the added index tag
-          EncodeIndexTag(ITag, icTemporary, IndexClass, IndexDef1.FieldIndex, FFieldHelper.NdIndexToRawIndex(IndexDef1.FieldIndex), IndexDef1.FieldDeconflict);
-          if not FData.Store.HasIndex(ITag) then
-            raise EMemDBInternalException.Create(S_INDEX_TAG_NOT_FOUND);
-          RV := FData.Store.DeleteIndex(ITag);
-          Assert(RV = rvOK);
-        end;
+        CheckTagAgreesWithMetadata(i, TagData, tciTemporaryAgreesNextOnly, tcpProgrammed);
+        TagData.RollbackRestoreToPermanent;
+        TagData.RollbackRmIdxsFromStore;
+        //No tag check here, because no "current" to roll back to.
       end;
     end;
   end;
 end;
 
-procedure TMemDbTablePersistent.CheckStreamedInRowIndexing(Row: TMemDBRow; IRec: TItemRec;  Ref1, Ref2: TObject;  Store: TIndexedStore);
+procedure TMemDbTablePersistent.CheckStreamedInRowIndexing(Row: TMemDBRow; IRec: TItemRec;  Ref1, Ref2: TObject;  Store: TIndexedStoreO);
 
   function MostRecentFieldsFromRow(Row: TMemDBRow): TMemStreamableList;
   begin
@@ -2919,10 +3094,11 @@ var
   PrevRowFields, NextRowFields: TMemStreamableList;
   PrevRowField, NextRowField: TMemFieldData;
   ZeroRec: TMemDbFieldDataRec;
-  IndexTag: Int64;
   PrevRec, NextRec: TItemRec;
   RV: TIsRetVal;
   IndexAdded, IndexChangedFieldNumber: boolean;
+  TagData: TMemDBITagData;
+  TagStruct: PITagStruct;
 begin
   FillChar(ZeroRec, sizeof(ZeroRec), 0);
   MostRecent := Ref1 as TMemTableMetadataItem;
@@ -2984,26 +3160,24 @@ begin
           begin
             //Work out what the index tag will be.
 
-            //We're working with the most recent index, which
-            //will work OK if the index is not temporary -
-            //in temporary cases, I think we need to check the indexing later on.
+            TagData := FTagDataArray[IdxIdx];
             if IndexAdded then
-              EncodeIndexTag(IndexTag, icTemporary, icMostRecent,
-                IndexDef.FieldIndex, FFieldHelper.NdIndexToRawIndex(IndexDef.FieldIndex), IndexDef.FieldDeconflict)
-            else if IndexChangedFieldNumber then
             begin
-              Assert(Assigned(CCIndexDef));
-              EncodeIndexTag(IndexTag, icTemporary, icMostRecent, IndexDef.FieldIndex, CCIndexDef.FieldIndex, IndexDef.FieldDeconflict)
+              Assert(not IndexChangedFieldNumber);
+              CheckTagAgreesWithMetadata(IdxIdx, TagData, tciTemporaryAgreesNextOnly, tcpProgrammed);
             end
+            else if IndexChangedFieldNumber then
+              CheckTagAgreesWithMetadata(IdxIdx, TagData, tciTemporaryAgreesBoth, tcpProgrammed)
             else
-              EncodeIndexTag(IndexTag, icMostRecent, icMostRecent, IndexDef.FieldIndex, 0, IndexDef.FieldDeconflict);
-            if not FData.Store.HasIndex(IndexTag) then
+              CheckTagAgreesWithMetadata(IdxIdx, TagData, tciPermanentAgreesCurrent, tcpProgrammed);
+            TagStruct := TagData.TagStructs[sicLatest];
+            if not FData.Store.HasIndex(TagStruct) then
               raise EMemDBInternalException.Create(S_INDEX_TAG_NOT_FOUND);
             PrevRec := IRec;
             NextRec := IRec;
-            RV := Store.NextByIndex(IndexTag, NextRec);
+            RV := Store.NextByIndex(TagStruct, NextRec);
             Assert(RV in [rvOK, rvNotFound]);
-            RV := Store.PreviousByIndex(IndexTag, PrevRec);
+            RV := Store.PreviousByIndex(TagStruct, PrevRec);
             Assert(RV in [rvOK, rvNotFound]);
             if Assigned(PrevRec) then
               PrevRow := PrevRec.Item as TMemDbRow
@@ -3028,14 +3202,14 @@ begin
                 //If previous / next row fields not assigned, then beginning
                 //or end of table, just check we can go all the way to end of table,
                 //and no rows have fields of that a/b type assigned.
-                RV := Store.PreviousByIndex(IndexTag, PrevRec);
+                RV := Store.PreviousByIndex(TagStruct, PrevRec);
                 Assert(RV in [rvOK, rvNotFound]);
                 while Assigned(PrevRec) do
                 begin
                   PrevRow := PrevRec.Item as TMemDbRow;
                   PrevRowFields := MostRecentFieldsFromRow(PrevRow);
                   Assert(not Assigned(PrevRowFields));
-                  RV := Store.PreviousByIndex(IndexTag, PrevRec);
+                  RV := Store.PreviousByIndex(TagStruct, PrevRec);
                   Assert(RV in [rvOK, rvNotFound]);
                 end;
               end;
@@ -3054,14 +3228,14 @@ begin
                 //If previous / next row fields not assigned, then beginning
                 //or end of table, just check we can go all the way to end of table,
                 //and no rows have fields of that a/b type assigned.
-                RV := Store.NextByIndex(IndexTag, NextRec);
+                RV := Store.NextByIndex(TagStruct, NextRec);
                 Assert(RV in [rvOK, rvNotFound]);
                 while Assigned(NextRec) do
                 begin
                   NextRow := NextRec.Item as TMemDBRow;
                   NextRowFields := MostRecentFieldsFromRow(NextRow);
                   Assert(not Assigned(NextRowFields));
-                  RV := Store.NextByIndex(IndexTag, NextRec);
+                  RV := Store.NextByIndex(TagStruct, NextRec);
                   Assert(RV in [rvOK, rvNotFound]);
                 end;
               end;
@@ -3078,7 +3252,6 @@ procedure TMemDbTablePersistent.RevalidateEntireUserIndex(
   RawIndexDefNumber: integer);
 var
   IndexDef1, IndexDef2: TMemIndexDef;
-  IndexTag: Int64;
   Current, Next: TItemRec;
   CurRow, NextRow: TMemDBRow;
   CurField, NextField: TMemFieldData;
@@ -3088,6 +3261,8 @@ var
   FieldNumber: integer;
   CurrentMetadata, NextMetadata: TMemTableMetadataItem;
   CCFieldCount, CCIndexCount, NCFieldCount, NCIndexCount: integer;
+  TagData: TMemDbITagData;
+  ITagStruct: PITagStruct;
 begin
   GetCurrNxtMetaCopiesEx(CurrentMetadata, NextMetadata,
     CCFieldCount, CCIndexCount, NCFieldCount, NCIndexCount);
@@ -3100,31 +3275,35 @@ begin
     IndexDef2 := nil;
   Assert(Assigned(IndexDef2) = not (ictAdded in FIndexChangesets[RawIndexDefNumber]));
   //Index tags currently in temporary state.
+  TagData := FTagDataArray[RawIndexDefNumber];
   if ictAdded in FIndexChangesets[RawIndexDefNumber] then
   begin
-    EncodeIndexTag(IndexTag, icTemporary, icMostRecent,
-      IndexDef1.FieldIndex, FFieldHelper.NdIndexToRawIndex(IndexDef1.FieldIndex), IndexDef1.FieldDeconflict);
+    Assert(not (ictChangedFieldNumber in FIndexChangesets[RawIndexDefNumber]));
+    CheckTagAgreesWithMetadata(RawIndexDefNumber, TagData, tciTemporaryAgreesNextOnly, tcpProgrammed);
     FieldNumber := FFieldHelper.NdIndexToRawIndex(IndexDef1.FieldIndex);
+    ITagStruct := TagData.TagStructs[sicLatest];
   end
   else if ictChangedFieldNumber in FIndexChangesets[RawIndexDefNumber] then
   begin
-    EncodeIndexTag(IndexTag, icTemporary, icMostRecent, IndexDef1.FieldIndex, IndexDef2.FieldIndex, IndexDef1.FieldDeconflict);
+    CheckTagAgreesWithMetadata(RawIndexDefNumber, TagData, tciTemporaryAgreesBoth, tcpProgrammed);
     //If changes field number, we still have delete sentinels, the original
     //field index (which is the ND IndexDef1.FieldIndex) is just fine.
     FieldNumber := IndexDef2.FieldIndex;
     Assert(IndexDef2.FieldIndex = FFieldHelper.NdIndexToRawIndex(IndexDef1.FieldIndex));
+    ITagStruct := TagData.TagStructs[sicLatest];
   end
   else
   begin
-    EncodeIndexTag(IndexTag, icMostRecent, icMostRecent, IndexDef1.FieldIndex, 0, IndexDef1.FieldDeconflict);
+    CheckTagAgreesWithMetadata(RawIndexDefNumber, TagData, tciPermanentAgreesCurrent, tcpProgrammed);
     FieldNumber := IndexDef1.FieldIndex;
+    ITagStruct := TagData.TagStructs[sicLatest];
   end;
-  if not FData.Store.HasIndex(IndexTag) then
+  if not FData.Store.HasIndex(ITagStruct) then
     raise EMemDBInternalException.Create(S_INDEX_TAG_NOT_FOUND);
 
   //NB. There's no guarantee that rows have valid latest data,
   //those just appear at the start or end of the series.
-  IRet := FData.Store.FirstByIndex(IndexTag, Current);
+  IRet := FData.Store.FirstByIndex(ITagStruct, Current);
   Assert(IRet in [rvOK, rvNotFound]);
   if Assigned(Current) then
     CurRow := Current.Item as TMemDbRow
@@ -3135,7 +3314,7 @@ begin
     Assert(not CurRow.Null); //Do not expect totally NULL rows.
     Assert(NotAssignedOrSentinel(CurRow.ABData[abLatest]));
 
-    IRet := FData.Store.NextByIndex(IndexTag, Current);
+    IRet := FData.Store.NextByIndex(ITagStruct, Current);
     Assert(IRet in [rvOK, rvNotFound]);
     if Assigned(Current) then
       CurRow := Current.Item as TMemDbRow
@@ -3156,7 +3335,7 @@ begin
     end;
 
     Next := Current;
-    IRet := FData.Store.NextByIndex(IndexTag, Next);
+    IRet := FData.Store.NextByIndex(ITagStruct, Next);
     Assert(IRet in [rvOK, rvNotFound]);
     if Assigned(Next) then
       NextRow := Next.Item as TMemDbRow
@@ -3165,7 +3344,7 @@ begin
     while Assigned(NextRow) and ((NextRow.Deleted) or (NextRow.Null)) do
     begin
       Assert(NotAssignedOrSentinel(NextRow.ABData[abLatest]));
-      IRet := FData.Store.NextByIndex(IndexTag, Next);
+      IRet := FData.Store.NextByIndex(ITagStruct, Next);
       Assert(IRet in [rvOK, rvNotFound]);
       if Assigned(Next) then
         NextRow := Next.Item as TMemDbRow
@@ -3191,9 +3370,8 @@ procedure TMemDbTablePersistent.PreCommit(Reason: TMemDBTransReason);
 begin
   if not (FMetadata.Deleted or FMetadata.Null) then
   begin
-    //Set up changeset info.
+    //Set up changeset info, arguably should have been re-gen before, but
     ReGenChangesets;
-
     //Structure checking, no modifications yet.
     if FDataChangeRequired and (Reason <> mtrReplayFromScratch) then
     begin
@@ -3209,18 +3387,21 @@ begin
 
     //Modifications from here on in.
     //(Indices need to be set up to allow foreign key checking).
-    if FIndexingChangeRequired then
-      DeleteUnusedIndices; //Changes FCommitChangesMade.
+
+    AddNewTagStructs;    //Changes FCommitChangesMade
+    DeleteUnusedIndices; //Changes FCommitChangesMade.
 
     //When we adjust table structure, add and delete should be OK
     //(we just need to consider deletion case).
 
     if FDataChangeRequired and (Reason <> mtrReplayFromScratch) then
-      AdjustTableStructureForMetadata;  //Changes FCommitChangesMade.
+      AdjustTableStructureForMetadata;
 
-    if FIndexingChangeRequired then
-      CommitAdjustIndicesToTemporary; //Changes FCommitChangesMade.
+    CommitAdjustIndicesToTemporary; //Changes FCommitChangesMade
 
+    //Partial validation of indexes. when data changes.
+    //In other cases (fromScratch, indexAdd), we expect to revalidate
+    //entire index.
     if (Reason <> mtrReplayFromScratch) and not FDataChangeRequired then
       FData.ForEachChangedRow(CheckStreamedInRowIndexing,
         FMetadata.ABData[abLatest], FMetadata.ABData[abCurrent]);
@@ -3243,10 +3424,12 @@ begin
       FCommitChangesMade := FCommitChangesMade - [ccmIndexesToTemporary];
     end;
   end;
+  RemoveOldTagStructs;
   //And now commit metadata.
-  FMetadata.Commit(Reason);
+  inherited; //FMetadata.Commit(Reason);
   FCommitChangesMade := [];
   FDataChangeRequired := false;
+  FIndexingChangeRequired := false;
   UpdateListHelpers;
 end;
 
@@ -3260,20 +3443,21 @@ begin
     RollbackRestoreIndicesToPermanent;
     FCommitChangesMade := FCommitChangesMade - [ccmIndexesToTemporary];
   end;
-  FData.Rollback(Reason);
-  if ccmAdjustTableStructure in FCommitChangesMade then
-  begin
-    UnAdjustTableStructureForMetadata;
-    FCommitChangesMade := FCommitChangesMade - [ccmAdjustTableStructure];
-  end;
+  FData.Rollback(Reason); //Undo AdjustTableStructureForMetadata, amongst other things.
   if ccmDeleteUnusedIndices in FCommitChangesMade then
   begin
     ReinstateDeletedIndices;
     FCommitChangesMade := FCommitChangesMade - [ccmDeleteUnusedIndices];
   end;
-  FMetadata.Rollback(Reason);
+  if ccmAddedNewTagStructs in FCommitChangesMade then
+  begin
+    RemoveNewlyAddedTagStructs;
+    FCommitChangesMade := FCommitChangesMade - [ccmAddedNewTagStructs];
+  end;
+  inherited; //FMetadata.Rollback(Reason);
   Assert(FCommitChangesMade  = []);
   FDataChangeRequired := false;
+//  FIndexingChangeRequired := false;
   UpdateListHelpers; //Rollback may have changed A-B, don't need to re-gen changesets.
 end;
 
@@ -3321,12 +3505,15 @@ end;
 constructor TMemDBForeignKeyPersistent.Create;
 begin
   inherited;
-  FReferringAdded := TIndexedStore.Create;
-  FReferringAdded.AddIndex(TMemDBFieldLookasideIndexNode, 0);
-  FReferredDeleted := TIndexedStore.Create;
-  FReferredDeleted.AddIndex(TMemDBFieldLookasideIndexNode, 0);
-  FReferredAdded := TIndexedStore.Create;
-  FReferredAdded.AddIndex(TMemDBFieldLookasideIndexNode, 0);
+  FReferringAdded := TIndexedStoreO.Create;
+  FReferringAdded.AddIndex(TMemDBFieldLookasideIndexNode,
+    TClass(TMemDBFieldLookasideIndexNode));
+  FReferredDeleted := TIndexedStoreO.Create;
+  FReferredDeleted.AddIndex(TMemDBFieldLookasideIndexNode,
+    TClass(TMemDBFieldLookasideIndexNode));
+  FReferredAdded := TIndexedStoreO.Create;
+  FReferredAdded.AddIndex(TMemDBFieldLookasideIndexNode,
+    TClass(TMemDBFieldLookasideIndexNode));
   FMetadata := TMemDBForeignKeyMetadata.Create;
 end;
 
@@ -3438,7 +3625,7 @@ type
 
   PMemDBFKMeta = ^TMemDBFKMeta;
   TProcessRowStruct = record
-    OutList: TIndexedStore;
+    OutList: TIndexedStoreO;
     PMeta: PMemDBFKMeta;
     TransReason: TMemDBTransReason;
     Action: TRowProcessingAction;
@@ -3446,7 +3633,7 @@ type
   PProcessRowStruct = ^TProcessRowStruct;
 
 procedure TMemDBForeignKeyPersistent.ProcessRow(Row: TMemDBRow;
-                     IRec: TItemRec; Ref1, Ref2: TObject; Store: TIndexedStore);
+                     IRec: TItemRec; Ref1, Ref2: TObject; Store: TIndexedStoreO);
 var
   PStruct: PProcessRowStruct;
   FieldOffset: integer;
@@ -3596,6 +3783,7 @@ procedure TMemDBForeignKeyPersistent.CreateReferringAddedList(const Meta: TMemDB
 var
   PStruct: TProcessRowStruct;
   IRec: TItemRec;
+  RV: TIsRetVal;
 begin
   with PStruct do
   begin
@@ -3611,7 +3799,8 @@ begin
     while Assigned(IRec) do
     begin
       ProcessRow(IRec.Item as TMemDBRow, IRec, @PStruct, nil, Meta.TableReferring.Data.Store);
-      Meta.TableReferring.Data.Store.GetAnotherItem(IRec)
+      RV := Meta.TableReferring.Data.Store.GetAnotherItem(IRec);
+      Assert(RV in [rvOK, rvNotFound]);
     end;
   end
   else
@@ -3630,7 +3819,7 @@ var
   LookupField: TMemFieldData;
   SearchVal: TMemDBIndexNodeSearchVal;
   IndexChangeset: TIndexChangeSet;
-  ITag: Int64;
+  ITag: PITagStruct;
   DataRV: TISRetVal;
   DataIRec: TITemRec;
   DataRow: TMemDBRow;
@@ -3647,12 +3836,10 @@ begin
       SearchVal := TMemDBIndexNodeSearchVal.Create;
       try
         //What's the index tag we need to search on?
-        ITag := FindIndexTag(Meta.TableReferring.Metadata as TMemDbTableMetadata,
-                             Meta.TableReferring.FFieldHelper,
+        ITag := FindIndexTag(Meta.TableReferring,
                              Meta.IndexDefReferring,
-                             Meta.TableReferring.FIndexChangesets,
                              IndexChangeset,
-                             icCurrent);
+                             sicCurrent);
 
         if ictChangedFieldNumber in IndexChangeset then
           raise EMemDBInternalException.Create(S_FK_INTERNAL) //Layout changed, should not be here at all.
@@ -3670,7 +3857,7 @@ begin
           LookupField := LookasideIRec.Item as TMemFieldData;
           SearchVal.FieldSearchVal := LookupField.FDataRec;
           DataRV := Meta.TableReferring.Data.Store.FindByIndex
-            (ITag, SearchVal, DataIRec);
+            (TObject(ITag), SearchVal, DataIRec);
           if DataRV = rvOK then
           begin
 {$IFOPT C+}
@@ -3751,7 +3938,7 @@ begin
         begin
           DelField := DeletedIRec.Item as TMemFieldData;
           SearchVal.FieldSearchVal := DelField.FDataRec;
-          AddedRV := FReferredAdded.FindByIndex(0, SearchVal, AddedIRec);
+          AddedRV := FReferredAdded.FindByIndex(TClass(TMemDBFieldLookasideIndexNode), SearchVal, AddedIRec);
           Assert(AddedRV in [rvOK, rvNotFound]);
           DelDel := AddedRV = rvOK;
 
@@ -3776,24 +3963,23 @@ begin
   end;
 end;
 
-function TMemDBForeignKeyPersistent.FindIndexTag(Metadata: TMemDBTableMetadata;
-                      FieldHelper: TMemDblBufListHelper;
-                      IndexDef: TMemIndexDef;
-                      const IndexChangesets:TIndexChangeArray;
-                      var OutChangeset: TIndexChangeset;
-                      IndexClass: TIndexClass): Int64;
+function TMemDBForeignKeyPersistent.FindIndexTag(Table: TMemDbTablePersistent;
+                          IndexDef: TMemIndexDef;
+                          var OutChangeset: TIndexChangeset;
+                          SubIndexClass: TSubIndexClass): PITagStruct;
 var
   LatestTableMeta: TMemTableMetadataItem;
   CurrentTableMeta: TMemTableMetadataItem;
   CurrentIndexDef: TMemIndexDef;
   idx: integer;
   IndexOffset: integer;
+  TagData: TMemDBITagData;
+
 begin
-  //Calculate index tag for referred table.
+  //Calculate index tag for referring / referred.
   IndexOffset := -1;
   //Latest metadata even though current index.
-  LatestTableMeta := Metadata.ABData[abLatest]
-    as TMemTableMetadataItem;
+  LatestTableMeta := Table.Metadata.ABData[abLatest] as TMemTableMetadataItem;
   //Find the absolute index offset
   for idx := 0 to Pred(LatestTableMeta.IndexDefs.Count) do
   begin
@@ -3805,27 +3991,32 @@ begin
   end;
   Assert(IndexOffset >= 0);
   //Get the index changeset attributes.
-  Assert((Length(IndexChangesets) = 0)
-    or (IndexOffset < Length(IndexChangesets)));
+  Assert((Length(Table.FIndexChangesets) = 0)
+    or (IndexOffset < Length(Table.FIndexChangesets)));
 
-  if Length(IndexChangesets) > 0 then
-    OutChangeset := IndexChangesets[IndexOffset]
+  if Length(Table.FIndexChangesets) > 0 then
+    OutChangeset := Table.FIndexChangesets[IndexOffset]
   else
     OutChangeset := [];
 
+  TagData := Table.FTagDataArray[IndexOffset];
   if ictChangedFieldNumber in OutChangeset then
   begin
-    CurrentTableMeta := Metadata.ABData[abCurrent] as TMemTableMetadataItem;
+    CurrentTableMeta := Table.Metadata.ABData[abCurrent] as TMemTableMetadataItem;
     CurrentIndexDef := CurrentTableMeta.IndexDefs.Items[IndexOffset] as TMemIndexDef;
-    EncodeIndexTag(result, icTemporary, IndexClass, IndexDef.FieldIndex, CurrentIndexDef.FieldIndex, IndexDef.FieldDeconflict);
+    Table.CheckTagAgreesWithMetadata(IndexOffset, TagData, tciTemporaryAgreesBoth, tcpProgrammed);
+    result := TagData.TagStructs[SubIndexClass];
   end
   else if ictAdded in OutChangeset then
   begin
-    EncodeIndexTag(result, icTemporary, IndexClass,
-      IndexDef.FieldIndex, FieldHelper.NdIndexToRawIndex(IndexDef.FieldIndex), IndexDef.FieldDeconflict);
+    Table.CheckTagAgreesWithMetadata(IndexOffset, TagData, tciTemporaryAgreesNextOnly, tcpProgrammed);
+    result := TagData.TagStructs[SubIndexClass];
   end
   else
-    EncodeIndexTag(result, IndexClass, IndexClass, IndexDef.FieldIndex, 0, IndexDef.FieldDeconflict);
+  begin
+    Table.CheckTagAgreesWithMetadata(IndexOffset, TagData, tciPermanentAgreesCurrent, tcpProgrammed);
+    result := TagData.TagStructs[SubIndexClass];
+  end;
 end;
 
 procedure TMemDBForeignKeyPersistent.CheckOutstandingCrossRefs(const Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
@@ -3833,7 +4024,7 @@ var
   SearchVal: TMemDBIndexNodeSearchVal;
   ListRetVal, DataRetVal: TISRetVal;
   ListIRec, DataIRec: TItemRec;
-  ITag: Int64;
+  ITag: PITagStruct;
   IndexChangeset: TIndexChangeset;
   ListField: TMemFieldData;
 {$IFOPT C+}
@@ -3848,11 +4039,10 @@ begin
   SearchVal := TMemDBIndexNodeSearchVal.Create;
   try
     //Check new vales in referrer exist in referred.
-    ITag := FindIndexTag(Meta.TableReferred.Metadata as TMemDBTableMetadata,
-                         Meta.TableReferred.FieldHelper,
+    ITag := FindIndexTag(Meta.TableReferred,
                          Meta.IndexDefReferred,
-                         Meta.TableReferred.FIndexChangesets,
-                         IndexChangeset, TIndexClass.icMostRecent);
+                         IndexChangeset,
+                         sicLatest);
     if not Meta.TableReferred.Data.Store.HasIndex(ITag) then
       raise EMemDBInternalException.Create(S_FK_INTERNAL);
     ListIRec := FReferringAdded.GetAnItem;
@@ -3861,7 +4051,7 @@ begin
       ListField := ListIRec.Item as TMemFieldData;
       SearchVal.FieldSearchVal := ListField.FDataRec;
       DataRetVal := Meta.TableReferred.Data.Store
-        .FindByIndex(ITag, SearchVal, DataIRec);
+        .FindByIndex(TObject(ITag), SearchVal, DataIRec);
       Assert(DataRetVal in [rvOK, rvNotFound]);
       if DataRetVal <> rvOK then
         raise EMemDBConsistencyException.Create(S_FK_NOT_IN_REFERRED_TABLE);
@@ -3869,11 +4059,9 @@ begin
       Assert(ListRetVal in [rvOK, rvNotFound]);
     end;
     //Check deleted values in referred not in referrer.
-    ITag := FindIndexTag(Meta.TableReferring.Metadata as TMemDBTableMetadata,
-                         Meta.TableReferring.FFieldHelper,
+    ITag := FindIndexTag(Meta.TableReferring,
                          Meta.IndexDefReferring,
-                         Meta.TableReferring.FIndexChangesets,
-                         IndexChangeset, TIndexClass.icMostRecent);
+                         IndexChangeset, sicLatest);
     if not Meta.TableReferring.Data.Store.HasIndex(ITag) then
       raise EMemDBInternalException.Create(S_FK_INTERNAL);
     ListIRec := FReferredDeleted.GetAnItem;
@@ -3882,7 +4070,7 @@ begin
       ListField := ListIRec.Item as TMemFieldData;
       SearchVal.FieldSearchVal := ListField.FDataRec;
       DataRetVal := Meta.TableReferring.Data.Store
-        .FindByIndex(ITag, SearchVal, DataIRec);
+        .FindByIndex(TObject(ITag), SearchVal, DataIRec);
       Assert(DataRetVal in [rvOK, rvNotFound]);
       if DataRetVal = rvOK then
       begin
@@ -3904,7 +4092,7 @@ begin
   end;
 end;
 
-procedure TMemDBForeignKeyPersistent.ClearLookaside(Store: TIndexedStore; AlsoFree: boolean);
+procedure TMemDBForeignKeyPersistent.ClearLookaside(Store: TIndexedStoreO; AlsoFree: boolean);
 var
   IRec: TItemRec;
 begin

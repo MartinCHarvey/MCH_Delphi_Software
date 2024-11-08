@@ -449,7 +449,7 @@ type
 
   TKKeyedIndex = class(TDuplicateValIndexNode)
   protected
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode)
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode)
       : integer; override;
   end;
 
@@ -462,7 +462,7 @@ type
   public
     constructor Create; override;
     destructor Destroy; override;
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode)
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode)
       : integer; override;
     property SearchKey: TGuid read GetSearchKey write SetSearchKey;
   end;
@@ -481,7 +481,7 @@ type
   protected
     procedure SetSearchListLevel(LL: TKListLevel); virtual; abstract;
     function GetSearchListLevel: TKListLevel; virtual; abstract;
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode)
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode)
       : integer; override;
     // As determined from index tags.
     function GetListLevel(out TL: TKListLevel): boolean;
@@ -506,7 +506,7 @@ type
     function GetSearchListLevel: TKListLevel; override;
     function GetSearchString: string; override;
     procedure SetSearchString(S: string); override;
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode)
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode)
       : integer; override;
   public
     destructor Destroy; override;
@@ -514,7 +514,7 @@ type
 
   TKUserNameIndex = class(TKBySiteIndex)
   protected
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode)
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode)
       : integer; override;
   end;
 
@@ -528,7 +528,7 @@ type
     function GetSearchSiteType: TKSiteType; override;
     function GetSearchString: string; override;
     procedure SetSearchString(S: string); override;
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode)
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode)
       : integer; override;
   public
     constructor Create; override;
@@ -544,7 +544,7 @@ type
 
   TKDateIndex = class(TKGeneralListIndex)
   protected
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode)
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode)
       : integer; override;
     // As determined from index tags.
     function GetDateSearchField(out DSF: TKDateSearchField): boolean;
@@ -561,7 +561,7 @@ type
     FSearchDateField: TKDateSearchField;
     FSearchDateFieldSet: boolean;
   protected
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode)
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode)
       : integer; override;
     procedure SetSearchListLevel(LL: TKListLevel);
     function GetSearchListLevel: TKListLevel;
@@ -582,13 +582,13 @@ type
   //to be at the start of the list in this order.
   TKPresentationOrderIndex = class(TKGeneralListIndex)
   protected
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode)
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode)
       : integer; override;
   end;
 
   TKIdentifierOrderIndex = class(TKGeneralListIndex)
   protected
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode)
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode)
       : integer; override;
   end;
 
@@ -596,7 +596,7 @@ type
   private
     FSearchString: string;
   protected
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode)
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode)
       : integer; override;
   public
     property SearchString: string read FSearchString write FSearchString;
@@ -1744,7 +1744,7 @@ end;
 
 destructor TKList.Destroy;
 var
-  Tag: Int64;
+  Tag: TTagType;
   NodeClass: TIndexNodeClass;
   RV: TIsRetVal;
 begin
@@ -2097,7 +2097,7 @@ var
   Src: TKList;
   ItemRec, TmpRec: TItemRec;
   RV: TISRetVal;
-  IndexTag: Int64;
+  IndexTag: TTagType;
   IndexClass: TIndexNodeClass;
   i: integer;
 begin
@@ -2514,7 +2514,7 @@ end;
 
 { TKKeyedIndex }
 
-function TKKeyedIndex.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64;
+function TKKeyedIndex.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType;
   OtherNode: TIndexNode): integer;
 var
   Tag: TKIndexTag;
@@ -2568,7 +2568,7 @@ begin
   inherited;
 end;
 
-function TKKeyedIndexSearchVal.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64;
+function TKKeyedIndexSearchVal.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType;
   OtherNode: TIndexNode): integer;
 begin
   Assert(not Assigned(OwnItem));
@@ -2605,7 +2605,7 @@ end;
 
 { TKIdIndex }
 
-function TKIdIndex.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64;
+function TKIdIndex.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType;
   OtherNode: TIndexNode): integer;
 var
   CmpIndex: TKIdIndex;
@@ -2741,7 +2741,7 @@ begin
   end;
 end;
 
-function TKIdIndexSearchVal.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64;
+function TKIdIndexSearchVal.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType;
   OtherNode: TIndexNode): integer;
 var
   FSearchItem: TObject;
@@ -2771,7 +2771,7 @@ end;
 
 { TKUserNameIndex }
 
-function TKUserNameIndex.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64;
+function TKUserNameIndex.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType;
   OtherNode: TIndexNode): integer;
 var
   CmpIndex: TKUserNameIndex;
@@ -2829,7 +2829,7 @@ begin
   inherited;
 end;
 
-function TKUserNameSearchVal.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64;
+function TKUserNameSearchVal.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType;
   OtherNode: TIndexNode): integer;
 begin
   result := inherited CompareItems(FSearchUserProf, OtherItem, IndexTag, OtherNode);
@@ -2855,7 +2855,7 @@ end;
 
 { TKDateIndex }
 
-function TKDateIndex.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64;
+function TKDateIndex.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType;
   OtherNode: TIndexNode): integer;
 var
   CmpIndex: TKDateIndex;
@@ -3103,7 +3103,7 @@ begin
   inherited;
 end;
 
-function TKDateIndexSearchVal.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64;
+function TKDateIndexSearchVal.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType;
   OtherNode: TIndexNode): integer;
 var
   FSearchItem: TObject;
@@ -3128,7 +3128,7 @@ end;
   //N.B If you change presentation order, be aware that some
   //parts of the UI logic expect interested and/or verified users
   //to be at the start of the list in this order.
-function TKPresentationOrderIndex.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
+function TKPresentationOrderIndex.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 var
   KL: TKListLevel;
   CmpIndex: TKPresentationOrderIndex;
@@ -3284,7 +3284,7 @@ end;
 
 { TKIdentifierOrderIndex }
 
-function TKIdentifierOrderIndex.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode)
+function TKIdentifierOrderIndex.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode)
   : integer;
 var
   OwnS, OtherS: string;
@@ -3305,7 +3305,7 @@ end;
 { TKIdentifierOrderIndexSearchVal }
 
 function TKIdentifierOrderSearchVal.CompareItems(OwnItem, OtherItem: TObject;
-  IndexTag: Int64; OtherNode: TIndexNode): integer;
+  IndexTag: TTagType; OtherNode: TIndexNode): integer;
 var
   LL: TKListLevel;
   CmpIndex: TKIdentifierOrderIndex;

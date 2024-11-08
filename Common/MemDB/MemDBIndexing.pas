@@ -30,86 +30,18 @@ IN THE SOFTWARE.
 interface
 
 uses
+{$IFDEF USE_TRACKABLES}
+  Trackables,
+{$ENDIF}
   IndexedStore, MemDBMisc;
 
-{ Make indexing pretty strict with respect to field types / values,
-  so that any errors in re-indexing are caught early }
-
-{ NB. Encoding of index types into tags:
-
-  63 - 40 : Reserved.
-  39 - 32 : Field number deconfliction (multiple indices on same field).
-  31, 30    : Index node class.
-     29 - 0 : Class specific.
-  +----------------------+
-  |  |   |               |
-  +----------------------+
-
-  Class: 0: CurrentIndex.
-         1: MostRecentIndex.
-         2: TemporaryIndex (Field number or type changing) - todo disallow indexed field type changes?
-         3: InternalIndex.
-
-  Class 0, 1:
-      29 - 15: Reserved.
-      14 - 0: Field offset.
-  +----------------------+
-  |  |                   |
-  +----------------------+
-
-  Class 2:
-     29, 28: Index class post commit. (Going from Temp to Current or Most Recent).
-     25 - 15: Field offset post-commit. (Later "current" copy of data).
-      14 - 0: Field offset pre-commit. (Most recent copy of data).
-  +----------------------+
-  |  |  |                 |
-  +----------------------+
-
-}
-
 type
-  TFieldOffset = 0.. $3FFF; //14 bits.
-  TFieldDeconflict = 0..$FF; //8 Bits.
-  TIndexNumber = type TFieldOffset;
+  TIndexNumber = type integer;
 
-const
-  DeconflictShift = 32;
-  DeconflictMask: UInt64 = UInt64(Ord(High(TFieldDeconflict))) shl DeconflictShift;
-  ClassShift = 30;
-  ClassMask: Uint64 = Uint64($3) shl ClassShift;
-  EncapClassShift = 28;
-  EncapClassMask:Uint64 = Uint64($3) shl EncapClassShift;
-  LowFieldShift = 0;
-  LowFieldMask:Uint64 = Ord(High(TFieldOffset)) shl LowFieldShift;
-  HighFieldShift = 14;
-  HighFieldMask:Uint64 = Ord(High(TFieldOffset)) shl HighFieldShift;
-
-{$IFOPT C+}
-  procedure DecodeIndexTag(Index: Int64;
-                         var IndexClass, EncapIndexClass: TIndexClass;
-                         var DefaultFieldOffset, ExtraFieldOffset: TFieldOffset;
-                         var FieldDeconflict: TFieldDeconflict);
-
-  procedure EncodeIndexTag(var Index: Int64;
-                         IndexClass, EncapIndexClass: TIndexClass;
-                         DefaultFieldOffset, ExtraFieldOffset: TFieldOffset;
-                         FieldDeconflict: TFieldDeconflict);
-{$ELSE}
-  procedure DecodeIndexTag(Index: Int64;
-                         var IndexClass, EncapIndexClass: TIndexClass;
-                         var DefaultFieldOffset, ExtraFieldOffset: TFieldOffset;
-                         var FieldDeconflict: TFieldDeconflict); inline;
-
-  procedure EncodeIndexTag(var Index: Int64;
-                         IndexClass, EncapIndexClass: TIndexClass;
-                         DefaultFieldOffset, ExtraFieldOffset: TFieldOffset;
-                         FieldDeconflict: TFieldDeconflict); inline;
-{$ENDIF}
-
-type
   TMemDBIndexNode = class(TDuplicateValIndexNode)
   protected
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer; override;
+    //TODO Index.
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer; override;
   end;
 
   TMemDBIndexNodeSearchVal = class(TMemDbIndexNode)
@@ -118,7 +50,8 @@ type
     FIdSearchVal: string;
     FFieldSearchVal: TMemDbFieldDataRec;
   protected
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer; override;
+    //TODO Index.
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer; override;
   public
     property PointerSearchVal: pointer read FPointerSearchVal write FPointerSearchVal;
     property IdSearchVal: string read FIdSearchVal write FIdSearchVal;
@@ -127,14 +60,15 @@ type
 
   TMemDBFieldLookasideIndexNode = class(TIndexNode)
   protected
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer; override;
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer; override;
   end;
 
   TMemDBFieldLookasideSearchVal = class(TMemDBFieldLookasideIndexNode)
   private
     FFieldSearchVal: TMemDbFieldDataRec;
   protected
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer; override;
+    //TODO Index.
+    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer; override;
   public
     property FieldSearchVal: TMemDbFieldDataRec read FFieldSearchVal write FFieldSearchVal;
   end;
@@ -153,85 +87,18 @@ var
   MDBInternalIndexPtr,
   MDBInternalIndexRowId,
   MDBInternalIndexCurrCopy,
-  MDBInternalIndexNextCopy:Int64;
+  MDBInternalIndexNextCopy:TMemDBITagData;
 
 implementation
 
 uses
-  MemDBBuffered, SysUtils, MemDbStreamable
 {$IFOPT C+}
 {$ELSE}
-  , Classes
+  Classes,
 {$ENDIF}
-
-  ;
+  MemDBBuffered, SysUtils, MemDbStreamable;
 
 { Misc functions }
-procedure DecodeIndexTag(Index: Int64;
-                       var IndexClass, EncapIndexClass: TIndexClass;
-                       var DefaultFieldOffset, ExtraFieldOffset: TFieldOffset;
-                       var FieldDeconflict: TFieldDeconflict);
-var
-  UnsignedIndex: UInt64;
-begin
-  UnsignedIndex := UInt64(Index);
-  FieldDeconflict := TFieldDeconflict((UnsignedIndex and DeconflictMask) shr DeconflictShift);
-  IndexClass := TIndexClass((UnsignedIndex and ClassMask) shr ClassShift);
-  if IndexClass = icTemporary then
-  begin
-    EncapIndexClass := TIndexClass((UnsignedIndex and EncapClassMask) shr EncapClassShift);
-    DefaultFieldOffset := (UnsignedIndex and LowFieldMask) shr LowFieldShift;
-    ExtraFieldOffset := (UnsignedIndex and HighFieldMask) shr HighFieldShift;
-  end
-  else
-  begin
-    EncapIndexClass := Low(EncapIndexClass);
-    DefaultFieldOffset := (UnsignedIndex and LowFieldMask) shr LowFieldShift;
-    ExtraFieldOffset := 0;
-  end;
-end;
-
-procedure EncodeIndexTag(var Index: Int64;
-                       IndexClass, EncapIndexClass: TIndexClass;
-                       DefaultFieldOffset, ExtraFieldOffset: TFieldOffset;
-                       FieldDeconflict: TFieldDeconflict);
-var
-  UnsignedIndex: UInt64;
-{$IFOPT C+}
- DbgIndexClass, DbgEncapIndexClass: TIndexClass;
- DbgDefaultFieldOffset, DbgExtraFieldOffset: TFieldOffset;
- DbgFieldDeconflict: TFieldDeconflict;
-{$ENDIF}
-begin
-  UnsignedIndex := (UInt64(Ord(IndexClass)) shl ClassShift)
-                   or
-                   (Uint64(Ord(FieldDeconflict)) shl DeconflictShift);
-  if IndexClass = icTemporary then
-  begin
-    UnsignedIndex := UnsignedIndex or
-      (UInt64(Ord(EncapIndexClass)) shl EncapClassShift) or
-      (UInt64(Ord(DefaultFieldOffset)) shl LowFieldShift) or
-      (UInt64(Ord(ExtraFieldOffset)) shl HighFieldShift);
-  end
-  else
-  begin
-    UnsignedIndex := UnsignedIndex or
-      (UInt64(Ord(DefaultFieldOffset)) shl LowFieldShift)
-  end;
-  Index := Int64(UnsignedIndex);
-{$IFOPT C+}
-  DecodeIndexTag(Index, DbgIndexClass, DbgEncapIndexClass,
-                 DbgDefaultFieldOffset, DbgExtraFieldOffset, DbgFieldDeconflict);
-  Assert(DbgIndexClass = IndexClass);
-  Assert(DbgDefaultFieldOffset = DefaultFieldOffset);
-  Assert(DbgFieldDeconflict = FieldDeconflict);
-  if IndexClass = icTemporary then
-  begin
-    Assert(DbgEncapIndexClass = EncapIndexClass);
-    Assert(DbgExtraFieldOffset = ExtraFieldOffset);
-  end;
-{$ENDIF}
-end;
 
 function CompareFields(const OwnRec: TMemDbFieldDataRec; const OtherRec: TMemDbFieldDataRec): integer;
 begin
@@ -322,16 +189,19 @@ end;
 //TODO - Consider some radical hack whereby we don't need to adjust the indexes
 //to temporary values at all.
 
-function TMemDBIndexNode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
 var
+  GoodTagsRead: integer = 0;
+
+function TMemDBIndexNode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
+var
+  PTag: PITagStruct;
+  TagData: TMemDBITagData;
+
   OwnRow, OtherRow: TMemDBRow;
   OwnFieldList, OtherFieldList: TMemStreamableList;
   OwnField, OtherField: TMemDBStreamable;
-  IndexClass, EncapIndexClass: TIndexClass;
-  DefaultFieldOffset, ExtraFieldOffset: TFieldOffset;
   OwnFieldOffset, OtherFieldOffset: TFieldOffset;
   UsingNextCopy, OtherUsingNextCopy: boolean;
-  FieldDeconflict: TFieldDeconflict;
 
 begin
   Assert(Assigned(OwnItem));
@@ -345,21 +215,26 @@ begin
   OwnRow := TMemDBRow(OwnItem);
   OtherRow := TMemDBROw(OtherItem);
 {$ENDIF}
-  DecodeIndexTag(IndexTag, IndexClass, EncapIndexClass, DefaultFieldOffset, ExtraFieldOffset, FieldDeconflict);
-  if IndexClass = icInternal then
+  PTag := PItagStruct(IndexTag);
+  TagData := PTag.TagData;
+  Assert(TagData is TMemDBITagData);
+  Assert(TagData.TagStructs[sicCurrent].TagData = TagData);
+  Assert(TagData.TagStructs[sicLatest].TagData = TagData);
+  Inc(GoodTagsRead);
+  if TagData.MainIndexClass = micInternal then
   begin
-    if IndexTag = MDBInternalIndexPtr then
-      result := ComparePointers(OwnRow, OtherRow)
-    else if IndexTag = MDBInternalIndexRowId then
-      result:= CompareStr(OwnRow.RowId, OtherRow.RowId)
-    else if IndexTag = MDBInternalIndexCurrCopy then
-      result := ComparePointers(OwnRow.ABData[abCurrent], OtherRow.ABData[abCurrent])
-    else if IndexTag = MDBInternalIndexNextCopy then
+    case TagData.InternalIndexClass of
+    iicPtr:
+      result := ComparePointers(OwnRow, OtherRow);
+    iicRowId:
+      result:= CompareStr(OwnRow.RowId, OtherRow.RowId);
+    iicCurCopy:
+      result := ComparePointers(OwnRow.ABData[abCurrent], OtherRow.ABData[abCurrent]);
+    iicNextCopy:
       result := ComparePointers(OwnRow.ABData[abNext], OtherRow.ABData[abNext])
     else
-    begin
       Assert(false);
-      result := 0;
+      result :=0;
     end;
   end
   else
@@ -385,9 +260,16 @@ begin
       OtherFieldList := TMemStreamableList(OtherRow.ABData[abCurrent]);
 {$ENDIF}
     end;
-    //(icCurrent, icMostRecent, icTemporary, icInternal)
+    //Main index class is either permanent or temporary.
+    //Case 2)
+    //If temporary, then index newly added, or changing field number,
+    //hence latest ab buffer if table structure has changed, else current
+    //(possibly to add indexes without changing table structure).
+    //Case 1)
+    //If permanent, then using next if subclass is most recent.
 
-    if IndexClass in [icMostRecent, icTemporary] then
+    if (TagData.MainIndexClass = micTemporary)
+      or (PTag.SubIndexClass = sicLatest) then
     begin
       //Go for most recent A/B buffer if we can.
       UsingNextCopy := Assigned(OwnRow.ABData[abNext]);
@@ -396,7 +278,6 @@ begin
       //have been processed at once.
       //if IndexClass = icTemporary then
         //Assert(UsingNextCopy = OtherUsingNextCopy);
-
       if UsingNextCopy then
       begin
         if OwnRow.ABData[abNext] is TMemDeleteSentinel then
@@ -440,21 +321,21 @@ begin
     end
     else //Both assigned.
     begin
-      if IndexClass = icTemporary then
+      if (TagData.MainIndexClass = micTemporary) then
       begin
         if UsingNextCopy then
-          OwnFieldOffset := ExtraFieldOffset
+          OwnFieldOffset := TagData.ExtraFieldOffset
         else
-          OwnFieldOffset := DefaultFieldOffset;
+          OwnFieldOffset := TagData.DefaultFieldOffset;
         if OtherUsingNextCopy then
-          OtherFieldOffset := ExtraFieldOffset
+          OtherFieldOffset := TagData.ExtraFieldOffset
         else
-          OtherFieldOffset := DefaultFieldOffset;
+          OtherFieldOffset := TagData.DefaultFieldOffset;
       end
       else
       begin
-        OwnFieldOffset := DefaultFieldOffset;
-        OtherFieldOffset := DefaultFieldOffset;
+        OwnFieldOffset := TagData.DefaultFieldOffset;
+        OtherFieldOffset := TagData.DefaultFieldOffset;
       end;
 
       //Check field indexes in range.
@@ -478,18 +359,18 @@ end;
 
 { TMemDBIndexNodeSearchVal }
 
-function TMemDBIndexNodeSearchVal.CompareItems(OwnItem, OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
+function TMemDBIndexNodeSearchVal.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 //OwnItem ptr always NIL, use built in field. Own field always exists.
 //Otherwise, as function above.
 var
+  PTag: PITagStruct;
+  TagData: TMemDBITagData;
+
   OtherRow: TMemDBRow;
   OtherFieldList: TMemStreamableList;
   OtherField: TMemDBStreamable;
-  IndexClass, EncapIndexClass: TIndexClass;
-  DefaultFieldOffset, ExtraFieldOffset: TFieldOffset;
-  FieldOffset: TFieldOffset;
+  OtherFieldOffset: TFieldOffset;
   OtherUsingNextCopy: boolean;
-  FieldDeconflict: TFieldDeconflict;
 
 begin
   Assert(not Assigned(OwnItem));
@@ -500,19 +381,20 @@ begin
 {$ELSE}
   OtherRow := TMemDBRow(OtherItem);
 {$ENDIF}
-  DecodeIndexTag(IndexTag, IndexClass, EncapIndexClass, DefaultFieldOffset, ExtraFieldOffset, FieldDeconflict);
-  if IndexClass = icInternal then
+  PTag := PItagStruct(IndexTag);
+  TagData := PTag.TagData;
+  if TagData.MainIndexClass = micInternal then
   begin
-    if IndexTag = MDBInternalIndexPtr then
-      result := ComparePointers(FPointerSearchVal, OtherRow)
-    else if IndexTag = MDBInternalIndexRowId then
-      result:= CompareStr(FIdSearchVal, OtherRow.RowId)
-    else if IndexTag = MDBInternalIndexCurrCopy then
-      result := ComparePointers(FPointerSearchVal, OtherRow.ABData[abCurrent])
-    else if IndexTag = MDBInternalIndexNextCopy then
-      result := ComparePointers(FPointerSearchVal, OtherRow.ABData[abNext])
+    case TagData.InternalIndexClass of
+    iicPtr:
+      result := ComparePointers(FPointerSearchVal, OtherRow);
+    iicRowId:
+      result:= CompareStr(FIdSearchVal, OtherRow.RowId);
+    iicCurCopy:
+      result := ComparePointers(FPointerSearchVal, OtherRow.ABData[abCurrent]);
+    iicNextCopy:
+      result := ComparePointers(FPointerSearchVal, OtherRow.ABData[abNext]);
     else
-    begin
       Assert(false);
       result := 0;
     end;
@@ -529,8 +411,16 @@ begin
       OtherFieldList := TMemStreamableList(OtherRow.ABData[abCurrent]);
 {$ENDIF}
     end;
+    //Main index class is either permanent or temporary.
+    //Case 2)
+    //If temporary, then index newly added, or changing field number,
+    //hence latest ab buffer if table structure has changed, else current
+    //(possibly to add indexes without changing table structure).
+    //Case 1)
+    //If permanent, then using next if subclass is most recent.
 
-    if IndexClass in [icMostRecent, icTemporary] then
+    if (TagData.MainIndexClass = micTemporary)
+      or (PTag.SubIndexClass = sicLatest) then
     begin
       //N.B yes, there is some cleverness on removing index nodes
       //for icCurrent, in that they're unchanged if a current index
@@ -560,20 +450,20 @@ begin
       result := 1
     else //Both assigned.
     begin
-      if IndexClass = icTemporary then
+      if (TagData.MainIndexClass = micTemporary) then
       begin
         if OtherUsingNextCopy then
-          FieldOffset := ExtraFieldOffset
+          OtherFieldOffset := TagData.ExtraFieldOffset
         else
-          FieldOffset := DefaultFieldOffset;
+          OtherFieldOffset := TagData.DefaultFieldOffset;
       end
       else
-        FieldOffset := DefaultFieldOffset;
+        OtherFieldOffset := TagData.DefaultFieldOffset;
 
       //Check field indexes in range.
       //However, do not need to have the same number of fields in each...
-      Assert(FieldOffset <= OtherFieldList.Count);
-      OtherField := OtherFieldList.Items[FieldOffset];
+      Assert(OtherFieldOffset <= OtherFieldList.Count);
+      OtherField := OtherFieldList.Items[OtherFieldOffset];
       Assert(not (OtherField is TMemDeleteSentinel));
 {$IFOPT C+}
       result := CompareFields(FFieldSearchVal,
@@ -588,12 +478,13 @@ end;
 
 { TMemDBFieldLookasideIndexNode}
 
-function TMemDBFieldLookasideIndexNode.CompareItems(OwnItem: TObject; OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
+function TMemDBFieldLookasideIndexNode.CompareItems(OwnItem: TObject; OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 begin
   Assert(Assigned(OwnItem));
   Assert(Assigned(OtherItem));
   Assert(OwnItem is TMemFieldData);
   Assert(OtherItem is TMemFieldData);
+  Assert(TObject(IndexTag) = TObject(self.ClassType));
 {$IFOPT C+}
   result := CompareFields((OwnItem as TMemFieldData).FDataRec,
                           (OtherItem as TMemFieldData).FDataRec);
@@ -605,11 +496,12 @@ end;
 
 { TMemDBFieldLookasideSearchVal }
 
-function TMemDBFieldLookasideSearchVal.CompareItems(OwnItem: TObject; OtherItem: TObject; IndexTag: Int64; OtherNode: TIndexNode): integer;
+function TMemDBFieldLookasideSearchVal.CompareItems(OwnItem: TObject; OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 begin
   Assert(not Assigned(OwnItem));
   Assert(Assigned(OtherItem));
   Assert(OtherItem is TMemFieldData);
+  Assert(TObject(IndexTag) = TObject(self.ClassType.ClassParent));
 {$IFOPT C+}
   result := CompareFields(FFieldSearchVal,
                           (OtherItem as TMemFieldData).FDataRec);
@@ -620,8 +512,17 @@ begin
 end;
 
 initialization
-  EncodeIndexTag(MDBInternalIndexPtr, icInternal, IcInternal, 0, 0, 0);
-  EncodeIndexTag(MDBInternalIndexRowId, icInternal, IcInternal, 1, 0, 0);
-  EncodeIndexTag(MDBInternalIndexCurrCopy, icInternal, IcInternal, 2, 0, 0);
-  EncodeIndexTag(MDBInternalIndexNextCopy, icInternal, IcInternal, 3, 0, 0);
+  MDBInternalIndexPtr := TMemDBITagData.Create;
+  MDBInternalIndexPtr.InitInternal(iicPtr);
+  MDBInternalIndexRowId := TMemDBITagData.Create;
+  MDBInternalIndexRowId.InitInternal(iicRowId);
+  MDBInternalIndexCurrCopy := TMemDBITagData.Create;
+  MDBInternalIndexCurrCopy.InitINternal(iicCurCopy);
+  MDBInternalIndexNextCopy := TMemDBITagData.Create;
+  MDBInternalIndexNextCopy.InitInternal(iicNextCopy);
+finalization
+  MDBInternalIndexPtr.Free;
+  MDBInternalIndexRowId.Free;
+  MDBInternalIndexCurrCopy.Free;
+  MDBInternalIndexNextCopy.Free;
 end.

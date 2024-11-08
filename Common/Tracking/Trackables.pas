@@ -75,7 +75,7 @@ type
 {$ENDIF}
     FTracker: TTracker;
   protected
-    function GetExtraInfoText: string; virtual;
+    function GetExtraInfoText: string; dynamic;
     procedure TrackerDeregister(Tracker: TTracker);
   public
 {$IFOPT C+}

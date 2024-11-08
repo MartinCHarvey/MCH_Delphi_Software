@@ -8,7 +8,7 @@
         <AppType>Application</AppType>
         <FrameworkType>VCL</FrameworkType>
         <ProjectVersion>14.6</ProjectVersion>
-        <Platform Condition="'$(Platform)'==''">Win64</Platform>
+        <Platform Condition="'$(Platform)'==''">Win32</Platform>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Base' or '$(Base)'!=''">
         <Base>true</Base>
@@ -118,24 +118,24 @@
     <PropertyGroup Condition="'$(Cfg_1_Win64)'!=''">
         <DCC_Optimize>true</DCC_Optimize>
         <Manifest_File>$(BDS)\bin\default_app.manifest</Manifest_File>
-        <VerInfo_Build>20</VerInfo_Build>
+        <VerInfo_Build>21</VerInfo_Build>
         <VerInfo_Locale>1033</VerInfo_Locale>
-        <VerInfo_Keys>CompanyName=;FileDescription=;FileVersion=1.0.5.20;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=;ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
+        <VerInfo_Keys>CompanyName=;FileDescription=;FileVersion=1.0.5.21;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=;ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_2)'!=''">
         <DCC_Define>DEBUG;USE_TRACKABLES;$(DCC_Define)</DCC_Define>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_2_Win32)'!=''">
         <Manifest_File>$(BDS)\bin\default_app.manifest</Manifest_File>
-        <VerInfo_Keys>CompanyName=;FileDescription=;FileVersion=1.0.5.8;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=;ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
-        <VerInfo_Build>8</VerInfo_Build>
+        <VerInfo_Keys>CompanyName=;FileDescription=;FileVersion=1.0.5.9;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=;ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
+        <VerInfo_Build>9</VerInfo_Build>
         <VerInfo_Locale>1033</VerInfo_Locale>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_2_Win64)'!=''">
         <Manifest_File>$(BDS)\bin\default_app.manifest</Manifest_File>
-        <VerInfo_Build>21</VerInfo_Build>
+        <VerInfo_Build>22</VerInfo_Build>
         <VerInfo_Locale>1033</VerInfo_Locale>
-        <VerInfo_Keys>CompanyName=;FileDescription=;FileVersion=1.0.5.21;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=;ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
+        <VerInfo_Keys>CompanyName=;FileDescription=;FileVersion=1.0.5.22;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=;ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
     </PropertyGroup>
     <ItemGroup>
         <DelphiCompile Include="$(MainSource)">
@@ -219,7 +219,7 @@
                     <VersionInfo Name="MajorVer">1</VersionInfo>
                     <VersionInfo Name="MinorVer">0</VersionInfo>
                     <VersionInfo Name="Release">2</VersionInfo>
-                    <VersionInfo Name="Build">123</VersionInfo>
+                    <VersionInfo Name="Build">126</VersionInfo>
                     <VersionInfo Name="Debug">False</VersionInfo>
                     <VersionInfo Name="PreRelease">False</VersionInfo>
                     <VersionInfo Name="Special">False</VersionInfo>
@@ -231,7 +231,7 @@
                 <VersionInfoKeys>
                     <VersionInfoKeys Name="CompanyName">Martin Harvey</VersionInfoKeys>
                     <VersionInfoKeys Name="FileDescription">Fractal Generator</VersionInfoKeys>
-                    <VersionInfoKeys Name="FileVersion">1.0.2.123</VersionInfoKeys>
+                    <VersionInfoKeys Name="FileVersion">1.0.2.126</VersionInfoKeys>
                     <VersionInfoKeys Name="InternalName">MFract</VersionInfoKeys>
                     <VersionInfoKeys Name="LegalCopyright">Copyright Martin Harvey 2010</VersionInfoKeys>
                     <VersionInfoKeys Name="LegalTrademarks"/>
@@ -274,12 +274,12 @@
                         <RemoteName>blues2.mfp</RemoteName>
                     </Platform>
                 </DeployFile>
-                <DeployFile LocalName="Win64\Release\MFract.exe" Class="File">
+                <DeployFile LocalName="help\pal_length2.png" Class="File">
                     <Platform Name="Win64">
-                        <RemoteName>MFract.exe</RemoteName>
+                        <RemoteName>pal_length2.png</RemoteName>
                     </Platform>
                     <Platform Name="Win32">
-                        <RemoteName>MFract.exe</RemoteName>
+                        <RemoteName>pal_length2.png</RemoteName>
                     </Platform>
                 </DeployFile>
                 <DeployFile LocalName="All Platforms\Release\MFract.rsm" Configuration="Release" Class="DebugSymbols">
@@ -570,20 +570,20 @@
                         <RemoteName>triangles.mff</RemoteName>
                     </Platform>
                 </DeployFile>
-                <DeployFile LocalName="Samples\leaves2.mff" Class="File">
-                    <Platform Name="Win64">
-                        <RemoteName>leaves2.mff</RemoteName>
-                    </Platform>
-                    <Platform Name="Win32">
-                        <RemoteName>leaves2.mff</RemoteName>
-                    </Platform>
-                </DeployFile>
                 <DeployFile LocalName="Samples\frothy swirl2.mff" Class="File">
                     <Platform Name="Win64">
                         <RemoteName>frothy swirl2.mff</RemoteName>
                     </Platform>
                     <Platform Name="Win32">
                         <RemoteName>frothy swirl2.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\leaves2.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>leaves2.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>leaves2.mff</RemoteName>
                     </Platform>
                 </DeployFile>
                 <DeployFile LocalName="Samples\ferns.mff" Class="File">
@@ -850,12 +850,12 @@
                         <RemoteName>frothy islands 4.mff</RemoteName>
                     </Platform>
                 </DeployFile>
-                <DeployFile LocalName="help\pal_length2.png" Class="File">
+                <DeployFile LocalName="Win64\Release\MFract.exe" Class="File">
                     <Platform Name="Win64">
-                        <RemoteName>pal_length2.png</RemoteName>
+                        <RemoteName>MFract.exe</RemoteName>
                     </Platform>
                     <Platform Name="Win32">
-                        <RemoteName>pal_length2.png</RemoteName>
+                        <RemoteName>MFract.exe</RemoteName>
                     </Platform>
                 </DeployFile>
                 <DeployClass Required="true" Name="DependencyPackage">
