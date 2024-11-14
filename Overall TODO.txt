@@ -1,28 +1,37 @@
 Delphi TODO.
 
-Initially: Indexed store changes:
-
-1. Change IndexStore so that it uses events instead of requiring overriden funcs?
-2. Make old index creation call deprecated, but leave it in for a few months. (To check).
-3. IndexedStore changes so tags can be pointers. (UINTPTR_T)?
-3. Work thru MemDB / MemDBTest to use new indexed store calls. (No change in actual logic).
-4. Re-run memdb testapp.
-5. Work thru other projects likewise (will have to go on a hunt).
-6. Change MemDB so index tags are actual metadata classes. Associated changes for finding indexes etc.
-
 Then: MemDB changes.
+
+0: Indexing: Index on multiple fields.
 
 1. See if we can address DB load times / index parallelism any better.
 2. Niceties to do with starting / ending transactions.
 3. Multi-changeset transactions:
  - Requires changeset inverses, and auto "new changeset in stransaction".
+ - Specific exception to indicate new changeset required, preceeding code
+   side-effect free, then re-run required API from the top?
+
  - Multi changeset commit and rollback.
  - Changes to persistence. Try to keep backward compatible if possible.
 
  4. Query engine. Not even sure where to start here.
 
- Other stuff:
-1. Learn how TensorFlow works with python.
-2. Translate TensorFlow C API to Delphi.
+Things to re-remember in MemDB.
 
-MH.
+1. Index changesets.
+2. NDIndex indexes to real IndexIndexes.
+3. ictTemporary in index tags. Where used, why? How does it affect the field of the index?
+   Temporary indicating index is changing, or fields index underneath is changing?
+4. Two trees for each index, with current / next? Remember how that works.
+
+Things to re-discover in MemDB:
+  - How many points where we had to "back out / stop" further changes, because
+    getting to the edge of allowable concurrent changes:
+    - Rename conflicts.
+    - Delete after add.
+    - Table structure changes.
+    - How are we going to deal with them?
+
+Having re-remembered that, look at Foreign key stuff.
+  - Will it go FUBAR if we index on multiple fields?
+

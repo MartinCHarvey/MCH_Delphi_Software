@@ -1,53 +1,154 @@
 
 MemDB: TODO and notes.
 
-Potential improvements:
+1. Index on multiple fields.
 
-0: String mem usage. After first item of journal replay,
-    scan all ordered (indexed) lists of strings in tables. Use assignment
-    between equals to remove redundant copies.
+2. Remove stuff we're not gonna handle in the "lowest level" API.
+   - Change field type. Handle with composite ops?
+   - Any other index/field changes we don't currently support.
 
-1. Need a case insensitive comparison for string indexes.
+3. Blob handling - do memcopies properly.
+    Testapp for basic blob handling.
 
-2. Further parallelisation on DB load. Load all tables etc in parallel,
-   and not just separate indexes in tables.
+4. Need a case insensitive comparison for string indexes.
 
-1. Would be nice / a good idea to be able to index on multiple fields.
-   Quite likely that current index tag strategy will go in the bin.
-   Existing bitmask is now 64 bits wide, can be replaced with a pointer to some
-   proper index metadata. Deconfliction info will go away.
+5: Yeah, go,on. Allow a memcmp for indexing on blobs,
+     provided blobdata small (hash etc?).
 
-2. Removing data / metadata conflicts. Transactions need to be able to consist of
-   multiple changesets. Auto-commit of intermediate changesets OK....
-   but then rollback needs to be able to replay multiple transactions in reverse.
-   However, would be good to do to make the DB fully transactional.
+6. Composite ops.
 
-   (Changeset pipeline deeper: multi internal transactions make one user transaction).
+6a. Support mini transactions and changesets
+    - To Journal has optional inverse for all journalling funcs.
+    - Streamable now needs "Same" (as before) and also needs
+      "Am inverse".
 
-   Given always updating from one consistent state to another, might be able to get
-   rid of quite a lot of checking.
+    - Revisit streaming of changesets in xactions. Used to be 1:1,
+      but we now need multiple changesets per transaction.
 
-3. Start-up time can be considerably improved if we do somewhat less checking than we do now.
+    - Revisit UserCommitCycle / UserRollback Cycle.
+      - MiniCommit?
+      - Need to keep track of where we are in Xaction.
+      - For writing to journal only stream proverses,
+      - For distrib to other machines poss also stream inverses?
+
+    - Revisit all API functions with respect to which are auto-retryable
+      after a mini-commit.
+
+    - Handling of mini-commit failure.
+
+    - Journalling: Backward compatibility for mini-changesets versus current changeset
+      functionality.
+
+    - Journalling: Revisit auto-batching of multi changesets into files.
+
+6b.
+   - Have a composite API (hangs off DB), which can be used manually.
+     - Does more complicated in-place changes, e.g.
+       - Change field type?
+       - Modify ops, which are actually a copy with multi-renames.
+       - Editing of indexes (actually copy / rename / deletecopy).
+
+     See if can wrap composite API into "normal" API functions.
+
+   - And revisit all exceptions, and allow auto-retry of API functions.
+     Possibly something in Xaction mode?
+
+- N.B. temporary index stage not strictly required for table field rearrangement.
+  We could just change the structure and the tags and run with it.
+  However, keep current permanent / temp for "safety" / "checking".
+  Consider for optimisation later.
+
+3b. Will handle more complex index/table rearrangements via some "extra-api"
+    that we put on top of existing API's.
+    - Will require support for "mini-commits" and "retryable" ops, which
+      we can do in due course.
+
+3. Further parallelisation on DB load. Not only tables in parallel but indexes parallel.
+   May need to seperate out between Main indexed store, and parallel indexed stores for indices.
+
+Suggestions:
+
+- Don't use threadpool, because possibility of deadlocks / starvation, spawn threads.
+- Now that you are subclassing TIndexedStore, have asycnhronous index add operations,
+  where you can do all the adds, and wait - spawn a thread for each index you need to build.
+
+So:
+  - Spawn threads as currently for entity precommit / commit at very initial journal replay.
+    (From Scratch and journal replay).
+  - Spawn threads in async index store class.
+
+  - Note that to get benefit of this, would be nice to checkpoint and have a big dbinit file
+    to start with.
+
+3b. "Retryable":
+    - Mini changesets in xactions, auto-retry of multi rename conflicts,
+      metadata / data conflicts, &c. &c.
+
+4. SQL / TSQL query engine.
+
+5. Start-up time can be considerably improved if we do somewhat less checking than we do now.
    - for journal replay, if we really trust the journal then we can skip all the pre-commit checks.
    - additionally, we could do all the data commits first, and then add indices and referential integrity
      as the last step, which would save a great deal of time.
    - various options need to be considered.
 
+6. MemDB efficiency improvements / memory usage: More compact table rows.
 
-4. Once we've got the hang of doing multiple changesets forward and backwards
+   String mem usage. After first item of journal replay,
+    scan all ordered (indexed) lists of strings in tables. Use assignment
+    between equals to remove redundant copies.
+
+
+8. Transaction handling can be improved: nested calls to start transaction - solving that is easy(ish),
+   but more complicatedly, allowing multiple write transactions in progress at the same time,
+   which requires a rethink to the buffering model.
+
+8. Implicit commit for "mini" transactions inside user transactions.
+   - Requires commit and generation of "undo" or "metadata inverse" operations.
+   - Allows us to then roll backwards thru changesets as well as forwards.
+
+   Removing data / metadata conflicts. Transactions need to be able to consist of
+   multiple changesets. Auto-commit of intermediate changesets OK....
+   but then rollback needs to be able to replay multiple transactions in reverse.
+   However, would be good to do to make the DB fully transactional.
+
+  - Need to either have a "generate inverse" operation, or a "check am inverse"
+    operation.
+
+  - Not sure whether need to distinguish between user xaction changesets and
+    implicitly genrated changesets.
+
+9. Not only checkpoint, but checkpoint and prune old and/or checkpoint to different location.
+
+Pend for later:
+
+Nope 2. Once we've got the hang of doing multiple changesets forward and backwards
    then could consider a distributed database.
    - Sets of changesets then need to be labelled (poss by location / clock),
      and we're then into voting algorithms - consistency constraints etc.
 
-5. MemDB efficiency improvements / memory usage: More compact table rows.
+Way this works is to have a master and a bunch of slave nodes.
+   - Write xactions always go to the master.
+   - Read xactions can go to anyone (preferably not the master (load balance).
+   - On commit of read xactions, need to ensure no journal infor is created.
 
-6. Indexing could be improved. The current tag system is not as general as it could be,
-   and we probably want to index off multiple fields.
+   - Behind the scenes, journal generated by the master is replayed to the slaves.
+   - Slaves thus catch up with the master, and reads are out of date, but not wrong.
 
-7. Transaction handling can be improved: nested calls to start transaction - solving that is easy(ish),
-   but more complicatedly, allowing multiple write transactions in progress at the same time,
-   which requires a rethink to the buffering model.
+- Okay, so far. However, the cleveverness then resides with:
+   - Master needs to keep a list of journal changesets it's written.
+     Slaves can re-sync with a master "from scratch", or alternatively,
+     if they have unique ID for changeset where they are, then master,
+     if it stores changesets, can reply all subsequent.
 
-   (Changeset pipeline wider: more than one one A-B buffered changeset in progress
-    at any one time)
+- Failover, and voting who is the master.
+- If you get more than one master subsequently (network split), then
+  there's a bit of an issue.
+
+- What do we do when we try to join split's - definitely need changeset histories,
+  and then vote most recent / most in common to new master.
+  Might have to discard chunks of changeset history / journal reply on failure?
+
+Nope 3.   (Changeset pipeline wider: more than one one A-B buffered changeset in progress
+    at any one time). Nope - especially not if you want distributed.
 
