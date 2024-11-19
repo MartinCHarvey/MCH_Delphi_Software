@@ -141,7 +141,6 @@ type
   private
     FIndexName: string;
     FFieldName: string;
-    FFieldIndex: TFieldOffset;
     FIndexAttrs: TMDBIndexAttrs;
   public
     procedure Assign(Source: TMemDBStreamable); override;
@@ -151,7 +150,6 @@ type
     procedure CheckSameAsStreamV2(Stream: TStream); override;
     property IndexName: string read FIndexName write FIndexName;
     property FieldName: string read FFieldName write FFieldName;
-    property FieldIndex: TFieldOffset read FFieldIndex write FFieldIndex;
     property IndexAttrs: TMDBIndexAttrs read FIndexAttrs write FIndexAttrs;
   end;
 
@@ -245,7 +243,11 @@ type
     mstFKMetadataEnd,
     DEPRECATED_mstIndexFieldDeconflict,
     mstFieldDefStartV2,
-    mstIndexDefStartV2
+    DEPRECATED_mstIndexDefStart_V2,
+    mstIndexDefStartV3,
+
+    mstReservedForEscape = $FE,
+    mstReservedForEscape2 = $FF
   );
 
 {$IFOPT C+}
@@ -412,7 +414,9 @@ begin
   case Tag of
     DEPRECATED_mstFieldDefStart_V1, mstFieldDefStartV2: result := TMemFieldDef.Create;
     mstFieldDataStart: result := TMemFieldData.Create;
-    DEPRECATED_mstIndexDefStart_V1, mstIndexDefStartV2: result := TMemIndexDef.Create;
+    DEPRECATED_mstIndexDefStart_V1,
+    DEPRECATED_mstIndexDefStart_V2,
+    mstIndexDefStartV3: result := TMemIndexDef.Create;
     mstDeleteSentinel: result := TMemDeleteSentinel.Create;
   else
     raise EMemDBException.Create(S_STREAMABLE_LIST_LOOKAHEAD_FAILED + IntToStr(Ord(Tag)));
@@ -642,10 +646,9 @@ end;
 
 procedure TMemIndexDef.ToStreamV2(Stream: TStream);
 begin
-  WrTag(Stream, mstIndexDefStartV2);
+  WrTag(Stream, mstIndexDefStartV3);
   WrStreamString(Stream, FIndexName);
   WrStreamString(Stream, FFieldName);
-  Stream.Write(FFieldIndex, sizeof(FFieldIndex));
   Stream.Write(FIndexAttrs, sizeof(FIndexAttrs));
   WrTag(Stream, mstIndexDefEnd);
 end;
@@ -656,9 +659,13 @@ var
   DepTag, InitialTag: TMemStreamTag;
   DEPRECATED_Deconflict: byte;
   OldFieldIndex: TOldFieldOffset;
+  DummyIndex: TFieldOffset;
 begin
   InitialTag := RdTag(Stream);
-  if not (InitialTag in [mstIndexDefStartV2, DEPRECATED_mstIndexDefStart_V1]) then
+  if not (InitialTag in [mstIndexDefStartV3,
+    DEPRECATED_mstIndexDefStart_V2,
+    DEPRECATED_mstIndexDefStart_V1
+    ]) then
     raise EMemDBException.Create(S_WRONG_TAG);
 
   FIndexName := RdStreamString(Stream);
@@ -667,10 +674,10 @@ begin
   if InitialTag = DEPRECATED_mstIndexDefStart_V1 then
   begin
     Stream.Read(OldFieldIndex, sizeof(OldFieldIndex));
-    FFieldIndex := OldFieldIndex;
   end
-  else
-    Stream.Read(FFieldIndex, sizeof(FFieldIndex));
+  else if InitialTag = DEPRECATED_mstIndexDefStart_V2 then
+    Stream.Read(DummyIndex, sizeof(Dummyindex));
+//  else pass
 
   Stream.Read(FIndexAttrs, sizeof(FIndexAttrs));
   if FIndexAttrs - AllIndexAttrs <> [] then
@@ -695,7 +702,7 @@ var
   LclIndexName: string;
   LclFieldName: string;
   OldLclFieldIndex: TOldFieldOffset;
-  LclFieldIndex: TFieldOffset;
+  DummyFieldIndex: TFieldOffset;
   LclIndexAttrs: TMDBIndexAttrs;
   Tag: TMemStreamTag;
   CurPos: Int64;
@@ -703,7 +710,11 @@ var
   InitialTag: TMemStreamTag;
 begin
   InitialTag := RdTag(Stream);
-  if not (InitialTag in [mstIndexDefStartV2, DEPRECATED_mstIndexDefStart_V1]) then
+  if not (InitialTag in [
+    mstIndexDefStartV3,
+    DEPRECATED_mstIndexDefStart_V2,
+    DEPRECATED_mstIndexDefStart_V1
+    ]) then
     raise EMemDBException.Create(S_WRONG_TAG);
 
   LclIndexName := RdStreamString(Stream);
@@ -716,13 +727,11 @@ begin
   if InitialTag = DEPRECATED_mstIndexDefStart_V1 then
   begin
     Stream.Read(OldLclFieldIndex, sizeof(OldLclFieldIndex));
-    LclFieldIndex := OldLclFieldIndex;
+    DummyFieldIndex := OldLclFieldIndex;
   end
-  else
-  Stream.Read(LclFieldIndex, sizeof(LclFieldIndex));
+  else if InitialTag = DEPRECATED_mstIndexDefStart_V2 then
+    Stream.Read(DummyFieldIndex, sizeof(DummyFieldIndex));
 
-  if LclFieldIndex <> FFieldIndex then
-    raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
   Stream.Read(LclIndexAttrs, sizeof(LclIndexAttrs));
   if LclIndexAttrs <> FIndexAttrs then
     raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
@@ -746,7 +755,6 @@ begin
   S := Source as TMemIndexDef;
   FIndexName := S.FIndexName;
   FFieldName := S.FFieldName;
-  FFieldIndex := S.FFieldIndex;
   FIndexAttrs := S.FIndexAttrs;
 end;
 
@@ -761,7 +769,6 @@ begin
     result :=
       (FIndexName = O.FIndexName) and
       (FFieldName = O.FFieldName) and
-      (FFieldIndex = O.FFieldIndex) and
       (FIndexAttrs = O.FIndexAttrs);
   end;
 end;

@@ -192,8 +192,6 @@ const
   S_CORRUPTED_FILE = 'Corrupted file: ';
   S_EXCEPTION = 'Internal error, exception: ';
   S_STREAM_SYSTEM_INTERNAL = 'Stream system internal error writing to file.';
-  ONE_MEG = 1024*1024;
-  FILE_CACHE_SIZE = ONE_MEG; //Let's not mess about with small cache sizes.
 
 type
   TJournalFileType = (jftInitOrCheckpoint, jftIncremental);

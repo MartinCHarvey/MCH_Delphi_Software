@@ -85,7 +85,6 @@ type
     procedure RenameField(OldName: string; NewName: string);
     function FieldInfo(Name: string; var FieldType: TMDBFieldType): boolean;
     function GetFieldNames: TStringList;
-    //TODO - Change field type.
 
     procedure CreateIndex(Name: string;
                           IndexedField: string;
@@ -96,11 +95,19 @@ type
                        var IndexedField: string;
                        var IndexAttrs: TMDBIndexAttrs): boolean;
     function GetIndexNames: TStringList;
-    //TODO - Change index attributes.
-    //TODO - Change which field an index refers to, or handle with duplicate
-    //       indices and renames?
 
-    //TODO - Something to list field / index names R/O
+    //DO NOT ALLOW:
+    //Changing objects once they are created.
+    //Easier to add-dup, remove-old, rename.
+    //Will create composite API to do this, such that we can do multiple
+    //changes / renames / whatever with multi-changesets inside a user transaction.
+
+    //That way we do not have to check multiple crazy change on change of
+    //multiple types of items in the same xaction. Eventually one's sanity runs out.
+
+    //Better to Dup state, and be sure it's correct rather than open the door
+    //to subtle nasty bugs dependent on whether things happen in the same xaxtion
+    //or not.
   end;
 
   //TODO - Can remove TMemAPIBufState, got there with a cursor
@@ -828,10 +835,10 @@ end;
 procedure TMemDBTable.API_DeleteField(Iso: TMDBIsolationLevel; Name: string);
 var
   M: TMemDBTableMetadata;
-  FieldIdx, FieldIdx2, FieldIdx2Copy: integer;
+  FieldIdx, FieldIdx2: integer;
   IndexIdx: integer;
   Field: TMemFieldDef;
-  Index, Index2: TMemIndexDef;
+  Index: TMemIndexDef;
   AB: TABSelection;
 begin
   AB := IsoToAB(Iso);
@@ -848,7 +855,6 @@ begin
   end;
   //Delete field.
   FieldIdx2 := FieldHelper.RawIndexToNdIndex(FieldIdx);
-  FieldIdx2Copy := FieldIdx2;
   FieldHelper.Delete(FieldIdx);
   //Adjust field index for later fields (ND).
   while (FieldIdx2 < FieldHelper.NonDeletedCount) do
@@ -856,16 +862,6 @@ begin
     Field := FieldHelper.ModifyND(FieldIdx2) as TMemFieldDef;
     Field.FieldIndex := Pred(Field.FieldIndex);
     Inc(FieldIdx2);
-  end;
-  //Adjust field index for indices referencing later fields.
-  for IndexIdx := 0 to Pred(IndexHelper.NonDeletedCount) do
-  begin
-    Index := IndexHelper.NonDeletedItems[IndexIdx] as TMemIndexDef;
-    if Index.FieldIndex >= FieldIdx2Copy then
-    begin
-      Index2 := IndexHelper.ModifyND(IndexIdx) as TMemIndexDef;
-      Index2.FieldIndex := Pred(Index2.FieldIndex);
-    end;
   end;
   ReGenChangesets;
 end;
@@ -906,8 +902,6 @@ begin
     Index := IndexHelper.NonDeletedItems[IndexIdx] as TMemIndexDef;
     if Index.FieldName = OldName then
     begin
-      if not (Index.FieldIndex = Field.FieldIndex) then
-        raise EMemDBAPIException.Create(S_API_INTERNAL_ERROR);
       Index := IndexHelper.ModifyND(IndexIdx) as TMemIndexDef;
       Index.FieldName := Field.FieldName;
     end;
@@ -974,8 +968,6 @@ begin
   Index := TMemIndexDef.Create;
   Index.IndexName := Name;
   Index.FieldName := IndexedField;
-  Index.FieldIndex := Field.FieldIndex;
-  //TODO - Any checking of index attributes?
   Index.IndexAttrs := IndexAttrs;
   IndexIdx := IndexHelper.Add(Index);
   Assert(IndexHelper.ChildAdded[IndexIdx]);
@@ -1102,6 +1094,10 @@ var
   IdxIdx: integer;
   Sic: TSubIndexClass;
   TagData: TMemDbITagData;
+{$IFDEF DEBUG_DATABASE_NAVIGATE}
+  FieldDef: TMemFieldDef;
+  FieldIdx: integer;
+{$ENDIF}
 begin
   if Length(Name) > 0 then
   begin
@@ -1111,15 +1107,20 @@ begin
     Idx := M.IndexByName(abCurrent, Name, IdxIdx);
     if not Assigned(Idx) then
       raise EMemDBAPIException.Create(S_API_INDEX_NAME_NOT_FOUND);
-    TagData := TagDataArray[IdxIdx];
+    TagData := TagDataList[IdxIdx];
+    if not Assigned(TagData) then
+      raise EMemDBInternalException.Create(S_API_INTERNAL_TAG_DATA_BAD);
     CheckTagAgreesWithMetadata(IdxIdx, TagData, tciPermanentAgreesCurrent, tcpProgrammed);
     //Indices are never in transient state in abCurrent, so no difference
     //between ND field index and absolute field index... we hope.
     Sic := IsoToSubIndexClass(Iso);
 
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
+    FieldDef := M.FieldByName(abCurrent, Idx.FieldName, FieldIdx);
+    Assert(Assigned(FieldDef));
+    Assert(FieldIdx >= 0);
   GLogLog(SV_INFO, 'Encode index tag: ' +
-    SubIndexClassStrings[Sic] + 'Field index: ' + IntToStr(Idx.FieldIndex));
+    SubIndexClassStrings[Sic] + 'Field index: ' + IntToStr(FieldIdx));
 {$ENDIF}
     result := TagData.TagStructs[Sic];
   end
