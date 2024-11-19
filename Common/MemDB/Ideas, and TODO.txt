@@ -1,21 +1,40 @@
 
 MemDB: TODO and notes.
 
+- Index metadata classes done.
+- Explicitly disallowed changing of objects (fields, indexes, foreign keys)
+  once created. Will solve altering objects via composite ops.
+
 1. Index on multiple fields.
 
-2. Remove stuff we're not gonna handle in the "lowest level" API.
-   - Change field type. Handle with composite ops?
-   - Any other index/field changes we don't currently support.
+(FK not allowed on multi-key index).
 
-3. Blob handling - do memcopies properly.
+2. Blob handling - do memcopies properly.
     Testapp for basic blob handling.
 
-4. Need a case insensitive comparison for string indexes.
+3. Need a case insensitive comparison for string indexes.
 
-5: Yeah, go,on. Allow a memcmp for indexing on blobs,
+(FK not allowed on case insensitive index).
+
+4. Yeah, go,on. Allow a memcmp for indexing on blobs,
      provided blobdata small (hash etc?).
 
-6. Composite ops.
+5. Composite ops.
+
+- Revisit the naming / renaming of entities indexes and fields
+  - Rename / rename clashes.
+  - Rename / delete clashes.
+  - Resolved same way at all levels?
+
+  - What is retryable?
+  - When things related, determining which changes are "real" changes,
+    and which are implicit renames as a result of other stuff going on.
+
+- Composite ops.
+  - Do some things (eg change field type?) with create and then
+    rename.
+  - How much can we solve things by creating new/old versions of things,
+    (indexes / fields / tables) and then renaming things around?
 
 6a. Support mini transactions and changesets
     - To Journal has optional inverse for all journalling funcs.
@@ -33,6 +52,12 @@ MemDB: TODO and notes.
 
     - Revisit all API functions with respect to which are auto-retryable
       after a mini-commit.
+
+      Types of conflicts to consider:
+      - Multiple renames. (Disallow after mini-commit implemented).
+      - Rename / delete conflicts (Disallow after mini-commit implemented).
+      - If implement change field type / change attrs / etc
+        - disallow changes if metadata changes already present?
 
     - Handling of mini-commit failure.
 

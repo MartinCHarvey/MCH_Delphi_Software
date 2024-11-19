@@ -323,6 +323,14 @@ begin
     begin
       if (TagData.MainIndexClass = micTemporary) then
       begin
+        //These field offsets look the wrong way around, but aren't.
+
+        //ExtraFieldOffset is the "higher" number when removing fields from the
+        //table. Not only does it correspond to the old index, (which you expect)
+
+        //it *also* corresponds to the new index, when the delete sentinels
+        //have not yet been removed.
+
         if UsingNextCopy then
           OwnFieldOffset := TagData.ExtraFieldOffset
         else
@@ -452,6 +460,14 @@ begin
     begin
       if (TagData.MainIndexClass = micTemporary) then
       begin
+        //These field offsets look the wrong way around, but aren't.
+
+        //ExtraFieldOffset is the "higher" number when removing fields from the
+        //table. Not only does it correspond to the old index, (which you expect)
+
+        //it *also* corresponds to the new index, when the delete sentinels
+        //have not yet been removed.
+
         if OtherUsingNextCopy then
           OtherFieldOffset := TagData.ExtraFieldOffset
         else

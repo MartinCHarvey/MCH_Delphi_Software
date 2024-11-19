@@ -509,10 +509,10 @@ begin
   //Now delete all the rows.
   DelRows;
 
-  SetBaseRowSet;
-
   //Test 1.
   //Add rows satisfying FK relationship to both tables (Base row set).
+  SetBaseRowSet;
+
   //Add FK, check all OK.
   Trans := FSession.StartTransaction(amReadWrite);
   try
@@ -560,7 +560,7 @@ begin
     end;
   end;
 
-  //Add extra row in Referring, re-add FK
+  //Add extra row in Referring, re-add FK (all in same transaction).
   Pass := false;
   Trans := FSession.StartTransaction(amReadWrite);
   try
@@ -590,25 +590,23 @@ begin
     end;
     Pass := true;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('FK Test 1a, foreign key violation failed.');
+    ResMemo.Lines.Add('FK Test 1a, foreign key violation (same transaction) failed.');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
       if Pass then
-        ResMemo.Lines.Add('FK Test 1a, foreign key violation OK.')
+        ResMemo.Lines.Add('FK Test 1a, foreign key violation (same transaction) OK.')
       else
       begin
-        ResMemo.Lines.Add('FK Test 1a, foreign key violation failed.');
+        ResMemo.Lines.Add('FK Test 1a, foreign key violation (same transaction) failed.');
         raise;
       end;
     end;
   end;
 
-  //Check fails.
-
   //Test 1b.
-  //Remove row in master, re-add FK
+  //Remove row in master, re-add FK (all in same transaction)
   DelRows;
   SetBaseRowSet;
 
@@ -638,17 +636,17 @@ begin
     end;
     Pass := true;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('FK Test 1b, foreign key violation failed.');
+    ResMemo.Lines.Add('FK Test 1b, foreign key violation (same transaction) failed.');
   //Check fails.
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
       if Pass then
-        ResMemo.Lines.Add('FK Test 1b, foreign key violation OK.')
+        ResMemo.Lines.Add('FK Test 1b, foreign key violation (same transaction) OK.')
       else
       begin
-        ResMemo.Lines.Add('FK Test 1b, foreign key violation failed.');
+        ResMemo.Lines.Add('FK Test 1b, foreign key violation (same transaction) failed.');
         raise;
       end;
     end;
@@ -710,17 +708,17 @@ begin
     end;
     Pass := true;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('FK Test 2a, foreign key violation failed.');
+    ResMemo.Lines.Add('FK Test 2a, foreign key violation (separate transaction) failed.');
   //Check fails.
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
       if Pass then
-        ResMemo.Lines.Add('FK Test 2a, foreign key violation OK.')
+        ResMemo.Lines.Add('FK Test 2a, foreign key violation (separate transaction) OK.')
       else
       begin
-        ResMemo.Lines.Add('FK Test 2a, foreign key violation failed.');
+        ResMemo.Lines.Add('FK Test 2a, foreign key violation (separate transaction) failed.');
         raise;
       end;
     end;
@@ -747,17 +745,17 @@ begin
     end;
     Pass := true;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('FK Test 2b, foreign key violation failed.');
+    ResMemo.Lines.Add('FK Test 2b, foreign key violation (separate transaction) failed.');
   //Check fails.
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
       if Pass then
-        ResMemo.Lines.Add('FK Test 2b, foreign key violation OK.')
+        ResMemo.Lines.Add('FK Test 2b, foreign key violation (separate transaction) OK.')
       else
       begin
-        ResMemo.Lines.Add('FK Test 2b, foreign key violation failed.');
+        ResMemo.Lines.Add('FK Test 2b, foreign key violation (separate transaction) failed.');
         raise;
       end;
     end;
@@ -788,17 +786,17 @@ begin
     end;
     Pass := true;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('FK Test 2c, foreign key violation failed.');
+    ResMemo.Lines.Add('FK Test 2c, foreign key violation (separate transaction) failed.');
   //Check fails.
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
       if Pass then
-        ResMemo.Lines.Add('FK Test 2c, foreign key violation OK.')
+        ResMemo.Lines.Add('FK Test 2c, foreign key violation (separate transaction) OK.')
       else
       begin
-        ResMemo.Lines.Add('FK Test 2c, foreign key violation failed.');
+        ResMemo.Lines.Add('FK Test 2c, foreign key violation (separate transaction) failed.');
         raise;
       end;
     end;
@@ -828,17 +826,17 @@ begin
     end;
     Pass := true;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('FK Test 2d, foreign key violation failed.');
+    ResMemo.Lines.Add('FK Test 2d, foreign key violation (separate transaction) failed.');
   //Check fails.
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
       if Pass then
-        ResMemo.Lines.Add('FK Test 2d, foreign key violation OK.')
+        ResMemo.Lines.Add('FK Test 2d, foreign key violation (separate transaction) OK.')
       else
       begin
-        ResMemo.Lines.Add('FK Test 2d, foreign key violation failed.');
+        ResMemo.Lines.Add('FK Test 2d, foreign key violation (separate transaction) failed.');
         raise;
       end;
     end;
@@ -918,7 +916,7 @@ begin
   //Field / index rearrangement and simul FK add/check.
 
   //Test 3a.
-  //Add extra fields to both tables.
+  //Add extra fields to both tables, in preparation for...
   //Dup row contents, add indexes, and add dup foreign key.
   //Check FK checking OK, even when index being added.
   Trans := FSession.StartTransaction(amReadWrite);
@@ -953,7 +951,9 @@ begin
   end;
 
   //Test 3b.
-  //Add indices, data and foreign key.
+  //Extra fields now added, so ...
+  //Dup row contents, add indexes, and add dup foreign key.
+  //Check FK checking OK, even when index being added.
   Trans := FSession.StartTransaction(amReadWrite);
   try
     DBAPI := Trans.GetAPI;

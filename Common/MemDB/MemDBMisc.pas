@@ -104,9 +104,6 @@ type
 
   procedure JoinLists(Joined, ToAppend: TList);
 
-  procedure ConvertField(const CurField: TMemDbFieldDataRec;
-                         var NextField: TMemDbFieldDataRec);
-
   function IsoToAB(Iso: TMDBIsolationLevel): TABSelection;
   function ABToSubIndexClass(AB: TABSelection): TSubIndexClass;
   function IsoToSubIndexClass(Iso: TMDBIsolationLevel): TSubIndexClass;
@@ -149,6 +146,9 @@ const
     ('Null', 'Initialising', 'Running',
     'Closing (WaitClients)', 'Closing (WaitPersist)', 'Closed',
     'Error');
+
+  ONE_MEG = 1024*1024;
+  FILE_CACHE_SIZE = ONE_MEG; //Let's not mess about with small cache sizes.
 
 type
 {$IFDEF USE_TRACKABLES}
@@ -514,7 +514,7 @@ end;
 constructor TMemDBWriteCachedFileStream.Create(const FileName: string);
 begin
   FFileName := FileName;
-  inherited Create(FileName);
+  inherited Create(FileName, FILE_CACHE_SIZE);
 {$IFOPT C+}
   FProxy := TTrackable.Create;
 {$ENDIF}
@@ -539,13 +539,6 @@ begin
   Joined.Count := JoinedCount + ToAppendCount;
   for i := JoinedCount to Pred(Joined.Count) do
     Joined.Items[i] := ToAppend.Items[i - JoinedCount];
-end;
-
-procedure ConvertField(const CurField: TMemDbFieldDataRec;
-                       var NextField: TMemDbFieldDataRec);
-begin
-  //TODO
-  raise EMemDBInternalException.Create(S_NOT_IMPLEMENTED);
 end;
 
 function IsoToAB(Iso: TMDBIsolationLevel): TABSelection;
