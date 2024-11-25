@@ -1,5 +1,9 @@
 # MCH_Delphi_Software
-GitHub repo for open sourced MCH Software
+GitHub repo for open sourced MCH Software.
+
+Most recent (2024) development is in Common/MemDB: I am updating my database engine for multiple
+field indexes and keys. Ongoing development involves implicit multiple changesets, commit
+and rollback across multi-changeset transactions.
 
 Files / Folders:
 
