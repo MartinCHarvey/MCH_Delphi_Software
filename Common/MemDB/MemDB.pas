@@ -275,6 +275,7 @@ var
   StorageMode: TTempStorageMode;
 begin
   WaitJournalDone := false;
+  StorageMode := tsmMemory; //To remove compiler warnings.
   FSessionLock.Acquire;
   try
     if Transaction.FCommitedOrRolledBack then

@@ -64,13 +64,13 @@ type
                    ftUnicodeString, ftDouble, ftBlob, ftGuid);
   TMDBFieldTypeSet = set of TMDBFieldType;
 
-  //TODO - Attribute that says must be unique only if nonzero.
   TMDBIndexAttr = (iaUnique, iaNotEmpty);
   TMDBIndexAttrs = set of TMDBIndexAttr;
+  TMDBFieldNames = array of string;
 
   TMDBChangeType = (mctNone, mctAdd, mctChange, mctDelete);
 
-  TMemDBHandle = type TObject;
+  TMemDBHandle = type Pointer;
 
   TMemAPIPosition = (ptFirst, ptLast, ptNext, ptPrevious);
 
@@ -99,16 +99,24 @@ type
     ftGuid: (gVal: TGUID);
   end;
 
-  TOldFieldOffset = 0.. $3FFF; //14 bits.
-  TFieldOffset = type integer;
+  TMemDbFieldDataRecs = array of TMemDbFieldDataRec;
 
-  procedure JoinLists(Joined, ToAppend: TList);
+  TOldFieldOffset = 0.. $3FFF; //14 bits.
+  TFieldOffset = integer;
+  TFieldOffsets = array of TFieldOffset;
+  //Field offsets used for two slightly different things: Standard ND field offsets
+  //and also a list of field absolute indexes. They're close enough the same now.
 
   function IsoToAB(Iso: TMDBIsolationLevel): TABSelection;
   function ABToSubIndexClass(AB: TABSelection): TSubIndexClass;
   function IsoToSubIndexClass(Iso: TMDBIsolationLevel): TSubIndexClass;
-
   function DataRecsSame(const S, O: TMemDBFieldDataRec): boolean;
+  function CopyFieldNames(const S: TMDBFieldNames): TMDBFieldNames;
+  function FieldNamesSame(const A, B: TMDBFieldNames): boolean;
+  function CopyDataRecs(const A:TMemDbFieldDataRecs): TMemDbFieldDataRecs;
+  function MultiDataRecsSame(const A,B: TMemDbFieldDataRecs; AssertSameFormat:boolean = true): boolean;
+  function CopyFieldOffsets(A: TFieldOffsets): TFieldOffsets;
+  function FieldOffsetsSame(A,B: TFieldOffsets; AssertSameFormat:boolean = true): boolean;
 
 type
   //API object numbering.
@@ -209,8 +217,8 @@ type
     FIndexClass: TMainIndexClass;
     FInternalIndexClass:TInternalIndexClass;
     //Do not need encap index class.
-    FDefaultFieldOffset: TFieldOffset;
-    FExtraFieldOffset: TFieldOffset;
+    FDefaultFieldOffsets: TFieldOffsets;
+    FExtraFieldOffsets: TFieldOffsets;
     FInit: boolean;
     FStoreIdxSet: TIndexedStoreO;
 
@@ -222,16 +230,17 @@ type
 {$ENDIF}
     function GetIdxsSetToStore: boolean;
     function GetInternalIndexClass: TInternalIndexClass;
-    function GetDefaultFieldOffset: TFieldOffset;
-    function GetExtraFieldOffset: TFieldOffset;
     function GetTagStructBySubClass(SubClass: TSubINdexClass): PITagStruct;
+
+    function GetDefaultFieldOffsets: TFieldOffsets;
+    function GetExtraFieldOffsets: TFieldOffsets;
   public
     constructor Create;
     destructor Destroy; override;
 
     //For user indexes, classes created dynamically.
-    procedure InitPermanent(DefaultFieldOffset: TFieldOffset);
-    procedure MakePermanentTemporary(NewOffset: TFieldOffset);
+    procedure InitPermanent(DefaultFieldOffsets: TFieldOffsets);
+    procedure MakePermanentTemporary(NewOffsets: TFieldOffsets);
     procedure CommitRestoreToPermanent;
     procedure RollbackRestoreToPermanent;
 
@@ -248,10 +257,12 @@ type
 
     property MainIndexClass: TMainIndexClass read FIndexClass;
     property InternalIndexClass:TInternalIndexClass read GetInternalIndexClass;
-    property DefaultFieldOffset: TFieldOffset read GetDefaultFieldOffset;
-    property ExtraFieldOffset: TFieldOffset read GetExtraFieldOffset;
 
     property TagStructs[S:TSubIndexClass]:PITagStruct read GetTagStructBySubClass;
+
+    property DefaultFieldOffsets: TFieldOffsets read GetDefaultFieldOffsets;
+    property ExtraFieldOffsets: TFieldOffsets read GetExtraFieldOffsets;
+
   end;
 
 
@@ -312,13 +323,23 @@ const
 
 function TMemDbITagData.GetExtraInfoText: string;
 var
-  r1, r2: string;
+  r1, r2,r3, r4: string;
+  i: integer;
 begin
   r1 := inherited;
+  r3 := '(';
+  for i  := 0 to Pred(Length(FDefaultFieldOffsets)) do
+    r3 := r3 + IntToStr(FDefaultFieldOffsets[i]) + ', ';
+  r3 := r3 + ')';
+  r4 := '(';
+  for i  := 0 to Pred(Length(FExtraFieldOffsets)) do
+    r4 := r4 + IntToStr(FExtraFieldOffsets[i]) + ', ';
+  r4 := r4 + ')';
+
   r2 := MainIndexClassStrings[FIndexClass] + ' ' +
         InternalIndexClassStrings[FInternalIndexClass] + ' ' +
-        IntToStr(FDefaultFieldOffset) + ' ' +
-        IntToStr(FExtraFieldOffset) + ' ' +
+        r3 + ' ' +
+        r4 + ' ' +
         BoolToStr(FInit, true) + ' ' +
         BoolToStr(Assigned(FStoreIdxSet), true);
   result := r1 + r2;
@@ -338,18 +359,18 @@ begin
   result := FInternalIndexClass;
 end;
 
-function TMemDbITagData.GetDefaultFieldOffset: TFieldOffset;
+function TMemDbITagData.GetDefaultFieldOffsets: TFieldOffsets;
 begin
   if not (FIndexClass in [micPermanent, micTemporary]) then
     raise EMemDBInternalException.Create(S_INDEXTAG_DATA_NOT_VALID);
-  result := FDefaultFieldOffset;
+  result := FDefaultFieldOffsets;
 end;
 
-function TMemDbITagData.GetExtraFieldOffset: TFieldOffset;
+function TMemDbITagData.GetExtraFieldOffsets: TFieldOffsets;
 begin
   if FIndexClass <> micTemporary then
     raise EMemDBInternalException.Create(S_INDEXTAG_DATA_NOT_VALID);
-  result := FExtraFieldOffset;
+  result := FExtraFieldOffsets;
 end;
 
 function TMemDBITagData.GetTagStructBySubClass(SubClass: TSubINdexClass): PITagStruct;
@@ -376,8 +397,6 @@ begin
     TagData := self;
     SubIndexClass := sicLatest;
   end;
-  FDefaultFieldOffset := -1;
-  FExtraFieldOffset := -1;
 end;
 
 destructor TMemDBITagData.Destroy;
@@ -387,22 +406,22 @@ begin
   inherited;
 end;
 
-procedure TMemDbITagData.InitPermanent(DefaultFieldOffset: TFieldOffset);
+procedure TMemDbITagData.InitPermanent(DefaultFieldOffsets: TFieldOffsets);
 begin
  if FInit then
    raise EMemDBInternalException.Create(S_IDXTAG_BAD_INIT); //Overwriting prev init?
   FIndexClass := micPermanent;
-  FDefaultFieldOffset := DefaultFieldOffset;
+  FDefaultFieldOffsets := CopyFieldOffsets(DefaultFieldOffsets);
   FInit := true;
 end;
 
-procedure TMemDbITagData.MakePermanentTemporary(NewOffset: TFieldOffset);
+procedure TMemDbITagData.MakePermanentTemporary(NewOffsets: TFieldOffsets);
 begin
   if (not FInit) or (FIndexClass <> micPermanent) then
     raise EMemDbInternalException.Create(S_IDXTAG_NOT_PERMANENT);
   FIndexClass := micTemporary;
-  FExtraFieldOffset := FDefaultFieldOffset;
-  FDefaultFieldOffset := NewOffset;
+  FExtraFieldOffsets := FDefaultFieldOffsets;
+  FDefaultFieldOffsets := CopyFieldOffsets(NewOffsets);
 end;
 
 procedure TMemDBITagData.CommitRestoreToPermanent;
@@ -410,15 +429,15 @@ begin
   if (not FInit) or (FIndexClass <> micTemporary) then
     raise EMemDBInternalException.Create(S_IDXTAG_NOT_TEMPORARY);
   //Default field offset unchanged as new offset.
-  FExtraFieldOffset := -1;
+  SetLength(FExtraFieldOffsets, 0);
   FIndexClass := micPermanent;
 end;
 
 procedure TMemDBITagData.RollbackRestoreToPermanent;
 begin
   Assert((FInit) and (FIndexClass = micTemporary));
-  FDefaultFieldOffset := FExtraFieldOffset; //Rollback default changes.
-  FExtraFieldOffset := -1;
+  FDefaultFieldOffsets := CopyFieldOffsets(FExtraFieldOffsets); //Rollback default changes.
+  SetLength(FExtraFieldOffsets, 0);
   FIndexClass := micPermanent;
 end;
 
@@ -528,18 +547,31 @@ begin
   inherited;
 end;
 
+{ Misc functions }
 
-procedure JoinLists(Joined, ToAppend: TList);
+function CopyFieldNames(const S: TMDBFieldNames): TMDBFieldNames;
 var
-  JoinedCount, ToAppendCount: integer;
   i: integer;
 begin
-  JoinedCount := Joined.Count;
-  ToAppendCount := ToAppend.Count;
-  Joined.Count := JoinedCount + ToAppendCount;
-  for i := JoinedCount to Pred(Joined.Count) do
-    Joined.Items[i] := ToAppend.Items[i - JoinedCount];
+  SetLength(result, Length(S));
+  for i := 0 to Pred(Length(Result)) do
+    result[i] := S[i];
 end;
+
+function FieldNamesSame(const A, B: TMDBFieldNames): boolean;
+var
+  i: integer;
+begin
+  result := Length(A) = Length(B);
+  if result then
+    for i := 0 to Pred(Length(A)) do
+      if not (A[i] = B[i]) then
+      begin
+        result := false;
+        exit;
+      end;
+end;
+
 
 function IsoToAB(Iso: TMDBIsolationLevel): TABSelection;
 begin
@@ -566,6 +598,36 @@ end;
 function IsoToSubIndexClass(Iso: TMDBIsolationLevel): TSubIndexClass;
 begin
   result := ABToSubIndexClass(IsoToAB(Iso));
+end;
+
+function CopyDataRecs(const A:TMemDbFieldDataRecs): TMemDbFieldDataRecs;
+var
+  i: integer;
+begin
+  SetLength(result, Length(A));
+  for i := 0 to Pred(Length(Result)) do
+    result[i] := A[i];
+end;
+
+//Typically comparing values here for index traversal.
+function MultiDataRecsSame(const A,B: TMemDbFieldDataRecs; AssertSameFormat:boolean = true): boolean;
+var
+  i: integer;
+begin
+  result := Length(A) = Length(B);
+  Assert(result or not AssertSameFormat);
+  if result then
+  begin
+    for i := 0 to Pred(Length(A)) do
+    begin
+      Assert((A[i].FieldType = B[i].FieldType) or not AssertSameFormat);
+      if not DataRecsSame(A[i], B[i]) then
+      begin
+        result := false;
+        exit;
+      end;
+    end;
+  end;
 end;
 
 function DataRecsSame(const S, O: TMemDBFieldDataRec): boolean;
@@ -605,6 +667,36 @@ begin
   for A := Low(A) to High(A) do
     result := result + [A];
 end;
+
+function CopyFieldOffsets(A: TFieldOffsets): TFieldOffsets;
+var
+  i: integer;
+begin
+  SetLength(result, Length(A));
+  for i := 0 to Pred(Length(A)) do
+    result[i] := A[i];
+end;
+
+
+function FieldOffsetsSame(A,B: TFieldOffsets; AssertSameFormat:boolean = true): boolean;
+var
+  i: integer;
+begin
+  result := Length(A) = Length(B);
+  Assert(result or not AssertSameFormat);
+  if result then
+  begin
+    for i := 0 to Pred(Length(A)) do
+    begin
+      if A[i] <> B[i] then
+      begin
+        result := false;
+        exit;
+      end;
+    end;
+  end;
+end;
+
 
 {$IFDEF MSWINDOWS}
 const

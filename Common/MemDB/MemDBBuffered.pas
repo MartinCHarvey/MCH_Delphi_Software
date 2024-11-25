@@ -276,9 +276,9 @@ type
                                  Pos: TMemAPIPosition): TMemDBRow;
     function FindRowByIndexTag(Iso: TMDBIsolationLevel;
                                IndexDef: TMemIndexDef;
-                               FieldDef: TMemFieldDef;
+                               FieldDefs: TMemFieldDefs;
                                ITagStruct: PITagStruct;
-                               const Data: TMemDbFieldDataRec): TMemDBRow;
+                               const DataRecs: TMemDbFieldDataRecs): TMemDBRow;
 
     procedure ReadRowData(Row: TMemDBRow; Iso: TMDBIsolationLevel;
                           Fields: TMemStreamableList);
@@ -326,8 +326,9 @@ type
     procedure PreCommit(Reason: TMemDbTransReason);override;
     procedure Commit(Reason: TMemDbTransReason); override;
 
-    function FieldByName(AB: TABSelection; Name: string; var AbsIndex: integer): TMemFieldDef;
-    function IndexByName(AB: TABSelection; Name: string; var AbsIndex: integer): TMemIndexDef;
+    function FieldsByNames(AB: TAbSelection; const Names: TMDBFieldNames; var AbsIdxs: TFieldOffsets): TMemFieldDefs;
+    function FieldByName(AB: TABSelection; const Name: string; var AbsIndex: integer): TMemFieldDef;
+    function IndexByName(AB: TABSelection; const Name: string; var AbsIndex: integer): TMemIndexDef;
     procedure Init(Context: TObject; Name:string); override;
   end;
 
@@ -394,16 +395,33 @@ type
     property Interfaced: TMemDBAPIInterfacedObject read FInterfaced;
   end;
 
+  TMemDBFKMetaTags = record
+    abBuf: TABSelection;
+    FieldAbsIdxs: TFieldOffsets;
+  end;
+  PMemDBMetaTags = ^TMemDbFKMetaTags;
+
+  TMemDBFKMetaLists = record
+    FReferringAdded,
+    FReferredDeleted,
+    FReferredAdded: TIndexedStoreO;
+
+    //Only need one extra index out of a possible six!
+    TagReferredAddedNext: TMemDbFkMetaTags;
+  end;
+
   //A temp struct we pass up the stack, to let functions
   //know what's what, and where.
   TMemDBFKMeta = record
     TableReferring, TableReferred: TMemDbTablePersistent;
     IndexDefReferring, IndexDefReferred: TMemIndexDef;
-    FieldDefReferring, FieldDefReferred: TMemFieldDef;
+    FieldDefsReferring, FieldDefsReferred: TMemFieldDefs;
     TableReferringIdx, TableReferredIdx,
     //IndexIdx and FieldIdx absolute in rearrangement cases.
-    IndexDefReferringIdx, IndexDefReferredIdx,
-    FieldDefReferringIdx, FieldDefReferredIdx: integer;
+    IndexDefReferringAbsIdx, IndexDefReferredAbsIdx: integer;
+    FieldDefsReferringAbsIdx, FieldDefsReferredAbsIdx: TFieldOffsets;
+
+    Lists: TMemDBFKMetaLists;
   end;
 
   TIndexChangeType = (ictAdded,
@@ -418,9 +436,9 @@ type
 
   TMemDBForeignKeyPersistent = class(TMemDBEntity)
   private
-    FReferringAdded,
-    FReferredDeleted, FReferredAdded: TIndexedStoreO;
   protected
+    procedure SetupIndexes(var Meta: TMemDBFKMeta);
+    procedure ClearIndexes(var Meta: TMemDbFkMeta);
 
     function FindIndexTag(Table: TMemDbTablePersistent;
                           IndexDef: TMemIndexDef;
@@ -430,8 +448,7 @@ type
     procedure ProcessRow(Row: TMemDBRow;
                          IRec: TItemRec; Ref1, Ref2: TObject; Store: TIndexedStoreO);
 
-    procedure CreateCheckForeignKeyRowSets(const Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
-    procedure ClearLookaside(Store: TIndexedStoreO; AlsoFree: boolean);
+    procedure CreateCheckForeignKeyRowSets(var Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
     procedure CreateReferringAddedList(const Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
     procedure TrimReferringAddedList(const Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
 
@@ -692,12 +709,21 @@ type
     property OnChangeRequest: TNotifyEvent read FOnChangeRequest write FOnChangeRequest;
   end;
 
-function AssignedNotSentinel(X: TMemDBStreamable): boolean;
-function NotAssignedOrSentinel(X: TMemDBStreamable): boolean;
+function AssignedNotSentinel(X: TMemDBStreamable): boolean; inline;
+function NotAssignedOrSentinel(X: TMemDBStreamable): boolean; inline;
 
 //Moved from TMemDBTableMetadata
-function FieldByNameInt(MetadataCopy: TMemTableMetadataItem; Name:string; var AbsIndex: integer): TMemFieldDef;
-function IndexByNameInt(MetadataCopy: TMemTableMetadataItem; Name:string; var AbsIndex: integer): TMemIndexDef;
+function FieldsByNamesInt(MetadataCopy: TMemTableMetadataItem; const Names:TMDBFieldNames; var AbsIndexes: TFieldOffsets): TMemFieldDefs;
+function FieldByNameInt(MetadataCopy: TMemTableMetadataItem; const Name:string; var AbsIndex: integer): TMemFieldDef;
+function IndexByNameInt(MetadataCopy: TMemTableMetadataItem; const Name:string; var AbsIndex: integer): TMemIndexDef;
+
+//Would like to put in Mics, but requires streamable list decl.
+
+//TODO - Building multi data recs for index validation / comparison may prove
+//to be a bit slow and costly. Consider refactoring in a way which does
+//not need mem alloc.
+function BuildMultiDataRecs(FieldList: TMemStreamableList;
+                          const AbsFieldOffsets: TFieldOffsets): TMemDbFieldDataRecs;
 
 
 const
@@ -721,6 +747,7 @@ const
   S_PRE_COMMIT_INTERNAL = 'Pre-commit setup failed, internal error';
   S_COMMMIT_CONSISTENCY_OBJS = 'Commit consistency check failed: Duplicate table or foreign key names.';
   S_MISSING_FIELD_DEF = 'Field definition missing.';
+  S_NO_FIELDS_IN_INDEX = 'No fields in index';
   S_FIELD_NAME_EMPTY = 'Field name empty.';
   S_DUP_FIELD_NAMES = 'Duplicate field names.';
   S_BAD_FIELD_INDEX = 'Bad field index.';
@@ -729,6 +756,7 @@ const
   S_DUP_INDEX_NAMES = 'Duplicate index names';
   S_FIELD_CHANGED_TYPE = 'Fields may not change type after being created';
   S_PRE_COMMIT_CHECK_INTERNAL = 'Pre commit check internal error.';
+  S_INDEX_FIELD_COUNT_SHOULD_BE_CONSTANT = 'Indexes should referencea constant number of fields once created.';
   S_INDEX_DOES_NOT_REFERENCE_FIELD = 'Index does not reference a valid field';
   S_INDEX_UNDERLYING_FIELD_CHANGED = 'Can''t change index to reference a different field.';
   S_INDEXES_INCONSISTENT = 'Index references inconsistent field names and offsets.';
@@ -737,6 +765,7 @@ const
   S_INDEX_BAD_FIELD_TYPE = 'This type of field cannot be indexed (float or blob?)';
   S_INDEX_TAG_NOT_FOUND = 'Index tag not found';
   S_INDEX_TAG_DUPLICATE = 'Index tag already exists';
+  S_INDEX_CONSTRAINTS_FIELDMOVE = 'Do not expect field numbers to be changing during partial index validation.';
   S_INDEX_CONSTRAINT_ZERO = 'Index attributes require fields not zero.';
   S_INDEX_CONSTRAINT_UNIQUE = 'Index attributes require fields unique.';
   S_COMMIT_ROLLBACK_FAILED_INDEXES_CORRUPTED = 'Commit or rollback for a DB row failed. Indexes or index tags corrupted.';
@@ -762,6 +791,7 @@ const
     'Navigating to next or previous row requires that you be on a row to start with.';
   S_API_NEXT_PREV_INTERNAL_ERROR = 'Internal error, couldn''t find current row';
   S_API_SEARCH_VAL_BAD_TYPE = 'Search key data must be of same type as field.';
+  S_API_SEARCH_BAD_FIELD_COUNT = 'Bad field count in search data, or indexed fields';
   S_API_SEARCH_INTERNAL = 'Data A/B buffer type disagrees with transaction isolation level';
   S_API_UNDELETING_ROW_AT_POST_TIME = 'Can''t modify a record previously deleted in same transaction';
   S_API_POST_COMMITTED_OVERWRITE =
@@ -775,9 +805,11 @@ const
   S_API_DELETE_INTERNAL = 'Internal indexing error trying to delete a record.';
   S_FK_TABLE_NOT_FOUND = 'Table not found checking foreign key relationship.';
   S_FK_INDEX_NOT_FOUND = 'Index not found checking foreign key relationship.';
+  S_FK_ONLY_ON_SF_INDEXES = 'Foreign key relationship only allowed between single field indexes at the moment.';
   S_FK_INDEX_FIELD_INTERNAL = 'Internal error checking foreign keys: field/index rearrangement.';
   S_INDEX_FOR_FK_UNIQUE_ATTR = 'Index referenced by foreign key must have unique attr set.';
-  S_FK_FIELDS_DIFFERENT_TYPES = 'All fields in foreign key relationship must have different types.';
+  S_FK_INDEXES_DIFF_FIELDCOUNT = 'Indexes in foreign key must have same number of associated fields.';
+  S_FK_FIELDS_DIFFERENT_TYPES = 'Fields in foreign key relationship must have same types.';
   S_FK_INTERNAL = 'Foreign key validation, internal error.';
   S_FK_INTERNAL_INDEX_TAG = 'Foreign key validation, internal error: bad index tag';
   S_FK_NOT_IN_REFERRED_TABLE = 'Foreign key: trying to add a key not found in referred table.';
@@ -804,6 +836,9 @@ const
   S_FOREIGN_KEY_UNDERLYING_TABLE_CHANGED = 'Table underlying foreign key changed location. Should be constant in spite of multi-renames.';
   S_FOREIGN_KEY_UNDERLYING_INDEX_CHANGED = 'Index underlying foreign key changed location. Should be constant in spite of multi-renames.';
   S_FOREIGN_KEY_UNDERLYING_FIELD_CHANGED = 'Field underlying foreign key changed location. Should be constant in spite of multi-renames.';
+  S_FIELD_LIST_BAD_FOR_COLLATION = 'Collating data for index: Field list bad.';
+  S_ZERO_LENGTH_FIELD_LIST_COLLATING = 'Collating data for index: Field list empty.';
+  S_EMPTY_FIELD_DATA_IN_INDEX_COLLATION = 'Collating data for index: Field data empty';
 
 {$IFDEF PRE_COMMIT_PARALLEL}
 type
@@ -839,6 +874,32 @@ function NotAssignedOrSentinel(X: TMemDBStreamable): boolean;
 begin
   result := (not Assigned(X)) or (X is TMemDeleteSentinel);
 end;
+
+//TODO - Refactor this out for speed (eventually).
+function BuildMultiDataRecs(FieldList: TMemStreamableList;
+                          const AbsFieldOffsets: TFieldOffsets): TMemDbFieldDataRecs;
+var
+  i, L: integer;
+  F: TObject;
+  FieldData: TMemFieldData;
+begin
+  if not (Assigned(FieldList) and (FieldList is TMemStreamableList)) then
+    raise EMemDbInternalException.Create(S_FIELD_LIST_BAD_FOR_COLLATION);
+  //Expect some fields, because this is for index traverse and validation.
+  L := Length(AbsFieldOffsets);
+  if L = 0 then
+    raise EMemDbInternalException.Create(S_ZERO_LENGTH_FIELD_LIST_COLLATING);
+  SetLength(result, L);
+  for i := 0 to Pred(L) do
+  begin
+    F := FieldList.Items[AbsFieldOffsets[i]];
+    if (not Assigned(F)) or (F is TMemDeleteSentinel) then
+      raise EMemDbInternalException.Create(S_EMPTY_FIELD_DATA_IN_INDEX_COLLATION);
+    FieldData := F as TMemFieldData;
+    result[i]:= FieldData.FDataRec
+  end;
+end;
+
 
 { TMemDBAPI }
 
@@ -1804,30 +1865,40 @@ end;
 
 function TMemDBTableList.FindRowByIndexTag(Iso: TMDBIsolationLevel;
                                            IndexDef: TMemIndexDef;
-                                           FieldDef: TMemFieldDef;
+                                           FieldDefs: TMemFieldDefs;
                                            ITagStruct: PITagStruct;
-                                           const Data: TMemDbFieldDataRec): TMemDBRow;
+                                           const DataRecs: TMemDbFieldDataRecs): TMemDBRow;
 var
   RV: TIsRetVal;
   IRec: TItemRec;
   SearchVal: TMemDBIndexNodeSearchVal;
   ABSel: TABSelection;
+  i: integer;
 begin
-  if not (FieldDef.FieldType in IndexableFieldTypes) then
-    raise EMemDBInternalException.Create(S_INDEX_BAD_FIELD_TYPE);
-  if Data.FieldType <> FieldDef.FieldType then
-    raise EMemDBAPIException.Create(S_API_SEARCH_VAL_BAD_TYPE);
+  if (Length(FieldDefs) <> Length(DataRecs)) or (Length(DataRecs) = 0) then
+    raise EMemDbInternalException.Create(S_API_SEARCH_BAD_FIELD_COUNT);
+    //Internal, should have been spotted before now.
+  for i := 0 to Pred(Length(FieldDefs)) do
+  begin
+    if not (FieldDefs[i].FieldType in IndexableFieldTypes) then
+      raise EMemDBInternalException.Create(S_INDEX_BAD_FIELD_TYPE);
+    if DataRecs[i].FieldType <> FieldDefs[i].FieldType then
+      raise EMemDBAPIException.Create(S_API_SEARCH_VAL_BAD_TYPE);
+  end;
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
     GLogLog(SV_INFO, 'FindRowByIndexTag ' +
       MDBIsoStrings[Iso] + ' Tag: ' + IntToStr(NativeInt(ITagStruct)));
-    if Data.FieldType = ftUnicodeString then
+    for i := 0 to Pred(Length(DataRecs)) do
     begin
-      GLogLog(SV_INFO, 'FindRowByIndexTag SearchVal: ' + Data.sVal);
+      if DataRecs[i].FieldType = ftUnicodeString then
+      begin
+        GLogLog(SV_INFO, 'FindRowByIndexTag SearchVal[' + InttoStr(i)+ ']: ' + DataRecs[i].sVal);
+      end;
     end;
 {$ENDIF}
   SearchVal := TMemDBIndexNodeSearchVal.Create;
   try
-    SearchVal.FieldSearchVal := Data; //Sidestepping pointerisms.
+    SearchVal.FieldSearchVals := CopyDataRecs(DataRecs);
     RV := Store.FindByIndex(ITagStruct, SearchVal, IRec);
     if not (RV in [rvOK, rvNotFound]) then
     begin
@@ -2298,10 +2369,11 @@ var
   CC,NC: TMemTableMetadataItem;
   CCFieldCount, CCIndexCount, NCFieldCount, NCIndexCount: integer;
   IndexDefCC, IndexDefNC: TMemIndexDef;
-  FieldDefCC, FieldDefNC: TMemFieldDef;
-  FieldAbsIndexCC, FieldAbsIndexNC: integer;
+  FieldDefsCC, FieldDefsNC: TMemFieldDefs;
+  FieldAbsIndexesCC, FieldAbsIndexesNC: TFieldOffsets;
   MSTemp: TMemDBStreamable;
   NeedCurrent, NeedNext:boolean;
+  i: integer;
 {$ENDIF}
 begin
 {$IFOPT C+}
@@ -2318,8 +2390,9 @@ begin
   //Consistency with current/next metadata, indexes and fields,
   //specifically field numbers is checked elsewhere (re-gen changesets).
   //Assume field indexes (which are ND indexes) are esentially correct.
-  FieldDefCC := nil;
-  FieldDefNC := nil;
+
+  SetLength(FieldDefsCC, 0);
+  SetLength(FieldDefsNC, 0);
   NeedCurrent := false;
   NeedNext := false;
   case IndexState of
@@ -2341,8 +2414,8 @@ begin
     if NotAssignedOrSentinel(MSTemp) then
       raise EMemDbInternalException.Create(S_CHECK_TAGDATA_NO_META);
     IndexDefCC := MSTemp as TMemIndexDef;
-    FieldDefCC := FieldByNameInt(CC, IndexDefCC.FieldName, FieldAbsIndexCC);
-    if NotAssignedOrSentinel(FieldDefCC) then
+    FieldDefsCC := FieldsByNamesInt(CC, IndexDefCC.FieldArray, FieldAbsIndexesCC);
+    if Length(FieldDefsCC) = 0 then
       raise EMemDbInternalException.Create(S_CHECK_TAGDATA_NO_FIELD);
   end;
   if NeedNext then
@@ -2353,8 +2426,8 @@ begin
     if NotAssignedOrSentinel(MSTemp) then
       raise EMemDbInternalException.Create(S_CHECK_TAGDATA_NO_META);
     IndexDefNC := MSTemp as TMemIndexDef;
-    FieldDefNC := FieldByNameInt(NC, IndexDefNC.FieldName, FieldAbsIndexNC);
-    if NotAssignedOrSentinel(FieldDefNC) then
+    FieldDefsNC := FieldsByNamesInt(NC, IndexDefNC.FieldArray, FieldAbsIndexesNC);
+    if Length(FieldDefsNC) = 0 then
       raise EMemDbInternalException.Create(S_CHECK_TAGDATA_NO_FIELD);
   end;
   case IndexState of
@@ -2363,16 +2436,28 @@ begin
     begin
       if TagData.MainIndexClass <> micPermanent then
         raise EMemDbInternalException.Create(S_TAG_FAILED_INDEX_CLASS_CHECK);
-      if (TagData.DefaultFieldOffset <> FieldDefCC.FieldIndex) then
+
+      if not (Length(TagData.DefaultFieldOffsets) = Length(FieldDefsCC)) then
         raise EMemDbInternalException.Create(S_TAG_FAILED_DEFAULT_OFFSET_CHECK);
+      for i := 0 to Pred(Length(TagData.DefaultFieldOffsets)) do
+      begin
+        if TagData.DefaultFieldOffsets[i] <> FieldDefsCC[i].FieldIndex then
+          raise EMemDbInternalException.Create(S_TAG_FAILED_DEFAULT_OFFSET_CHECK);
+      end;
     end;
     tciPermanentAgreesNext:
     //Permanent index, default field offset which agrees with NC.IndexDef.FieldNumber
     begin
       if TagData.MainIndexClass <> micPermanent then
         raise EMemDbInternalException.Create(S_TAG_FAILED_INDEX_CLASS_CHECK);
-      if (TagData.DefaultFieldOffset <> FieldDefNC.FieldIndex) then
+
+      if not (Length(TagData.DefaultFieldOffsets) = Length(FieldDefsNC)) then
         raise EMemDbInternalException.Create(S_TAG_FAILED_DEFAULT_OFFSET_CHECK);
+      for i := 0 to Pred(Length(TagData.DefaultFieldOffsets)) do
+      begin
+        if TagData.DefaultFieldOffsets[i] <> FieldDefsNC[i].FieldIndex then
+          raise EMemDbInternalException.Create(S_TAG_FAILED_DEFAULT_OFFSET_CHECK);
+      end;
     end;
     tciTemporaryAgreesBoth:
     //Temporary index, default field offset agreeds with NC.IndexDef.FieldNumber,
@@ -2381,10 +2466,22 @@ begin
     begin
       if TagData.MainIndexClass <> micTemporary then
         raise EMemDbInternalException.Create(S_TAG_FAILED_INDEX_CLASS_CHECK);
-      if (TagData.DefaultFieldOffset <> FieldDefNC.FieldIndex) then
+
+      if not (Length(TagData.DefaultFieldOffsets) = Length(FieldDefsNC)) then
         raise EMemDbInternalException.Create(S_TAG_FAILED_DEFAULT_OFFSET_CHECK);
-      if (TagData.ExtraFieldOffset <> FieldDefCC.FieldIndex) then
+      for i := 0 to Pred(Length(TagData.DefaultFieldOffsets)) do
+      begin
+        if TagData.DefaultFieldOffsets[i] <> FieldDefsNC[i].FieldIndex then
+          raise EMemDbInternalException.Create(S_TAG_FAILED_DEFAULT_OFFSET_CHECK);
+      end;
+
+      if not (Length(TagData.ExtraFieldOffsets) = Length(FieldDefsCC)) then
         raise EMemDbInternalException.Create(S_TAG_FAILED_EXTRA_OFFSET_CHECK);
+      for i := 0 to Pred(Length(TagData.ExtraFieldOffsets)) do
+      begin
+        if TagData.ExtraFieldOffsets[i] <> FieldDefsCC[i].FieldIndex then
+          raise EMemDbInternalException.Create(S_TAG_FAILED_EXTRA_OFFSET_CHECK);
+      end;
     end;
     //Temporary index, default field offset agreeds with NC.IndexDef.FieldNumber,
     //which should prob be the NDIndex of the field, extra field offset is the
@@ -2394,8 +2491,14 @@ begin
     begin
       if TagData.MainIndexClass <> micTemporary then
         raise EMemDbInternalException.Create(S_TAG_FAILED_INDEX_CLASS_CHECK);
-      if (TagData.DefaultFieldOffset <> FieldDefNC.FieldIndex) then
+
+      if not (Length(TagData.DefaultFieldOffsets) = Length(FieldDefsNC)) then
         raise EMemDbInternalException.Create(S_TAG_FAILED_DEFAULT_OFFSET_CHECK);
+      for i := 0 to Pred(Length(TagData.DefaultFieldOffsets)) do
+      begin
+        if TagData.DefaultFieldOffsets[i] <> FieldDefsNC[i].FieldIndex then
+          raise EMemDbInternalException.Create(S_TAG_FAILED_DEFAULT_OFFSET_CHECK);
+      end;
     end;
   else
     Assert(false);
@@ -2416,12 +2519,13 @@ end;
 
 procedure TMemDBTablePersistent.ReGenChangesets;
 var
-  i, j, NDIndex: integer;
+  i, j, NDIndex, ff: integer;
   FieldDef1, FieldDef2: TMemFieldDef;
+  FieldDefs1, FieldDefs2: TMemFieldDefs;
   IndexDef1, IndexDef2: TMemIndexDef;
   CC, NC: TMemTableMetadataItem;
   CCFieldCount, CCINdexCount, NCFieldCount, NCIndexCount: integer;
-  AbsIndex1, AbsIndex2: integer;
+  AbsIndexes1, AbsIndexes2: TFieldOffsets;
 begin
   UpdateListHelpers;
   GetCurrNxtMetaCopiesEx(CC, NC, CCFieldCount, CCIndexCount, NCFieldCount, NCIndexCount);
@@ -2468,8 +2572,13 @@ begin
       IndexDef1:= NC.IndexDefs.Items[i] as TMemIndexDef;
       if IndexDef1.IndexName = '' then
         raise EMemDBConsistencyException.Create(S_INDEX_NAME_EMPTY);
-      if IndexDef1.FieldName = '' then
-        raise EMemDBConsistencyException.Create(S_FIELD_NAME_EMPTY);
+      if IndexDef1.FieldNameCount = 0 then
+        raise EMemDBConsistencyException.Create(S_NO_FIELDS_IN_INDEX);
+      for ff := 0 to Pred(IndexDef1.FieldNameCount) do
+      begin
+        if IndexDef1.FieldNames[ff] = '' then
+          raise EMemDBConsistencyException.Create(S_FIELD_NAME_EMPTY);
+      end;
       for j := Succ(i) to Pred(NCIndexCount) do
       begin
         //Check unique index names.
@@ -2539,34 +2648,49 @@ begin
         //Check indexes reference same underlying field:
         //Same abs position in array for field index,
         //and also, field number change is same for field, and index.
+        FieldDefs1 := (FMetadata as TMemDBTableMetadata).FieldsByNames(abNext, IndexDef1.FieldArray, AbsIndexes1);
+        FieldDefs2 := (FMetadata as TMemDBTableMetadata).FieldsByNames(abCurrent, IndexDef2.FieldArray, AbsIndexes2);
 
-        FieldDef1 := (FMetadata as TMemDBTableMetadata).FieldByName(abNext, IndexDef1.FieldName, AbsIndex1);
-        FieldDef2 := (FMetadata as TMemDBTableMetadata).FieldByName(abCurrent, IndexDef2.FieldName, AbsIndex2);
-        //Check fields looked up by name are good.
-        if not (Assigned(FieldDef1) and Assigned(FieldDef2)) then
-          raise EMemDBConsistencyException.Create(S_INDEX_DOES_NOT_REFERENCE_FIELD);
-        //Check same underlying fields.
-        if AbsIndex1 <> AbsIndex2 then
-          raise EMemDbConsistencyException.Create(S_INDEX_UNDERLYING_FIELD_CHANGED);
-        //Check field indexes for index are ok.
-        if FieldDef1.FieldType <> FieldDef2.FieldType then
-          raise EMemDBConsistencyException.Create(S_INDEXED_FIELD_CHANGED_TYPE);
+        Assert(Length(FieldDefs1) > 0); // i < NCIndexCount
+        Assert(Length(FieldDefs2) > 0); // i < CCIndexCount
+        Assert(Length(FieldDefs1) = Length(AbsIndexes1));
+        Assert(Length(FieldDefs2) = Length(AbsIndexes2));
 
-        //Check indexed fields in correct locations,
-        //(should have been verified by field number checking above).
-        Assert(FieldDef2.FieldIndex = AbsIndex2);
-        Assert(FFieldHelper.NdIndexToRawIndex(FieldDef1.FieldIndex) = AbsIndex1);
+        if Length(FieldDefs1) <> Length(FieldDefs2) then
+          raise EMemDbConsistencyException.Create(S_INDEX_FIELD_COUNT_SHOULD_BE_CONSTANT);
+        for ff := 0 to Pred(Length(FieldDefs1)) do
+        begin
+          //Check fields looked up by name are good.
+          if not (Assigned(FieldDefs1[ff]) and Assigned(FieldDefs2[ff])) then
+            raise EMemDBConsistencyException.Create(S_INDEX_DOES_NOT_REFERENCE_FIELD);
+          //Check same underlying fields.
+          if AbsIndexes1[ff] <> AbsIndexes2[ff] then
+            raise EMemDbConsistencyException.Create(S_INDEX_UNDERLYING_FIELD_CHANGED);
+          //Check field indexes for index are ok.
+          if FieldDefs1[ff].FieldType <> FieldDefs2[ff].FieldType then
+            raise EMemDBConsistencyException.Create(S_INDEXED_FIELD_CHANGED_TYPE);
 
-        if FieldDef1.FieldIndex <> FieldDef2.FieldIndex then
-          FIndexChangesets[i] := FIndexChangesets[i] + [ictChangedFieldNumber];
+          //Check indexed fields in correct locations,
+          //(should have been verified by field number checking above).
+          Assert(FieldDefs2[ff].FieldIndex = AbsIndexes2[ff]);
+          Assert(FFieldHelper.NdIndexToRawIndex(FieldDefs1[ff].FieldIndex) = AbsIndexes1[ff]);
+
+          if FieldDefs1[ff].FieldIndex <> FieldDefs2[ff].FieldIndex then
+            FIndexChangesets[i] := FIndexChangesets[i] + [ictChangedFieldNumber];
+        end;
       end
       else
       begin
-        FieldDef1 := (FMetadata as TMemDBTableMetadata).FieldByName(abNext, IndexDef1.FieldName, AbsIndex1);
-        if not Assigned(FieldDef1) then
-          raise EMemDBConsistencyException.Create(S_INDEX_DOES_NOT_REFERENCE_FIELD);
-        if not (FieldDef1.FieldType in IndexableFieldTypes) then
-          raise EMemDBConsistencyException.Create(S_INDEX_BAD_FIELD_TYPE);
+        FieldDefs1 := (FMetadata as TMemDBTableMetadata).FieldsByNames(abNext, IndexDef1.FieldArray, AbsIndexes1);
+        Assert(Length(FieldDefs1) > 0); // i < NCIndexCount
+        Assert(Length(FieldDefs1) = Length(AbsIndexes1));
+        for ff := 0 to Pred(Length(FieldDefs1)) do
+        begin
+          if not Assigned(FieldDefs1[ff]) then
+            raise EMemDBConsistencyException.Create(S_INDEX_DOES_NOT_REFERENCE_FIELD);
+          if not (FieldDefs1[ff].FieldType in IndexableFieldTypes) then
+            raise EMemDBConsistencyException.Create(S_INDEX_BAD_FIELD_TYPE);
+        end;
         FIndexChangesets[i] := [ictAdded];
       end;
     end
@@ -2816,8 +2940,8 @@ var
   CC, NC: TMemTableMetadataItem;
   Row: TMemDBRow;
   EditRec: TEditRec;
-  CurrFields, NextFields: TMemStreamableList;
-  CurField, NextField: TMemFieldData;
+  NextFields: TMemStreamableList;
+  NextField: TMemFieldData;
   FieldDef1, FieldDef2: TMemFieldDef;
   i: integer;
 begin
@@ -2830,7 +2954,6 @@ begin
     try
       //Go through all the fields.
       Row.RequestChange;
-      CurrFields := Row.ABData[abCurrent] as TMemStreamableList;
       NextFields := Row.ABData[abNext] as TMemStreamableList;
       if NC.FieldDefs.Count = 0 then
       begin
@@ -2844,12 +2967,10 @@ begin
           //No delete sentinels in current or next at the moment....
           if i < CC.FieldDefs.Count then
           begin
-            CurField := CurrFields.Items[i] as TMemFieldData;
             NextField := NextFields.Items[i] as TMemFieldData;
           end
           else
           begin
-            CurField := nil;
             NextField := nil;
           end;
           if (NC.FieldDefs.Items[i]) is TMemDeleteSentinel then
@@ -2893,9 +3014,11 @@ var
   CC, NC: TMemTableMetadataItem;
   i: integer;
   IndexDef1: TMemIndexDef;
-  FieldDef1: TMemFieldDef;
-  FieldAbsIdx: integer;
+  FieldDefs1: TMemFieldDefs;
+  FieldAbsIdxes: TFieldOffsets;
+  NewOffsets: TFieldOffsets;
   TagData: TMemDbITagData;
+  ff: integer;
 begin
   if FIndexingChangeRequired then
   begin
@@ -2914,25 +3037,39 @@ begin
       IndexDef1 := NC.IndexDefs.Items[i] as TMemIndexDef;
       if NotAssignedOrSentinel(IndexDef1) then
         raise EMemDBInternalException.Create(S_ADJUST_INDICES_NO_INDEX);
-      FieldDef1 := FieldByNameInt(NC, IndexDef1.FieldName, FieldAbsIdx);
-      if NotAssignedOrSentinel(FieldDef1) then
+      FieldDefs1 := FieldsByNamesInt(NC, IndexDef1.FieldArray, FieldAbsIdxes);
+      if Length(FieldDefs1) = 0 then
         raise EMemDBInternalException.Create(S_ADJUST_INDICES_NO_FIELD);
+      for ff := 0 to Pred(Length(FieldDefs1)) do
+        if NotAssignedOrSentinel(FieldDefs1[ff]) then
+          raise EMemDBInternalException.Create(S_ADJUST_INDICES_NO_FIELD);
+
       FCommitChangesMade := FCommitChangesMade + [ccmIndexesToTemporary];
+      SetLength(NewOffsets, Length(FieldDefs1));
 
       if ictChangedFieldNumber  in FIndexChangesets[i] then
       begin
         Assert(not (ictAdded in FIndexChangesets[i]));
         CheckTagAgreesWithMetadata(i, TagData, tciPermanentAgreesCurrent, tcpProgrammed);
-        TagData.MakePermanentTemporary(FieldDef1.FieldIndex);
+        for ff := 0 to Pred(Length(FieldDefs1)) do
+          NewOffsets[ff] := FieldDefs1[ff].FieldIndex;
+        TagData.MakePermanentTemporary(NewOffsets);
         CheckTagAgreesWithMetadata(i, TagData, tciTemporaryAgreesBoth, tcpProgrammed);
       end
       else if ictAdded in FIndexChangesets[i] then
       begin
         //Newly created tag needs to be made temporary, and we create the
         //"previous" field index to take into account possible field rearrangements.
-        Assert(FieldDef1.FieldIndex <= FFieldHelper.NdIndexToRawIndex(FieldDef1.FieldIndex));
-        TagData.InitPermanent(FFieldHelper.NdIndexToRawIndex(FieldDef1.FieldIndex));
-        TagData.MakePermanentTemporary(FieldDef1.FieldIndex);
+        for ff := 0 to Pred(Length(FieldDefs1)) do
+        begin
+          Assert(FieldDefs1[ff].FieldIndex <= FFieldHelper.NdIndexToRawIndex(FieldDefs1[ff].FieldIndex));
+          NewOffsets[ff] := FFieldHelper.NdIndexToRawIndex(FieldDefs1[ff].FieldIndex);
+        end;
+        //New assert, shortly array-ized.
+        TagData.InitPermanent(NewOffsets);
+        for ff := 0 to Pred(Length(FieldDefs1)) do
+          NewOffsets[ff] := FieldDefs1[ff].FieldIndex;
+        TagData.MakePermanentTemporary(NewOffsets);
         CheckTagAgreesWithMetadata(i, TagData, tciTemporaryAgreesNextOnly, tcpNotProgrammed);
         TagData.CommitAddIdxsToStore(FData.Store);
         CheckTagAgreesWithMetadata(i, TagData, tciTemporaryAgreesNextOnly, tcpProgrammed);
@@ -3037,9 +3174,8 @@ end;
 
 type
   TProcessRowChkIdxStruct = record
-    FieldDefs: TMemStreamableList;
-    FieldDef: TMemFieldDef;
-    FieldIdx: integer;
+    FieldsForIndexDef: TMemFieldDefs;
+    AbsFieldOffsets: TFieldOffsets;
     IndexAttrs: TMDBIndexAttrs;
     IdxIdx: integer;
     IdxAdded, IdxChangedFieldNumber: boolean;
@@ -3049,11 +3185,12 @@ type
 procedure TMemDBTablePersistent.CheckStreamedInRowIndexing;
 var
  CC, MRC: TMemTableMetadataItem;
- CCFieldDef, MRCFieldDef: TMemFieldDef;
+ CCFieldsForIndexDef, MRCFieldsForIndexDef: TMemFieldDefs;
  CCIndexDef, MRCIndexDef: TMemIndexDef;
  IdxIdx: integer;
- FieldAbsIdx: integer;
+ FieldAbsIdxs: TFieldOffsets;
  RowStruct: TProcessRowChkIdxStruct;
+ ff: integer;
 
 begin
   MRC := FMetadata.ABData[abLatest] as TMemTableMetadataItem;
@@ -3074,32 +3211,51 @@ begin
         RowStruct.IdxChangedFieldNumber := (Length(FIndexChangesets) > IdxIdx)
           and (ictChangedFieldNumber in FIndexChangesets[IdxIdx]);
 
+        Assert(not RowStruct.IdxChangedFieldNumber);
+        //CheckStreamedInRowIndexing => !FDataChangeRequired
+        // => No index or field changesets, so current index offsets fine.
+        // => No delete sentinels or field rearrangement.
+
         RowStruct.IndexAttrs := MRCIndexDef.IndexAttrs;
         RowStruct.IdxIdx := IdxIdx;
         if RowStruct.IdxAdded then
         begin
           Assert(Assigned(MRCIndexDef));
-          MRCFieldDef := FieldByNameInt(MRC, MRCIndexDef.FieldName, FieldAbsIdx);
-          Assert(Assigned(MRCFieldDef));
-          Assert(MRCFieldDef.FieldIndex = FieldAbsIdx); //No delete sentinels.
-          //NoNDToAbs - do not expect field numbers to have changed.
-          RowStruct.FieldDefs := MRC.FieldDefs;
-          RowStruct.FieldDef := MRCFieldDef;
-          RowStruct.FieldIdx := MRCFieldDef.FieldIndex;
+          MRCFieldsForIndexDef := FieldsByNamesInt(MRC, MRCIndexDef.FieldArray, FieldAbsIdxs);
+          if Length(MRCFieldsForIndexDef) = 0 then
+            raise EMemDBInternalException.Create(S_INTERNAL_CHECKING_INDEXES);
+          for ff := 0 to Pred(Length(MRCFieldsForIndexDef)) do
+          begin
+            if NotAssignedOrSentinel(MRCFieldsForIndexDef[ff]) then
+              raise EMemDBInternalException.Create(S_INTERNAL_CHECKING_INDEXES);
+            Assert(MRCFieldsForIndexDef[ff].FieldIndex = FieldAbsIdxs[ff]);
+          end;
+           //Not concerned about copy-by-reference here.
+          RowStruct.FieldsForIndexDef := MRCFieldsForIndexDef;
+          RowStruct.AbsFieldOffsets := FieldAbsIdxs;
         end
         else
         begin
+          Assert(not RowStruct.IdxChangedFieldNumber);
+          //CheckStreamedInRowIndexing => !FDataChangeRequired
+          // => No index or field changesets, so current index offsets fine.
+          // => No delete sentinels or field rearrangement.
           Assert(Assigned(CC));
           Assert(Assigned(CC.IndexDefs) and (IdxIdx < CC.IndexDefs.Count));
           CCIndexDef := CC.IndexDefs.Items[IdxIdx] as TMemIndexDef;
           Assert(Assigned(CCIndexDef));
-          CCFieldDef := FieldByNameInt(CC, CCIndexDef.FieldName, FieldAbsIdx);
-          Assert(Assigned(CCFieldDef));
-          Assert(CCFieldDef.FieldIndex = FieldAbsIdx); //No delete sentinels.
-          //NoNDToAbs - do not expect field numbers to have changed.
-          RowStruct.FieldDefs := CC.FieldDefs;
-          RowStruct.FieldDef := CCFieldDef;
-          RowStruct.FieldIdx := CCFieldDef.FieldIndex;
+          CCFieldsForIndexDef := FieldsByNamesInt(CC, CCIndexDef.FieldArray, FieldAbsIdxs);
+          if Length(CCFieldsForIndexDef) = 0 then
+            raise EMemDBInternalException.Create(S_INTERNAL_CHECKING_INDEXES);
+          for ff := 0 to Pred(Length(CCFieldsForIndexDef)) do
+          begin
+            if NotAssignedOrSentinel(CCFieldsForIndexDef[ff]) then
+              raise EMemDBInternalException.Create(S_INTERNAL_CHECKING_INDEXES);
+            Assert(CCFieldsForIndexDef[ff].FieldIndex = FieldAbsIdxs[ff]);
+          end;
+           //Not concerned about copy-by-reference here.
+           RowStruct.FieldsForIndexDef := CCFieldsForIndexDef;
+           RowStruct.AbsFieldOffsets := FieldAbsIdxs;
         end;
         FData.ForEachChangedRow(CheckIndexForRow, @RowStruct, nil);
       end;
@@ -3119,46 +3275,10 @@ procedure TMemDbTablePersistent.CheckIndexForRow(Row: TMemDBRow; IRec: TItemRec;
     end;
   end;
 
-  function FieldFromFieldList(Fields: TMemStreamableList; Idx: integer): TMemFieldData;
-  begin
-    result := nil;
-    if Assigned(Fields) then
-    begin
-      if (Idx < 0) or (Idx > Fields.Count) then
-        raise EMemDBInternalException.Create(S_INTERNAL_CHECKING_INDEXES);
-      if Fields.Items[Idx] is TMemDeleteSentinel then
-        raise EMemDBInternalException.Create(S_INTERNAL_CHECKING_INDEXES);
-      result := Fields.Items[Idx] as TMemFieldData;
-    end;
-  end;
-
-  procedure CheckFieldDef(MetaFields: TMemStreamableList; Idx: integer);
-  var
-    FieldDef: TMemFieldDef;
-  begin
-    if (Idx < 0) or (Idx > MetaFields.Count) then
-      raise EMemDBInternalException.Create(S_INTERNAL_CHECKING_INDEXES);
-    if MetaFields.Items[Idx] is TMemDeleteSentinel then
-      raise EMemDBInternalException.Create(S_INTERNAL_CHECKING_INDEXES);
-    FieldDef := MetaFields.Items[Idx] as TMemFieldDef;
-    if FieldDef.FieldIndex <> Idx then
-      raise EMemDBInternalException.Create(S_INTERNAL_CHECKING_INDEXES);
-  end;
-
-  procedure CheckDifferent(RowField, OtherRowField: TMemFieldData);
-  begin
-    Assert(Assigned(RowField));
-    if Assigned(OtherRowField) then
-    begin
-      if CompareFields(RowField.FDataRec, OtherRowField.FDataRec) = 0 then
-        raise EMemDBConsistencyException.Create(S_INDEX_CONSTRAINT_UNIQUE);
-    end;
-  end;
-
 var
   PProcRowStruct: PProcessRowChkIdxStruct;
   RowFields: TMemStreamableList;
-  RowField: TMemFieldData;
+  RowDataRecs: TMemDbFieldDataRecs;
   ZeroRec: TMemDBFieldDataRec;
   TagData: TMemDBITagData;
   TagStruct: PITagStruct;
@@ -3166,7 +3286,9 @@ var
   RV: TIsRetVal;
   PrevRow, NextRow: TMemDBRow;
   PrevRowFields, NextRowFields: TMemStreamableList;
-  PrevRowField, NextRowField: TMemFieldData;
+  PrevRowDataRecs, NextRowDataRecs: TMemDbFieldDataRecs;
+  ff: integer;
+  AllEmpty: boolean;
 
 begin
   PProcRowStruct := PProcessRowChkIdxStruct(Ref1);
@@ -3175,18 +3297,38 @@ begin
     FillChar(ZeroRec, sizeof(ZeroRec), 0);
 
     RowFields := Row.ABData[abNext] as TMemStreamableList;
-    CheckFieldDef(PProcRowStruct.FieldDefs, PProcRowStruct.FieldIdx);
-    RowField := FieldFromFieldList(RowFields, PProcRowStruct.FieldIdx);
+    //RowDataRecs are only the fields required as referenced (in order) by a particular index.
+    RowDataRecs := BuildMultiDataRecs(RowFields, PProcRowStruct.AbsFieldOffsets);
+
     if iaNotEmpty in PProcRowStruct.IndexAttrs then
     begin
-      ZeroRec.FieldType := RowField.FDataRec.FieldType;
-      if CompareFields(ZeroRec, RowField.FDataRec) = 0 then
+      //Very arguable here, but we'll just require that not all fields are empty,
+      //Kinda like digits of an int not being zero ....
+      AllEmpty := true;
+      for ff := 0 to Pred(Length(RowDataRecs)) do
+      begin
+        ZeroRec.FieldType := RowDataRecs[ff].FieldType;
+        if CompareFields(ZeroRec, RowDataRecs[ff]) <> 0 then
+        begin
+          AllEmpty := false;
+          break;
+        end;
+      end;
+      if AllEmpty then
         raise EMemDBConsistencyException.Create(S_INDEX_CONSTRAINT_ZERO);
     end;
     if iaUnique in PProcRowStruct.IndexAttrs then
     begin
       //Work out what the index tag will be.
 
+      //We can not get here if not FDataChangeRequired = true
+      // => No fields moved.
+      // => never IdxChangedFieldNumber.
+
+      //However, we can definitely add new records, and then add an index.
+      //Index change required -> True. Data change required -> false.
+
+      //Asserted and old code commented out. Can be removed in a bit.
       TagData := FTagDataList[PProcRowStruct.IdxIdx];
       if PProcRowStruct.IdxAdded then
       begin
@@ -3195,11 +3337,11 @@ begin
       end
       else if PProcRowStruct.IdxChangedFieldNumber then
       begin
-        Assert(not PProcRowStruct.IdxAdded);
-        CheckTagAgreesWithMetadata(PProcRowStruct.IdxIdx, TagData, tciTemporaryAgreesBoth, tcpProgrammed);
+        raise EMemDBInternalException.Create(S_INDEX_CONSTRAINTS_FIELDMOVE);
       end
       else
         CheckTagAgreesWithMetadata(PProcRowStruct.IdxIdx, TagData, tciPermanentAgreesCurrent, tcpProgrammed);
+
       TagStruct := TagData.TagStructs[sicLatest];
       if not FData.Store.HasIndex(TagStruct) then
         raise EMemDBInternalException.Create(S_INDEX_TAG_NOT_FOUND);
@@ -3217,12 +3359,18 @@ begin
         NextRow := NextRec.Item as TMemDBRow
       else
         NextRow := nil;
+      //Index metadata copies used are
+      //CC (Current Copies), but we are using the most recent fields.
+      //OK if data changed, but no field number change.
+      //Checked for above.
       PrevRowFields := MostRecentFieldsFromRow(PrevRow);
       NextRowFields := MostRecentFieldsFromRow(NextRow);
+      //One or other field lists might be NULL.
       if Assigned(PrevRowFields) then
       begin
-        PrevRowField := FieldFromFieldList(PrevRowFields, PProcRowStruct.FieldIdx);
-        CheckDifferent(RowField, PrevRowField);
+        PrevRowDataRecs := BuildMultiDataRecs(PrevRowFields, PProcRowStruct.AbsFieldOffsets);
+        if MultiDataRecsSame(RowDataRecs, PrevRowDataRecs) then
+          raise EMemDBConsistencyException.Create(S_INDEX_CONSTRAINT_UNIQUE);
       end
       else
       begin
@@ -3247,8 +3395,9 @@ begin
       end;
       if Assigned(NextRowFields) then
       begin
-        NextRowField := FieldFromFieldList(NextRowFields, PProcRowStruct.FieldIdx);
-        CheckDifferent(RowField, NextRowField);
+        NextRowDataRecs := BuildMultiDataRecs(NextRowFields, PProcRowStruct.AbsFieldOffsets);
+        if MultiDataRecsSame(RowDataRecs, NextRowDataRecs) then
+          raise EMemDBConsistencyException.Create(S_INDEX_CONSTRAINT_UNIQUE);
       end
       else
       begin
@@ -3279,46 +3428,54 @@ procedure TMemDbTablePersistent.RevalidateEntireUserIndex(
   RawIndexDefNumber: integer);
 var
   IndexDef1, IndexDef2: TMemIndexDef;
-  FieldDef1, FieldDef2: TMemFieldDef;
-  FieldDef1AbsIdx, FieldDef2AbsIdx: integer;
+  FieldDefs1, FieldDefs2: TMemFieldDefs;
+  AbsIdxs1, AbsIdxs2: TFieldOffsets;
   Current, Next: TItemRec;
   CurRow, NextRow: TMemDBRow;
-  CurField, NextField: TMemFieldData;
   IRet: TIsRetVal;
   ZeroRec: TMemDbFieldDataRec;
   CurRowFields, NextRowFields: TMemStreamableList;
-  FieldNumber: integer;
+  FieldNumbers: TFieldOffsets;
   CurrentMetadata, NextMetadata: TMemTableMetadataItem;
   CCFieldCount, CCIndexCount, NCFieldCount, NCIndexCount: integer;
   TagData: TMemDbITagData;
   ITagStruct: PITagStruct;
+  ff: integer;
+  RowDataRecs, NextRowDataRecs: TMemDbFieldDataRecs;
+  AllEmpty, AllSame: boolean;
+
 begin
   GetCurrNxtMetaCopiesEx(CurrentMetadata, NextMetadata,
     CCFieldCount, CCIndexCount, NCFieldCount, NCIndexCount);
   FillChar(ZeroRec, sizeof(ZeroRec), 0);
   Assert(NCIndexCount > RawIndexDefNumber);
   IndexDef1 := NextMetadata.IndexDefs.Items[RawIndexDefNumber] as TMemIndexDef;
-  FieldDef1 := FieldByNameInt(NextMetadata, IndexDef1.FieldName, FieldDef1AbsIdx);
+  FieldDefs1 := FieldsByNamesInt(NextMetadata, IndexDef1.FieldArray, AbsIdxs1);
   if RawIndexDefNumber < CCIndexCount then
   begin
     IndexDef2 := CurrentMetadata.IndexDefs.Items[RawIndexDefNumber] as TMemIndexDef;
-    FieldDef2 := FieldByNameInt(CurrentMetadata, IndexDef2.FieldName, FieldDef2AbsIdx);
+    FieldDefs2 := FieldsByNamesInt(CurrentMetadata, IndexDef2.FieldArray, AbsIdxs2);
   end
   else
   begin
     IndexDef2 := nil;
-    FieldDef2 := nil;
+    SetLength(FieldDefs2, 0);
+    SetLength(AbsIdxs2, 0);
   end;
   Assert(Assigned(IndexDef2) = not (ictAdded in FIndexChangesets[RawIndexDefNumber]));
-  Assert(Assigned(IndexDef1) = Assigned(FieldDef1));
-  Assert(Assigned(IndexDef2) = Assigned(FieldDef2));
+  Assert(Assigned(IndexDef1) = (Length(FieldDefs1) > 0));
+  Assert(Assigned(IndexDef2) = (Length(FieldDefs2) > 0));
   //Index tags currently in temporary state.
   TagData := FTagDataList[RawIndexDefNumber];
   if ictAdded in FIndexChangesets[RawIndexDefNumber] then
   begin
     Assert(not (ictChangedFieldNumber in FIndexChangesets[RawIndexDefNumber]));
     CheckTagAgreesWithMetadata(RawIndexDefNumber, TagData, tciTemporaryAgreesNextOnly, tcpProgrammed);
-    FieldNumber := FFieldHelper.NdIndexToRawIndex(FieldDef1.FieldIndex);
+    SetLength(FieldNumbers, Length(FieldDefs1));
+    //TODO - Use AbsIdxs1?
+    for ff := 0 to Pred(Length(FieldNumbers)) do
+      FieldNumbers[ff] := FFieldHelper.NdIndexToRawIndex(FieldDefs1[ff].FieldIndex);
+
     ITagStruct := TagData.TagStructs[sicLatest];
   end
   else if ictChangedFieldNumber in FIndexChangesets[RawIndexDefNumber] then
@@ -3326,14 +3483,21 @@ begin
     CheckTagAgreesWithMetadata(RawIndexDefNumber, TagData, tciTemporaryAgreesBoth, tcpProgrammed);
     //If changes field number, we still have delete sentinels, the original
     //field index (which is the ND IndexDef1.FieldIndex) is just fine.
-    FieldNumber := FieldDef2.FieldIndex;
-    Assert(FieldDef2.FieldIndex = FFieldHelper.NdIndexToRawIndex(FieldDef1.FieldIndex));
+    SetLength(FieldNumbers, Length(FieldDefs2));
+    Assert(Length(FieldDefs2) = Length(FieldDefs1));
+    for ff := 0 to Pred(Length(FieldNumbers)) do
+    begin
+      FieldNumbers[ff] := FieldDefs2[ff].FieldIndex;
+      Assert(FieldDefs2[ff].FieldIndex = FFieldHelper.NdIndexToRawIndex(FieldDefs1[ff].FieldIndex));
+    end;
     ITagStruct := TagData.TagStructs[sicLatest];
   end
   else
   begin
     CheckTagAgreesWithMetadata(RawIndexDefNumber, TagData, tciPermanentAgreesCurrent, tcpProgrammed);
-    FieldNumber := FieldDef1.FieldIndex;
+    SetLength(FieldNumbers, Length(FieldDefs1));
+    for ff := 0 to Pred(Length(FieldNumbers)) do
+      FieldNumbers[ff] := FieldDefs1[ff].FieldIndex;
     ITagStruct := TagData.TagStructs[sicLatest];
   end;
   if not FData.Store.HasIndex(ITagStruct) then
@@ -3364,11 +3528,20 @@ begin
   begin
     Assert(not (CurRow.Deleted or CurRow.Null));
     CurRowFields := CurRow.ABData[abLatest] as TMemStreamableList;
-    CurField := CurRowFields.Items[FieldNumber] as TMemFieldData;
+    RowDataRecs := BuildMultiDataRecs(CurRowFields, FieldNumbers);
     if iaNotEmpty in IndexDef1.IndexAttrs then
     begin
-      ZeroRec.FieldType := CurField.FDataRec.FieldType;
-      if CompareFields(ZeroRec, CurField.FDataRec) = 0 then
+      AllEmpty := true;
+      for ff := 0 to Pred(Length(RowDataRecs)) do
+      begin
+        ZeroRec.FieldType := RowDataRecs[ff].FieldType;
+        if CompareFields(ZeroRec, RowDataRecs[ff]) <> 0 then
+        begin
+          AllEmpty := false;
+          break;
+        end;
+      end;
+      if AllEmpty then
         raise EMemDBConsistencyException.Create(S_INDEX_CONSTRAINT_ZERO);
     end;
 
@@ -3394,9 +3567,18 @@ begin
     begin
       Assert(not (NextRow.Deleted or NextRow.Null));
       NextRowFields := NextRow.ABData[abLatest] as TMemStreamableList;
-
-      NextField := NextRowFields.Items[FieldNumber] as TMemFieldData;
-      if CompareFields(CurField.FDataRec, NextField.FDataRec) = 0 then
+      NextRowDataRecs := BuildMultiDataRecs(NextRowFields, FieldNumbers);
+      Assert(Length(RowDataRecs) = Length(NextRowDataRecs));
+      AllSame := true;
+      for ff := 0 to Pred(Length(NextRowDataRecs)) do
+      begin
+        if CompareFields(RowDataRecs[ff], NextRowDataRecs[ff]) <> 0 then
+        begin
+          AllSame := false;
+          break;
+        end;
+      end;
+      if AllSame then
         raise EMemDBConsistencyException.Create(S_INDEX_CONSTRAINT_UNIQUE);
     end;
     Current := Next;
@@ -3542,23 +3724,11 @@ end;
 constructor TMemDBForeignKeyPersistent.Create;
 begin
   inherited;
-  FReferringAdded := TIndexedStoreO.Create;
-  FReferringAdded.AddIndex(TMemDBFieldLookasideIndexNode,
-    TClass(TMemDBFieldLookasideIndexNode));
-  FReferredDeleted := TIndexedStoreO.Create;
-  FReferredDeleted.AddIndex(TMemDBFieldLookasideIndexNode,
-    TClass(TMemDBFieldLookasideIndexNode));
-  FReferredAdded := TIndexedStoreO.Create;
-  FReferredAdded.AddIndex(TMemDBFieldLookasideIndexNode,
-    TClass(TMemDBFieldLookasideIndexNode));
   FMetadata := TMemDBForeignKeyMetadata.Create;
 end;
 
 destructor TMemDBForeignKeyPersistent.Destroy;
 begin
-  ClearLookaside(FReferringAdded, true);
-  ClearLookaside(FReferredDeleted, true);
-  ClearLookaside(FReferredAdded, true);
   FMetadata.Free;
   inherited;
 end;
@@ -3608,6 +3778,8 @@ var
   M: TMemDBTableMetadata;
   Meta: TMemDbFKMeta;
   CCMeta: TMemDBFKMeta;
+  ff: integer;
+
 begin
   if FMetadata.Deleted or FMetadata.Null then
     exit;
@@ -3622,13 +3794,14 @@ begin
     raise EMemDBException.Create(S_FK_TABLE_NOT_FOUND);
   Meta.TableReferring := EntityReferring as TMemDBTablePersistent;
   M := Meta.TableReferring.Metadata as TMemDBTableMetadata;
-  Meta.IndexDefReferring := M.IndexByName(abLatest, FKM.IndexReferer, Meta.IndexDefReferringIdx);
+  Meta.IndexDefReferring := M.IndexByName(abLatest, FKM.IndexReferer, Meta.IndexDefReferringAbsIdx);
   if not Assigned(Meta.IndexDefReferring) then
     raise EMemDBException.Create(S_FK_INDEX_NOT_FOUND);
-  //..and field.
-  Meta.FieldDefReferring :=  M.FieldByName(abLatest, Meta.IndexDefReferring.FieldName, Meta.FieldDefReferringIdx);
-  if not Assigned(Meta.FieldDefReferring) then
+  //..and fields (names should already have been checked, tables before fkeys).
+  Meta.FieldDefsReferring := M.FieldsByNames(abLatest, Meta.IndexDefReferring.FieldArray, Meta.FieldDefsReferringAbsIdx);
+  if Length(Meta.FieldDefsReferring) = 0 then
     raise EMemDBInternalException.Create(S_FK_INDEX_FIELD_INTERNAL);
+  Assert(Length(Meta.FieldDefsReferring) = Length(Meta.FieldDefsReferringAbsIdx));
 
   //Referred index.
   EntityReferred := ParentDB.EntitiesByName(abLatest, FKM.TableReferred, Meta.TableReferredIdx);
@@ -3636,20 +3809,29 @@ begin
     raise EMemDBException.Create(S_FK_TABLE_NOT_FOUND);
   Meta.TableReferred := EntityReferred as TMemDBTablePersistent;
   M := Meta.TableReferred.Metadata as TMemDBTableMetadata;
-  Meta.IndexDefReferred := M.IndexByName(abLatest, FKM.IndexReferred, Meta.IndexDefReferredIdx);
+  Meta.IndexDefReferred := M.IndexByName(abLatest, FKM.IndexReferred, Meta.IndexDefReferredAbsIdx);
   if not Assigned(Meta.IndexDefReferred) then
     raise EMemDBException.Create(S_FK_INDEX_NOT_FOUND);
-  //..and field.
-  Meta.FieldDefReferred := M.FieldByName(abLatest, Meta.IndexDefReferred.FieldName, Meta.FieldDefReferredIdx);
-  if not Assigned(Meta.FieldDefReferred) then
+  //...And fields (names should already have been checked, tables before fkeys).
+  Meta.FieldDefsReferred := M.FieldsByNames(abLatest, Meta.IndexDefReferred.FieldArray, Meta.FieldDefsReferredAbsIdx);
+  if Length(Meta.FieldDefsReferred) = 0 then
     raise EMemDBInternalException.Create(S_FK_INDEX_FIELD_INTERNAL);
+  Assert(Length(Meta.FieldDefsReferred) = Length(Meta.FieldDefsReferredAbsIdx));
 
   //Index uniqueness
   if not (iaUnique in Meta.IndexDefReferred.IndexAttrs) then
     raise EMemDBException.Create(S_INDEX_FOR_FK_UNIQUE_ATTR);
-  //Field type cross check.
-  if Meta.FieldDefReferring.FieldType <> Meta.FieldDefReferred.FieldType then
-    raise EMemDBException.Create(S_FK_FIELDS_DIFFERENT_TYPES);
+
+  //Indexes have same field count and type / order.
+  if Length(Meta.FieldDefsReferring) <> Length(Meta.FieldDefsReferred) then
+    raise EMemDbException.Create(S_FK_INDEXES_DIFF_FIELDCOUNT);
+
+  for ff := 0 to Pred(Length(Meta.FieldDefsReferring)) do
+  begin
+    //Field type cross check.
+    if Meta.FieldDefsReferring[ff].FieldType <> Meta.FieldDefsReferred[ff].FieldType then
+      raise EMemDBException.Create(S_FK_FIELDS_DIFFERENT_TYPES);
+  end;
 
   if not FMetadata.Added then
   begin
@@ -3683,28 +3865,41 @@ begin
 
     //Indexes.
     M := CCMeta.TableReferring.Metadata as TMemDBTableMetadata;
-    CCMeta.IndexDefReferring := M.IndexByName(abCurrent, FKMCC.IndexReferer, CCMeta.IndexDefReferringIdx);
+    CCMeta.IndexDefReferring := M.IndexByName(abCurrent, FKMCC.IndexReferer, CCMeta.IndexDefReferringAbsIdx);
     M := CCMeta.TableReferred.Metadata as TMemDBTableMetadata;
-    CCMeta.IndexDefReferred := M.IndexByName(abCurrent, FKMCC.IndexReferred, CCMeta.IndexDefReferredIdx);
+    CCMeta.IndexDefReferred := M.IndexByName(abCurrent, FKMCC.IndexReferred, CCMeta.IndexDefReferredAbsIdx);
     //Index objs do not actually need to be the same object (copied on write),
     //and nor do they have to have the same name, or refer to the same fields,
     //but for them to be the "same" index, we expect the IndexIndex (which is AbsIndex, not NDIndex),
     //to be the same (hence why we have changeset arrays).
-    if (CCMeta.IndexDefReferringIdx <> Meta.IndexDefReferringIdx)
-      or (CCMeta.IndexDefReferredIdx <> Meta.IndexDefReferredIdx) then
+    if (CCMeta.IndexDefReferringAbsIdx <> Meta.IndexDefReferringAbsIdx)
+      or (CCMeta.IndexDefReferredAbsIdx <> Meta.IndexDefReferredAbsIdx) then
       raise EMemDBInternalException.Create(S_FOREIGN_KEY_UNDERLYING_INDEX_CHANGED);
 
     //Fields.
     M := CCMeta.TableReferring.Metadata as TMemDBTableMetadata;
-    CCMeta.FieldDefReferring := M.FieldByName(abCurrent, CCMeta.IndexDefReferring.FieldName, CCMeta.FieldDefReferringIdx);
+    CCMeta.FieldDefsReferring := M.FieldsByNames(abCurrent, CCMeta.IndexDefReferring.FieldArray, CCMeta.FieldDefsReferringAbsIdx);
     M := CCMeta.TableReferred.Metadata as TMemDBTableMetadata;
-    CCMeta.FieldDefReferred := M.FieldByName(abCurrent, CCMeta.IndexDefReferred.FieldName, CCMeta.FieldDefReferredIdx);
-    //As with Index defs, field defs do not need to be the same object, but they need
-    //to be (for each xaction changeset) at the same AbsIdx as previously,
-    //hence changeset arrays.
-    if (CCMeta.FieldDefReferringIdx <> Meta.FieldDefReferringIdx)
-      or (CCMeta.FieldDefReferredIdx <> Meta.FieldDefReferredIdx) then
+    CCMeta.FieldDefsReferred := M.FieldsByNames(abCurrent, CCMeta.IndexDefReferred.FieldArray, CCMeta.FieldDefsReferredAbsIdx);
+
+    //Expect CC meta to be as consistent as NCMeta....
+    if Length(CCMeta.FieldDefsReferring) <> Length(CCMeta.FieldDefsReferred) then
       raise EMemDBInternalException.Create(S_FOREIGN_KEY_UNDERLYING_FIELD_CHANGED);
+
+    //And lengths between them also to be the same.
+    if Length(CCMeta.FieldDefsReferring) <> Length(Meta.FieldDefsReferred) then
+      raise EMemDBInternalException.Create(S_FOREIGN_KEY_UNDERLYING_FIELD_CHANGED);
+
+    //And expect field defs to have same absIdx as before, even if field rearrangement.
+    for ff := 0 to Pred(Length(CCMeta.FieldDefsReferring)) do
+    begin
+      //As with Index defs, field defs do not need to be the same object, but they need
+      //to be (for each xaction changeset) at the same AbsIdx as previously,
+      //hence changeset arrays.
+      if (CCMeta.FieldDefsReferringAbsIdx[ff] <> Meta.FieldDefsReferringAbsIdx[ff])
+        or (CCMeta.FieldDefsReferredAbsIdx[ff] <> Meta.FieldDefsReferredAbsIdx[ff]) then
+        raise EMemDBInternalException.Create(S_FOREIGN_KEY_UNDERLYING_FIELD_CHANGED);
+    end;
   end;
 
   //And now the grunt work of checking the relation.
@@ -3729,9 +3924,9 @@ procedure TMemDBForeignKeyPersistent.ProcessRow(Row: TMemDBRow;
                      IRec: TItemRec; Ref1, Ref2: TObject; Store: TIndexedStoreO);
 var
   PStruct: PProcessRowFKStruct;
-  FieldOffset: integer;
   RowFields: TMemStreamableList;
-  CurrentField, LatestField: TMemFieldData;
+  //TODO - remove allocation in this oft performed function.
+  CurrentFieldRecs, LatestFieldRecs: TMemDbFieldDataRecs;
   RV: TIsRetVal;
   IRecAdd: TItemRec;
   AddToList: boolean;
@@ -3748,30 +3943,26 @@ begin
           //layout change and FK add.
           AddToList := FMetadata.Added;
 
-          //Latest field (delete sentinels still in place).
-          //Only perform calc if we need to.
-          RowFields := Row.ABData[abNext] as TMemStreamableList;
-          //Layout change in FromScratch case handled in Row.Added
-          if PStruct.PMeta.TableReferring.LayoutChangeRequired then
-          begin
-            FieldOffset := PStruct.PMeta.TableReferring.FFieldHelper
-              .NdIndexToRawIndex(PStruct.PMeta.FieldDefReferring.FieldIndex)
-          end
-          else
-            FieldOffset := PStruct.PMeta.FieldDefReferring.FieldIndex;
-          LatestField := RowFields.Items[FieldOffset] as TMemFieldData;
           if not AddToList then
           begin
+            //Latest field (delete sentinels still in place).
+            //Only perform calc if we need to.
+            RowFields := Row.ABData[abNext] as TMemStreamableList;
+            //Layout change in FromScratch case handled in Row.Added
+            LatestFieldRecs := BuildMultiDataRecs(RowFields,
+            PStruct.PMeta.FieldDefsReferringAbsIdx);
             //Not adding FK, check current field. Same field offset
             //Delete sentinels not removed yet.
             RowFields := Row.ABData[abCurrent] as TMemStreamableList;
-            CurrentField := RowFields.Items[FieldOffset] as TMemFieldData;
-            AddToList := not LatestField.Same(CurrentField);
+            CurrentFieldRecs := BuildMultiDataRecs(RowFields,
+              PStruct.PMeta.FieldDefsReferringAbsIdx);
+
+            AddToList := not MultiDataRecsSame(LatestFieldRecs, CurrentFieldRecs);
           end;
           if AddToList then
           begin
-            RV := PStruct.OutList.AddItem(LatestField, IRecAdd);
-            Assert(RV in [rvOk, rvDuplicateKey]);
+            RV := PStruct.OutList.AddItem(Row, IRecAdd);
+            Assert(RV in [rvOk]); //TODO - Handle failure, why dupKey?
           end;
         end
         else
@@ -3784,13 +3975,9 @@ begin
           Assert((not PStruct.PMeta.TableReferring.LayoutChangeRequired)
             or (PStruct.TransReason = mtrReplayFromScratch));
           //In from scratch, no delete sentinels.
-          Assert(PStruct.PMeta.TableReferring.FFieldHelper
-            .NdIndexToRawIndex(PStruct.PMeta.FieldDefReferring.FieldIndex)
-            = PStruct.PMeta.FieldDefReferring.FieldIndex);
-          FieldOffset := PStruct.PMeta.FieldDefReferring.FieldIndex;
-          RowFields := Row.ABData[abLatest] as TMemStreamableList;
-          RV := PStruct.OutList.AddItem(RowFields.Items[FieldOffset], IRecAdd);
-          Assert(RV in [rvOk, rvDuplicateKey]);
+          //Handle rows not fields, no need for field offset.
+          RV := PStruct.OutList.AddItem(Row, IRecAdd);
+          Assert(RV in [rvOk]); //TODO - Handle failure. Why Dup key?
         end;
       end;
     end;
@@ -3807,24 +3994,24 @@ begin
         Assert(not PStruct.PMeta.TableReferred.LayoutChangeRequired);
         if Row.Deleted or Row.Changed then
         begin
-          Assert(PStruct.PMeta.TableReferred.FFieldHelper
-            .NdIndexToRawIndex(PStruct.PMeta.FieldDefReferred.FieldIndex)
-            = PStruct.PMeta.FieldDefReferred.FieldIndex);
 
-          RowFields := Row.ABData[abCurrent] as TMemStreamableList;
-          FieldOffset := PStruct.PMeta.FieldDefReferred.FieldIndex;
           AddToList := Row.Deleted;
-          CurrentField := RowFields.Items[FieldOffset]as TMemFieldData;
           if not AddToList then
           begin
+            RowFields := Row.ABData[abCurrent] as TMemStreamableList;
+            CurrentFieldRecs := BuildMultiDataRecs(RowFields,
+              PStruct.PMeta.FieldDefsReferredAbsIdx);
+
             RowFields := Row.ABData[abNext] as TMemStreamableList;
-            LatestField := RowFields.Items[FieldOffset]as TMemFieldData;
-            AddToList := not LatestField.Same(CurrentField);
+            LatestFieldRecs := BuildMultiDataRecs(RowFields,
+              PStruct.PMeta.FieldDefsReferredAbsIdx);
+
+            AddToList := not MultiDataRecsSame(LatestFieldRecs, CurrentFieldRecs);
           end;
           if AddToList then
           begin
-            RV := PStruct.OutList.AddItem(CurrentField, IRecAdd);
-            Assert(RV in [rvOk, rvDuplicateKey]);
+            RV := PStruct.OutList.AddItem(Row, IRecAdd);
+            Assert(RV in [rvOk]); //TODO - Handle failure. Why Dup key?
           end;
         end
         else //Do not expect unchanged rows here.
@@ -3843,23 +4030,21 @@ begin
         if Row.Added or Row.Changed then
         begin
           //From scratch case does get here, but no delete sentinels.
-          Assert(PStruct.PMeta.TableReferred.FFieldHelper
-            .NdIndexToRawIndex(PStruct.PMeta.FieldDefReferred.FieldIndex)
-            = PStruct.PMeta.FieldDefReferred.FieldIndex);
-
-          RowFields := Row.ABData[abNext] as TMemStreamableList;
-          FieldOffset := PStruct.PMeta.FieldDefReferred.FieldIndex;
           AddToList := Row.Added;
-          LatestField := RowFields.Items[FieldOffset]as TMemFieldData;
           if not AddToList then
           begin
+            RowFields := Row.ABData[abNext] as TMemStreamableList;
+            LatestFieldRecs := BuildMultiDataRecs(RowFields,
+              PStruct.PMeta.FieldDefsReferredAbsIdx);
             RowFields := Row.ABData[abCurrent] as TMemStreamableList;
-            CurrentField := RowFields.Items[FieldOffset]as TMemFieldData;
-            AddToList := not CurrentField.Same(LatestField)
+            CurrentFieldRecs := BuildMultiDataRecs(RowFields,
+              PStruct.PMeta.FieldDefsReferredAbsIdx);
+
+            AddToList := not MultiDataRecsSame(CurrentFieldRecs, LatestFieldRecs);
           end;
           if AddToList then
           begin
-            RV := PStruct.OutList.AddItem(LatestField, IRecAdd);
+            RV := PStruct.OutList.AddItem(Row, IRecAdd);
             Assert(RV in [rvOk, rvDuplicateKey]);
           end;
         end
@@ -3880,7 +4065,7 @@ var
 begin
   with PStruct do
   begin
-    OutList := FReferringAdded;
+    OutList := Meta.Lists.FReferringAdded;
     PMeta := @Meta;
     Action := rpaReferringAddedFieldsToList;
     TransReason := Reason;
@@ -3916,14 +4101,19 @@ procedure TMemDBForeignKeyPersistent.TrimReferringAddedList(const Meta: TMemDBFK
 var
   LookasideRV: TISRetVal;
   LookasideIRec, NextLookasideIRec: TItemRec;
-  LookupField: TMemFieldData;
+  LookupRow: TMemDbRow;
+  LookupFields: TMemStreamableList;
+  LookupFieldRecs: TMemDbFieldDataRecs;
   SearchVal: TMemDBIndexNodeSearchVal;
   IndexChangeset: TIndexChangeSet;
   ITag: PITagStruct;
   DataRV: TISRetVal;
   DataIRec: TITemRec;
+{$IFOPT C+}
   DataRow: TMemDBRow;
-  DataField: TMemFieldData;
+  DataFields: TMemStreamableList;
+  DataFieldRecs: TMemDBFieldDataRecs;
+{$ENDIF}
 begin
   if not FMetadata.Added then
   begin
@@ -3940,6 +4130,8 @@ begin
                              Meta.IndexDefReferring,
                              IndexChangeset,
                              sicCurrent);
+        if not Assigned(ITag) then
+          raise EMemDBInternalException.Create(S_FK_INTERNAL_INDEX_TAG);
 
         if ictChangedFieldNumber in IndexChangeset then
           raise EMemDBInternalException.Create(S_FK_INTERNAL) //Layout changed, should not be here at all.
@@ -3948,34 +4140,36 @@ begin
           //we don't know what was there before.
           exit;
 
-        if not Meta.TableReferring.Data.Store.HasIndex(ITag) then
-          raise EMemDBInternalException.Create(S_FK_INTERNAL_INDEX_TAG);
-
-        LookasideIRec := FReferringAdded.GetAnItem;
+        LookasideIRec := Meta.Lists.FReferringAdded.GetAnItem;
         while Assigned(LookasideIRec) do
         begin
-          LookupField := LookasideIRec.Item as TMemFieldData;
-          SearchVal.FieldSearchVal := LookupField.FDataRec;
-          DataRV := Meta.TableReferring.Data.Store.FindByIndex
-            (TObject(ITag), SearchVal, DataIRec);
+          LookupRow := LookasideIRec.Item as TMemDbRow;
+          LookupFields := LookupRow.ABData[abLatest] as  TMemStreamableList;
+          //Added rows contain latest data always in latest.
+          //And we're gonna be brave and use the AbsIdx we think is always correct.
+          LookupFieldRecs := BuildMultiDataRecs(LookupFields,
+            Meta.FieldDefsReferringAbsIdx);
+          SearchVal.FieldSearchVals := LookupFieldRecs;
+          DataRV := Meta.TableReferring.Data.Store.FindByIndex(
+            ITag, SearchVal, DataIRec);
           if DataRV = rvOK then
           begin
 {$IFOPT C+}
             //Let's just check.
             DataRow := DataIRec.Item as TMemDBRow;
-            DataField :=
-              ((DataRow.ABData[abCurrent] as TMemStreamableList)
-                .Items[Meta.FieldDefReferring.FieldIndex] as TMemFieldData);
-            Assert(LookupField.Same(DataField));
+            DataFields := DataRow.ABData[abCurrent] as TMemStreamableList;
+            DataFieldRecs := BuildMultiDataRecs(DataFields,
+              Meta.FieldDefsReferringAbsIdx);
+            Assert(MultiDataRecsSame(LookupFieldRecs, DataFieldRecs));
 {$ENDIF}
           end;
           NextLookasideIRec := LookasideIRec;
-          LookasideRV := FReferringAdded.GetAnotherItem(NextLookasideIRec);
+          LookasideRV := Meta.Lists.FReferringAdded.GetAnotherItem(NextLookasideIRec);
           Assert(LookasideRV in [rvOK, rvNotFound]);
           if DataRV = rvOK then
           begin
-            LookasideRV := FReferringAdded.RemoveItem(LookasideIRec);
-            Assert(LookasideRV in [rvOK, rvNotFound]);
+            LookasideRV := Meta.Lists.FReferringAdded.RemoveItem(LookasideIRec);
+            Assert(LookasideRV in [rvOK]);
           end;
           LookasideIRec := NextLookasideIRec;
         end;
@@ -3997,7 +4191,7 @@ begin
     begin
       with PStruct do
       begin
-        OutList := FReferredDeleted;
+        OutList := Meta.Lists.FReferredDeleted;
         PMeta := @Meta;
         Action := rpaReferredDeletedFieldsToList;
         TransReason := Reason;
@@ -4010,7 +4204,7 @@ end;
 // N.B. This trim is not quite so optional.
 //
 // We make a note of all rows deleted, but then trim those, where another
-// row with the same value has simulatneously be re-added into the table.
+// row with the same value has simultaneously been re-added into the table.
 //
 // If we removed this trim, then a simultaneous delete-readd would fail the FK
 // relationship, where arguably, it shouldn't.
@@ -4020,21 +4214,26 @@ procedure TMemDBForeignKeyPersistent.TrimReferredDeletedList(const Meta: TMemDBF
 var
   PStruct: TProcessRowFKStruct;
   DeletedRV, AddedRV: TISRetVal;
-  DelField, AddField: TMemFieldData;
+  DelRow:TMemDBRow;
   DeletedIRec, NextDeletedIRec, AddedIRec: TItemRec;
   DelDel: boolean;
-  SearchVal: TMemDBFieldLookasideSearchVal;
+  SearchVal: TMemDBRowLookasideSearchVal;
+  DelFields: TMemDbFieldDataRecs;
+{$IFOPT C+}
+  AddRow: TMemDBRow;
+  AddFields: TMemDbFieldDataRecs;
+{$ENDIF}
 begin
   if not FMetadata.Added then
   begin
     if not Meta.TableReferred.LayoutChangeRequired then
     begin
-      SearchVal := TMemDBFieldLookasideSearchVal.Create;
+      SearchVal := TMemDBRowLookasideSearchVal.Create;
       try
         //Create a referred added list if applicable, and difference the lists.
         with PStruct do
         begin
-          OutList := FReferredAdded;
+          OutList := Meta.Lists.FReferredAdded;
           PMeta := @Meta;
           Action := rpaReferredAddedFieldsToList;
           TransReason := Reason;
@@ -4042,25 +4241,33 @@ begin
         Meta.TableReferred.Data.ForEachChangedRow(ProcessRow, @PStruct, nil);
 
         //Now do a bit of differencing.
-        DeletedIRec := FReferredDeleted.GetAnItem;
+
+        //For each set of "previous" fields in the deleted list,
+        //we can trim the row if they are in the "next" fields in the added list.
+        DeletedIRec := Meta.Lists.FReferredDeleted.GetAnItem;
         while Assigned(DeletedIRec) do
         begin
-          DelField := DeletedIRec.Item as TMemFieldData;
-          SearchVal.FieldSearchVal := DelField.FDataRec;
-          AddedRV := FReferredAdded.FindByIndex(TClass(TMemDBFieldLookasideIndexNode), SearchVal, AddedIRec);
+          DelRow := DeletedIRec.Item as TMemDBRow;
+          DelFields := BuildMultiDataRecs(DelRow.ABData[abCurrent] as TMemStreamableList,
+            Meta.FieldDefsReferredAbsIdx);
+          SearchVal.FieldSearchVals := DelFields;
+          AddedRV := Meta.Lists.FReferredAdded.FindByIndex(
+            @Meta.Lists.TagReferredAddedNext, SearchVal, AddedIRec);
           Assert(AddedRV in [rvOK, rvNotFound]);
           DelDel := AddedRV = rvOK;
 
           NextDeletedIRec := DeletedIRec;
-          DeletedRV := FReferredDeleted.GetAnotherItem(NextDeletedIRec);
+          DeletedRV := Meta.Lists.FReferredDeleted.GetAnotherItem(NextDeletedIRec);
           Assert(DeletedRV in [rvOK, rvNotFound]);
           if DelDel then
           begin
 {$IFOPT C+}
-            AddField := AddedIRec.Item as TMemFieldData;
-            Assert(AddField.Same(DelField));
+            AddRow := AddedIRec.Item as TMemDBRow;
+            AddFields := BuildMultiDataRecs(AddRow.ABData[abNext] as TMemStreamableList,
+              Meta.FieldDefsReferredAbsIdx);
+            Assert(MultiDataRecsSame(AddFields, DelFields));
 {$ENDIF}
-            DeletedRV := FReferredDeleted.RemoveItem(DeletedIRec);
+            DeletedRV := Meta.Lists.FReferredDeleted.RemoveItem(DeletedIRec);
             Assert(DeletedRV = rvOK);
           end;
           DeletedIRec := NextDeletedIRec;
@@ -4096,31 +4303,38 @@ begin
       break;
     end;
   end;
-  Assert(IndexOffset >= 0);
-  //Get the index changeset attributes.
-  Assert((Length(Table.FIndexChangesets) = 0)
-    or (IndexOffset < Length(Table.FIndexChangesets)));
-
-  if Length(Table.FIndexChangesets) > 0 then
-    OutChangeset := Table.FIndexChangesets[IndexOffset]
-  else
+  if IndexOffset < 0 then
+  begin
     OutChangeset := [];
-
-  TagData := Table.FTagDataList[IndexOffset];
-  if ictChangedFieldNumber in OutChangeset then
-  begin
-    Table.CheckTagAgreesWithMetadata(IndexOffset, TagData, tciTemporaryAgreesBoth, tcpProgrammed);
-    result := TagData.TagStructs[SubIndexClass];
-  end
-  else if ictAdded in OutChangeset then
-  begin
-    Table.CheckTagAgreesWithMetadata(IndexOffset, TagData, tciTemporaryAgreesNextOnly, tcpProgrammed);
-    result := TagData.TagStructs[SubIndexClass];
+    result := nil;
   end
   else
   begin
-    Table.CheckTagAgreesWithMetadata(IndexOffset, TagData, tciPermanentAgreesCurrent, tcpProgrammed);
-    result := TagData.TagStructs[SubIndexClass];
+    //Get the index changeset attributes.
+    Assert((Length(Table.FIndexChangesets) = 0)
+      or (IndexOffset < Length(Table.FIndexChangesets)));
+
+    if Length(Table.FIndexChangesets) > 0 then
+      OutChangeset := Table.FIndexChangesets[IndexOffset]
+    else
+      OutChangeset := [];
+
+    TagData := Table.FTagDataList[IndexOffset];
+    if ictChangedFieldNumber in OutChangeset then
+    begin
+      Table.CheckTagAgreesWithMetadata(IndexOffset, TagData, tciTemporaryAgreesBoth, tcpProgrammed);
+      result := TagData.TagStructs[SubIndexClass];
+    end
+    else if ictAdded in OutChangeset then
+    begin
+      Table.CheckTagAgreesWithMetadata(IndexOffset, TagData, tciTemporaryAgreesNextOnly, tcpProgrammed);
+      result := TagData.TagStructs[SubIndexClass];
+    end
+    else
+    begin
+      Table.CheckTagAgreesWithMetadata(IndexOffset, TagData, tciPermanentAgreesCurrent, tcpProgrammed);
+      result := TagData.TagStructs[SubIndexClass];
+    end;
   end;
 end;
 
@@ -4131,10 +4345,11 @@ var
   ListIRec, DataIRec: TItemRec;
   ITag: PITagStruct;
   IndexChangeset: TIndexChangeset;
-  ListField: TMemFieldData;
+  ListRow: TMemDbRow;
+  ListDataRecs: TMemDbFieldDataRecs;
 {$IFOPT C+}
   DataRow: TMemDBRow;
-  DataField: TMemFieldData;
+  DataFields: TMemDBFieldDataRecs;
 {$ENDIF}
 
 begin
@@ -4150,17 +4365,27 @@ begin
                          sicLatest);
     if not Meta.TableReferred.Data.Store.HasIndex(ITag) then
       raise EMemDBInternalException.Create(S_FK_INTERNAL);
-    ListIRec := FReferringAdded.GetAnItem;
+    ListIRec := Meta.Lists.FReferringAdded.GetAnItem;
     while Assigned(ListIRec) do
     begin
-      ListField := ListIRec.Item as TMemFieldData;
-      SearchVal.FieldSearchVal := ListField.FDataRec;
+      ListRow := ListIRec.Item as TMemDbRow;
+      //Referring added, new values in abLatest, cos can add from scratch too.
+      ListDataRecs := BuildMultiDataRecs(ListRow.ABData[abLatest] as TMemStreamableList,
+        Meta.FieldDefsReferringAbsIdx);
+      SearchVal.FieldSearchVals := ListDataRecs;
       DataRetVal := Meta.TableReferred.Data.Store
         .FindByIndex(TObject(ITag), SearchVal, DataIRec);
       Assert(DataRetVal in [rvOK, rvNotFound]);
       if DataRetVal <> rvOK then
         raise EMemDBConsistencyException.Create(S_FK_NOT_IN_REFERRED_TABLE);
-      ListRetVal := FReferringAdded.GetAnotherItem(ListIRec);
+{$IFOPT C+}
+        //Just check the fields really match.
+        DataRow := DataIRec.Item as TMemDBRow;
+        DataFields := BuildMultiDataRecs(DataRow.ABData[abLatest] as TMemStreamableList,
+          Meta.FieldDefsReferredAbsIdx);
+        Assert(MultiDataRecsSame(ListDataRecs, DataFields));
+{$ENDIF}
+      ListRetVal := Meta.Lists.FReferringAdded.GetAnotherItem(ListIRec);
       Assert(ListRetVal in [rvOK, rvNotFound]);
     end;
     //Check deleted values in referred not in referrer.
@@ -4169,11 +4394,14 @@ begin
                          IndexChangeset, sicLatest);
     if not Meta.TableReferring.Data.Store.HasIndex(ITag) then
       raise EMemDBInternalException.Create(S_FK_INTERNAL);
-    ListIRec := FReferredDeleted.GetAnItem;
+    ListIRec := Meta.Lists.FReferredDeleted.GetAnItem;
     while Assigned(ListIRec) do
     begin
-      ListField := ListIRec.Item as TMemFieldData;
-      SearchVal.FieldSearchVal := ListField.FDataRec;
+      ListRow := ListIrec.Item as TMemDBRow;
+      //Referred deleted, old values in abCurrent.
+      ListDataRecs := BuildMultiDataRecs(ListRow.ABData[abCurrent] as TMemStreamableList,
+        Meta.FieldDefsReferredAbsIdx);
+      SearchVal.FieldSearchVals := ListDataRecs;
       DataRetVal := Meta.TableReferring.Data.Store
         .FindByIndex(TObject(ITag), SearchVal, DataIRec);
       Assert(DataRetVal in [rvOK, rvNotFound]);
@@ -4182,14 +4410,13 @@ begin
 {$IFOPT C+}
         //Just check the fields really match.
         DataRow := DataIRec.Item as TMemDBRow;
-        DataField := (DataRow.ABData[abLatest] as TMemStreamableList)
-          .Items[Meta.TableReferring.FieldHelper.NdIndexToRawIndex(Meta.FieldDefReferring.FieldIndex)]
-          as TMemFieldData;
-        Assert(ListField.Same(DataField));
+        DataFields := BuildMultiDataRecs(DataRow.ABData[abLatest] as TMemStreamableList,
+          Meta.FieldDefsReferringAbsIdx);
+        Assert(MultiDataRecsSame(ListDataRecs, DataFields));
 {$ENDIF}
         raise EMemDBConsistencyException.Create(S_FK_IN_REFERRING_TABLE);
       end;
-      ListRetVal := FReferredDeleted.GetAnotherItem(ListIRec);
+      ListRetVal := Meta.Lists.FReferredDeleted.GetAnotherItem(ListIRec);
       Assert(ListRetVal in [rvOK, rvNotFound]);
     end;
   finally
@@ -4197,22 +4424,32 @@ begin
   end;
 end;
 
-procedure TMemDBForeignKeyPersistent.ClearLookaside(Store: TIndexedStoreO; AlsoFree: boolean);
-var
-  IRec: TItemRec;
+procedure TMemDbForeignKeyPersistent.SetupIndexes(var Meta: TMemDBFkMeta);
 begin
-  if Assigned(Store) then
+  with Meta.Lists do
   begin
-    IRec := Store.GetAnItem;
-    while Assigned(IRec) do
-    begin
-      Store.RemoveItem(IRec);
-      IRec := Store.GetAnItem;
-    end;
+    TagReferredAddedNext.abBuf := abNext;
+    TagReferredAddedNext.FieldAbsIdxs := CopyFieldOffsets(Meta.FieldDefsReferredAbsIdx);
+
+    FReferringAdded := TIndexedStoreO.Create;
+    FReferredDeleted := TIndexedStoreO.Create;
+    FReferredAdded := TIndexedStoreO.Create;
+    FReferredAdded.AddIndex(TMemDBRowLookasideIndexNode, @TagReferredAddedNext);
   end;
-  if AlsoFree then Store.Free;
 end;
 
+procedure TMemDbForeignKeyPersistent.ClearIndexes(var Meta: TMemDBFkMeta);
+begin
+  with Meta.Lists do
+  begin
+    FReferringAdded.Free;
+    FReferredDeleted.Free;
+    FReferredAdded.Free;
+    FReferringAdded := nil;
+    FReferredDeleted := nil;
+    FReferredAdded := nil;
+  end;
+end;
   //Referential integrity is violated when:
   //1. Rows / data are added to the Referring that do not exist in the referred.
   //2. Rows / data are deleted from the Referred that exist in the referring.
@@ -4246,22 +4483,26 @@ end;
   //For each item left in referring added list, there should be a row in the referrer table.
   //For each item left in the referred deleted list, there should not be a row in the referring table.
 
-procedure TMemDBForeignKeyPersistent.CreateCheckForeignKeyRowSets(const Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
+//Unfortunately, there is some nastiness here with respect to
+//calculating field offsets, which we want to do only once,
+//outside of
+
+
+procedure TMemDBForeignKeyPersistent.CreateCheckForeignKeyRowSets(var  Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
 
 begin
   //Create some "lookaside lists" of values that have been added / deleted.
   //The store contains TMemFieldData items.
   try
     //N.B. Indexed store gives us a "duplicate key" error code, which we should use.
+    SetupIndexes(Meta);
     CreateReferringAddedList(Meta, Reason);
     TrimReferringAddedList(Meta, Reason);
     CreateReferredDeletedList(Meta, Reason);
     TrimReferredDeletedList(Meta, Reason);
     CheckOutstandingCrossRefs(Meta, Reason);
   finally
-    ClearLookaside(FReferringAdded, false);
-    ClearLookaside(FReferredDeleted, false);
-    ClearLookaside(FReferredAdded, false);
+    ClearIndexes(Meta);
   end;
 end;
 
@@ -4540,12 +4781,33 @@ begin
   end;
 end;
 
-function FieldByNameInt(MetadataCopy: TMemTableMetadataItem; Name:string; var AbsIndex: integer): TMemFieldDef;
+function FieldsByNamesInt(MetadataCopy: TMemTableMetadataItem; const Names:TMDBFieldNames; var AbsIndexes: TFieldOffsets): TMemFieldDefs;
+var
+  i: integer;
+  SomeData: boolean;
+begin
+  SetLength(result, Length(Names));
+  SetLength(AbsIndexes, Length(Names));
+  SomeData := false;
+  for i := 0 to Pred(Length(Names)) do
+  begin
+    result[i] := FieldByNameInt(MetadataCopy, Names[i], Absindexes[i]);
+    SomeData := SomeData or (Assigned(result[i]));
+  end;
+  if not SomeData then
+  begin
+    SetLength(result, 0);
+    SetLength(AbsIndexes, 0);
+  end;
+end;
+
+function FieldByNameInt(MetadataCopy: TMemTableMetadataItem; const Name:string; var AbsIndex: integer): TMemFieldDef;
 var
   Field: TMemFieldDef;
   i: integer;
 begin
   result := nil;
+  AbsIndex := -1;
   for i := 0 to Pred(MetadataCopy.FieldDefs.Count) do
   begin
     Assert(Assigned(MetadataCopy.FieldDefs.Items[i]));
@@ -4562,7 +4824,7 @@ begin
   end;
 end;
 
-function IndexByNameInt(MetadataCopy: TMemTableMetadataItem; Name:string; var AbsIndex: integer): TMemIndexDef;
+function IndexByNameInt(MetadataCopy: TMemTableMetadataItem; const Name:string; var AbsIndex: integer): TMemIndexDef;
 var
   Index: TMemIndexDef;
   i: integer;
@@ -4584,7 +4846,23 @@ begin
   end;
 end;
 
-function TMemDBTableMetadata.FieldByName(AB: TABSelection; Name: string; var AbsIndex: Integer): TMemFieldDef;
+function TMemDBTableMetadata.FieldsByNames(AB: TAbSelection; const Names: TMDBFieldNames; var AbsIdxs: TFieldOffsets): TMemFieldDefs;
+var
+  MetadataCopy: TMemTableMetadataItem;
+begin
+  if AssignedNotSentinel(ABData[AB]) then
+  begin
+    MetadataCopy := ABData[AB] as TMemTableMetadataItem;
+    result := FieldsByNamesInt(MetadataCopy, Names, AbsIdxs);
+  end
+  else
+  begin
+    SetLength(result, 0);
+    SetLength(AbsIdxs, 0);
+  end;
+end;
+
+function TMemDBTableMetadata.FieldByName(AB: TABSelection; const Name: string; var AbsIndex: Integer): TMemFieldDef;
 var
   MetadataCopy: TMemTableMetadataItem;
 begin
@@ -4597,7 +4875,7 @@ begin
     result := nil;
 end;
 
-function TMemDBTableMetadata.IndexByName(AB: TABSelection; Name: string; var AbsIndex: Integer): TMemIndexDef;
+function TMemDBTableMetadata.IndexByName(AB: TABSelection; const Name: string; var AbsIndex: Integer): TMemIndexDef;
 var
   MetadataCopy: TMemTableMetadataItem;
 begin

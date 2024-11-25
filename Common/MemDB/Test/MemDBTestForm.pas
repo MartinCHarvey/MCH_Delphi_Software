@@ -18,6 +18,8 @@ type
     CheckpointBtn: TButton;
     SmallTrans: TButton;
     FindEdgeTest: TButton;
+    MFIndexTest: TButton;
+    MFFKeyTest: TButton;
     procedure BasicTestBtnClick(Sender: TObject);
     procedure ResetClick(Sender: TObject);
     procedure IndexTestClick(Sender: TObject);
@@ -26,6 +28,8 @@ type
     procedure FKTestClick(Sender: TObject);
     procedure SmallTransClick(Sender: TObject);
     procedure FindEdgeTestClick(Sender: TObject);
+    procedure MFIndexTestClick(Sender: TObject);
+    procedure MFFKeyTestClick(Sender: TObject);
   private
     { Private declarations }
   public
@@ -89,15 +93,11 @@ begin
 
         TableMeta := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata) as TMemAPITableMetadata;
         try
-          try
-            TableMeta.CreateField('Int', ftInteger);
-            TableMeta.CreateField('U64', ftUint64);
-            TableMeta.CreateField('String', ftUnicodeString);
-            TableMeta.CreateField('Double', ftDouble);
-            TableMeta.CreateField('Guid', ftGuid);
-          except
-            on E: Exception do; // Just assume already set up.
-          end;
+          TableMeta.CreateField('Int', ftInteger);
+          TableMeta.CreateField('U64', ftUint64);
+          TableMeta.CreateField('String', ftUnicodeString);
+          TableMeta.CreateField('Double', ftDouble);
+          TableMeta.CreateField('Guid', ftGuid);
         finally
           TableMeta.Free;
         end;
@@ -1800,6 +1800,706 @@ begin
   end;
 end;
 
+procedure TForm1.MFFKeyTestClick(Sender: TObject);
+
+const
+  LIMIT_CUBEROOT = 10;
+var
+  Trans:TMemDBTransaction;
+  Pass: boolean;
+
+  procedure PopulateRowsInTransaction;
+  var
+    i,j,k: integer;
+    TableData1, TableData2: TMemAPITableData;
+    Table1, Table2: TMemDBHandle;
+    Data: TMemDbFieldDataRec;
+    DBAPI: TMemAPIDatabase;
+
+  begin
+    DBAPI := Trans.GetAPI;
+    try
+      Table1 := DBAPI.OpenTableOrKey('FKTestTableMaster');
+      Table2 := DBAPI.OpenTableOrKey('FKTestTableSub');
+      TableData1 := DBAPI.GetApiObjectFromHandle(Table1, APITableData) as TMemAPITableData;
+      TableData2 := DBAPI.GetApiObjectFromHandle(Table2, APITableData) as TMemAPiTableData;
+      try
+        for i := 1 to LIMIT_CUBEROOT do
+          for j := 1 to LIMIT_CUBEROOT do
+            for k := 1 to LIMIT_CUBEROOT do
+            begin
+              TableData1.Append;
+              TableData2.Append;
+              Data.FieldType := ftInteger;
+              Data.i32Val := i;
+              TableData1.WriteField('MasterKey1', Data);
+              TableData2.WriteField('ReferringField1', Data);
+              Data.FieldType := ftUnicodeString;
+              Data.sVal := IntToStr(j);
+              TableData1.WriteField('MasterKey2',Data);
+              TableData2.WriteField('ReferringField2', Data);
+              Data.FieldType := ftGuid;
+              FillChar(Data.gVal, sizeof(Data.gVal),0);
+              Data.gVal.D3 := k;
+              TableData1.WriteField('MasterKey3', Data);
+              TableData2.WriteField('ReferringField3', Data);
+              TableData1.Post;
+              TableData2.Post;
+            end;
+      finally
+        TableData1.Free;
+        TableData2.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+  end;
+
+  procedure CreateTablesInTransaction;
+  var
+    FNames: TMDBFieldNames;
+    DBAPI: TMemAPIDatabase;
+    TableMeta: TMemAPITableMetadata;
+    Table: TMemDBHandle;
+  begin
+    DBAPI := Trans.GetAPI;
+    try
+      Table := DBAPI.OpenTableOrKey('FKTestTableMaster');
+      if not Assigned(Table) then
+      begin
+        Table := DBAPI.CreateTable('FKTestTableMaster');
+        TableMeta := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata) as TMemAPITableMetadata;
+        try
+          TableMeta.CreateField('MasterKey1', ftInteger);
+          TableMeta.CreateField('MasterKey2', ftUnicodeString);
+          TableMeta.CreateField('MasterKey3', ftGuid);
+          SetLength(FNames,2);
+          FNames[0] := 'MasterKey1';
+          FNames[1] := 'MasterKey2';
+          TableMeta.CreateMultiFieldIndex('MasterKeyIdx2', FNames, [iaNotEmpty]);
+          FNames[1] := 'MasterKey3';
+          TableMeta.CreateMultiFieldIndex('MasterKeyIdx3', FNames, [iaNotEmpty]);
+          SetLength(FNames,3);
+          FNames[0] := 'MasterKey1';
+          FNames[1] := 'MasterKey2';
+          FNames[2] := 'MasterKey3';
+          TableMeta.CreateMultiFieldIndex('MasterKeyIdx1', FNames, [iaUnique, iaNotEmpty]);
+        finally
+          TableMeta.Free;
+        end;
+      end;
+      Table := DBAPI.OpenTableOrKey('FKTestTableSub');
+      if not Assigned(Table) then
+      begin
+        Table := DBAPI.CreateTable('FKTestTableSub');
+        TableMeta := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata) as TMemAPITableMetadata;
+        try
+          TableMeta.CreateField('ReferringField1', ftInteger);
+          TableMeta.CreateField('ReferringField2', ftUnicodeString);
+          TableMeta.CreateField('ReferringField3', ftGuid);
+          SetLength(FNames, 2);
+          FNames[0] := 'ReferringField1';
+          FNames[1] := 'ReferringField2';
+          TableMeta.CreateMultiFieldIndex('ReferringIdx2', FNames, [iaNotEmpty]);
+          FNames[0] := 'ReferringField3';
+          TableMeta.CreateMultiFieldIndex('ReferringIdx3', FNames, [iaNotEmpty]);
+          TableMeta.CreateIndex('ExtraIndex', 'ReferringField1', []);
+          SetLength(FNames,3);
+          FNames[0] := 'ReferringField1';
+          FNames[1] := 'ReferringField2';
+          FNames[2] := 'ReferringField3';
+          TableMeta.CreateMultiFieldIndex('ReferringIdx1', FNames, [iaNotEmpty]);
+        finally
+          TableMeta.Free;
+        end;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+  end;
+
+  procedure CreateFKeysInTransaction;
+  var
+    DBAPI: TMemAPIDatabase;
+    FKHandle: TMemDBHandle;
+    FKMeta: TMemAPIForeignKey;
+
+  begin
+    DBAPI := Trans.GetAPI;
+    try
+      FKHandle := DBAPI.OpenTableOrKey('FKTest1');
+      if not Assigned(FKHandle) then
+      begin
+        FKHandle := DBAPI.CreateForeignKey('FKTest1');
+        FKMeta := DBAPI.GetApiObjectFromHandle(FKHandle, APIForeignKey) as TMemAPIForeignKey;
+        try
+          FKMeta.SetReferencedParent('FKTestTableMaster','MasterKeyIdx1');
+          FKMeta.SetReferencingChild('FKTestTableSub', 'ReferringIdx1');
+        finally
+          FKMeta.Free;
+        end;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+  end;
+
+  procedure AddMasterVal(i: integer);
+  var
+    TableData: TMemAPITableData;
+    Table: TMemDBHandle;
+    Data: TMemDbFieldDataRec;
+    DBAPI: TMemAPIDatabase;
+
+  begin
+    DBAPI := Trans.GetAPI;
+    try
+      Table := DBAPI.OpenTableOrKey('FKTestTableMaster');
+      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+      try
+        TableData.Append;
+        Data.FieldType := ftInteger;
+        Data.i32Val := i;
+        TableData.WriteField('MasterKey1', Data);
+        Data.FieldType := ftUnicodeString;
+        Data.sVal := IntToStr(i);
+        TableData.WriteField('MasterKey2',Data);
+        Data.FieldType := ftGuid;
+        FillChar(Data.gVal, sizeof(Data.gVal),0);
+        Data.gVal.D3 := i;
+        TableData.WriteField('MasterKey3', Data);
+        TableData.Post;
+      finally
+        TableData.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+  end;
+
+  procedure AddSubVal(i: integer);
+  var
+    TableData: TMemAPITableData;
+    Table: TMemDBHandle;
+    Data: TMemDbFieldDataRec;
+    DBAPI: TMemAPIDatabase;
+
+  begin
+    DBAPI := Trans.GetAPI;
+    try
+      Table := DBAPI.OpenTableOrKey('FKTestTableSub');
+      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+      try
+        TableData.Append;
+        Data.FieldType := ftInteger;
+        Data.i32Val := i;
+        TableData.WriteField('ReferringField1', Data);
+        Data.FieldType := ftUnicodeString;
+        Data.sVal := IntToStr(i);
+        TableData.WriteField('ReferringField2',Data);
+        Data.FieldType := ftGuid;
+        FillChar(Data.gVal, sizeof(Data.gVal),0);
+        Data.gVal.D3 := i;
+        TableData.WriteField('ReferringField3', Data);
+        TableData.Post;
+      finally
+        TableData.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+  end;
+
+
+  procedure AddMasterUnique;
+  begin
+    AddMasterVal(LIMIT_CUBEROOT + 1);
+  end;
+
+  procedure DelMasterVal(i: integer);
+  var
+    TableData: TMemAPITableData;
+    Table: TMemDBHandle;
+    DataRecs: TMemDbFieldDataRecs;
+    DBAPI: TMemAPIDatabase;
+
+  begin
+    DBAPI := Trans.GetAPI;
+    try
+      Table := DBAPI.OpenTableOrKey('FKTestTableMaster');
+      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+      try
+        SetLength(DataRecs, 3);
+        DataRecs[0].FieldType := ftInteger;
+        DataRecs[1].FieldType := ftUnicodeString;
+        DataRecs[2].FieldType := ftGuid;
+        DataRecs[0].i32Val := i;
+        DataRecs[1].sVal := IntToStr(i);
+        FillChar(DataRecs[2].gVal, sizeof(DataRecs[2].gVal), 0);
+        DataRecs[2].gVal.D3 := i;
+        TableData.FindByMultiFieldIndex('MasterKeyIdx1', DataRecs);
+        TableData.Delete;
+      finally
+        TableData.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+  end;
+
+  procedure RemoveMasterUnique;
+  begin
+    DelMasterVal(LIMIT_CUBEROOT + 1);
+  end;
+
+  procedure AddMasterDup;
+  begin
+    AddMasterVal(5);
+  end;
+
+  procedure RemoveMasterDup;
+  begin
+    DelMasterVal(5);
+  end;
+
+  procedure AddSubPresent;
+  begin
+    AddSubVal(5);
+  end;
+
+  procedure AddSubNewUnique;
+  begin
+    AddSubVal(LIMIT_CUBEROOT + 1);
+  end;
+
+  procedure AddSubUtterlyUnique;
+  begin
+    AddSubVal(LIMIT_CUBEROOT + 2);
+  end;
+
+begin
+  ResetClick(Sender);
+  try
+    Trans := FSession.StartTransaction(amReadWrite);
+    try
+      CreateTablesInTransaction;
+      CreateFKeysInTransaction;
+      Trans.CommitAndFree;
+    except
+      Trans.RollbackAndFree;
+      raise;
+    end;
+    Trans := FSession.StartTransaction(amReadWrite);
+    try
+      PopulateRowsInTransaction;
+      Trans.CommitAndFree;
+    except
+      Trans.RollbackAndFree;
+      raise;
+    end;
+    ResMemo.Lines.Add('1: Foreign key MF test (Add keys before data) OK.');
+  except
+    on E: Exception do
+    begin
+      ResMemo.Lines.Add('1: Foreign key test (Add keys before data) failed:' + E.Message);
+    end;
+  end;
+
+  ResetClick(Sender);
+  try
+    Trans := FSession.StartTransaction(amReadWrite);
+    try
+      CreateTablesInTransaction;
+      Trans.CommitAndFree;
+    except
+      Trans.RollbackAndFree;
+      raise;
+    end;
+    Trans := FSession.StartTransaction(amReadWrite);
+    try
+      PopulateRowsInTransaction;
+      CreateFKeysInTransaction;
+      Trans.CommitAndFree;
+    except
+      Trans.RollbackAndFree;
+      raise;
+    end;
+    ResMemo.Lines.Add('2: Foreign key MF test (Add data before keys) OK.');
+  except
+    on E: Exception do
+    begin
+      ResMemo.Lines.Add('2: Foreign key test (Add data before keys) failed:' + E.Message);
+    end;
+  end;
+
+  //3. Add item in referred, unique from all others. Expect OK.
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    AddMasterUnique;
+    Trans.CommitAndFree;
+    ResMemo.Lines.Add('3. Added new unique row to master table OK.');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      ResMemo.Lines.Add('3. Added new unique row to master table failed: ' + E.Message);
+    end;
+  end;
+
+  //4. Remove new unique item. Expect OK.
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    RemoveMasterUnique;
+    Trans.CommitAndFree;
+    ResMemo.Lines.Add('4. Removed new unique row from master table OK.');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      ResMemo.Lines.Add('4. Removed new unique row from master table failed:' + E.Message);
+    end;
+  end;
+
+  //5. Add item in referred, already present, expect fail.
+  Trans := FSession.StartTransaction(amReadWrite);
+  Pass := false;
+  try
+    AddMasterDup;
+    Pass := true;
+    Trans.CommitAndFree;
+    ResMemo.Lines.Add('5. Add duplicate item to master table foreign key Failed.');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      if Pass then
+        ResMemo.Lines.Add('5. Add duplicate item to master table foreign key OK.')
+      else
+        ResMemo.Lines.Add('5. Add duplicate item to master table foreign key Failed: ' + E.Message);
+    end;
+  end;
+
+  //6. Re-add new unique item, Expect OK.
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    AddMasterUnique;
+    Trans.CommitAndFree;
+    ResMemo.Lines.Add('6. Re add unique item to master table OK.');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      ResMemo.Lines.Add('6. Re add unique item to master table failed:' + E.Message);
+    end;
+  end;
+
+  //7. Remove item in referred, already present, expect FK fail.
+  Trans := FSession.StartTransaction(amReadWrite);
+  Pass := false;
+  try
+    RemoveMasterDup;
+    Pass := true;
+    Trans.CommitAndFree;
+    ResMemo.Lines.Add('7. Remove item in master required by FK failed.');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      if Pass then
+        ResMemo.Lines.Add('7. Remove item in master required by FK OK.')
+      else
+        ResMemo.Lines.Add('7. Remove item in master required by FK failed:' + E.Message);
+    end;
+  end;
+
+  //8. Add item in referring same as already present, expect OK.
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    AddSubPresent;
+    Trans.CommitAndFree;
+    ResMemo.Lines.Add('8. Add duplicate item in referring OK');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      ResMemo.Lines.Add('8. Add duplicate item in referring failed:' + E.Message);
+    end;
+  end;
+
+  //9. Add item in referring same as new unique, expect OK.
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    AddSubNewUnique;
+    Trans.CommitAndFree;
+    ResMemo.Lines.Add('9. Add new item in referring, same as new master val OK.');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      ResMemo.Lines.Add('9. Add new item in referring, same as new master val failed:' + E.Message);
+    end;
+  end;
+
+  //10. Add item in referring diff from all in master, expect fail.
+  Trans := FSession.StartTransaction(amReadWrite);
+  Pass := false;
+  try
+    AddSubUtterlyUnique;
+    Pass := true;
+    Trans.CommitAndFree;
+    ResMemo.Lines.Add('10. Add new item in referring, master key not present Failed.');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      if Pass then
+        ResMemo.Lines.Add('10. Add new item in referring, master key not present OK.')
+      else
+        ResMemo.Lines.Add('10. Add new item in referring, master key not present Failed: '+ E.Message);
+    end;
+  end;
+end;
+
+procedure TForm1.MFIndexTestClick(Sender: TObject);
+var
+  Trans:TMemDBTransaction;
+  DBAPI: TMemAPIDatabase;
+  Tbl: TMemDBHandle;
+  TblMeta: TMemAPITableMetadata;
+  TblData: TMemAPITableData;
+  i: integer;
+  Data: TMemDbFieldDataRec;
+  DataRecs: TMemDbFieldDataRecs;
+  IndexedFields: TMDBFieldNames;
+  Ret, Pass: boolean;
+
+begin
+  ResetClick(Sender);
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      Tbl := DBAPI.CreateTable('Test table');
+      TblMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
+      try
+        TblMeta.CreateField('U64', ftUint64);
+        TblMeta.CreateField('IntLo', ftInteger);
+        TblMeta.CreateField('IntHi', ftInteger);
+        TblMeta.CreateField('String', ftUnicodeString);
+        TblMeta.CreateIndex('I64', 'U64', [iaUnique, iaNotEmpty]);
+        SetLength(IndexedFields, 2);
+        IndexedFields[0] := 'IntHi';
+        IndexedFields[1] := 'IntLo';
+        TblMeta.CreateMultiFieldIndex('IntComp', IndexedFields, [iaUnique, iaNotEmpty]);
+      finally
+        TblMeta.Free;
+      end;
+      Trans.CommitAndFree;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      ResMemo.Lines.Add('MF Indexes, table setup failed.: ' + E.Message);
+      raise;
+    end;
+  end;
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      Tbl := DBAPI.OpenTableOrKey('Test table');
+      TblData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+      try
+        FillChar(Data, sizeof(Data), 0);
+        for i := 1 to LIMIT do
+        begin
+          TblData.Append;
+          Data.FieldType := ftInteger;
+          Data.i32Val := i mod 10;
+          TblData.WriteField('IntLo', Data);
+          Data.i32Val := i div 10;
+          TblData.WriteField('IntHi', Data);
+          Data.FieldType := ftUInt64;
+          Data.u64Val := i;
+          TblData.WriteField('U64', Data);
+          Data.FieldType := ftUnicodeString;
+          Data.sVal := IntToStr(i);
+          TblData.WriteField('String', Data);
+          TblData.Post;
+        end;
+      finally
+        TblData.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+    ResMemo.Lines.Add('MF Indexes, table populate OK');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      ResMemo.Lines.Add('MF Indexes, table populate failed.: ' + E.Message);
+      raise;
+    end;
+  end;
+  //Check basic indexing traversal.
+  Pass := true;
+  Trans := FSession.StartTransaction(amRead);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      Tbl := DBAPI.OpenTableOrKey('Test table');
+      TblData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+      try
+        i := 1;
+        Ret := TblData.Locate(ptFirst, 'I64');
+        while Ret do
+        begin
+          TblData.ReadField('U64', Data);
+          if Data.u64Val <> i then
+            Pass := false;
+          TblData.ReadField('IntHi', Data);
+          if Data.i32Val <> i div 10 then
+            Pass := false;
+          TblData.ReadField('IntLo', Data);
+          if Data.i32Val <> i mod 10 then
+            Pass := false;
+          Ret := TblData.Locate(ptNext, 'I64');
+          Inc(i);
+        end;
+        i := 1;
+        Ret := TblData.Locate(ptFirst, 'IntComp');
+        while Ret do
+        begin
+          TblData.ReadField('U64', Data);
+          if Data.u64Val <> i then
+            Pass := false;
+          TblData.ReadField('IntHi', Data);
+          if Data.i32Val <> i div 10 then
+            Pass := false;
+          TblData.ReadField('IntLo', Data);
+          if Data.i32Val <> i mod 10 then
+            Pass := false;
+          Ret := TblData.Locate(ptNext, 'IntComp');
+          Inc(i);
+        end;
+      finally
+        TblData.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+    if Pass then
+      ResMemo.Lines.Add('MF Indexes, traversal OK.')
+    else
+      ResMemo.Lines.Add('MF Indexes, traversal Failed.')
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      ResMemo.Lines.Add('MF Indexes, traversal failed.: ' + E.Message);
+      raise;
+    end;
+  end;
+  //Check couple of random index find. examples.
+  Pass := true;
+  Trans := FSession.StartTransaction(amRead);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      Tbl := DBAPI.OpenTableOrKey('Test table');
+      TblData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+      try
+        i := 1;
+        SetLength(DataRecs, 2);
+        while i <= LIMIT do
+        begin
+          DataRecs[0].FieldType := ftInteger;
+          DataRecs[0].i32Val := i div 10; //First field is IntHi.
+          DataRecs[1].FieldType := ftInteger;
+          DataRecs[1].i32Val := i mod 10; //First field is IntLo.
+          Ret := TblData.FindByMultiFieldIndex('IntComp', DataRecs);
+          if not Ret then
+            Pass := false;
+          TblData.ReadField('U64', Data);
+          if (Data.FieldType <> ftUint64) or (Data.u64Val <> i) then
+            Pass := false;
+          Inc(i, 3); //Would pick a random number, but I like repeatable tests.
+        end;
+      finally
+        TblData.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+    if Pass then
+      ResMemo.Lines.Add('MF Indexes, find OK.')
+    else
+      ResMemo.Lines.Add('MF Indexes, find Failed.')
+  except
+    on E:Exception do
+    begin
+      Trans.RollbackAndFree;
+      ResMemo.Lines.Add('MF Indexes, find failed.: ' + E.Message);
+      raise;
+    end;
+  end;
+  //Check index Nonzero constraint, and unique constraints.
+  Pass := false;
+  for i := 0 to 1 do
+  begin
+    Trans := FSession.StartTransaction(amReadWrite);
+    try
+      DBAPI := Trans.GetAPI;
+      try
+        Tbl := DBAPI.OpenTableOrKey('Test table');
+        TblData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+        try
+          SetLength(DataRecs, 2);
+          DataRecs[0].FieldType := ftInteger;
+          DataRecs[0].i32Val := 7;
+          DataRecs[1].FieldType := ftInteger;
+          DataRecs[1].i32Val := 4;
+          Ret := TblData.FindByMultiFieldIndex('IntComp', DataRecs);
+          if not Ret then
+            raise EMemDBTestException.Create('Expected find op to work.');
+          Data := DataRecs[0];
+          if i = 0 then
+            Data.i32Val := 0
+          else
+            Data.i32Val := 7;
+          TblData.WriteField('IntLo', Data);
+          TblData.WriteField('IntHi', Data);
+          TblData.Post;
+        finally
+          TblData.Free;
+        end;
+      finally
+        DBAPI.Free;
+      end;
+      Pass := true;
+      Trans.CommitAndFree;
+      ResMemo.Lines.Add('MF Index constraints failed.');
+    except
+      on E:Exception do
+      begin
+        Trans.RollbackAndFree;
+        if Pass then
+          ResMemo.Lines.Add('MF Indexes, constraints: (' + E.Message +'): OK')
+        else
+          ResMemo.Lines.Add('MF Indexes, constraints: (' + E.Message +'): failed.');
+      end;
+    end;
+  end;
+end;
+
 procedure TForm1.ResetClick(Sender: TObject);
 var
   Trans: TMemDBTransaction;
@@ -1816,6 +2516,15 @@ begin
       Tbl := DBAPI.OpenTableOrKey('ForeignKey2');
       if Assigned(Tbl) then
         DBAPI.DeleteTableOrKey('ForeignKey2');
+      Tbl := DBAPI.OpenTableOrKey('FKTest1');
+      if Assigned(Tbl) then
+        DBAPI.DeleteTableOrKey('FKTest1');
+      Tbl := DBAPI.OpenTableOrKey('FKTest2');
+      if Assigned(Tbl) then
+        DBAPI.DeleteTableOrKey('FKTest2');
+      Tbl := DBAPI.OpenTableOrKey('FKTest3');
+      if Assigned(Tbl) then
+        DBAPI.DeleteTableOrKey('FKTest3');
       Tbl := DBAPI.OpenTableOrKey('Test table');
       if Assigned(Tbl) then
         DBAPI.DeleteTableOrKey('Test table');
