@@ -4542,11 +4542,6 @@ end;
   //For each item left in referring added list, there should be a row in the referrer table.
   //For each item left in the referred deleted list, there should not be a row in the referring table.
 
-//Unfortunately, there is some nastiness here with respect to
-//calculating field offsets, which we want to do only once,
-//outside of
-
-
 procedure TMemDBForeignKeyPersistent.CreateCheckForeignKeyRowSets(var  Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
 
 begin

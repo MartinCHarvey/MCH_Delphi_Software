@@ -55,7 +55,7 @@ type
     rvInternalError,
     rvDuplicateKey,
     rvNilEvent,
-    rvInsufficientResources,
+    DEPRECATED_rvInsufficientResources, //Protect with exceptions.
     rvBadIndex,
     rvInvalidTag
     );
@@ -313,6 +313,8 @@ type
 
 implementation
 
+uses SysUtils;
+
 const
   S_CORRUPTED_INDEX =
     'Index node comparison bad: one or other is nil (or wrong type).';
@@ -541,21 +543,21 @@ begin
     exit;
   end;
   IndexLink := TIndexNodeLink.Create;
-  if not Assigned(IndexLink) then
-  begin
-    result := rvInsufficientResources;
-    exit;
-  end;
+  //First exception, no special handling.
 
   InClassType := Index.NodeClassType;
-  IndexNode := InClassType.Create;
-  if not Assigned(IndexNode) then
-  begin
-    result := rvInsufficientResources;
-    IndexLink.Free;
-    exit;
+  try
+    IndexNode := InClassType.Create;
+  except
+    on E: EOutOfMemory do
+    begin
+      IndexLink.Free;
+      raise;
+    end;
   end;
 
+  //No mem allocation for remainder of function,
+  //expect no exceptions in INode comparison funcs.
   IndexNode.FIndexLink := IndexLink;
   IndexLink.IndexNode := IndexNode;
   IndexLink.ItemRec := Item;
@@ -636,13 +638,30 @@ var
 {$IFOPT C+}
   res2: TISRetVal;
 {$ENDIF}
+
+  procedure Cleanup; //One index for all the items
+  begin
+    Assert(Assigned(CurItem));
+    Assert(Assigned(NewIndex));
+    CurItem := CurItem.FSiblingListEntry.BLink.Owner as TItemRec;
+    while Assigned(CurItem) do
+    begin
+{$IFOPT C+}
+      res2 := DeleteIndexNodeForItem(NewIndex, CurItem);
+      Assert(res2 = rvOK, S_ROLLBACK_ADD_INDEX_FAILED);
+{$ELSE}
+      DeleteIndexNodeForItem(NewIndex, CurItem);
+{$ENDIF}
+      CurItem := CurItem.FSiblingListEntry.BLink.Owner as TItemRec;
+    end;
+    DLListRemoveObj(@NewIndex.SiblingListEntry);
+    NewIndex.Free;
+  end;
+
 begin
   NewIndex := TSIndex.Create;
-  if not Assigned(NewIndex) then
-  begin
-    result := rvInsufficientResources;
-    exit;
-  end;
+  //First exception, no special handling.
+
   //Check tag not already represented.
   if Assigned(GetIndexByTag(Tag)) then
   begin
@@ -666,30 +685,24 @@ begin
   //In case of failure, need to roll back all changes.
   result := rvOK;
   CurItem := FItemRecList.FLink.Owner as TItemRec;
-  while Assigned(CurItem) do
-  begin
-    result := AddIndexNodeForItem(NewIndex, CurItem);
-    if result <> rvOK then break;
-    CurItem := CurItem.FSiblingListEntry.FLink.Owner as TItemRec;
-  end;
-  //OK, all done!
-  if result <> rvOK then
-  begin
-    Assert(Assigned(CurItem));
-    CurItem := CurItem.FSiblingListEntry.BLink.Owner as TItemRec;
+  try
     while Assigned(CurItem) do
     begin
-{$IFOPT C+}
-      res2 := DeleteIndexNodeForItem(NewIndex, CurItem);
-      Assert(res2 = rvOK, S_ROLLBACK_ADD_INDEX_FAILED);
-{$ELSE}
-      DeleteIndexNodeForItem(NewIndex, CurItem);
-{$ENDIF}
-      CurItem := CurItem.FSiblingListEntry.BLink.Owner as TItemRec;
+      result := AddIndexNodeForItem(NewIndex, CurItem);
+      if result <> rvOK then break;
+      CurItem := CurItem.FSiblingListEntry.FLink.Owner as TItemRec;
     end;
-    DLListRemoveObj(@NewIndex.SiblingListEntry);
-    NewIndex.Free;
+  except
+    on E: EOutOfMemory do
+    begin
+      Cleanup;
+      raise;
+    end;
   end;
+
+  //OK, all done!
+  if result <> rvOK then
+    Cleanup;
 end;
 
 function TIndexedStoreG._DeleteIndex(Tag: TTagType): TISRetVal;
@@ -731,35 +744,11 @@ var
 {$IFOPT C+}
   FailRet: TISRetVal;
 {$ENDIF}
-begin
-  if not Assigned(NewItem) then
-  begin
-    result := rvInvalidItem;
-    exit;
-  end;
-  //Create the item.
-  Res := CreateItemRec(NewItem);
-  if not Assigned(Res) then
-  begin
-    result := rvInsufficientResources;
-    exit;
-  end;
-  //Try to add the item to the list.
-  DLListInsertTail(@FItemRecList, @Res.FSiblingListEntry);
-  result := rvOK;
-  //For all the indices that exist try and add.
-  Index := FIndices.FLink.Owner as TSIndex;
-  while Assigned(Index) do
-  begin
-    result := AddIndexNodeForItem(Index, Res);
-    if result <> rvOK then break;
-    Index := Index.SiblingListEntry.FLink.Owner as TSIndex;
-  end;
 
-  //If fail, then unindex and remove.
-  if result <> rvOK then
+  procedure Cleanup; //All Indexes for the one item.
   begin
     Assert(Assigned(Index));
+    Assert(Assigned(Res));
     Index := Index.SiblingListEntry.BLink.Owner as TSIndex;
     while Assigned(Index) do
     begin
@@ -774,9 +763,46 @@ begin
     DLListRemoveObj(@Res.FSiblingListEntry);
     Res.Free;
     Res := nil;
-  end
+  end;
+
+begin
+  if not Assigned(NewItem) then
+  begin
+    result := rvInvalidItem;
+    exit;
+  end;
+  //Create the item.
+  Res := CreateItemRec(NewItem);
+  //No exception handler here, first allocation, can fall straight out.
+
+  //Try to add the item to the list.
+  DLListInsertTail(@FItemRecList, @Res.FSiblingListEntry);
+
+  //For all the indices that exist try and add, protect with exception handler
+  //for out of memory cases.
+  result := rvOK;
+  Index := FIndices.FLink.Owner as TSIndex;
+  try
+    while Assigned(Index) do
+    begin
+      result := AddIndexNodeForItem(Index, Res);
+      if result <> rvOK then break;
+      Index := Index.SiblingListEntry.FLink.Owner as TSIndex;
+    end;
+  except
+    on E: EOutOfMemory do
+    begin
+      Cleanup;
+      raise;
+    end;
+  end;
+
+  //If fail, then unindex and remove.
+  if result <> rvOK then
+    Cleanup
   else
     Inc(FCount);
+
   Assert(DlItemIsEmpty(@FItemRecList) = (FCount = 0), S_COUNT_CORRUPTED_AFTER_ADD);
 end;
 

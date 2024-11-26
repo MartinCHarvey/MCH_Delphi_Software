@@ -103,6 +103,7 @@ var
   Data: TMemDbFieldDataRec;
   DirectionUp: boolean;
   FieldIncrement: integer;
+  DataI64: Int64;
   NavOK: boolean;
   i,j: integer;
 begin
@@ -158,50 +159,43 @@ begin
           end;
 
           // 3) Test row navigation by indernal index and field modification.
-          i:= 1;
           for DirectionUp := High(boolean) downto Low(boolean) do
           begin
-            FieldIncrement := Pred(2 * Ord(DirectionUp)); // +1, -1
             if DirectionUp then
-              i := 1;
+              FieldIncrement := 1
+            else
+              FieldIncrement := -1;
             NavOK := TableData.Locate(ptFirst, '');
             while NavOK do
             begin
-{$IFOPT R+}
-{$DEFINE REENABLE_R}
-{$ENDIF}
-{$RANGECHECKS OFF}
-{$IFOPT O+}
-{$DEFINE REENABLE_O}
-{$ENDIF}
-{$OVERFLOWCHECKS OFF}
               TableData.ReadField('Int', Data);
-              Inc(Data.i32Val, FieldIncrement);
+              Data.i32Val := Data.i32Val + FieldIncrement;
               TableData.WriteField('Int', Data);
+
               TableData.ReadField('U64', Data);
-              Inc(Data.u64Val, FieldIncrement);
+              //Do the arithmetic signed, and no don't range check the
+              //type conversion or sign extension.
+              DataI64 := Int64(Data.u64Val);
+              DataI64 := DataI64 + FieldIncrement;
+              Data.u64Val := UInt64(DataI64);
               TableData.WriteField('U64', Data);
+
               TableData.ReadField('String', Data);
+              i := StrToInt(Data.sVal);
               Data.sVal := IntToStr(i + FieldIncrement);
               TableData.WriteField('String', Data);
+
               TableData.ReadField('Double', Data);
               Data.dVal := Data.dVal + FieldIncrement;
               TableData.WriteField('Double', Data);
+
               TableData.ReadField('Guid', Data);
               j := Integer(Data.gVal.D1);
               Inc(j, FieldIncrement);
               Data.gVal := TestGuidFromInt(j);
               TableData.Post;
               NavOK := TableData.Locate(ptNext, '');
-              Inc(i);
-{$IFDEF REENABLE_O}
-{$O+}
-{$ENDIF}
-{$IFDEF REENABLE_R}
-{$R+}
-{$ENDIF}
             end;
-            i := 1 + FieldIncrement;
           end;
         finally
           TableData.Free;
