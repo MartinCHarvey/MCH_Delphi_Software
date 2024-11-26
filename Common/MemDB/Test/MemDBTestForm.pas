@@ -30,8 +30,11 @@ type
     procedure FindEdgeTestClick(Sender: TObject);
     procedure MFIndexTestClick(Sender: TObject);
     procedure MFFKeyTestClick(Sender: TObject);
+    procedure FormCreate(Sender: TObject);
   private
     { Private declarations }
+    FTimeStamp: TDateTime;
+    procedure LogTimeIncr(S: string);
   public
     { Public declarations }
   end;
@@ -44,10 +47,10 @@ implementation
 {$R *.fmx}
 
 uses
-  IOUtils, MemDBMisc, MemDBAPI;
+  IOUtils, MemDBMisc, MemDBAPI, Math;
 
 const
-  LIMIT = 1000;
+  LIMIT = 10000;
   TRANS_LIMIT = 1024;
 
 type
@@ -56,6 +59,7 @@ type
 var
   FDB: TMemDB;
   FSession: TMemDBSession;
+  LIMIT_CUBEROOT: integer;
 
 function TestGuidFromInt(i: integer): TGUID;
 var
@@ -66,6 +70,27 @@ begin
   result.D3 := result.D2;
   for j := 0 to 7 do
     result.D4[j] := Byte(i);
+end;
+
+procedure TForm1.LogTimeIncr(S: string);
+var
+  N: TDateTime;
+  MSecsElapsed: integer;
+  SecsElapsed: integer;
+  ElapsedD: double;
+  TimeS: string;
+begin
+  N := Now;
+  ElapsedD := N - FTimeStamp;
+  SecsElapsed := Trunc(ElapsedD * (24.0 * 3600.0));
+  ElapsedD := ElapsedD - (SecsElapsed / (24.0 * 3600.0));
+  MSecsElapsed := Trunc(ElapsedD * (24.0 * 3600.0 * 1000.0));
+  FTimeStamp := N;
+  if SecsElapsed < 1 then
+    TimeS := '('+ IntToStr(MSecsElapsed) + ' msecs)'
+  else
+    TimeS := '('+ InttoStr(SecsElapsed) + '.' + IntToStr(MSecsElapsed) + ' secs)';
+  ResMemo.Lines.Add(TimeS + ' ' + S);
 end;
 
 procedure TForm1.BasicTestBtnClick(Sender: TObject);
@@ -103,7 +128,7 @@ begin
         end;
         Trans.CommitAndFree;
         DBAPI.Free;
-        ResMemo.Lines.Add('Table create OK');
+        LogTimeIncr('Table create OK');
         Trans := FSession.StartTransaction(amReadWrite, amLazyWrite, ilDirtyRead);
         DBAPI := Trans.GetAPI;
         Assert(Assigned(DBAPI));
@@ -142,6 +167,14 @@ begin
             NavOK := TableData.Locate(ptFirst, '');
             while NavOK do
             begin
+{$IFOPT R+}
+{$DEFINE REENABLE_R}
+{$ENDIF}
+{$RANGECHECKS OFF}
+{$IFOPT O+}
+{$DEFINE REENABLE_O}
+{$ENDIF}
+{$OVERFLOWCHECKS OFF}
               TableData.ReadField('Int', Data);
               Inc(Data.i32Val, FieldIncrement);
               TableData.WriteField('Int', Data);
@@ -161,6 +194,12 @@ begin
               TableData.Post;
               NavOK := TableData.Locate(ptNext, '');
               Inc(i);
+{$IFDEF REENABLE_O}
+{$O+}
+{$ENDIF}
+{$IFDEF REENABLE_R}
+{$R+}
+{$ENDIF}
             end;
             i := 1 + FieldIncrement;
           end;
@@ -172,12 +211,12 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('Table add data OK');
+    LogTimeIncr('Table add data OK');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('Table add data failed: ' + E.Message);
+      LogTimeIncr('Table add data failed: ' + E.Message);
       raise;
     end;
   end;
@@ -185,10 +224,15 @@ end;
 
 procedure TForm1.CheckpointBtnClick(Sender: TObject);
 begin
+  FTimeStamp := Now;
   if FDB.Checkpoint then
-    ResMemo.Lines.Add('Checkpoint OK')
+  begin
+    LogTimeIncr('Checkpoint OK')
+  end
   else
-    ResMemo.Lines.Add('Cannot checkpoint at this time')
+  begin
+    LogTimeIncr('Cannot checkpoint at this time')
+  end;
 end;
 
 procedure TForm1.FindEdgeTestClick(Sender: TObject);
@@ -227,10 +271,10 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('Edge test OK (1)');
+    LogTimeIncr('Edge test OK (1)');
   except
     Trans.RollbackAndFree;
-    ResMemo.Lines.Add('Edge test failed (1)');
+    LogTimeIncr('Edge test failed (1)');
     raise;
   end;
 
@@ -260,10 +304,10 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('Edge test OK (2)');
+    LogTimeIncr('Edge test OK (2)');
   except
     Trans.RollbackAndFree;
-    ResMemo.Lines.Add('Edge test failed (2)');
+    LogTimeIncr('Edge test failed (2)');
     raise;
   end;
 
@@ -308,7 +352,7 @@ begin
           end;
         end;
         if i <> DUP_FACTOR then
-          ResMemo.Lines.Add('Edge test failed (3)');
+          LogTimeIncr('Edge test failed (3)');
 
         //Use somewhat internal API's to do the same searching.
         i := 0;
@@ -337,9 +381,9 @@ begin
           end;
         end;
         if i <> DUP_FACTOR then
-          ResMemo.Lines.Add('Edge test failed (4)');
+          LogTimeIncr('Edge test failed (4)');
         if j <> DUP_FACTOR then
-          ResMemo.Lines.Add('Edge test failed (5)');
+          LogTimeIncr('Edge test failed (5)');
 
       finally
         TableData.Free;
@@ -347,7 +391,7 @@ begin
     finally
       DBAPI.Free;
     end;
-    ResMemo.Lines.Add('Edge test finished');
+    LogTimeIncr('Edge test OK (3)');
   finally
     Trans.CommitAndFree;
   end;
@@ -398,12 +442,12 @@ var
         DBAPI.Free;
       end;
       Trans.CommitAndFree;
-      ResMemo.Lines.Add('FK test delete rows OK.');
+      LogTimeIncr('FK test delete rows OK.');
     except
       on E:Exception do
       begin
         Trans.RollbackAndFree;
-        ResMemo.Lines.Add('FK test delete rows failed.');
+        LogTimeIncr('FK test delete rows failed.');
         raise;
       end;
     end;
@@ -451,12 +495,12 @@ var
         DBAPI.Free;
       end;
       Trans.CommitAndFree;
-      ResMemo.Lines.Add('FK test set base row set OK.');
+      LogTimeIncr('FK test set base row set OK.');
     except
       on E:Exception do
       begin
         Trans.RollbackAndFree;
-        ResMemo.Lines.Add('FK test set base row set Failed.');
+        LogTimeIncr('FK test set base row set Failed.');
         raise;
       end;
     end;
@@ -501,7 +545,7 @@ begin
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('Foreign key test setup failed.');
+      LogTimeIncr('Foreign key test setup failed.');
       raise;
     end;
   end;
@@ -530,12 +574,12 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('FK Test 1, add foreign key relationship OK.');
+    LogTimeIncr('FK Test 1, add foreign key relationship OK.');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('FK Test 1, add foreign key relationship failed.');
+      LogTimeIncr('FK Test 1, add foreign key relationship failed.');
       raise;
     end;
   end;
@@ -555,7 +599,7 @@ begin
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('FK Test 1a, delete foreign key relationship failed.');
+      LogTimeIncr('FK Test 1a, delete foreign key relationship failed.');
       raise;
     end;
   end;
@@ -590,16 +634,18 @@ begin
     end;
     Pass := true;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('FK Test 1a, foreign key violation (same transaction) failed.');
+    LogTimeIncr('FK Test 1a, foreign key violation (same transaction) failed.');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
       if Pass then
-        ResMemo.Lines.Add('FK Test 1a, foreign key violation (same transaction) OK.')
+      begin
+        LogTimeIncr('FK Test 1a, foreign key violation (same transaction) OK.')
+      end
       else
       begin
-        ResMemo.Lines.Add('FK Test 1a, foreign key violation (same transaction) failed.');
+        LogTimeIncr('FK Test 1a, foreign key violation (same transaction) failed.');
         raise;
       end;
     end;
@@ -636,17 +682,19 @@ begin
     end;
     Pass := true;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('FK Test 1b, foreign key violation (same transaction) failed.');
+    LogTimeIncr('FK Test 1b, foreign key violation (same transaction) failed.');
   //Check fails.
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
       if Pass then
-        ResMemo.Lines.Add('FK Test 1b, foreign key violation (same transaction) OK.')
+      begin
+        LogTimeIncr('FK Test 1b, foreign key violation (same transaction) OK.')
+      end
       else
       begin
-        ResMemo.Lines.Add('FK Test 1b, foreign key violation (same transaction) failed.');
+        LogTimeIncr('FK Test 1b, foreign key violation (same transaction) failed.');
         raise;
       end;
     end;
@@ -679,7 +727,7 @@ begin
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('FK Test 2, add foreign key failed.');
+      LogTimeIncr('FK Test 2, add foreign key failed.');
       raise;
     end;
   end;
@@ -708,17 +756,19 @@ begin
     end;
     Pass := true;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('FK Test 2a, foreign key violation (separate transaction) failed.');
+    LogTimeIncr('FK Test 2a, foreign key violation (separate transaction) failed.');
   //Check fails.
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
       if Pass then
-        ResMemo.Lines.Add('FK Test 2a, foreign key violation (separate transaction) OK.')
+      begin
+        LogTimeIncr('FK Test 2a, foreign key violation (separate transaction) OK.')
+      end
       else
       begin
-        ResMemo.Lines.Add('FK Test 2a, foreign key violation (separate transaction) failed.');
+        LogTimeIncr('FK Test 2a, foreign key violation (separate transaction) failed.');
         raise;
       end;
     end;
@@ -745,17 +795,19 @@ begin
     end;
     Pass := true;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('FK Test 2b, foreign key violation (separate transaction) failed.');
+    LogTimeIncr('FK Test 2b, foreign key violation (separate transaction) failed.');
   //Check fails.
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
       if Pass then
-        ResMemo.Lines.Add('FK Test 2b, foreign key violation (separate transaction) OK.')
+      begin
+        LogTimeIncr('FK Test 2b, foreign key violation (separate transaction) OK.')
+      end
       else
       begin
-        ResMemo.Lines.Add('FK Test 2b, foreign key violation (separate transaction) failed.');
+        LogTimeIncr('FK Test 2b, foreign key violation (separate transaction) failed.');
         raise;
       end;
     end;
@@ -786,17 +838,19 @@ begin
     end;
     Pass := true;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('FK Test 2c, foreign key violation (separate transaction) failed.');
+    LogTimeIncr('FK Test 2c, foreign key violation (separate transaction) failed.');
   //Check fails.
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
       if Pass then
-        ResMemo.Lines.Add('FK Test 2c, foreign key violation (separate transaction) OK.')
+      begin
+        LogTimeIncr('FK Test 2c, foreign key violation (separate transaction) OK.')
+      end
       else
       begin
-        ResMemo.Lines.Add('FK Test 2c, foreign key violation (separate transaction) failed.');
+        LogTimeIncr('FK Test 2c, foreign key violation (separate transaction) failed.');
         raise;
       end;
     end;
@@ -826,17 +880,19 @@ begin
     end;
     Pass := true;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('FK Test 2d, foreign key violation (separate transaction) failed.');
+    LogTimeIncr('FK Test 2d, foreign key violation (separate transaction) failed.');
   //Check fails.
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
       if Pass then
-        ResMemo.Lines.Add('FK Test 2d, foreign key violation (separate transaction) OK.')
+      begin
+        LogTimeIncr('FK Test 2d, foreign key violation (separate transaction) OK.')
+      end
       else
       begin
-        ResMemo.Lines.Add('FK Test 2d, foreign key violation (separate transaction) failed.');
+        LogTimeIncr('FK Test 2d, foreign key violation (separate transaction) failed.');
         raise;
       end;
     end;
@@ -865,13 +921,13 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('FK Test 2e, dup rows OK.');
+    LogTimeIncr('FK Test 2e, dup rows OK.');
   //Check fails.
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('FK Test 2e, dup rows failed.');
+      LogTimeIncr('FK Test 2e, dup rows failed.');
       raise;
     end;
   end;
@@ -901,13 +957,13 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('FK Test 2d, master key moved OK.');
+    LogTimeIncr('FK Test 2d, master key moved OK.');
   //Check fails.
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('FK Test 2d, master key moved failed.');
+      LogTimeIncr('FK Test 2d, master key moved failed.');
       raise;
     end;
   end;
@@ -945,7 +1001,7 @@ begin
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('FK Test 3a, master key add fields failed.');
+      LogTimeIncr('FK Test 3a, master key add fields failed.');
       raise;
     end;
   end;
@@ -1004,12 +1060,12 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-      ResMemo.Lines.Add('FK Test 3b, master key add fields OK.');
+      LogTimeIncr('FK Test 3b, master key add fields OK.');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('FK Test 3b, master key add fields failed.');
+      LogTimeIncr('FK Test 3b, master key add fields failed.');
       raise;
     end;
   end;
@@ -1050,16 +1106,18 @@ begin
     end;
     Pass := true;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('FK Test 3c, delete fields whilst FK reverify failed.');
+    LogTimeIncr('FK Test 3c, delete fields whilst FK reverify failed.');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
       if Pass then
-        ResMemo.Lines.Add('FK Test 3c, delete fields whilst FK reverify OK.')
+      begin
+        LogTimeIncr('FK Test 3c, delete fields whilst FK reverify OK.')
+      end
       else
       begin
-        ResMemo.Lines.Add('FK Test 3c, delete fields whilst FK reverify failed.');
+        LogTimeIncr('FK Test 3c, delete fields whilst FK reverify failed.');
         raise;
       end;
     end;
@@ -1097,16 +1155,18 @@ begin
     end;
     Pass := true;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('FK Test 3d, delete fields whilst FK reverify failed.');
+    LogTimeIncr('FK Test 3d, delete fields whilst FK reverify failed.');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
       if Pass then
-        ResMemo.Lines.Add('FK Test 3d, delete fields whilst FK reverify OK.')
+      begin
+        LogTimeIncr('FK Test 3d, delete fields whilst FK reverify OK.')
+      end
       else
       begin
-        ResMemo.Lines.Add('FK Test 3d, delete fields whilst FK reverify failed.');
+        LogTimeIncr('FK Test 3d, delete fields whilst FK reverify failed.');
         raise;
       end;
     end;
@@ -1143,12 +1203,12 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('FK Test 3e, delete multiple indices and fields OK.');
+    LogTimeIncr('FK Test 3e, delete multiple indices and fields OK.');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('FK Test 3e, delete multiple indices and fields failed.');
+      LogTimeIncr('FK Test 3e, delete multiple indices and fields failed.');
       raise;
     end;
   end;
@@ -1182,15 +1242,20 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('FK Test 3f, rename everything OK.');
+    LogTimeIncr('FK Test 3f, rename everything OK.');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('FK Test 3f, rename everything failed.');
+      LogTimeIncr('FK Test 3f, rename everything failed.');
       raise;
     end;
   end;
+end;
+
+procedure TForm1.FormCreate(Sender: TObject);
+begin
+  FTimeStamp := Now;
 end;
 
 procedure TForm1.IndexTest2Click(Sender: TObject);
@@ -1217,12 +1282,12 @@ var
         DBAPI.Free;
       end;
       Trans.CommitAndFree;
-      ResMemo.Lines.Add('IndexTest DelTable OK.');
+      LogTimeIncr('IndexTest DelTable OK.');
     except
       on E:Exception do
       begin
         Trans.RollbackAndFree;
-        ResMemo.Lines.Add('IndexTest DelTable failed.');
+        LogTimeIncr('IndexTest DelTable failed.');
         raise;
       end;
     end;
@@ -1250,18 +1315,19 @@ var
         DBAPI.Free;
       end;
       Trans.CommitAndFree;
-      ResMemo.Lines.Add('Index test delete rows OK.');
+      LogTimeIncr('Index test delete rows OK.');
     except
       on E:Exception do
       begin
         Trans.RollbackAndFree;
-        ResMemo.Lines.Add('Index test delete rows failed.');
+        LogTimeIncr('Index test delete rows failed.');
         raise;
       end;
     end;
   end;
 
 begin
+  FTimeStamp := Now;
   DelTable;
 
   //1. Test Index constraint checking on newly created table with added index.
@@ -1286,7 +1352,7 @@ begin
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('Index test 1ai failed.');
+      LogTimeIncr('Index test 1ai failed.');
       raise;
     end;
   end;
@@ -1315,11 +1381,11 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('Index test 1ai OK.');
+    LogTimeIncr('Index test 1ai OK.');
   except
     on E:Exception do
     begin
-      ResMemo.Lines.Add('Index test 1ai failed.');
+      LogTimeIncr('Index test 1ai failed.');
       Trans.RollbackAndFree;
       raise;
     end;
@@ -1349,7 +1415,7 @@ begin
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('Index test 1bi failed.');
+      LogTimeIncr('Index test 1bi failed.');
       raise;
     end;
   end;
@@ -1379,16 +1445,18 @@ begin
     end;
     Pass := true;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('Index test 1bi failed.');
+    LogTimeIncr('Index test 1bi failed.');
   except
     on E:Exception do
     begin
       Trans.RollbackAndFree;
       if Pass then
-        ResMemo.Lines.Add('Index test 1bi OK.')
+      begin
+        LogTimeIncr('Index test 1bi OK.')
+      end
       else
       begin
-        ResMemo.Lines.Add('Index test 1bi failed.');
+        LogTimeIncr('Index test 1bi failed.');
         raise;
       end;
     end;
@@ -1418,7 +1486,7 @@ begin
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('Index test 1ci failed.');
+      LogTimeIncr('Index test 1ci failed.');
       raise;
     end;
   end;
@@ -1453,16 +1521,18 @@ begin
     end;
     Pass := true;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('Index test 1ci failed.');
+    LogTimeIncr('Index test 1ci failed.');
   except
     on E:Exception do
     begin
       Trans.RollbackAndFree;
       if Pass then
-        ResMemo.Lines.Add('Index test 1ci OK.')
+      begin
+        LogTimeIncr('Index test 1ci OK.')
+      end
       else
       begin
-        ResMemo.Lines.Add('Index test 1ci failed.');
+        LogTimeIncr('Index test 1ci failed.');
         raise;
       end;
     end;
@@ -1488,12 +1558,12 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('Index test, add permanent index OK');
+    LogTimeIncr('Index test, add permanent index OK');
   except
     on E:Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('Index test, add permanent index failed');
+      LogTimeIncr('Index test, add permanent index failed');
       raise;
     end;
   end;
@@ -1523,11 +1593,11 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('Index test 2ai OK.');
+    LogTimeIncr('Index test 2ai OK.');
   except
     on E:Exception do
     begin
-      ResMemo.Lines.Add('Index test 2ai failed.');
+      LogTimeIncr('Index test 2ai failed.');
       Trans.RollbackAndFree;
       raise;
     end;
@@ -1561,16 +1631,18 @@ begin
     end;
     Pass := true;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('Index test 2bi failed.');
+    LogTimeIncr('Index test 2bi failed.');
   except
     on E:Exception do
     begin
       Trans.RollbackAndFree;
       if Pass then
-        ResMemo.Lines.Add('Index test 2bi OK.')
+      begin
+        LogTimeIncr('Index test 2bi OK.')
+      end
       else
       begin
-        ResMemo.Lines.Add('Index test 2bi failed.');
+        LogTimeIncr('Index test 2bi failed.');
         raise;
       end;
     end;
@@ -1609,16 +1681,18 @@ begin
     end;
     Pass := true;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('Index test 2ci failed.');
+    LogTimeIncr('Index test 2ci failed.');
   except
     on E:Exception do
     begin
       Trans.RollbackAndFree;
       if Pass then
-        ResMemo.Lines.Add('Index test 2ci OK.')
+      begin
+        LogTimeIncr('Index test 2ci OK.')
+      end
       else
       begin
-        ResMemo.Lines.Add('Index test 2ci failed.');
+        LogTimeIncr('Index test 2ci failed.');
         raise;
       end;
     end;
@@ -1693,12 +1767,12 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('Table add data with index OK');
+    LogTimeIncr('Table add data with index OK');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('Table add data with index failed: ' + E.Message);
+      LogTimeIncr('Table add data with index failed: ' + E.Message);
       raise;
     end;
   end;
@@ -1724,12 +1798,12 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('Table add multiple indices OK');
+    LogTimeIncr('Table add multiple indices OK');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('Table add multiple indices failed: ' + E.Message);
+      LogTimeIncr('Table add multiple indices failed: ' + E.Message);
       raise;
     end;
   end;
@@ -1752,12 +1826,12 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('Table delete index and field OK');
+    LogTimeIncr('Table delete index and field OK');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('Table delete index and field failed: ' + E.Message);
+      LogTimeIncr('Table delete index and field failed: ' + E.Message);
       raise;
     end;
   end;
@@ -1789,12 +1863,12 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('Table add/delete multiple indexes simultaneously OK.');
+    LogTimeIncr('Table add/delete multiple indexes simultaneously OK.');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('Table add/delete multiple indexes simultaneously failed: ' + E.Message);
+      LogTimeIncr('Table add/delete multiple indexes simultaneously failed: ' + E.Message);
       raise;
     end;
   end;
@@ -1802,8 +1876,6 @@ end;
 
 procedure TForm1.MFFKeyTestClick(Sender: TObject);
 
-const
-  LIMIT_CUBEROOT = 10;
 var
   Trans:TMemDBTransaction;
   Pass: boolean;
@@ -1870,8 +1942,9 @@ var
         Table := DBAPI.CreateTable('FKTestTableMaster');
         TableMeta := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata) as TMemAPITableMetadata;
         try
-          TableMeta.CreateField('MasterKey1', ftInteger);
+          //Fields in different order in tables, for checking.
           TableMeta.CreateField('MasterKey2', ftUnicodeString);
+          TableMeta.CreateField('MasterKey1', ftInteger);
           TableMeta.CreateField('MasterKey3', ftGuid);
           SetLength(FNames,2);
           FNames[0] := 'MasterKey1';
@@ -1894,9 +1967,10 @@ var
         Table := DBAPI.CreateTable('FKTestTableSub');
         TableMeta := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata) as TMemAPITableMetadata;
         try
+          //Fields in different order in tables, for checking.
           TableMeta.CreateField('ReferringField1', ftInteger);
-          TableMeta.CreateField('ReferringField2', ftUnicodeString);
           TableMeta.CreateField('ReferringField3', ftGuid);
+          TableMeta.CreateField('ReferringField2', ftUnicodeString);
           SetLength(FNames, 2);
           FNames[0] := 'ReferringField1';
           FNames[1] := 'ReferringField2';
@@ -2097,11 +2171,11 @@ begin
       Trans.RollbackAndFree;
       raise;
     end;
-    ResMemo.Lines.Add('1: Foreign key MF test (Add keys before data) OK.');
+    LogTimeIncr('1: Foreign key MF test (Add keys before data) OK.');
   except
     on E: Exception do
     begin
-      ResMemo.Lines.Add('1: Foreign key test (Add keys before data) failed:' + E.Message);
+      LogTimeIncr('1: Foreign key test (Add keys before data) failed:' + E.Message);
     end;
   end;
 
@@ -2124,11 +2198,11 @@ begin
       Trans.RollbackAndFree;
       raise;
     end;
-    ResMemo.Lines.Add('2: Foreign key MF test (Add data before keys) OK.');
+    LogTimeIncr('2: Foreign key MF test (Add data before keys) OK.');
   except
     on E: Exception do
     begin
-      ResMemo.Lines.Add('2: Foreign key test (Add data before keys) failed:' + E.Message);
+      LogTimeIncr('2: Foreign key test (Add data before keys) failed:' + E.Message);
     end;
   end;
 
@@ -2137,12 +2211,12 @@ begin
   try
     AddMasterUnique;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('3. Added new unique row to master table OK.');
+    LogTimeIncr('3. Added new unique row to master table OK.');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('3. Added new unique row to master table failed: ' + E.Message);
+      LogTimeIncr('3. Added new unique row to master table failed: ' + E.Message);
     end;
   end;
 
@@ -2151,12 +2225,12 @@ begin
   try
     RemoveMasterUnique;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('4. Removed new unique row from master table OK.');
+    LogTimeIncr('4. Removed new unique row from master table OK.');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('4. Removed new unique row from master table failed:' + E.Message);
+      LogTimeIncr('4. Removed new unique row from master table failed:' + E.Message);
     end;
   end;
 
@@ -2167,15 +2241,17 @@ begin
     AddMasterDup;
     Pass := true;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('5. Add duplicate item to master table foreign key Failed.');
+    LogTimeIncr('5. Add duplicate item to master table foreign key Failed.');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
       if Pass then
-        ResMemo.Lines.Add('5. Add duplicate item to master table foreign key OK.')
+      begin
+        LogTimeIncr('5. Add duplicate item to master table foreign key OK.')
+      end
       else
-        ResMemo.Lines.Add('5. Add duplicate item to master table foreign key Failed: ' + E.Message);
+        LogTimeIncr('5. Add duplicate item to master table foreign key Failed: ' + E.Message);
     end;
   end;
 
@@ -2184,12 +2260,12 @@ begin
   try
     AddMasterUnique;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('6. Re add unique item to master table OK.');
+    LogTimeIncr('6. Re add unique item to master table OK.');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('6. Re add unique item to master table failed:' + E.Message);
+      LogTimeIncr('6. Re add unique item to master table failed:' + E.Message);
     end;
   end;
 
@@ -2200,15 +2276,19 @@ begin
     RemoveMasterDup;
     Pass := true;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('7. Remove item in master required by FK failed.');
+    LogTimeIncr('7. Remove item in master required by FK failed.');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
       if Pass then
-        ResMemo.Lines.Add('7. Remove item in master required by FK OK.')
+      begin
+        LogTimeIncr('7. Remove item in master required by FK OK.')
+      end
       else
-        ResMemo.Lines.Add('7. Remove item in master required by FK failed:' + E.Message);
+      begin
+        LogTimeIncr('7. Remove item in master required by FK failed:' + E.Message);
+      end;
     end;
   end;
 
@@ -2217,12 +2297,12 @@ begin
   try
     AddSubPresent;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('8. Add duplicate item in referring OK');
+    LogTimeIncr('8. Add duplicate item in referring OK');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('8. Add duplicate item in referring failed:' + E.Message);
+      LogTimeIncr('8. Add duplicate item in referring failed:' + E.Message);
     end;
   end;
 
@@ -2231,12 +2311,12 @@ begin
   try
     AddSubNewUnique;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('9. Add new item in referring, same as new master val OK.');
+    LogTimeIncr('9. Add new item in referring, same as new master val OK.');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('9. Add new item in referring, same as new master val failed:' + E.Message);
+      LogTimeIncr('9. Add new item in referring, same as new master val failed:' + E.Message);
     end;
   end;
 
@@ -2247,15 +2327,19 @@ begin
     AddSubUtterlyUnique;
     Pass := true;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('10. Add new item in referring, master key not present Failed.');
+    LogTimeIncr('10. Add new item in referring, master key not present Failed.');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
       if Pass then
-        ResMemo.Lines.Add('10. Add new item in referring, master key not present OK.')
+      begin
+        LogTimeIncr('10. Add new item in referring, master key not present OK.')
+      end
       else
-        ResMemo.Lines.Add('10. Add new item in referring, master key not present Failed: '+ E.Message);
+      begin
+        LogTimeIncr('10. Add new item in referring, master key not present Failed: '+ E.Message);
+      end;
     end;
   end;
 end;
@@ -2303,7 +2387,7 @@ begin
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('MF Indexes, table setup failed.: ' + E.Message);
+      LogTimeIncr('MF Indexes, table setup failed.: ' + E.Message);
       raise;
     end;
   end;
@@ -2338,12 +2422,12 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('MF Indexes, table populate OK');
+    LogTimeIncr('MF Indexes, table populate OK');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('MF Indexes, table populate failed.: ' + E.Message);
+      LogTimeIncr('MF Indexes, table populate failed.: ' + E.Message);
       raise;
     end;
   end;
@@ -2396,14 +2480,18 @@ begin
     end;
     Trans.CommitAndFree;
     if Pass then
-      ResMemo.Lines.Add('MF Indexes, traversal OK.')
+    begin
+      LogTimeIncr('MF Indexes, traversal OK.')
+    end
     else
-      ResMemo.Lines.Add('MF Indexes, traversal Failed.')
+    begin
+      LogTimeIncr('MF Indexes, traversal Failed.')
+    end;
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('MF Indexes, traversal failed.: ' + E.Message);
+      LogTimeIncr('MF Indexes, traversal failed.: ' + E.Message);
       raise;
     end;
   end;
@@ -2440,14 +2528,18 @@ begin
     end;
     Trans.CommitAndFree;
     if Pass then
-      ResMemo.Lines.Add('MF Indexes, find OK.')
+    begin
+      LogTimeIncr('MF Indexes, find OK.')
+    end
     else
-      ResMemo.Lines.Add('MF Indexes, find Failed.')
+    begin
+      LogTimeIncr('MF Indexes, find Failed.')
+    end;
   except
     on E:Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('MF Indexes, find failed.: ' + E.Message);
+      LogTimeIncr('MF Indexes, find failed.: ' + E.Message);
       raise;
     end;
   end;
@@ -2486,15 +2578,19 @@ begin
       end;
       Pass := true;
       Trans.CommitAndFree;
-      ResMemo.Lines.Add('MF Index constraints failed.');
+      LogTimeIncr('MF Index constraints failed.');
     except
       on E:Exception do
       begin
         Trans.RollbackAndFree;
         if Pass then
-          ResMemo.Lines.Add('MF Indexes, constraints: (' + E.Message +'): OK')
+        begin
+          LogTimeIncr('MF Indexes, constraints: (' + E.Message +'): OK')
+        end
         else
-          ResMemo.Lines.Add('MF Indexes, constraints: (' + E.Message +'): failed.');
+        begin
+          LogTimeIncr('MF Indexes, constraints: (' + E.Message +'): failed.');
+        end;
       end;
     end;
   end;
@@ -2506,6 +2602,7 @@ var
   DBAPI: TMemAPIDatabase;
   Tbl: TMemDBHandle;
 begin
+  FTimeStamp := Now;
   Trans := FSession.StartTransaction(amReadWrite);
   try
     DBAPI := Trans.GetAPI;
@@ -2547,12 +2644,12 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-    ResMemo.Lines.Add('Reset state OK.');
+    LogTimeIncr('Reset state OK.');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      ResMemo.Lines.Add('Reset state failed.');
+      LogTimeIncr('Reset state failed.');
     end;
   end;
 end;
@@ -2577,14 +2674,19 @@ begin
         end;
       end;
     end;
-    ResMemo.Lines.Add('Many small transactions OK');
+    LogTimeIncr('Many small transactions OK');
   except
     on E: Exception do
-      ResMemo.Lines.Add('Many small transactions failed: ' + E.Message);
+    begin
+      LogTimeIncr('Many small transactions failed: ' + E.Message);
+    end;
   end;
 end;
 
 initialization
+  LIMIT_CUBEROOT := Trunc(Math.Power(LIMIT, (1/3)));
+  if LIMIT_CUBEROOT < 2 then
+    LIMIT_CUBEROOT := 2;
   FDB := TMemDB.Create;
   FDB.InitDB('c:\temp\MemDB', jtV2);
   FSession := FDB.StartSession;

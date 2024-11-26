@@ -513,11 +513,17 @@ type
 
     //IdxIdx here the same as changesets.
     //All errors here internal exceptions.
+{$IFOPT C+}
     procedure CheckTagAgreesWithMetadata(IdxIdx: integer;
                             TagData: TMemDBITagData;
                             IndexState: TTagCheckIndexState;
                             ProgState: TTagCheckProgrammedState);
-
+{$ELSE}
+    procedure CheckTagAgreesWithMetadata(IdxIdx: integer;
+                            TagData: TMemDBITagData;
+                            IndexState: TTagCheckIndexState;
+                            ProgState: TTagCheckProgrammedState); inline;
+{$ENDIF}
     //Actions at change or commit check time.
     procedure HandleHelperChangeRequest(Sender: TObject);
     procedure UpdateListHelpers;
@@ -723,8 +729,17 @@ function IndexByNameInt(MetadataCopy: TMemTableMetadataItem; const Name:string; 
 //to be a bit slow and costly. Consider refactoring in a way which does
 //not need mem alloc.
 function BuildMultiDataRecs(FieldList: TMemStreamableList;
-                          const AbsFieldOffsets: TFieldOffsets): TMemDbFieldDataRecs;
+                            const AbsFieldOffsets: TFieldOffsets): TMemDbFieldDataRecs;
 
+function SameLayoutFieldsSame(A,B: TMemStreamableList; FieldOffsets: TFieldOffsets;
+                              AssertSameFormat: boolean = true): boolean;
+
+function DiffLayoutFieldsSame(A: TMemStreamableList; AOffsets: TFieldOffsets;
+                              B: TMemStreamableList; BOffsets: TFieldOffsets;
+                              AssertSameFormat: boolean = true): boolean;
+
+function AllFieldsZero(FieldList: TMemStreamableList;
+                            const AbsFieldOffsets: TFieldOffsets): boolean;
 
 const
   S_TABLE_DATA_CHANGED = 'Cannot change table field layout when uncommitted data changes.';
@@ -839,6 +854,9 @@ const
   S_FIELD_LIST_BAD_FOR_COLLATION = 'Collating data for index: Field list bad.';
   S_ZERO_LENGTH_FIELD_LIST_COLLATING = 'Collating data for index: Field list empty.';
   S_EMPTY_FIELD_DATA_IN_INDEX_COLLATION = 'Collating data for index: Field data empty';
+  S_FIELD_LIST_BAD_FOR_COMPARISON = 'Bad field list object comparing sets of fields.';
+  S_ZERO_LENGTH_FIELD_LIST_COMPARING = 'Comparing sets of fields, given a zero length field list.';
+  S_DIFF_LENGTH_FIELD_LIST_COMPARING = 'Comparing sets of fields, given different length field lists.';
 
 {$IFDEF PRE_COMMIT_PARALLEL}
 type
@@ -875,7 +893,6 @@ begin
   result := (not Assigned(X)) or (X is TMemDeleteSentinel);
 end;
 
-//TODO - Refactor this out for speed (eventually).
 function BuildMultiDataRecs(FieldList: TMemStreamableList;
                           const AbsFieldOffsets: TFieldOffsets): TMemDbFieldDataRecs;
 var
@@ -883,7 +900,7 @@ var
   F: TObject;
   FieldData: TMemFieldData;
 begin
-  if not (Assigned(FieldList) and (FieldList is TMemStreamableList)) then
+  if not Assigned(FieldList) then
     raise EMemDbInternalException.Create(S_FIELD_LIST_BAD_FOR_COLLATION);
   //Expect some fields, because this is for index traverse and validation.
   L := Length(AbsFieldOffsets);
@@ -900,6 +917,104 @@ begin
   end;
 end;
 
+function AllFieldsZero(FieldList: TMemStreamableList;
+                            const AbsFieldOffsets: TFieldOffsets): boolean;
+var
+  i: integer;
+  ZeroRec: TMemDbFieldDataRec;
+  F: TObject;
+  FieldData: TMemFieldData;
+
+begin
+  if not Assigned(FieldList) then
+    raise EMemDbInternalException.Create(S_FIELD_LIST_BAD_FOR_COLLATION);
+  //Expect some fields, because this is for index traverse and validation.
+  FillChar(ZeroRec, sizeof(ZeroRec), 0);
+  result := true;
+  for i := 0 to Pred(Length(AbsFieldOffsets)) do
+  begin
+    F := FieldList.Items[AbsFieldOffsets[i]];
+    if (not Assigned(F)) or (F is TMemDeleteSentinel) then
+      raise EMemDbInternalException.Create(S_EMPTY_FIELD_DATA_IN_INDEX_COLLATION);
+    FieldData := F as TMemFieldData;
+    ZeroRec.FieldType := FieldData.FDataRec.FieldType;
+    if not DataRecsSame(ZeroRec, FieldData.FDataRec) then
+    begin
+      result := false;
+      exit;
+    end;
+  end;
+end;
+
+function SameLayoutFieldsSame(A,B: TMemStreamableList; FieldOffsets: TFieldOffsets;
+                              AssertSameFormat: boolean = true): boolean;
+var
+  L,i: integer;
+  OA, OB: TMemDBStreamable;
+  FA,FB: TMemFieldData;
+begin
+  if not (Assigned(A) and Assigned(B))  then
+    raise EMemDbInternalException.Create(S_FIELD_LIST_BAD_FOR_COMPARISON);
+  L := Length(FieldOffsets);
+  if L = 0 then
+    raise EMemDbInternalException.Create(S_ZERO_LENGTH_FIELD_LIST_COMPARING);
+  //Happy to have list range check errors as native exceptions.
+  //Field offsets does not necessarily have to cover all the fields.
+  result := true;
+  for i := 0 to Pred(L) do
+  begin
+    OA := A.Items[FieldOffsets[i]];
+    OB := B.Items[FieldOffsets[i]];
+    if NotAssignedOrSentinel(OA) or NotAssignedOrSentinel(OB) then
+      raise EMemDbInternalException.Create(S_EMPTY_FIELD_DATA_IN_INDEX_COLLATION);
+    FA := OA as TMemFieldData;
+    FB := OB as TMemFieldData;
+    Assert((FA.FDataRec.FieldType = FB.FDataRec.FieldType)
+      or not AssertSameFormat);
+    if not DataRecsSame(FA.FDataRec, FB.FDataRec) then
+    begin
+      result := false;
+      exit;
+    end;
+  end;
+end;
+
+function DiffLayoutFieldsSame(A: TMemStreamableList; AOffsets: TFieldOffsets;
+                              B: TMemStreamableList; BOffsets: TFieldOffsets;
+                              AssertSameFormat: boolean = true):boolean;
+var
+  LA,LB,i: integer;
+  OA, OB: TMemDBStreamable;
+  FA,FB: TMemFieldData;
+begin
+  if not (Assigned(A) and Assigned(B))  then
+    raise EMemDbInternalException.Create(S_FIELD_LIST_BAD_FOR_COMPARISON);
+  LA := Length(AOffsets);
+  if LA = 0 then
+    raise EMemDbInternalException.Create(S_ZERO_LENGTH_FIELD_LIST_COMPARING);
+  LB := Length(BOffsets);
+  if LA <> LB then
+    raise EMemDbInternalException.Create(S_DIFF_LENGTH_FIELD_LIST_COMPARING);
+  //Happy to have list range check errors as native exceptions.
+  //Field offsets does not necessarily have to cover all the fields.
+  result := true;
+  for i := 0 to Pred(LA) do
+  begin
+    OA := A.Items[AOffsets[i]];
+    OB := B.Items[BOffsets[i]];
+    if NotAssignedOrSentinel(OA) or NotAssignedOrSentinel(OB) then
+      raise EMemDbInternalException.Create(S_EMPTY_FIELD_DATA_IN_INDEX_COLLATION);
+    FA := OA as TMemFieldData;
+    FB := OB as TMemFieldData;
+    Assert((FA.FDataRec.FieldType = FB.FDataRec.FieldType)
+      or not AssertSameFormat);
+    if not DataRecsSame(FA.FDataRec, FB.FDataRec) then
+    begin
+      result := false;
+      exit;
+    end;
+  end;
+end;
 
 { TMemDBAPI }
 
@@ -3278,7 +3393,6 @@ procedure TMemDbTablePersistent.CheckIndexForRow(Row: TMemDBRow; IRec: TItemRec;
 var
   PProcRowStruct: PProcessRowChkIdxStruct;
   RowFields: TMemStreamableList;
-  RowDataRecs: TMemDbFieldDataRecs;
   ZeroRec: TMemDBFieldDataRec;
   TagData: TMemDBITagData;
   TagStruct: PITagStruct;
@@ -3286,9 +3400,6 @@ var
   RV: TIsRetVal;
   PrevRow, NextRow: TMemDBRow;
   PrevRowFields, NextRowFields: TMemStreamableList;
-  PrevRowDataRecs, NextRowDataRecs: TMemDbFieldDataRecs;
-  ff: integer;
-  AllEmpty: boolean;
 
 begin
   PProcRowStruct := PProcessRowChkIdxStruct(Ref1);
@@ -3297,24 +3408,12 @@ begin
     FillChar(ZeroRec, sizeof(ZeroRec), 0);
 
     RowFields := Row.ABData[abNext] as TMemStreamableList;
-    //RowDataRecs are only the fields required as referenced (in order) by a particular index.
-    RowDataRecs := BuildMultiDataRecs(RowFields, PProcRowStruct.AbsFieldOffsets);
 
     if iaNotEmpty in PProcRowStruct.IndexAttrs then
     begin
       //Very arguable here, but we'll just require that not all fields are empty,
       //Kinda like digits of an int not being zero ....
-      AllEmpty := true;
-      for ff := 0 to Pred(Length(RowDataRecs)) do
-      begin
-        ZeroRec.FieldType := RowDataRecs[ff].FieldType;
-        if CompareFields(ZeroRec, RowDataRecs[ff]) <> 0 then
-        begin
-          AllEmpty := false;
-          break;
-        end;
-      end;
-      if AllEmpty then
+      if AllFieldsZero(RowFields, PProcRowStruct.AbsFieldOffsets) then
         raise EMemDBConsistencyException.Create(S_INDEX_CONSTRAINT_ZERO);
     end;
     if iaUnique in PProcRowStruct.IndexAttrs then
@@ -3368,13 +3467,12 @@ begin
       //One or other field lists might be NULL.
       if Assigned(PrevRowFields) then
       begin
-        PrevRowDataRecs := BuildMultiDataRecs(PrevRowFields, PProcRowStruct.AbsFieldOffsets);
-        if MultiDataRecsSame(RowDataRecs, PrevRowDataRecs) then
+        if SameLayoutFieldsSame(PrevRowFields, RowFields, PProcRowStruct.AbsFieldOffsets) then
           raise EMemDBConsistencyException.Create(S_INDEX_CONSTRAINT_UNIQUE);
       end
       else
       begin
-  {$IFOPT C+}
+{$IFDEF DEBUG_INDEXING_CHECK}
         if Assigned(PrevRow) then
         begin
           //If previous / next row fields not assigned, then beginning
@@ -3395,13 +3493,12 @@ begin
       end;
       if Assigned(NextRowFields) then
       begin
-        NextRowDataRecs := BuildMultiDataRecs(NextRowFields, PProcRowStruct.AbsFieldOffsets);
-        if MultiDataRecsSame(RowDataRecs, NextRowDataRecs) then
+        if SameLayoutFieldsSame(NextRowFields, RowFields, PProcRowStruct.AbsFieldOffsets) then
           raise EMemDBConsistencyException.Create(S_INDEX_CONSTRAINT_UNIQUE);
       end
       else
       begin
-  {$IFOPT C+}
+{$IFDEF DEBUG_INDEXING_CHECK}
         if Assigned(NextRow) then
         begin
           //If previous / next row fields not assigned, then beginning
@@ -3418,7 +3515,7 @@ begin
             Assert(RV in [rvOK, rvNotFound]);
           end;
         end;
-  {$ENDIF}
+{$ENDIF}
       end;
     end;
   end;
@@ -3441,8 +3538,6 @@ var
   TagData: TMemDbITagData;
   ITagStruct: PITagStruct;
   ff: integer;
-  RowDataRecs, NextRowDataRecs: TMemDbFieldDataRecs;
-  AllEmpty, AllSame: boolean;
 
 begin
   GetCurrNxtMetaCopiesEx(CurrentMetadata, NextMetadata,
@@ -3474,7 +3569,10 @@ begin
     SetLength(FieldNumbers, Length(FieldDefs1));
     //TODO - Use AbsIdxs1?
     for ff := 0 to Pred(Length(FieldNumbers)) do
-      FieldNumbers[ff] := FFieldHelper.NdIndexToRawIndex(FieldDefs1[ff].FieldIndex);
+    begin
+      Assert(FFieldHelper.NdIndexToRawIndex(FieldDefs1[ff].FieldIndex) = AbsIdxs1[ff]);
+      FieldNumbers[ff] := AbsIdxs1[ff];
+    end;
 
     ITagStruct := TagData.TagStructs[sicLatest];
   end
@@ -3528,20 +3626,9 @@ begin
   begin
     Assert(not (CurRow.Deleted or CurRow.Null));
     CurRowFields := CurRow.ABData[abLatest] as TMemStreamableList;
-    RowDataRecs := BuildMultiDataRecs(CurRowFields, FieldNumbers);
     if iaNotEmpty in IndexDef1.IndexAttrs then
     begin
-      AllEmpty := true;
-      for ff := 0 to Pred(Length(RowDataRecs)) do
-      begin
-        ZeroRec.FieldType := RowDataRecs[ff].FieldType;
-        if CompareFields(ZeroRec, RowDataRecs[ff]) <> 0 then
-        begin
-          AllEmpty := false;
-          break;
-        end;
-      end;
-      if AllEmpty then
+      if AllFieldsZero(CurRowFields, FieldNumbers) then
         raise EMemDBConsistencyException.Create(S_INDEX_CONSTRAINT_ZERO);
     end;
 
@@ -3567,18 +3654,7 @@ begin
     begin
       Assert(not (NextRow.Deleted or NextRow.Null));
       NextRowFields := NextRow.ABData[abLatest] as TMemStreamableList;
-      NextRowDataRecs := BuildMultiDataRecs(NextRowFields, FieldNumbers);
-      Assert(Length(RowDataRecs) = Length(NextRowDataRecs));
-      AllSame := true;
-      for ff := 0 to Pred(Length(NextRowDataRecs)) do
-      begin
-        if CompareFields(RowDataRecs[ff], NextRowDataRecs[ff]) <> 0 then
-        begin
-          AllSame := false;
-          break;
-        end;
-      end;
-      if AllSame then
+      if SameLayoutFieldsSame(NextRowFields, CurRowFields, FieldNumbers) then
         raise EMemDBConsistencyException.Create(S_INDEX_CONSTRAINT_UNIQUE);
     end;
     Current := Next;
@@ -3924,9 +4000,8 @@ procedure TMemDBForeignKeyPersistent.ProcessRow(Row: TMemDBRow;
                      IRec: TItemRec; Ref1, Ref2: TObject; Store: TIndexedStoreO);
 var
   PStruct: PProcessRowFKStruct;
-  RowFields: TMemStreamableList;
-  //TODO - remove allocation in this oft performed function.
-  CurrentFieldRecs, LatestFieldRecs: TMemDbFieldDataRecs;
+  CurrentRowFields, NextRowFields: TMemStreamableList;
+
   RV: TIsRetVal;
   IRecAdd: TItemRec;
   AddToList: boolean;
@@ -3947,17 +4022,13 @@ begin
           begin
             //Latest field (delete sentinels still in place).
             //Only perform calc if we need to.
-            RowFields := Row.ABData[abNext] as TMemStreamableList;
-            //Layout change in FromScratch case handled in Row.Added
-            LatestFieldRecs := BuildMultiDataRecs(RowFields,
-            PStruct.PMeta.FieldDefsReferringAbsIdx);
-            //Not adding FK, check current field. Same field offset
+            NextRowFields := Row.ABData[abNext] as TMemStreamableList;
+            //Not adding FK, check current field. Same field offsets
             //Delete sentinels not removed yet.
-            RowFields := Row.ABData[abCurrent] as TMemStreamableList;
-            CurrentFieldRecs := BuildMultiDataRecs(RowFields,
-              PStruct.PMeta.FieldDefsReferringAbsIdx);
+            CurrentRowFields := Row.ABData[abCurrent] as TMemStreamableList;
 
-            AddToList := not MultiDataRecsSame(LatestFieldRecs, CurrentFieldRecs);
+            AddToList := not SameLayoutFieldsSame(NextRowFields, CurrentRowFields,
+              PStruct.PMeta.FieldDefsReferringAbsIdx);
           end;
           if AddToList then
           begin
@@ -3998,15 +4069,10 @@ begin
           AddToList := Row.Deleted;
           if not AddToList then
           begin
-            RowFields := Row.ABData[abCurrent] as TMemStreamableList;
-            CurrentFieldRecs := BuildMultiDataRecs(RowFields,
+            CurrentRowFields := Row.ABData[abCurrent] as TMemStreamableList;
+            NextRowFields := Row.ABData[abNext] as TMemStreamableList;
+            AddToList := not SameLayoutFieldsSame(NextRowFields, CurrentRowFields,
               PStruct.PMeta.FieldDefsReferredAbsIdx);
-
-            RowFields := Row.ABData[abNext] as TMemStreamableList;
-            LatestFieldRecs := BuildMultiDataRecs(RowFields,
-              PStruct.PMeta.FieldDefsReferredAbsIdx);
-
-            AddToList := not MultiDataRecsSame(LatestFieldRecs, CurrentFieldRecs);
           end;
           if AddToList then
           begin
@@ -4033,14 +4099,10 @@ begin
           AddToList := Row.Added;
           if not AddToList then
           begin
-            RowFields := Row.ABData[abNext] as TMemStreamableList;
-            LatestFieldRecs := BuildMultiDataRecs(RowFields,
+            NextRowFields := Row.ABData[abNext] as TMemStreamableList;
+            CurrentRowFields := Row.ABData[abCurrent] as TMemStreamableList;
+            AddToList := not SameLayoutFieldsSame(CurrentRowFields, NextRowFields,
               PStruct.PMeta.FieldDefsReferredAbsIdx);
-            RowFields := Row.ABData[abCurrent] as TMemStreamableList;
-            CurrentFieldRecs := BuildMultiDataRecs(RowFields,
-              PStruct.PMeta.FieldDefsReferredAbsIdx);
-
-            AddToList := not MultiDataRecsSame(CurrentFieldRecs, LatestFieldRecs);
           end;
           if AddToList then
           begin
@@ -4112,7 +4174,6 @@ var
 {$IFOPT C+}
   DataRow: TMemDBRow;
   DataFields: TMemStreamableList;
-  DataFieldRecs: TMemDBFieldDataRecs;
 {$ENDIF}
 begin
   if not FMetadata.Added then
@@ -4158,9 +4219,8 @@ begin
             //Let's just check.
             DataRow := DataIRec.Item as TMemDBRow;
             DataFields := DataRow.ABData[abCurrent] as TMemStreamableList;
-            DataFieldRecs := BuildMultiDataRecs(DataFields,
-              Meta.FieldDefsReferringAbsIdx);
-            Assert(MultiDataRecsSame(LookupFieldRecs, DataFieldRecs));
+            Assert(SameLayoutFieldsSame(LookupFields, DataFields,
+              Meta.FieldDefsReferringAbsIdx));
 {$ENDIF}
           end;
           NextLookasideIRec := LookasideIRec;
@@ -4221,7 +4281,6 @@ var
   DelFields: TMemDbFieldDataRecs;
 {$IFOPT C+}
   AddRow: TMemDBRow;
-  AddFields: TMemDbFieldDataRecs;
 {$ENDIF}
 begin
   if not FMetadata.Added then
@@ -4263,9 +4322,8 @@ begin
           begin
 {$IFOPT C+}
             AddRow := AddedIRec.Item as TMemDBRow;
-            AddFields := BuildMultiDataRecs(AddRow.ABData[abNext] as TMemStreamableList,
-              Meta.FieldDefsReferredAbsIdx);
-            Assert(MultiDataRecsSame(AddFields, DelFields));
+            Assert(SameLayoutFieldsSame(AddRow.ABData[abNext] as TMemStreamableList,
+              DelRow.ABData[abCurrent] as TMemStreamableList, Meta.FieldDefsReferredAbsIdx));
 {$ENDIF}
             DeletedRV := Meta.Lists.FReferredDeleted.RemoveItem(DeletedIRec);
             Assert(DeletedRV = rvOK);
@@ -4349,7 +4407,6 @@ var
   ListDataRecs: TMemDbFieldDataRecs;
 {$IFOPT C+}
   DataRow: TMemDBRow;
-  DataFields: TMemDBFieldDataRecs;
 {$ENDIF}
 
 begin
@@ -4381,9 +4438,10 @@ begin
 {$IFOPT C+}
         //Just check the fields really match.
         DataRow := DataIRec.Item as TMemDBRow;
-        DataFields := BuildMultiDataRecs(DataRow.ABData[abLatest] as TMemStreamableList,
-          Meta.FieldDefsReferredAbsIdx);
-        Assert(MultiDataRecsSame(ListDataRecs, DataFields));
+        Assert(DiffLayoutFieldsSame(ListRow.ABData[abLatest] as TMemStreamableList,
+                             Meta.FieldDefsReferringAbsIdx,
+                             DataRow.ABData[abLatest] as TMemStreamableList,
+                             Meta.FieldDefsReferredAbsIdx));
 {$ENDIF}
       ListRetVal := Meta.Lists.FReferringAdded.GetAnotherItem(ListIRec);
       Assert(ListRetVal in [rvOK, rvNotFound]);
@@ -4410,9 +4468,10 @@ begin
 {$IFOPT C+}
         //Just check the fields really match.
         DataRow := DataIRec.Item as TMemDBRow;
-        DataFields := BuildMultiDataRecs(DataRow.ABData[abLatest] as TMemStreamableList,
-          Meta.FieldDefsReferringAbsIdx);
-        Assert(MultiDataRecsSame(ListDataRecs, DataFields));
+        Assert(DiffLayoutFieldsSame(ListRow.ABData[abCurrent] as TMemStreamableList,
+            Meta.FieldDefsReferredAbsIdx,
+            DataRow.ABData[abLatest] as TMemStreamableList,
+            Meta.FieldDefsReferringAbsIdx));
 {$ENDIF}
         raise EMemDBConsistencyException.Create(S_FK_IN_REFERRING_TABLE);
       end;

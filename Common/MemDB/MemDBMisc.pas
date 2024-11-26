@@ -114,9 +114,11 @@ type
   function CopyFieldNames(const S: TMDBFieldNames): TMDBFieldNames;
   function FieldNamesSame(const A, B: TMDBFieldNames): boolean;
   function CopyDataRecs(const A:TMemDbFieldDataRecs): TMemDbFieldDataRecs;
-  function MultiDataRecsSame(const A,B: TMemDbFieldDataRecs; AssertSameFormat:boolean = true): boolean;
+  // Removed MCH hg changeset 1201, 25/11/24
+  //function MultiDataRecsSame(const A,B: TMemDbFieldDataRecs; AssertSameFormat:boolean = true): boolean;
   function CopyFieldOffsets(A: TFieldOffsets): TFieldOffsets;
-  function FieldOffsetsSame(A,B: TFieldOffsets; AssertSameFormat:boolean = true): boolean;
+  // Removed MCH hg changeset 1201, 25/11/24
+  //function FieldOffsetsSame(A,B: TFieldOffsets; AssertSameFormat:boolean = true): boolean;
 
 type
   //API object numbering.
@@ -609,27 +611,6 @@ begin
     result[i] := A[i];
 end;
 
-//Typically comparing values here for index traversal.
-function MultiDataRecsSame(const A,B: TMemDbFieldDataRecs; AssertSameFormat:boolean = true): boolean;
-var
-  i: integer;
-begin
-  result := Length(A) = Length(B);
-  Assert(result or not AssertSameFormat);
-  if result then
-  begin
-    for i := 0 to Pred(Length(A)) do
-    begin
-      Assert((A[i].FieldType = B[i].FieldType) or not AssertSameFormat);
-      if not DataRecsSame(A[i], B[i]) then
-      begin
-        result := false;
-        exit;
-      end;
-    end;
-  end;
-end;
-
 function DataRecsSame(const S, O: TMemDBFieldDataRec): boolean;
 begin
   result := (S.FieldType = O.FieldType);
@@ -676,27 +657,6 @@ begin
   for i := 0 to Pred(Length(A)) do
     result[i] := A[i];
 end;
-
-
-function FieldOffsetsSame(A,B: TFieldOffsets; AssertSameFormat:boolean = true): boolean;
-var
-  i: integer;
-begin
-  result := Length(A) = Length(B);
-  Assert(result or not AssertSameFormat);
-  if result then
-  begin
-    for i := 0 to Pred(Length(A)) do
-    begin
-      if A[i] <> B[i] then
-      begin
-        result := false;
-        exit;
-      end;
-    end;
-  end;
-end;
-
 
 {$IFDEF MSWINDOWS}
 const

@@ -36,6 +36,7 @@ interface
 //TODO - We should be able to phase out most of the V1 streaming classes.
 
 uses
+  SysUtils,
 {$IFDEF USE_TRACKABLES}
   Trackables,
 {$ENDIF}
@@ -279,8 +280,6 @@ type
 {$ENDIF}
 
 implementation
-
-uses SysUtils;
 
 const
   S_MEM_DB_FIELD_TYPE = 'FieldType';

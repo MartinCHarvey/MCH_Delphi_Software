@@ -1256,7 +1256,9 @@ var
   Idx: TMemIndexDef;
   FieldDefs: TMemFieldDefs;
   FieldAbsIdxs: TFieldOffsets;
+{$IFDEF DEBUG_DATABASE_NAVIGATE}
   i: integer;
+{$ENDIF}
 begin
   //Cannot find by internal index.
   if Length(IdxName) = 0 then
@@ -1288,11 +1290,11 @@ var
   FieldDefs: TMemFieldDefs;
   FieldAbsIdxs: TFieldOffsets;
   Next: TObject;
-  NextFieldDataRecs,
-  ResultFieldDataRecs: TMemDbFieldDataRecs;
   NextFields, ResultFields: TMemStreamableList;
   AB: TABSelection;
+{$IFDEF DEBUG_DATABASE_NAVIGATE}
   i: integer;
+{$ENDIF}
 begin
   if Length(IdxName) = 0 then
     raise EMemDBAPIException.Create(S_API_SEARCH_REQUIRES_INDEX);
@@ -1304,8 +1306,6 @@ begin
   IndexDefToFieldDefs(Idx, FieldDefs, FieldAbsIdxs);
   if Length(DataRecs) <> Length(FieldDefs) then
     raise EMemDBAPIException.Create(S_API_SEARCH_REQURES_CORRECT_FIELD_COUNT);
-  SetLength(NextFieldDataRecs, Length(FieldDefs));
-  SetLength(ResultFieldDataRecs, Length(FieldDefs));
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
   GLogLog(SV_INFO, 'EDGE by index, IndexName: ' + Idx.IndexName);
   for i := 0 to Pred(Length(FieldDefs)) do
@@ -1351,19 +1351,18 @@ begin
 
         //Pretty sure we shouldn't have any sentinels at this point.
         NextFields := (Next as TMemDBRow).ABData[AB] as TMemStreamableList;
-        NextFieldDataRecs := BuildMultiDataRecs(NextFields, FieldAbsIdxs);
         ResultFields := (result as TMemDBRow).ABData[AB] as TMemStreamableList;
-        ResultFieldDataRecs := BuildMultiDataRecs(ResultFields, FieldAbsIdxs);
 
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
         //Compare all fields.
-        if MultiDataRecsSame(NextFieldDataRecs, ResultFieldDataRecs) then
+        if SameLayoutFieldsSame(NextFields, ResultFields, FieldAbsIdxs) then
         begin
           GLogLog(SV_INFO, 'EDGE by Index ' + MemAPIPositionStrings[Pos] + ' row has same fields.');
           for i := 0 to Pred(Length(FieldDefs)) do
           begin
-            if NextFieldDataRecs[i].FieldType = ftUnicodeString then
-              GLogLog(SV_INFO, 'Field['+ InttoStr(i) +'] is: ' + NextFieldDataRecs[i].sVal);
+            if (NextFields.Items[FieldAbsIdxs[i]] as TMemFieldData).FDataRec.FieldType = ftUnicodeString then
+              GLogLog(SV_INFO, 'Field['+ InttoStr(i) +'] is: ' +
+                (NextFields.Items[FieldAbsIdxs[i]] as TMemFieldData).FDataRec.sVal);
           end;
         end
         else
@@ -1371,12 +1370,13 @@ begin
           GLogLog(SV_INFO, 'EDGE by Index ' + MemAPIPositionStrings[Pos] + ' row differs.');
           for i := 0 to Pred(Length(FieldDefs)) do
           begin
-            if NextFieldDataRecs[i].FieldType = ftUnicodeString then
-              GLogLog(SV_INFO, 'Field['+ InttoStr(i) +'] is: ' + NextFieldDataRecs[i].sVal);
+            if (NextFields.Items[FieldAbsIdxs[i]] as TMemFieldData).FDataRec.FieldType = ftUnicodeString then
+              GLogLog(SV_INFO, 'Field['+ InttoStr(i) +'] is: ' +
+                (NextFields.Items[FieldAbsIdxs[i]] as TMemFieldData).FDataRec.sVal);
           end;
         end;
 {$ENDIF}
-        if not MultiDataRecsSame(NextFieldDataRecs, ResultFieldDataRecs) then
+        if not SameLayoutFieldsSame(NextFields, ResultFields, FieldAbsIdxs) then
           Next := nil;
       end;
       if Assigned(Next) then
