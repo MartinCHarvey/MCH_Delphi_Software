@@ -40,7 +40,6 @@ type
 
   TMemDBIndexNode = class(TDuplicateValIndexNode)
   protected
-    //TODO Index.
     function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer; override;
   end;
 
@@ -48,29 +47,27 @@ type
   private
     FPointerSearchVal: pointer;
     FIdSearchVal: string;
-    FFieldSearchVal: TMemDbFieldDataRec;
+    FFieldSearchVals: TMemDbFieldDataRecs;
   protected
-    //TODO Index.
     function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer; override;
   public
     property PointerSearchVal: pointer read FPointerSearchVal write FPointerSearchVal;
     property IdSearchVal: string read FIdSearchVal write FIdSearchVal;
-    property FieldSearchVal: TMemDbFieldDataRec read FFieldSearchVal write FFieldSearchVal;
+    property FieldSearchVals: TMemDbFieldDataRecs read FFieldSearchVals write FFieldSearchVals;
   end;
 
-  TMemDBFieldLookasideIndexNode = class(TIndexNode)
+  TMemDBRowLookasideIndexNode = class(TDuplicateValIndexNode)
   protected
     function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer; override;
   end;
 
-  TMemDBFieldLookasideSearchVal = class(TMemDBFieldLookasideIndexNode)
+  TMemDBRowLookasideSearchVal = class(TMemDBRowLookasideIndexNode)
   private
-    FFieldSearchVal: TMemDbFieldDataRec;
+    FFieldSearchVals: TMemDbFieldDataRecs;
   protected
-    //TODO Index.
     function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer; override;
   public
-    property FieldSearchVal: TMemDbFieldDataRec read FFieldSearchVal write FFieldSearchVal;
+    property FieldSearchVals: TMemDbFieldDataRecs read FFieldSearchVals write FFieldSearchVals;
   end;
 
 {$IFOPT C+}
@@ -200,9 +197,9 @@ var
   OwnRow, OtherRow: TMemDBRow;
   OwnFieldList, OtherFieldList: TMemStreamableList;
   OwnField, OtherField: TMemDBStreamable;
-  OwnFieldOffset, OtherFieldOffset: TFieldOffset;
+  OwnFieldOffsets, OtherFieldOffsets: TFieldOffsets;
   UsingNextCopy, OtherUsingNextCopy: boolean;
-
+  ff:integer;
 begin
   Assert(Assigned(OwnItem));
   Assert(Assigned(OtherItem));
@@ -331,36 +328,46 @@ begin
         //it *also* corresponds to the new index, when the delete sentinels
         //have not yet been removed.
 
+        //Dynamic array assignment by reference - no dynamic array allocation
+        //or copying here.
         if UsingNextCopy then
-          OwnFieldOffset := TagData.ExtraFieldOffset
+          OwnFieldOffsets := TagData.ExtraFieldOffsets
         else
-          OwnFieldOffset := TagData.DefaultFieldOffset;
+          OwnFieldOffsets := TagData.DefaultFieldOffsets;
         if OtherUsingNextCopy then
-          OtherFieldOffset := TagData.ExtraFieldOffset
+          OtherFieldOffsets := TagData.ExtraFieldOffsets
         else
-          OtherFieldOffset := TagData.DefaultFieldOffset;
+          OtherFieldOffsets := TagData.DefaultFieldOffsets;
       end
       else
       begin
-        OwnFieldOffset := TagData.DefaultFieldOffset;
-        OtherFieldOffset := TagData.DefaultFieldOffset;
+        OwnFieldOffsets := TagData.DefaultFieldOffsets;
+        OtherFieldOffsets := TagData.DefaultFieldOffsets;
       end;
 
       //Check field indexes in range.
       //However, do not need to have the same number of fields in each...
-      Assert(OwnFieldOffset <= OwnFieldList.Count);
-      Assert(OtherFieldOffset <= OtherFieldList.Count);
-      OwnField := OwnFieldList.Items[OwnFieldOffset];
-      OtherField := OtherFieldList.Items[OtherFieldOffset];
-      Assert(not (OwnField is TMemDeleteSentinel));
-      Assert(not (OtherField is TMemDeleteSentinel));
+      Assert(Length(OwnFieldOffsets) > 0);
+      Assert(Length(OwnFieldOffsets) = Length(OtherFieldOffsets));
+      result := 0;
+      ff := 0;
+      while (result = 0) and (ff < Length(OwnFieldOffsets)) do
+      begin
+        Assert(OwnFieldOffsets[ff] <= OwnFieldList.Count);
+        Assert(OtherFieldOffsets[ff] <= OtherFieldList.Count);
+        OwnField := OwnFieldList.Items[OwnFieldOffsets[ff]];
+        OtherField := OtherFieldList.Items[OtherFieldOffsets[ff]];
+        Assert(not (OwnField is TMemDeleteSentinel));
+        Assert(not (OtherField is TMemDeleteSentinel));
 {$IFOPT C+}
-      result := CompareFields((OwnField as TMemFieldData).FDataRec,
-                              (OtherField as TMemFieldData).FDataRec);
+        result := CompareFields((OwnField as TMemFieldData).FDataRec,
+                                (OtherField as TMemFieldData).FDataRec);
 {$ELSE}
-      result := CompareFields(TMemFieldData(OwnField).FDataRec,
-                              TMemFieldData(OtherField).FDataRec);
+        result := CompareFields(TMemFieldData(OwnField).FDataRec,
+                                TMemFieldData(OtherField).FDataRec);
 {$ENDIF}
+        Inc(ff);
+      end;
     end;
   end;
 end;
@@ -377,8 +384,9 @@ var
   OtherRow: TMemDBRow;
   OtherFieldList: TMemStreamableList;
   OtherField: TMemDBStreamable;
-  OtherFieldOffset: TFieldOffset;
+  OtherFieldOffsets: TFieldOffsets;
   OtherUsingNextCopy: boolean;
+  ff:integer;
 
 begin
   Assert(not Assigned(OwnItem));
@@ -468,64 +476,155 @@ begin
         //it *also* corresponds to the new index, when the delete sentinels
         //have not yet been removed.
 
+        //Dynamic array assignment by reference - no dynamic array allocation
+        //or copying here.
         if OtherUsingNextCopy then
-          OtherFieldOffset := TagData.ExtraFieldOffset
+          OtherFieldOffsets := TagData.ExtraFieldOffsets
         else
-          OtherFieldOffset := TagData.DefaultFieldOffset;
+          OtherFieldOffsets := TagData.DefaultFieldOffsets;
       end
       else
-        OtherFieldOffset := TagData.DefaultFieldOffset;
+        OtherFieldOffsets := TagData.DefaultFieldOffsets;
 
       //Check field indexes in range.
       //However, do not need to have the same number of fields in each...
-      Assert(OtherFieldOffset <= OtherFieldList.Count);
-      OtherField := OtherFieldList.Items[OtherFieldOffset];
-      Assert(not (OtherField is TMemDeleteSentinel));
-{$IFOPT C+}
-      result := CompareFields(FFieldSearchVal,
-                              (OtherField as TMemFieldData).FDataRec);
-{$ELSE}
-      result := CompareFields(FFieldSearchVal,
-                              TMemFieldData(OtherField).FDataRec);
-{$ENDIF}
+      Assert(Length(OtherFieldOffsets) > 0);
+      Assert(Length(OtherFieldOffsets) = Length(FFieldSearchVals));
+      result := 0;
+      ff := 0;
+      while (result = 0) and (ff < Length(OtherFieldOffsets)) do
+      begin
+        Assert(OtherFieldOffsets[ff] <= OtherFieldList.Count);
+
+        OtherField := OtherFieldList.Items[OtherFieldOffsets[ff]];
+        Assert(not (OtherField is TMemDeleteSentinel));
+  {$IFOPT C+}
+        result := CompareFields(FFieldSearchVals[ff],
+                                (OtherField as TMemFieldData).FDataRec);
+  {$ELSE}
+        result := CompareFields(FFieldSearchVals[ff],
+                                TMemFieldData(OtherField).FDataRec);
+  {$ENDIF}
+        Inc(ff);
+      end;
     end;
   end;
 end;
 
-{ TMemDBFieldLookasideIndexNode}
+{ TMemDBRowLookasideIndexNode}
 
-function TMemDBFieldLookasideIndexNode.CompareItems(OwnItem: TObject; OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
+function TMemDBRowLookasideIndexNode.CompareItems(OwnItem: TObject; OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
+var
+  Tag: PMemDBMetaTags;
+  OwnFieldList, OtherFieldList: TMemStreamableList;
+  OwnRow, OtherRow: TMemDbRow;
+  OwnField, OtherField: TMemDBStreamable;
+  ff: integer;
+
 begin
   Assert(Assigned(OwnItem));
   Assert(Assigned(OtherItem));
-  Assert(OwnItem is TMemFieldData);
-  Assert(OtherItem is TMemFieldData);
-  Assert(TObject(IndexTag) = TObject(self.ClassType));
+  Assert(OwnItem is TMemDBRow);
+  Assert(OtherItem is TMemDBRow);
+  Tag := PMemDBMetaTags(IndexTag);
+
+  //First off, deal with NULL abData cases.
+  OwnRow := OwnItem as TMemDBRow;
+  OtherRow := OtherItem as TMemDbRow;
+
+  if AssignedNotSentinel(OwnRow.ABData[Tag.abBuf]) then
+    OwnFieldList := OwnRow.ABData[Tag.abBuf] as TMemStreamableList
+  else
+    OwnFieldList := nil;
+
+  if AssignedNotSentinel(OtherRow.ABData[Tag.abBuf]) then
+    OtherFieldList := OtherRow.ABData[Tag.abBuf] as TMemStreamableList
+  else
+    OtherFieldList := nil;
+
+  if not (Assigned(OwnFieldList) or Assigned(OtherFieldList)) then
+    result := 0
+  else if not (Assigned(OwnFieldList) and Assigned(OtherFieldList)) then
+  begin
+    if Assigned(OwnFieldList) then
+      result := 1
+    else
+      result := -1;
+  end
+  else //Both assigned.
+  begin
+      Assert(Length(Tag.FieldAbsIdxs) > 0);
+      result := 0;
+      ff := 0;
+      while (result = 0) and (ff < Length(Tag.FieldAbsIdxs)) do
+      begin
+        Assert(Tag.FieldAbsIdxs[ff] <= OwnFieldList.Count);
+        Assert(Tag.FieldAbsIdxs[ff] <= OtherFieldList.Count);
+        OwnField := OwnFieldList.Items[Tag.FieldAbsIdxs[ff]];
+        OtherField := OtherFieldList.Items[Tag.FieldAbsIdxs[ff]];
+        Assert(not (OwnField is TMemDeleteSentinel));
+        Assert(not (OtherField is TMemDeleteSentinel));
 {$IFOPT C+}
-  result := CompareFields((OwnItem as TMemFieldData).FDataRec,
-                          (OtherItem as TMemFieldData).FDataRec);
+        result := CompareFields((OwnField as TMemFieldData).FDataRec,
+                                (OtherField as TMemFieldData).FDataRec);
 {$ELSE}
-  result := CompareFields(TMemFieldData(OwnItem).FDataRec,
-                          TMemFieldData(OtherItem).FDataRec);
+        result := CompareFields(TMemFieldData(OwnField).FDataRec,
+                                TMemFieldData(OtherField).FDataRec);
 {$ENDIF}
+        Inc(ff);
+      end;
+  end;
 end;
 
-{ TMemDBFieldLookasideSearchVal }
+{ TMemDBRowLookasideSearchVal }
 
-function TMemDBFieldLookasideSearchVal.CompareItems(OwnItem: TObject; OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
+function TMemDBRowLookasideSearchVal.CompareItems(OwnItem: TObject; OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
+var
+  Tag: PMemDBMetaTags;
+  OtherFieldList: TMemStreamableList;
+  OtherRow: TMemDbRow;
+  OtherField: TMemDBStreamable;
+  ff: integer;
+
 begin
   Assert(not Assigned(OwnItem));
   Assert(Assigned(OtherItem));
-  Assert(OtherItem is TMemFieldData);
-  Assert(TObject(IndexTag) = TObject(self.ClassType.ClassParent));
+  Assert(OtherItem is TMemDBRow);
+  Tag := PMemDBMetaTags(IndexTag);
+
+  //First off, deal with NULL abData cases.
+  OtherRow := OtherItem as TMemDbRow;
+
+  if AssignedNotSentinel(OtherRow.ABData[Tag.abBuf]) then
+    OtherFieldList := OtherRow.ABData[Tag.abBuf] as TMemStreamableList
+  else
+    OtherFieldList := nil;
+
+  if not Assigned(OtherFieldList) then
+      result := 1
+  else //Both assigned.
+  begin
+      Assert(Length(Tag.FieldAbsIdxs) > 0);
+      Assert(Length(Tag.FieldAbsIdxs) = Length(FFieldSearchVals));
+      result := 0;
+      ff := 0;
+      while (result = 0) and (ff < Length(Tag.FieldAbsIdxs)) do
+      begin
+        Assert(Tag.FieldAbsIdxs[ff] <= OtherFieldList.Count);
+        OtherField := OtherFieldList.Items[Tag.FieldAbsIdxs[ff]];
+        Assert(not (OtherField is TMemDeleteSentinel));
 {$IFOPT C+}
-  result := CompareFields(FFieldSearchVal,
-                          (OtherItem as TMemFieldData).FDataRec);
+        result := CompareFields(FFieldSearchVals[ff],
+                                (OtherField as TMemFieldData).FDataRec);
 {$ELSE}
-  result := CompareFields(FFieldSearchVal,
-                          TMemFieldData(OtherItem).FDataRec);
+        result := CompareFields(FFieldSearchVals[ff],
+                                TMemFieldData(OtherField).FDataRec);
 {$ENDIF}
+        Inc(ff);
+      end;
+  end;
 end;
+
 
 initialization
   MDBInternalIndexPtr := TMemDBITagData.Create;

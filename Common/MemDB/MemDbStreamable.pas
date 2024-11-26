@@ -36,6 +36,7 @@ interface
 //TODO - We should be able to phase out most of the V1 streaming classes.
 
 uses
+  SysUtils,
 {$IFDEF USE_TRACKABLES}
   Trackables,
 {$ENDIF}
@@ -124,6 +125,8 @@ type
     property FieldIndex: TFieldOffset read FFieldIndex write FFieldIndex;
   end;
 
+  TMemFieldDefs = array of TMemFieldDef;
+
   TMemFieldData = class(TMemDBStreamable)
   protected
     procedure RecFromStream(Stream: TStream; var Rec: TMemDbFieldDataRec);
@@ -140,8 +143,13 @@ type
   TMemIndexDef = class(TMemDBStreamable)
   private
     FIndexName: string;
-    FFieldName: string;
+    FFieldNames: TMDBFieldNames;
     FIndexAttrs: TMDBIndexAttrs;
+  protected
+    function GetFieldName(i: integer): string;
+    procedure SetFieldName(i: integer; const s:string);
+    function GetFieldNameCount: integer;
+    procedure SetFieldNameCount(i: integer);
   public
     procedure Assign(Source: TMemDBStreamable); override;
     function Same(Other: TMemDBStreamable):boolean; override;
@@ -149,7 +157,9 @@ type
     procedure FromStreamV2(Stream: TStream); override;
     procedure CheckSameAsStreamV2(Stream: TStream); override;
     property IndexName: string read FIndexName write FIndexName;
-    property FieldName: string read FFieldName write FFieldName;
+    property FieldNames[i: integer]: string read GetFieldName write SetFieldName;
+    property FieldNameCount: integer read GetFieldNameCount write SetFieldNameCount;
+    property FieldArray: TMDBFieldNames read FFieldNames; //Try to use this as a const parameter only ....
     property IndexAttrs: TMDBIndexAttrs read FIndexAttrs write FIndexAttrs;
   end;
 
@@ -244,7 +254,8 @@ type
     DEPRECATED_mstIndexFieldDeconflict,
     mstFieldDefStartV2,
     DEPRECATED_mstIndexDefStart_V2,
-    mstIndexDefStartV3,
+    DEPRECATED_mstIndexDefStartV3,
+    mstIndexDefStartV4,
 
     mstReservedForEscape = $FE,
     mstReservedForEscape2 = $FF
@@ -269,8 +280,6 @@ type
 {$ENDIF}
 
 implementation
-
-uses SysUtils;
 
 const
   S_MEM_DB_FIELD_TYPE = 'FieldType';
@@ -416,7 +425,8 @@ begin
     mstFieldDataStart: result := TMemFieldData.Create;
     DEPRECATED_mstIndexDefStart_V1,
     DEPRECATED_mstIndexDefStart_V2,
-    mstIndexDefStartV3: result := TMemIndexDef.Create;
+    DEPRECATED_mstIndexDefStartV3,
+    mstIndexdefStartV4: result := TMemIndexDef.Create;
     mstDeleteSentinel: result := TMemDeleteSentinel.Create;
   else
     raise EMemDBException.Create(S_STREAMABLE_LIST_LOOKAHEAD_FAILED + IntToStr(Ord(Tag)));
@@ -644,11 +654,36 @@ end;
 
 { TMemIndexDef }
 
-procedure TMemIndexDef.ToStreamV2(Stream: TStream);
+function TMemIndexDef.GetFieldName(i: integer): string;
 begin
-  WrTag(Stream, mstIndexDefStartV3);
+  result := FFieldNames[i];
+end;
+
+procedure TMemIndexDef.SetFieldName(i: integer; const s:string);
+begin
+  FFieldNames[i] := s;
+end;
+
+function TMemIndexDef.GetFieldNameCount: integer;
+begin
+  result := Length(FFieldNames);
+end;
+
+procedure TMemIndexDef.SetFieldNameCount(i: integer);
+begin
+  SetLength(FFieldNames, i);
+end;
+
+procedure TMemIndexDef.ToStreamV2(Stream: TStream);
+var
+  i:integer;
+begin
+  WrTag(Stream, mstIndexDefStartV4);
   WrStreamString(Stream, FIndexName);
-  WrStreamString(Stream, FFieldName);
+  i := Length(FFieldNames);
+  Stream.Write(i, sizeof(i));
+  for i := 0 to Pred(Length(FFieldNames)) do
+    WrStreamString(Stream, FFieldNames[i]);
   Stream.Write(FIndexAttrs, sizeof(FIndexAttrs));
   WrTag(Stream, mstIndexDefEnd);
 end;
@@ -660,16 +695,29 @@ var
   DEPRECATED_Deconflict: byte;
   OldFieldIndex: TOldFieldOffset;
   DummyIndex: TFieldOffset;
+  i: integer;
 begin
   InitialTag := RdTag(Stream);
-  if not (InitialTag in [mstIndexDefStartV3,
+  if not (InitialTag in [mstIndexDefStartV4,
+    DEPRECATED_mstIndexDefStartV3,
     DEPRECATED_mstIndexDefStart_V2,
     DEPRECATED_mstIndexDefStart_V1
     ]) then
     raise EMemDBException.Create(S_WRONG_TAG);
 
   FIndexName := RdStreamString(Stream);
-  FFieldName := RdStreamString(Stream);
+  if InitialTag = mstIndexDefStartV4 then
+  begin
+    Stream.Read(i, sizeof(i));
+    SetLength(FFieldNames, i);
+    for i := 0 to Pred(Length(FFieldNames)) do
+      FFieldNames[i] := RdStreamString(Stream);
+  end
+  else
+  begin
+    SetLength(FFieldNames, 1);
+    FFieldNames[0] := RdStreamString(Stream);
+  end;
 
   if InitialTag = DEPRECATED_mstIndexDefStart_V1 then
   begin
@@ -682,6 +730,7 @@ begin
   Stream.Read(FIndexAttrs, sizeof(FIndexAttrs));
   if FIndexAttrs - AllIndexAttrs <> [] then
     raise EMemDBException.Create(S_MEM_DB_UNSTREAM_OOR);
+
   //Lookahead - field deconflict currently optional.
   //Remove deconflict from stream rd/wr in a while.
   CurPos := Stream.Position;
@@ -700,7 +749,7 @@ end;
 procedure TMemIndexDef.CheckSameAsStreamV2(Stream: TStream);
 var
   LclIndexName: string;
-  LclFieldName: string;
+  LclFieldNames: TMDBFieldNames;
   OldLclFieldIndex: TOldFieldOffset;
   DummyFieldIndex: TFieldOffset;
   LclIndexAttrs: TMDBIndexAttrs;
@@ -708,10 +757,11 @@ var
   CurPos: Int64;
   DEPRECATED_Deconflict: byte;
   InitialTag: TMemStreamTag;
+  i: integer;
 begin
   InitialTag := RdTag(Stream);
-  if not (InitialTag in [
-    mstIndexDefStartV3,
+  if not (InitialTag in [mstIndexDefStartV4,
+    DEPRECATED_mstIndexDefStartV3,
     DEPRECATED_mstIndexDefStart_V2,
     DEPRECATED_mstIndexDefStart_V1
     ]) then
@@ -720,8 +770,21 @@ begin
   LclIndexName := RdStreamString(Stream);
   if CompareStr(FIndexName, LclIndexName) <> 0 then
     raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
-  LclFieldName := RdStreamString(Stream);
-  if CompareStr(FFieldName, LclFieldName) <> 0 then
+
+  if InitialTag = mstIndexDefSTartV4 then
+  begin
+    Stream.Read(i, sizeof(i));
+    SetLength(LclFieldNames, i);
+    for i := 0 to Pred(Length(LclFieldNames)) do
+      LclFieldNames[i] := RdStreamString(Stream);
+  end
+  else
+  begin
+    SetLength(LclFieldNames, 1);
+    LclFieldNames[0] := RdStreamString(Stream);
+  end;
+
+  if not FieldNamesSame(FFieldNames, LclFieldNames) then
     raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
 
   if InitialTag = DEPRECATED_mstIndexDefStart_V1 then
@@ -754,7 +817,7 @@ begin
   inherited;
   S := Source as TMemIndexDef;
   FIndexName := S.FIndexName;
-  FFieldName := S.FFieldName;
+  FFieldNames := CopyFieldNames(S.FFieldNames);
   FIndexAttrs := S.FIndexAttrs;
 end;
 
@@ -768,7 +831,7 @@ begin
     O := Other as TMemIndexDef;
     result :=
       (FIndexName = O.FIndexName) and
-      (FFieldName = O.FFieldName) and
+      FieldNamesSame(FFieldNames, O.FFieldNames) and
       (FIndexAttrs = O.FIndexAttrs);
   end;
 end;

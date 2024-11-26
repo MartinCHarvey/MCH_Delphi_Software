@@ -1,13 +1,13 @@
 
 MemDB: TODO and notes.
 
-- Index metadata classes done.
-- Explicitly disallowed changing of objects (fields, indexes, foreign keys)
-  once created. Will solve altering objects via composite ops.
+TODO: Decide what to do with these silly assertions:
+-            RV := PStruct.OutList.AddItem(LatestField, IRecAdd);
+-            Assert(RV in [rvOk, rvDuplicateKey]);
 
-1. Index on multiple fields.
+TODO: review mem alloc on rollback path?
 
-(FK not allowed on multi-key index).
+TODO: Find out why validate FK stuff so slow. Building indexes?
 
 2. Blob handling - do memcopies properly.
     Testapp for basic blob handling.

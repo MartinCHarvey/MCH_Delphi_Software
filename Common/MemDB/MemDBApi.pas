@@ -89,10 +89,13 @@ type
     procedure CreateIndex(Name: string;
                           IndexedField: string;
                           IndexAttrs: TMDbIndexAttrs);
+    procedure CreateMultiFieldIndex(Name: string;
+                          IndexedFields: TMDBFieldNames;
+                          IndexAttrs: TMDbIndexAttrs);
     procedure DeleteIndex(Name: string);
     procedure RenameIndex(OldName: string; NewName: string);
     function IndexInfo(Name: string;
-                       var IndexedField: string;
+                       var IndexedFields: TMDBFieldNames;
                        var IndexAttrs: TMDBIndexAttrs): boolean;
     function GetIndexNames: TStringList;
 
@@ -137,7 +140,9 @@ type
     function Locate(Pos: TMemAPIPosition; IdxName: string = ''): boolean;
 
     function FindByIndex(IdxName: string;
-                          Data: TMemDbFieldDataRec): boolean;
+                          const Data: TMemDbFieldDataRec): boolean;
+    function FindByMultiFieldIndex(IdxName: string;
+                          const DataRecs: TMemDbFieldDataRecs): boolean;
 
     //FindEdgeByIndex is a little hack to find the first / last
     //of a set of records with a certain field value.
@@ -146,10 +151,10 @@ type
     //(i.e. "SELECT * FROM WHERE 'key_field' = ).
 
     function FindEdgeByIndex(Pos: TMemAPIPosition; IdxName: string;
-                              Data: TMemDbFieldDataRec): boolean;
+                              const Data: TMemDbFieldDataRec): boolean;
+    function FindEdgeByMultiFieldIndex(Pos: TMemAPIPosition; IdxName: string;
+                              const DataRecs: TMemDbFieldDataRecs): boolean;
     procedure Append;
-    //TODO - Possibly syntactically sugared versions of these,
-    //without exposing the data record.
     procedure ReadField(FieldName: string;
                         var Data: TMemDbFieldDataRec);
     procedure WriteField(FieldName: string;
@@ -199,7 +204,7 @@ type
     procedure CheckNoUncommitedData;
     function GetFieldDefList: TMemStreamableList;
     function IndexNameToIndexAndTag(Iso: TMDBIsolationLevel;  var Idx:TMemIndexDef; Name: string): PITagStruct;
-    procedure IndexDefToFieldDef(IndexDef: TMemIndexDef; var FieldDef: TMemFieldDef; var FieldAbsIdx: integer);
+    procedure IndexDefToFieldDefs(IndexDef: TMemIndexDef; var FieldDefs: TMemFieldDefs; var FieldAbsIdxs: TFieldOffsets);
   public
     procedure API_CreateField(Name: string; FieldType: TMDBFieldType);
     procedure API_DeleteField(Iso: TMDBIsolationLevel; Name: string);
@@ -208,12 +213,12 @@ type
     function API_GetFieldNames(Iso: TMDBIsolationLevel): TStringList;
 
     procedure API_CreateIndex(Name: string;
-                          IndexedField: string;
+                          IndexedFields: TMDBFieldNames;
                           IndexAttrs: TMDbIndexAttrs);
     procedure API_DeleteIndex(Iso: TMDBIsolationLevel; Name: string);
     procedure API_RenameIndex(Iso: TMDBIsolationLevel; OldName: string; NewName: string);
     function API_IndexInfo(Iso: TMDBIsolationLevel; Name: string;
-                       var IndexedField: string;
+                       var IndexedFields: TMDBFieldNames;
                        var IndexAttrs: TMDBIndexAttrs): boolean;
     function API_GetIndexNames(Iso: TMDBIsolationLevel): TStringList;
 
@@ -224,11 +229,11 @@ type
 
     function API_DataFindByIndex(Iso: TMDBIsolationLevel;
                                 IdxName: string;
-                                const Data: TMemDbFieldDataRec): TObject; //Returns cursor
+                                const DataRecs: TMemDbFieldDataRecs): TObject; //Returns cursor
 
     function API_DataFindEdgeByIndex(Iso: TMDBIsolationLevel;
                                      IdxName: string;
-                                     const Data: TMemDbFieldDataRec;
+                                     const DataRecs: TMemDbFieldDataRecs;
                                      Pos: TMemAPIPosition): TObject; //Returns cursor.
 
     procedure API_DataReadRow(Iso: TMDBIsolationLevel;
@@ -443,10 +448,23 @@ end;
 procedure TMemAPITableMetadata.CreateIndex(Name: string;
                                            IndexedField: string;
                                            IndexAttrs: TMDbIndexAttrs);
+var
+  Fields: TMDBFieldNames;
 begin
   CheckReadWriteTransaction;
-  Table.API_CreateIndex(Name, IndexedField, IndexAttrs);
+  SetLength(Fields,1);
+  Fields[0] := IndexedField;
+  Table.API_CreateIndex(Name, Fields, IndexAttrs);
 end;
+
+procedure TMemAPITableMetadata.CreateMultiFieldIndex(Name: string;
+                                                     IndexedFields: TMDBFieldNames;
+                                                     IndexAttrs: TMDbIndexAttrs);
+begin
+  CheckReadWriteTransaction;
+  Table.API_CreateIndex(Name, IndexedFields, IndexAttrs);
+end;
+
 
 procedure TMemAPITableMetadata.DeleteIndex(Name: string);
 begin
@@ -461,10 +479,10 @@ begin
 end;
 
 function TMemAPITableMetadata.IndexInfo(Name: string;
-                                        var IndexedField: string;
+                                        var IndexedFields: TMDBFieldNames;
                                         var IndexAttrs: TMDBIndexAttrs): boolean;
 begin
-  result := Table.API_IndexInfo(Isolation, Name, IndexedField, IndexAttrs);
+  result := Table.API_IndexInfo(Isolation, Name, IndexedFields, IndexAttrs);
 end;
 
 function TMemAPITableMetadata.GetIndexNames: TStringList;
@@ -505,21 +523,41 @@ begin
 end;
 
 function TMemAPITableData.FindByIndex(IdxName: string;
-                                      Data: TMemDbFieldDataRec): boolean;
+                                      const Data: TMemDbFieldDataRec): boolean;
+var
+  DataRecs: TMemDbFieldDataRecs;
+begin
+  SetLength(DataRecs,1);
+  DataRecs[0] := Data;
+  result := FindByMultiFieldIndex(IdxName, DataRecs);
+end;
+
+function TMemAPITableData.FindByMultiFieldIndex(IdxName: string;
+                                        const DataRecs: TMemDbFieldDataRecs): boolean;
 begin
   DiscardInternal;
-  FCursor := Table.API_DataFindByIndex(FIsolation, IdxName, Data);
+  FCursor := Table.API_DataFindByIndex(FIsolation, IdxName, DataRecs);
   result := Assigned(FCursor);
   if result then
     Table.API_DataReadRow(FIsolation, FCursor, FFieldList);
 end;
 
 function TMemAPITableData.FindEdgeByIndex(Pos: TMemAPIPosition; IdxName: string;
-                                          Data: TMemDbFieldDataRec): boolean;
+                                          const Data: TMemDbFieldDataRec): boolean;
+var
+  DataRecs: TMemDbFieldDataRecs;
+begin
+  SetLength(DataRecs,1);
+  DataRecs[0] := Data;
+  result := FindEdgeByMultiFieldIndex(Pos, IdxName, DataRecs);
+end;
+
+function TMemAPITableData.FindEdgeByMultiFieldIndex(Pos: TMemAPIPosition; IdxName: string;
+                                            const DataRecs: TMemDbFieldDataRecs): boolean;
 begin
   DiscardInternal;
   FCursor := Table.API_DataFindEdgeByIndex(FIsolation,
-                                           IdxName, Data, Pos);
+                                           IdxName, DataRecs, Pos);
   result := Assigned(FCursor);
   if result then
     Table.API_DataReadRow(FIsolation, FCursor, FFieldList);
@@ -663,9 +701,11 @@ const
   S_API_FIELD_NAME_CONFLICT =
     'A field already exists with that name. Perhaps commit previous renames / deletions?';
   S_API_FIELD_NAME_NOT_FOUND = 'Field name not found.';
+  S_API_FIELDS_IN_INDEX_MUST_BE_DISJOINT = 'Cannot specify a field name more than once in an index.';
   S_API_INDEX_REFERENCES_FIELD = 'Cannot delete field, it is referenced by an index.';
   S_API_INTERNAL_ERROR = 'API implementation internal error.';
   S_API_INDEX_NAME_CONFLICT = 'An index already exists with that name. Perhaps commit previous renames / deletions?';
+  S_API_INDEX_MUST_HAVE_FIELDS = 'You must specify some fields to index on';
   S_API_INDEX_NAME_NOT_FOUND = 'Index name not found.';
   S_API_INTERNAL_TAG_DATA_BAD = 'Index does not correspond with a valid tag';
   S_API_INTERNAL_READING_ROW = 'Internal error reading row data.';
@@ -673,6 +713,7 @@ const
   S_API_INTERNAL_CHANGING_ROW = 'Internal error changing row data.';
   S_API_ROW_BAD_STRUCTURE = 'Error changing row, field layout different from table.';
   S_API_SEARCH_REQUIRES_INDEX = 'Bad index name, or index not found, comitted indices only.';
+  S_API_SEARCH_REQURES_CORRECT_FIELD_COUNT = 'Number of data fields supplied for search must be same as number of fields indexed.';
   S_API_NO_FIELDS_IN_TABLE_AT_APPEND_TIME = 'Cannot append a record until you have added fields to the table.';
   S_API_NO_ROW_FOR_DELETE = 'You need to navigate to a row before you can delete it.';
   S_API_INDEX_FOR_FK_UNIQUE_ATTR = 'Foreign key: referenced index must have unique attribute set.';
@@ -821,7 +862,6 @@ begin
   NewField := TMemFieldDef.Create;
   try
     NewField.FieldName := Name;
-    //NewField.FieldIndex - where does this get setup?
     NewField.FieldType := FieldType;
     tmpIdx := FieldHelper.Add(NewField);
     NewField.FieldIndex := FieldHelper.RawIndexToNdIndex(tmpIdx);
@@ -836,7 +876,7 @@ procedure TMemDBTable.API_DeleteField(Iso: TMDBIsolationLevel; Name: string);
 var
   M: TMemDBTableMetadata;
   FieldIdx, FieldIdx2: integer;
-  IndexIdx: integer;
+  IndexIdx, IdxFIdx: integer;
   Field: TMemFieldDef;
   Index: TMemIndexDef;
   AB: TABSelection;
@@ -850,8 +890,11 @@ begin
   for IndexIdx := 0 to Pred(IndexHelper.NonDeletedCount) do
   begin
     Index := IndexHelper.NonDeletedItems[IndexIdx] as TMemIndexDef;
-    if Index.FieldName = Name then
-      raise EMemDBAPIException.Create(S_API_INDEX_REFERENCES_FIELD);
+    for IdxFidx := 0 to Pred(Index.FieldNameCount) do
+    begin
+      if Index.FieldNames[IdxFIdx] = Name then
+        raise EMemDBAPIException.Create(S_API_INDEX_REFERENCES_FIELD);
+    end;
   end;
   //Delete field.
   FieldIdx2 := FieldHelper.RawIndexToNdIndex(FieldIdx);
@@ -871,7 +914,7 @@ var
   Field: TMemFieldDef;
   FieldIdx, tmpIdx: integer;
   M: TMemDBTableMetadata;
-  IndexIdx: integer;
+  IndexIdx, IdxFIdx: integer;
   Index: TMemIndexDef;
   AB: TABSelection;
 begin
@@ -900,10 +943,13 @@ begin
   for IndexIdx := 0 to Pred(IndexHelper.NonDeletedCount) do
   begin
     Index := IndexHelper.NonDeletedItems[IndexIdx] as TMemIndexDef;
-    if Index.FieldName = OldName then
+    for IdxFIdx := 0 to Pred(Index.FieldNameCount) do
     begin
-      Index := IndexHelper.ModifyND(IndexIdx) as TMemIndexDef;
-      Index.FieldName := Field.FieldName;
+      if Index.FieldNames[IdxFIdx] = OldName then
+      begin
+        Index := IndexHelper.ModifyND(IndexIdx) as TMemIndexDef;
+        Index.FieldNames[IdxFIdx] := Field.FieldName;
+      end;
     end;
   end;
   ReGenChangesets;
@@ -950,24 +996,40 @@ begin
 end;
 
 procedure TMemDBTable.API_CreateIndex(Name: string;
-                      IndexedField: string;
+                      IndexedFields: TMDBFieldNames;
                       IndexAttrs: TMDbIndexAttrs);
 var
   M: TMemDbTableMetadata;
   Index: TMemIndexDef;
   IndexIdx: integer;
-  Field: TMemFieldDef;
-  FieldIdx: integer;
+  Fields: TMemFieldDefs;
+  FieldAbsIdxs: TFieldOffsets;
+  x,y: integer;
+
 begin
   M := Metadata as TMemDBTableMetadata;
   if Assigned(M.IndexByName(abLatest, Name, IndexIdx)) then
     raise EMemDBAPIException.Create(S_API_INDEX_NAME_CONFLICT);
-  Field := M.FieldByName(abLatest, IndexedField, FieldIdx);
-  if (not Assigned(Field)) or (FieldHelper.ChildDeleted[FieldIdx]) then
+  if Length(IndexedFields) = 0 then
+    raise EMemDbApiException.Create(S_API_INDEX_MUST_HAVE_FIELDS);
+  Fields := M.FieldsByNames(abLatest, IndexedFields, FieldAbsIdxs);
+  if Length(Fields) = 0 then
     raise EMemDBAPIException.Create(S_API_FIELD_NAME_NOT_FOUND);
+  Assert(Length(Fields) = Length(IndexedFields));
+  for x := 0 to Pred(Length(IndexedFields)) do
+  begin
+    if (not Assigned(Fields[x])) or (FieldHelper.ChildDeleted[FieldAbsIdxs[x]]) then
+      raise EMemDBAPIException.Create(S_API_FIELD_NAME_NOT_FOUND + IndexedFields[x]);
+    for y := Succ(x) to Pred(Length(IndexedFields)) do
+      if FieldAbsIdxs[x] = FieldAbsIdxs[y] then
+        raise EMemDbAPIException.Create(S_API_FIELDS_IN_INDEX_MUST_BE_DISJOINT);
+  end;
   Index := TMemIndexDef.Create;
   Index.IndexName := Name;
-  Index.FieldName := IndexedField;
+  Index.FieldNameCount := Length(IndexedFields);
+  //FieldArray is R/O property, kinda want to keep it that way.
+  for x := 0 to Pred(Length(IndexedFields)) do
+    Index.FieldNames[x] := IndexedFields[x];
   Index.IndexAttrs := IndexAttrs;
   IndexIdx := IndexHelper.Add(Index);
   Assert(IndexHelper.ChildAdded[IndexIdx]);
@@ -1026,12 +1088,13 @@ begin
 end;
 
 function TMemDBTable.API_IndexInfo(Iso: TMDBIsolationLevel; Name: string;
-                   var IndexedField: string;
+                   var IndexedFields: TMDBFieldNames;
                    var IndexAttrs: TMDBIndexAttrs): boolean;
 var
   M: TMemDbTableMetadata;
   Index: TMemIndexDef;
   IndexIdx: integer;
+  IdxFIdx: integer;
   AB: TABSelection;
 begin
   AB := IsoToAB(Iso);
@@ -1040,7 +1103,9 @@ begin
   result := Assigned(Index);
   if result then
   begin
-    IndexedField := Index.FieldName;
+    SetLength(IndexedFields, Index.FieldNameCount);
+    for IdxFIdx := 0 to Pred(Length(IndexedFields)) do
+      IndexedFields[IdxFIdx] := Index.FieldNames[IdxFIdx];
     IndexAttrs := Index.IndexAttrs;
   end;
 end;
@@ -1097,6 +1162,7 @@ var
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
   FieldDef: TMemFieldDef;
   FieldIdx: integer;
+  i: integer;
 {$ENDIF}
 begin
   if Length(Name) > 0 then
@@ -1116,11 +1182,14 @@ begin
     Sic := IsoToSubIndexClass(Iso);
 
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
-    FieldDef := M.FieldByName(abCurrent, Idx.FieldName, FieldIdx);
-    Assert(Assigned(FieldDef));
-    Assert(FieldIdx >= 0);
-  GLogLog(SV_INFO, 'Encode index tag: ' +
-    SubIndexClassStrings[Sic] + 'Field index: ' + IntToStr(FieldIdx));
+    for i := 0 to Pred(Idx.FieldNameCount) do
+    begin
+      FieldDef := M.FieldByName(abCurrent, Idx.FieldNames[i], FieldIdx);
+      Assert(Assigned(FieldDef));
+      Assert(FieldIdx >= 0);
+      GLogLog(SV_INFO, 'Encode index tag (field ' + InttoStr(i) +'): ' +
+      SubIndexClassStrings[Sic] + 'Field index: ' + IntToStr(FieldIdx));
+    end;
 {$ENDIF}
     result := TagData.TagStructs[Sic];
   end
@@ -1134,17 +1203,14 @@ begin
   end;
 end;
 
-procedure TMemDBTable.IndexDefToFieldDef(IndexDef: TMemIndexDef; var FieldDef: TMemFieldDef; var FieldAbsIdx: integer);
+procedure TMemDBTable.IndexDefToFieldDefs(IndexDef: TMemIndexDef; var FieldDefs: TMemFieldDefs; var FieldAbsIdxs: TFieldOffsets);
 var
   M: TMemDBTableMetadata;
 begin
   Assert(Assigned(IndexDef));
-  Assert(Length(IndexDef.FieldName) > 0);
+  Assert(IndexDef.FieldNameCount > 0);
   M := Metadata as TMemDbTableMetadata;
-  //Always look in current metadata copy: Indexes don't change until the next commit.
-  //However, can still use "current / next" index with respect to data changes.
-  FieldDef := M.FieldByName(abCurrent, IndexDef.FieldName, FieldAbsIdx);
-  Assert(Assigned(FieldDef));
+  FieldDefs := M.FieldsByNames(abCurrent, IndexDef.FieldArray, FieldAbsIdxs);
 end;
 
 function TMemDBTable.API_DataLocate(Iso: TMDBIsolationLevel;
@@ -1184,12 +1250,15 @@ end;
 
 function TMemDBTable.API_DataFindByIndex(Iso: TMDBIsolationLevel;
                             IdxName: string;
-                            const Data: TMemDbFieldDataRec): TObject; //Returns cursor
+                            const DataRecs: TMemDbFieldDataRecs): TObject; //Returns cursor
 var
   ITagStruct: PITagStruct;
   Idx: TMemIndexDef;
-  Field: TMemFieldDef;
-  FieldAbsIdx: integer;
+  FieldDefs: TMemFieldDefs;
+  FieldAbsIdxs: TFieldOffsets;
+{$IFDEF DEBUG_DATABASE_NAVIGATE}
+  i: integer;
+{$ENDIF}
 begin
   //Cannot find by internal index.
   if Length(IdxName) = 0 then
@@ -1197,28 +1266,35 @@ begin
   ITagStruct := IndexNameToIndexAndTag(Iso, Idx, IdxName);
   if not Assigned(Idx) then
     raise EMemDBAPIException.Create(S_API_SEARCH_REQUIRES_INDEX);
-  IndexDefToFieldDef(Idx, Field, FieldAbsIdx);
+  IndexDefToFieldDefs(Idx, FieldDefs, FieldAbsIdxs);
+  if Length(DataRecs)<> Length(FieldDefs) then
+    raise EMemDBAPIException.Create(S_API_SEARCH_REQURES_CORRECT_FIELD_COUNT);
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
-  GLogLog(SV_INFO, 'FIND by index, IndexName: ' + Idx.IndexName +
-    ' FieldName: ' + Field.FieldName + ' FieldNDIndex: ' +
-    IntToStr(Field.FieldIndex) + ' FieldAbsIdx: ' + IntToStr(FieldAbsIdx));
+  GLogLog(SV_INFO, 'FIND by index, IndexName: ' + Idx.IndexName);
+  for i := 0 to Pred(Length(FieldDefs)) do
+  begin
+    GLogLog(SV_INFO, 'FieldName[' + InttoStr(i) + ']: ' + FieldDefs[i].FieldName + ' FieldNDIndex: ' +
+    IntToStr(FieldDefs[i].FieldIndex) + ' FieldAbsIdx: ' + IntToStr(FieldAbsIdxs[i]));
+  end;
 {$ENDIF}
-  result := self.Data.FindRowByIndexTag(Iso, Idx, Field, ITagStruct, Data);
+  result := self.Data.FindRowByIndexTag(Iso, Idx, FieldDefs, ITagStruct, DataRecs);
 end;
 
 function TMemDBTable.API_DataFindEdgeByIndex(Iso: TMDBIsolationLevel;
                                              IdxName: string;
-                                             const Data: TMemDbFieldDataRec;
+                                             const DataRecs: TMemDbFieldDataRecs;
                                              Pos: TMemAPIPosition): TObject;
 var
   ITagStruct: PITagStruct;
   Idx: TMemIndexDef;
-  Field: TMemFieldDef;
+  FieldDefs: TMemFieldDefs;
+  FieldAbsIdxs: TFieldOffsets;
   Next: TObject;
-  NextField, ResultField: TMemFieldData;
   NextFields, ResultFields: TMemStreamableList;
-  FieldAbsIdx: integer;
   AB: TABSelection;
+{$IFDEF DEBUG_DATABASE_NAVIGATE}
+  i: integer;
+{$ENDIF}
 begin
   if Length(IdxName) = 0 then
     raise EMemDBAPIException.Create(S_API_SEARCH_REQUIRES_INDEX);
@@ -1227,13 +1303,18 @@ begin
     raise EMemDBAPIException.Create(S_API_SEARCH_REQUIRES_INDEX);
   if not (Pos in [ptFirst, ptLast]) then
     raise EMemDBAPIException.Create(S_API_FIND_EDGE_FIRST_OR_LAST);
-  IndexDefToFieldDef(Idx, Field, FieldAbsIdx);
+  IndexDefToFieldDefs(Idx, FieldDefs, FieldAbsIdxs);
+  if Length(DataRecs) <> Length(FieldDefs) then
+    raise EMemDBAPIException.Create(S_API_SEARCH_REQURES_CORRECT_FIELD_COUNT);
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
-  GLogLog(SV_INFO, 'EDGE by index, IndexName: ' + Idx.IndexName +
-    ' FieldName: ' + Field.FieldName + ' FieldNDIndex: ' +
-    IntToStr(Field.FieldIndex) + ' FieldAbsIdx: ' + IntToStr(FieldAbsIdx));
+  GLogLog(SV_INFO, 'EDGE by index, IndexName: ' + Idx.IndexName);
+  for i := 0 to Pred(Length(FieldDefs)) do
+  begin
+    GLogLog(SV_INFO,  ' FieldName['+ IntToStr(i) +']: ' + FieldDefs[i].FieldName + ' FieldNDIndex: ' +
+      IntToStr(FieldDefs[i].FieldIndex) + ' FieldAbsIdx: ' + IntToStr(FieldAbsIdxs[i]));
+  end;
 {$ENDIF}
-  Result := self.Data.FindRowByIndexTag(Iso, Idx, Field, ITagStruct, Data);
+  Result := self.Data.FindRowByIndexTag(Iso, Idx, FieldDefs, ITagStruct, DataRecs);
   AB := IsoToAB(Iso);
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
   if Assigned(Result) then
@@ -1267,29 +1348,35 @@ begin
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
     GLogLog(SV_INFO, 'EDGE by Index, found ' + MemAPIPositionStrings[Pos] + ' row');
 {$ENDIF}
+
         //Pretty sure we shouldn't have any sentinels at this point.
         NextFields := (Next as TMemDBRow).ABData[AB] as TMemStreamableList;
         ResultFields := (result as TMemDBRow).ABData[AB] as TMemStreamableList;
-        NextField := NextFields.Items[FieldAbsIdx] as TMemFieldData;
-        ResultField := ResultFields.Items[FieldAbsIdx] as TMemFieldData;
+
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
-        if NextField.Same(ResultField) then
+        //Compare all fields.
+        if SameLayoutFieldsSame(NextFields, ResultFields, FieldAbsIdxs) then
         begin
-          GLogLog(SV_INFO, 'EDGE by Index ' + MemAPIPositionStrings[Pos] + ' row has same field.');
-          if NextField.FDataRec.FieldType = ftUnicodeString then
-            GLogLog(SV_INFO, 'Field is: ' + NextField.FDataRec.sVal);
+          GLogLog(SV_INFO, 'EDGE by Index ' + MemAPIPositionStrings[Pos] + ' row has same fields.');
+          for i := 0 to Pred(Length(FieldDefs)) do
+          begin
+            if (NextFields.Items[FieldAbsIdxs[i]] as TMemFieldData).FDataRec.FieldType = ftUnicodeString then
+              GLogLog(SV_INFO, 'Field['+ InttoStr(i) +'] is: ' +
+                (NextFields.Items[FieldAbsIdxs[i]] as TMemFieldData).FDataRec.sVal);
+          end;
         end
         else
         begin
           GLogLog(SV_INFO, 'EDGE by Index ' + MemAPIPositionStrings[Pos] + ' row differs.');
-          if NextField.FDataRec.FieldType = ftUnicodeString then
+          for i := 0 to Pred(Length(FieldDefs)) do
           begin
-            GLogLog(SV_INFO, 'EDGE by Index Fields disagree: ' + NextField.FDataRec.sVal +
-            ' ' + ResultField.FDataRec.sVal );
+            if (NextFields.Items[FieldAbsIdxs[i]] as TMemFieldData).FDataRec.FieldType = ftUnicodeString then
+              GLogLog(SV_INFO, 'Field['+ InttoStr(i) +'] is: ' +
+                (NextFields.Items[FieldAbsIdxs[i]] as TMemFieldData).FDataRec.sVal);
           end;
         end;
 {$ENDIF}
-        if not NextField.Same(ResultField) then
+        if not SameLayoutFieldsSame(NextFields, ResultFields, FieldAbsIdxs) then
           Next := nil;
       end;
       if Assigned(Next) then

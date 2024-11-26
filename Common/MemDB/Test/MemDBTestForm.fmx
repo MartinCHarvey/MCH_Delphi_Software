@@ -7,6 +7,7 @@ object Form1: TForm1
   FormFactor.Width = 320
   FormFactor.Height = 480
   FormFactor.Devices = [dkDesktop, dkiPhone, dkiPad]
+  OnCreate = FormCreate
   DesignerMobile = False
   DesignerWidth = 0
   DesignerHeight = 0
@@ -90,5 +91,23 @@ object Form1: TForm1
     Text = 'Edge test'
     Width = 80.000000000000000000
     OnClick = FindEdgeTestClick
+  end
+  object MFIndexTest: TButton
+    Height = 22.000000000000000000
+    Position.X = 184.000000000000000000
+    Position.Y = 40.000000000000000000
+    TabOrder = 9
+    Text = 'MF Indexes'
+    Width = 80.000000000000000000
+    OnClick = MFIndexTestClick
+  end
+  object MFFKeyTest: TButton
+    Height = 22.000000000000000000
+    Position.X = 272.000000000000000000
+    Position.Y = 40.000000000000000000
+    TabOrder = 10
+    Text = 'MF FKeys'
+    Width = 80.000000000000000000
+    OnClick = MFFKeyTestClick
   end
 end
