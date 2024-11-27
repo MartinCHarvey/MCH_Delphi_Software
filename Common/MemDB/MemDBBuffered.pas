@@ -70,7 +70,7 @@ type
     procedure CheckReadWriteTransaction;
   public
     function GetApiObjectFromHandle(Handle: TMemDBHandle; ID: TMemDBAPIId; RaiseIfNoAPI: boolean = true): TMemDBAPI;
-    function GetApiObject(ID: TMemDBAPIId): TMemDBAPI;
+    function GetApiObject(ID: TMemDBAPIId; RaiseIfNoAPI: boolean = true): TMemDBAPI;
     destructor Destroy; override;
     property Isolation: TMDBIsolationLevel read FIsolation write FIsolation;
   end;
@@ -1025,7 +1025,6 @@ begin
     raise EMemDBAPIException.Create(S_API_TRANSACTION_IS_RO);
 end;
 
-
 function TMemDBAPI.GetApiObjectFromHandle(Handle: TMemDBHandle; ID: TMemDBAPIId; RaiseIfNoAPI: boolean = true): TMemDBAPI;
 begin
   if Assigned(Handle)
@@ -1035,12 +1034,16 @@ begin
       .GetAPIObject(FAssociatedTransaction, ID, RaiseIfNoAPI);
   end
   else
+    result := nil;
+  if (not Assigned(result)) and RaiseIfNoAPI then
     raise EMemDBAPIException.Create(S_API_NO_SUCH_API_OBJECT);
 end;
 
-function TMemDBAPI.GetApiObject(ID: TMemDBAPIId): TMemDBAPI;
+function TMemDBAPI.GetApiObject(ID: TMemDBAPIId; RaiseIfNoAPI: boolean = true): TMemDBAPI;
 begin
   result := FInterfacedObject.GetAPIObject(FAssociatedTransaction, ID);
+  if (not Assigned(result)) and RaiseIfNoAPI then
+    raise EMemDBAPIException.Create(S_API_NO_SUCH_API_OBJECT);
 end;
 
 destructor TMemDBAPI.Destroy;
