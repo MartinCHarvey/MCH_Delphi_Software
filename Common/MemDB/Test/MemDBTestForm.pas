@@ -20,6 +20,7 @@ type
     FindEdgeTest: TButton;
     MFIndexTest: TButton;
     MFFKeyTest: TButton;
+    BigTable: TButton;
     procedure BasicTestBtnClick(Sender: TObject);
     procedure ResetClick(Sender: TObject);
     procedure IndexTestClick(Sender: TObject);
@@ -31,6 +32,7 @@ type
     procedure MFIndexTestClick(Sender: TObject);
     procedure MFFKeyTestClick(Sender: TObject);
     procedure FormCreate(Sender: TObject);
+    procedure BigTableClick(Sender: TObject);
   private
     { Private declarations }
     FTimeStamp: TDateTime;
@@ -38,6 +40,9 @@ type
   public
     { Public declarations }
   end;
+
+const
+  DB_LOCATION = 'c:\temp\MemDB';
 
 var
   Form1: TForm1;
@@ -47,11 +52,14 @@ implementation
 {$R *.fmx}
 
 uses
-  IOUtils, MemDBMisc, MemDBAPI, Math;
+  IOUtils, MemDBMisc, MemDBAPI, Math, MemDbBuffered;
 
 const
   LIMIT = 10000;
   TRANS_LIMIT = 1024;
+  BIG_ROWS = 1024 * 64;
+  BIG_NTABLES = 3;
+  BIG_NINDEXES = 3;
 
 type
   EMemDBTestException = class(EMemDBException);
@@ -91,6 +99,7 @@ begin
   else
     TimeS := '('+ InttoStr(SecsElapsed) + '.' + IntToStr(MSecsElapsed) + ' secs)';
   ResMemo.Lines.Add(TimeS + ' ' + S);
+  Application.ProcessMessages;
 end;
 
 procedure TForm1.BasicTestBtnClick(Sender: TObject);
@@ -214,6 +223,123 @@ begin
       raise;
     end;
   end;
+end;
+
+procedure TForm1.BigTableClick(Sender: TObject);
+var
+  TabI: integer;
+  FieldIndexI: integer;
+  RowI: integer;
+  Trans: TMemDBTransaction;
+  DBAPI: TMemAPIDatabase;
+  Table, FK: TMemDBHandle;
+  TMetAPI: TMemAPITableMetadata;
+  TDatAPI: TMemAPITableData;
+  FKAPI: TMemAPIForeignKey;
+  Data: TMemDBFieldDataRec;
+begin
+  ResetClick(Sender);
+  CheckpointBtnClick(Sender);
+
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      for TabI := 0 to Pred(BIG_NTABLES) do
+      begin
+        Table := DBAPI.OpenTableOrKey('BIGTABLE_'+IntToStr(TabI));
+        if not Assigned(Table) then
+        begin
+          Table := DBAPI.CreateTable('BIGTABLE_'+InttoStr(TabI));
+          TMetAPI := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata) as TMemAPITableMetadata;
+          try
+            for FieldIndexI := 0 to Pred(BIG_NINDEXES) do
+            begin
+              TMetAPI.CreateField('FIELD_'+InttoStr(FieldIndexI), ftInteger);
+              TMetAPI.CreateIndex('INDEX_'+IntToStr(FieldIndexI), 'FIELD_'+InttoStr(FieldIndexI), [iaUnique]);
+            end;
+          finally
+            TMetAPI.Free;
+          end;
+        end;
+        if (TabI > 0) then
+        begin
+           FK := DBApi.OpenTableOrKey('BIGFK_'+InttoStr(TabI));
+           if not Assigned(FK) then
+           begin
+             FK := DBAPI.CreateForeignKey('BIGFK_'+InttoStr(TabI));
+             FKAPI := DBAPI.GetApiObjectFromHandle(FK, APIForeignKey) as TMemAPIForeignKey;
+             try
+               for FieldIndexI := 0 to Pred(BIG_NINDEXES) do
+               begin
+                 FKAPI.SetReferencingChild('BIGTABLE_'+IntToStr(TabI), 'INDEX_'+IntToStr(FieldIndexI));
+                 FKAPI.SetReferencedParent('BIGTABLE_'+IntToStr(TabI-1), 'INDEX_'+IntToStr(FieldIndexI));
+               end;
+             finally
+               FKAPI.Free;
+             end;
+           end;
+        end;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+    LogTimeIncr('Big table structure setup OK.');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('Big table structure setup failed' + E.Message);
+    end;
+  end;
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      for TabI := 0 to Pred(BIG_NTABLES) do
+      begin
+        Table := DBAPI.OpenTableOrKey('BIGTABLE_'+IntToStr(TabI));
+        TDatAPI := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+        try
+          for RowI := 0 to Pred(BIG_ROWS) do
+          begin
+            TDatAPI.Append;
+            for FieldIndexI := 0 to Pred(BIG_NINDEXES) do
+            begin
+              Data.FieldType := ftInteger;
+              Data.i32Val := RowI;
+              TDatAPI.WriteField('FIELD_'+InttoStr(FieldIndexI), Data);
+            end;
+            TDatAPI.Post;
+          end;
+        finally
+          TDatAPI.Free;
+        end;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+    LogTimeIncr('Big table data filled OK.');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('Big tables data fill failed' + E.Message);
+    end;
+  end;
+  FSession.Free;
+  FDB.StopDB(false);
+  LogtimeIncr('DB Stopped. Reload, no checkpoint.');
+  FDB.InitDB(DB_LOCATION, jtV2);
+  LogtimeIncr('DB Loaded, possibly implicit checkpoint.');
+  FDB.StopDB(false);
+  LogtimeIncr('DB Stopped.');
+  FDB.InitDB(DB_LOCATION, jtV2);
+  LogtimeIncr('DB Loaded, Probably from checkpoint.');
+  FSession := FDB.StartSession;
+  FSession.TempStorageMode := tsmMemory;
 end;
 
 procedure TForm1.CheckpointBtnClick(Sender: TObject);
@@ -2594,46 +2720,43 @@ procedure TForm1.ResetClick(Sender: TObject);
 var
   Trans: TMemDBTransaction;
   DBAPI: TMemAPIDatabase;
-  Tbl: TMemDBHandle;
+  Handle: TMemDBHandle;
+  TestAPI: TMemDBAPI;
+  Strings: TStringList;
+  i: integer;
 begin
   FTimeStamp := Now;
   Trans := FSession.StartTransaction(amReadWrite);
   try
     DBAPI := Trans.GetAPI;
     try
-      Tbl := DBAPI.OpenTableOrKey('ForeignKey1');
-      if Assigned(Tbl) then
-        DBAPI.DeleteTableOrKey('ForeignKey1');
-      Tbl := DBAPI.OpenTableOrKey('ForeignKey2');
-      if Assigned(Tbl) then
-        DBAPI.DeleteTableOrKey('ForeignKey2');
-      Tbl := DBAPI.OpenTableOrKey('FKTest1');
-      if Assigned(Tbl) then
-        DBAPI.DeleteTableOrKey('FKTest1');
-      Tbl := DBAPI.OpenTableOrKey('FKTest2');
-      if Assigned(Tbl) then
-        DBAPI.DeleteTableOrKey('FKTest2');
-      Tbl := DBAPI.OpenTableOrKey('FKTest3');
-      if Assigned(Tbl) then
-        DBAPI.DeleteTableOrKey('FKTest3');
-      Tbl := DBAPI.OpenTableOrKey('Test table');
-      if Assigned(Tbl) then
-        DBAPI.DeleteTableOrKey('Test table');
-      Tbl := DBAPI.OpenTableOrKey('IndexTest');
-      if Assigned(Tbl) then
-        DBAPI.DeleteTableOrKey('IndexTest');
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableMaster');
-      if Assigned(Tbl) then
-        DBAPI.DeleteTableOrKey('FKTestTableMaster');
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableSub');
-      if Assigned(Tbl) then
-        DBAPI.DeleteTableOrKey('FKTestTableSub');
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableMaster_');
-      if Assigned(Tbl) then
-        DBAPI.DeleteTableOrKey('FKTestTableMaster_');
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableSub_');
-      if Assigned(Tbl) then
-        DBAPI.DeleteTableOrKey('FKTestTableSub_');
+      Strings := DBAPI.GetEntityNames;
+      try
+        //Delete the foreign keys first.
+        for i := 0 to Pred(Strings.Count) do
+        begin
+          Handle := DBAPI.OpenTableOrKey(Strings[i]);
+          TestAPI := DBAPI.GetApiObjectFromHandle(Handle, APIForeignKey, false);
+          if Assigned(TestAPI) then
+          begin
+            TestAPI.Free;
+            DBAPI.DeleteTableOrKey(Strings[i]);
+          end;
+        end;
+        //And now the tables.
+        for i := 0 to Pred(Strings.Count) do
+        begin
+          Handle := DBAPI.OpenTableOrKey(Strings[i]);
+          TestAPI := DBAPI.GetApiObjectFromHandle(Handle, APITableData, false);
+          if Assigned(TestAPI) then
+          begin
+            TestAPI.Free;
+            DBAPI.DeleteTableOrKey(Strings[i]);
+          end;
+        end;
+      finally
+        Strings.Free;
+      end;
     finally
       DBAPI.Free;
     end;
@@ -2682,9 +2805,9 @@ initialization
   if LIMIT_CUBEROOT < 2 then
     LIMIT_CUBEROOT := 2;
   FDB := TMemDB.Create;
-  FDB.InitDB('c:\temp\MemDB', jtV2);
+  FDB.InitDB(DB_LOCATION, jtV2);
   FSession := FDB.StartSession;
-  FSession.TempStorageMode := tsmDisk;
+  FSession.TempStorageMode := tsmMemory;
 finalization
   FSession.Free;
   FDB.Free;

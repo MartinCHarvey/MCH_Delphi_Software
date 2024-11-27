@@ -149,7 +149,7 @@ type
     function InitDB(RootLocation: string;
                     JournalType: TMemDBJournalType = jtV2;
                     Async: boolean = false): boolean;
-    procedure StopDB;
+    procedure StopDB(CheckpointOnClose: boolean = true);
     function GetDBStats: TMemDBStats;
     function Checkpoint: boolean;
     function StartSession: TMemDBSession;
@@ -567,6 +567,8 @@ begin
 end;
 
 procedure TMemDB.StopDBLocked;
+var
+  DBTmp: TMemDbDatabasePersistent;
 begin
   while not(FPhase in [mdbNull, mdbClosed, mdbError]) do
   begin
@@ -608,7 +610,14 @@ begin
         end;
       mdbClosingWaitPersist:
         begin
+          //All client ops basically finished, waiting for journal to flush.
+          //Now would be a good time to free up our actual data, so
+          //restarts start with a fresh copy of TMemDBPersistent.
+          DBTmp := FDatabase;
+          FDatabase := TMemDBDatabase.Create;
           FSessionLock.Release;
+
+          DBTmp.Free;
           try
             FPersistWait.WaitFor(INFINITE);
           finally
@@ -628,8 +637,12 @@ begin
   end;
 end;
 
-procedure TMemDB.StopDB;
+procedure TMemDB.StopDB(CheckpointOnClose: boolean = true);
 begin
+  //Speculative attempt to checkpoint if currently in running state.
+  //If race on stop path, no checkpoint.
+  if CheckpointOnClose then
+    Checkpoint;
   FSessionLock.Acquire;
   try
     StopDBLocked;

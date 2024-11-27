@@ -110,4 +110,13 @@ object Form1: TForm1
     Width = 80.000000000000000000
     OnClick = MFFKeyTestClick
   end
+  object BigTable: TButton
+    Height = 22.000000000000000000
+    Position.X = 360.000000000000000000
+    Position.Y = 40.000000000000000000
+    TabOrder = 11
+    Text = 'Load Unload 1G'
+    Width = 97.000000000000000000
+    OnClick = BigTableClick
+  end
 end
