@@ -36,16 +36,11 @@ interface
 {$DEFINE DEBUG_DATABASE_NAVIGATE}
 {$ENDIF}
 
-{$DEFINE PRE_COMMIT_PARALLEL}
-
 uses
 {$IFDEF USE_TRACKABLES}
   Trackables,
 {$ENDIF}
-{$IFDEF PRE_COMMIT_PARALLEL}
-  CommonPool, Workitems,
-{$ENDIF}
-  IndexedStore, MemDbStreamable, Classes, MemDBMisc, SyncObjs;
+  IndexedStore, MemDbStreamable, Classes, MemDBMisc, SyncObjs, Parallelizer;
 
 type
   TMemDBTransReason = (mtrUserOp,
@@ -533,10 +528,10 @@ type
     procedure AddNewTagStructs;
     procedure RemoveNewlyAddedTagStructs;
     procedure RemoveOldTagStructs(DeleteAll: boolean = false);
-    procedure DeleteUnusedIndices;
+    procedure DeleteUnusedIndices(Reason: TMemDBTransReason);
     procedure ReinstateDeletedIndices;
     procedure AdjustTableStructureForMetadata;
-    procedure CommitAdjustIndicesToTemporary;
+    procedure CommitAdjustIndicesToTemporary(Reason: TMemDBTransReason);
     procedure CommitRestoreIndicesToPermanent;
     procedure RollbackRestoreIndicesToPermanent;
 
@@ -596,23 +591,15 @@ type
   protected
     FUserObjs: TDBObjList;
     FInterfaced: TMemDBAPIInterfacedObject;
-{$IFDEF PRE_COMMIT_PARALLEL}
-    FAccumulatedOK: boolean;
-    FAccumulatedExceptionMsg: string;
-    FPoolRec: TClientRec;
-    FPoolRequests: integer;
-    FPoolEvent: TEvent;
-{$ENDIF}
     procedure CleanupCommon;
     function HandleInterfacedObjRequest(Transaction: TObject; ID: TMemDBAPIId): TMemDBAPI;virtual;
     procedure LookaheadHelper(Stream: TStream;
                              var ChangeType: TMemDBEntityChangeType;
                              var EntityName: string);
-{$IFDEF PRE_COMMIT_PARALLEL}
-    procedure WorkItemCompleteCommon(WorkItem: TWorkItem);
-    procedure HandlePoolNormalCompletion(Sender: TObject);
-    procedure HandlePoolCancelledCompletion(Sender: TObject);
-{$ENDIF}
+    function PreCommitParallelHandler(Ref1, Ref2: pointer):pointer;
+    procedure PreCommitParallel;
+    function CommitParallelHandler(Ref1, Ref2: pointer):pointer;
+    procedure CommitParallel;
   public
     function EntitiesByName(AB: TABSelection; Name: string; var Idx: integer): TMemDBEntity;
 
@@ -857,29 +844,7 @@ const
   S_FIELD_LIST_BAD_FOR_COMPARISON = 'Bad field list object comparing sets of fields.';
   S_ZERO_LENGTH_FIELD_LIST_COMPARING = 'Comparing sets of fields, given a zero length field list.';
   S_DIFF_LENGTH_FIELD_LIST_COMPARING = 'Comparing sets of fields, given different length field lists.';
-
-{$IFDEF PRE_COMMIT_PARALLEL}
-type
-  TDBParallelOp = (dbpopPreCommit, dbpopCommit);
-
-  TDBParallelWorkItem = class(TCommonPoolWorkItem)
-  private
-    FExceptionMsg: string;
-    FEntity: TMemDBEntity;
-    FParent: TMemDBDatabasePersistent;
-    FOK: boolean;
-    FReason: TMemDBTransReason;
-    FOp: TDBParallelOp;
-  protected
-    function DoWork: integer; override;
-    property Entity: TMemDBEntity read FEntity write FEntity;
-    property Parent: TMemDBDatabasePersistent read FParent write FParent;
-    property OK: boolean read FOK write FOK;
-    property ExceptionMsg: string read FExceptionMsg write FExceptionMsg;
-    property Reason: TMemDBTransReason read FReason write FReason;
-    property Op: TDBParallelOp read FOP write FOP;
-  end;
-{$ENDIF}
+  S_ASYNC_INDEX_OP_FAILED = 'Asynchronous index build failed. Indexes are probably toast.';
 
 { Misc Functions }
 
@@ -1571,13 +1536,13 @@ var
   RV: TIsRetVal;
 begin
   inherited;
-  RV := FStore.AddIndex(TMemDBIndexNode, MDBInternalIndexPtr.TagStructs[sicCurrent]);
+  RV := FStore.AddIndex(TMemDBIndexNode, MDBInternalIndexPtr.TagStructs[sicCurrent], false);
   Assert(RV = rvOK);
-  RV := FStore.AddIndex(TMemDBIndexNode, MDBInternalIndexRowId.TagStructs[sicCurrent]);
+  RV := FStore.AddIndex(TMemDBIndexNode, MDBInternalIndexRowId.TagStructs[sicCurrent], false);
   Assert(RV = rvOK);
-  RV := FStore.AddIndex(TMemDBIndexNode, MDBInternalIndexCurrCopy.TagStructs[sicCurrent]);
+  RV := FStore.AddIndex(TMemDBIndexNode, MDBInternalIndexCurrCopy.TagStructs[sicCurrent], false);
   Assert(RV = rvOK);
-  RV := FStore.AddIndex(TMemDBIndexNode, MDBInternalIndexNextCopy.TagStructs[sicCurrent]);
+  RV := FStore.AddIndex(TMemDBIndexNode, MDBInternalIndexNextCopy.TagStructs[sicCurrent], false);
   Assert(RV = rvOK);
 end;
 
@@ -1590,11 +1555,12 @@ var
   RV: TIsRetVal;
 begin
   //Clear all the indexes before removing items (for speed).
-  while FStore.IndexCount > 0 do
+  while (FStore.IndexCount > 0) and (RV = rvOK) do
   begin
     RV := FStore.IndexInfoByOrdinal(0, Tag, NodeClass);
     Assert(RV = rvOK);
-    RV := FStore.DeleteIndex(Tag);
+    //Actually, single threaded deletion seems to be fastest.
+    RV := FStore.DeleteIndex(Tag, false);
     Assert(RV = rvOK);
   end;
   //Unlike other arbitrary indexed lists, we almost definitely own
@@ -2905,10 +2871,11 @@ begin
 end;
 
 
-procedure TMemDBTablePersistent.DeleteUnusedIndices;
+procedure TMemDBTablePersistent.DeleteUnusedIndices(Reason: TMemDBTransReason);
 var
   i: integer;
   TagData: TMemDBITagData;
+  RV: TIsRetVal;
 begin
   if FIndexingChangeRequired then
   begin
@@ -2918,10 +2885,16 @@ begin
       begin
         TagData := FTagDataList[i];
         CheckTagAgreesWithMetadata(i, TagData, tciPermanentAgreesCurrent, tcpProgrammed);
-        TagData.CommitRmIdxsFromStore;
+        TagData.CommitRmIdxsFromStore(Reason = mtrReplayFromScratch);
         FCommitChangesMade := FCommitChangesMade + [ccmDeleteUnusedIndices];
         CheckTagAgreesWithMetadata(i, TagData, tciPermanentAgreesCurrent, tcpNotProgrammed);
       end;
+    end;
+    if Reason = mtrReplayFromScratch then
+    begin
+      RV := FData.Store.PerformAsyncActions(@MemDBXlateExceptions);
+      if RV <> rvOK then
+        raise EMemDbInternalException.Create(S_ASYNC_INDEX_OP_FAILED);
     end;
   end;
 end;
@@ -3127,7 +3100,7 @@ begin
 end;
 
 
-procedure TMemDbTablePersistent.CommitAdjustIndicesToTemporary;
+procedure TMemDbTablePersistent.CommitAdjustIndicesToTemporary(Reason: TMemDBTransReason);
 var
   CC, NC: TMemTableMetadataItem;
   i: integer;
@@ -3137,6 +3110,7 @@ var
   NewOffsets: TFieldOffsets;
   TagData: TMemDbITagData;
   ff: integer;
+  RV: TIsRetVal;
 begin
   if FIndexingChangeRequired then
   begin
@@ -3189,10 +3163,17 @@ begin
           NewOffsets[ff] := FieldDefs1[ff].FieldIndex;
         TagData.MakePermanentTemporary(NewOffsets);
         CheckTagAgreesWithMetadata(i, TagData, tciTemporaryAgreesNextOnly, tcpNotProgrammed);
-        TagData.CommitAddIdxsToStore(FData.Store);
+        TagData.CommitAddIdxsToStore(FData.Store, Reason = mtrReplayFromScratch);
         CheckTagAgreesWithMetadata(i, TagData, tciTemporaryAgreesNextOnly, tcpProgrammed);
       end;
       FTemporaryIndexLimit := Succ(i);
+    end;
+
+    if Reason = mtrReplayFromScratch then
+    begin
+      RV := FData.Store.PerformAsyncActions(@MemDBXlateExceptions);
+      if RV <> rvOK then
+        raise EMemDbInternalException.Create(S_ASYNC_INDEX_OP_FAILED);
     end;
 
     for i := 0 to Pred(Length(FIndexChangesets)) do
@@ -3688,7 +3669,7 @@ begin
     //(Indices need to be set up to allow foreign key checking).
 
     AddNewTagStructs;    //Changes FCommitChangesMade
-    DeleteUnusedIndices; //Changes FCommitChangesMade.
+    DeleteUnusedIndices(Reason); //Changes FCommitChangesMade.
 
     //When we adjust table structure, add and delete should be OK
     //(we just need to consider deletion case).
@@ -3696,7 +3677,7 @@ begin
     if FDataChangeRequired and (Reason <> mtrReplayFromScratch) then
       AdjustTableStructureForMetadata;
 
-    CommitAdjustIndicesToTemporary; //Changes FCommitChangesMade
+    CommitAdjustIndicesToTemporary(Reason); //Changes FCommitChangesMade
 
     //Partial validation of indexes. when data changes.
     //In other cases (fromScratch, indexAdd), we expect to revalidate
@@ -4487,6 +4468,8 @@ begin
 end;
 
 procedure TMemDbForeignKeyPersistent.SetupIndexes(var Meta: TMemDBFkMeta);
+var
+  RV: TIsRetVal;
 begin
   with Meta.Lists do
   begin
@@ -4496,7 +4479,8 @@ begin
     FReferringAdded := TIndexedStoreO.Create;
     FReferredDeleted := TIndexedStoreO.Create;
     FReferredAdded := TIndexedStoreO.Create;
-    FReferredAdded.AddIndex(TMemDBRowLookasideIndexNode, @TagReferredAddedNext);
+    RV := FReferredAdded.AddIndex(TMemDBRowLookasideIndexNode, @TagReferredAddedNext, false);
+    Assert(RV = rvOK);
   end;
 end;
 
@@ -5053,71 +5037,7 @@ begin
 end;
 
 
-{$IFDEF PRE_COMMIT_PARALLEL}
-{ TDBParallelWorkitem }
-
-function TDBParallelWorkItem.DoWork;
-begin
-  result := 0;
-  try
-    case Op of
-      dbpopPreCommit: Entity.PreCommit(Reason);
-      dbpopCommit: Entity.Commit(Reason);
-    else
-      raise EMemDBInternalException.Create(S_INTERNAL_PARALLEL_OP);
-    end;
-    FOK := true;
-  except
-    on E: Exception do
-    begin
-      FOK := false;
-      result := -1;
-      FExceptionMsg := E.Message;
-    end;
-  end;
-end;
-
-{$ENDIF}
-
 { TMemDBDatabasePersistent }
-
-{$IFDEF PRE_COMMIT_PARALLEL}
-procedure TMemDBDatabasePersistent.WorkItemCompleteCommon(WorkItem: TWorkItem);
-var
-  WI: TDBParallelWorkItem;
-begin
-  //Bit cheeky, but I think strings use interlocked Ops for multi-thread,
-  //so will simply write last failure msg in. It's an error case anyway...
-  WI := WorkItem as TDBParallelWorkItem;
-  if not WI.OK then
-    FAccumulatedOK := false;
-  if Length(WI.ExceptionMsg) > 0 then
-    FAccumulatedExceptionMsg := WI.ExceptionMsg;
-  if TInterlocked.Decrement(FPoolRequests) = 0 then
-    FPoolEvent.SetEvent;
-end;
-
-procedure TMemDBDatabasePersistent.HandlePoolNormalCompletion(Sender: TObject);
-var
-  WI: TDBParallelWorkItem;
-begin
-  WI := Sender as TDBParallelWorkItem;
-  WorkItemCompleteCommon(WI);
-end;
-
-procedure TMemDBDatabasePersistent.HandlePoolCancelledCompletion(Sender: TObject);
-var
-  WI: TDBParallelWorkItem;
-begin
-  WI := Sender as TDBParallelWorkItem;
-  if WI.OK then
-    WI.OK := false;
-  if Length(WI.ExceptionMsg) = 0 then
-    WI.ExceptionMsg := S_ASYNC_PROCESS_CANCELLED;
-  WorkItemCompleteCommon(WI);
-end;
-{$ENDIF}
-
 
 procedure TMemDBDatabasePersistent.CheckNoChanges;
 var
@@ -5128,13 +5048,70 @@ begin
 end;
 
 
+function TMemDBDatabasePersistent.PreCommitParallelHandler(Ref1, Ref2: pointer):pointer;
+var
+  ObjI :TMemDBEntity;
+begin
+  ObjI := TMemDBEntity(Ref1);
+  Assert(Assigned(ObjI));
+  Assert(ObjI is TMemDbEntity);
+  ObjI.PreCommit(mtrReplayFromScratch);
+  result := nil;
+end;
+
+procedure TMemDBDatabasePersistent.PreCommitParallel;
+var
+  Handlers: TParallelHandlers;
+  Refs1, Refs2: TPHRefs;
+  Rets: TPHRefs;
+  Excepts: TPHExcepts;
+  Count, i: integer;
+  ObjI: TMemDbEntity;
+  DoTables, Include: boolean;
+begin
+  for DoTables := True downto False do
+  begin
+    Count := 0;
+    for i := 0 to Pred(FUserObjs.Count) do
+    begin
+      ObjI := FUserObjs[i];
+      Assert((ObjI is TMemDBTablePersistent) or (ObjI is TMemDBForeignKeyPersistent));
+      if DoTables then
+        Include := ObjI is TMemDBTablePersistent
+      else
+        Include := ObjI is TMemDBForeignKeyPersistent;
+      if Include then
+        Inc(Count);
+    end;
+    if (Count > 0) then
+    begin
+      SetLength(Handlers, Count);
+      SetLength(Refs1, Count);
+      Count := 0;
+      for i := 0 to Pred(FUserObjs.Count) do
+      begin
+        ObjI := FUserObjs[i];
+        Assert((ObjI is TMemDBTablePersistent) or (ObjI is TMemDBForeignKeyPersistent));
+        if DoTables then
+          Include := ObjI is TMemDBTablePersistent
+        else
+          Include := ObjI is TMemDBForeignKeyPersistent;
+        if Include then
+        begin
+          Handlers[Count] := PreCommitParallelHandler;
+          Refs1[Count] := Pointer(ObjI);
+          Inc(Count)
+        end;
+      end;
+      Parallelizer.ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
+    end;
+  end;
+end;
+
 procedure TMemDBDatabasePersistent.PreCommit(Reason: TMemDBTransReason);
 var
   i, j: integer;
   ObjI, ObjJ: TMemDBEntity;
-{$IFDEF PRE_COMMIT_PARALLEL}
-  WI: TDBParallelWorkItem;
-{$ENDIF}
 begin
   inherited;
   //Check no duplicate object names.
@@ -5158,85 +5135,12 @@ begin
   //(so changesets done, indexes in temporary state if applicable).
 
   //Can also do tables and foreign keys in parallel.
-{$IFDEF PRE_COMMIT_PARALLEL}
   if Reason = mtrReplayFromScratch then
   begin
-    FAccumulatedOK := true;
-    FAccumulatedExceptionMsg := '';
-
-    Assert(FPoolRequests = 0);
-    FPoolEvent.SetEvent;
-    //Table pre-commit step.
-    //Increment the pool request count before starting any workitems to remove a race.
-    for i := 0 to Pred(FUserObjs.Count) do
-    begin
-      ObjI := FUserObjs[i];
-      Assert((ObjI is TMemDBTablePersistent) or (ObjI is TMemDBForeignKeyPersistent));
-      if ObjI is TMemDBTablePersistent then
-      begin
-        if FPoolRequests = 0 then
-          FPoolEvent.ResetEvent;
-        Inc(FPoolRequests);
-      end;
-    end;
-    for i := 0 to Pred(FUserObjs.Count) do
-    begin
-      ObjI := FUserObjs[i];
-      Assert((ObjI is TMemDBTablePersistent) or (ObjI is TMemDBForeignKeyPersistent));
-      if ObjI is TMemDBTablePersistent then
-      begin
-        WI := TDBParallelWorkItem.Create;
-        WI.CanAutoFree := true;
-        WI.CanAutoReset := false;
-        WI.Entity := ObjI;
-        WI.Parent := self;
-        WI.Reason := Reason;
-        WI.Op := dbpopPreCommit;
-        GCommonPool.AddWorkItem(FPoolRec, WI);
-      end;
-    end;
-    FPoolEvent.WaitFor(INFINITE); //Wait for all table pre-commits to finish.
-    if not FAccumulatedOK then
-      raise EMemDBException.Create(FAccumulatedExceptionMsg);
-
-    //Foreign key pre-commit step.
-    Assert(FPoolRequests = 0);
-    FPoolEvent.SetEvent;
-    for i := 0 to Pred(FUserObjs.Count) do
-    begin
-      ObjI := FUserObjs[i];
-      if ObjI is TMemDBForeignKeyPersistent then
-      begin
-        if FPoolRequests = 0 then
-          FPoolEvent.ResetEvent;
-        Inc(FPoolRequests);
-      end;
-    end;
-    for i := 0 to Pred(FUserObjs.Count) do
-    begin
-      ObjI := FUserObjs[i];
-      if ObjI is TMemDBForeignKeyPersistent then
-      begin
-        WI := TDBParallelWorkItem.Create;
-        WI.CanAutoFree := true;
-        WI.CanAutoReset := false;
-        WI.Entity := ObjI;
-        WI.Parent := self;
-        WI.Reason := Reason;
-        WI.Op := dbpopPreCommit;
-        GCommonPool.AddWorkItem(FPoolRec, WI);
-      end;
-    end;
-    FPoolEvent.WaitFor(INFINITE); //Wait for all foreign key pre-commits to finish.
-    if not FAccumulatedOK then
-      raise EMemDBException.Create(FAccumulatedExceptionMsg);
-
-    Assert(FPoolRequests = 0);
-    FPoolRequests := 0;
+    PreCommitParallel;
   end
   else
   begin
-{$ENDIF}
     for i := 0 to Pred(FUserObjs.Count) do
     begin
       ObjI := FUserObjs[i];
@@ -5250,9 +5154,7 @@ begin
       if ObjI is TMemDBForeignKeyPersistent then
         ObjI.PreCommit(Reason);
     end;
-{$IFDEF PRE_COMMIT_PARALLEL}
   end;
-{$ENDIF}
 end;
 
 procedure TMemDBDatabasePersistent.LookaheadHelper(Stream: TStream;
@@ -5455,62 +5357,50 @@ begin
   end;
 end;
 
+function TMemDBDatabasePersistent.CommitParallelHandler(Ref1, Ref2: pointer):pointer;
+var
+  ObjI :TMemDBEntity;
+begin
+  ObjI := TMemDBEntity(Ref1);
+  Assert(Assigned(ObjI));
+  Assert(ObjI is TMemDbEntity);
+  ObjI.Commit(mtrReplayFromScratch);
+  result := nil;
+end;
+
+procedure TMemDbDatabasePersistent.CommitParallel;
+var
+  Handlers: TParallelHandlers;
+  Refs1, Refs2: TPHRefs;
+  Excepts: TPHExcepts;
+  Rets: TPHRefs;
+  i: integer;
+begin
+  if FUserObjs.Count > 0 then
+  begin
+    SetLength(Handlers, FUserObjs.Count);
+    SetLength(Refs1, FUserObjs.Count);
+    for i := 0 to Pred(FUserObjs.Count) do
+    begin
+      Handlers[i] := CommitParallelHandler;
+      Refs1[i] := FUserObjs.Items[i];
+    end;
+    ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
+  end;
+end;
 
 procedure TMemDBDatabasePersistent.Commit(Reason: TMemDbTransReason);
 var
   i: integer;
-{$IFDEF PRE_COMMIT_PARALLEL}
-  ObjI: TMemDBEntity;
-  WI: TDBParallelWorkItem;
-{$ENDIF}
 begin
   inherited;
-{$IFDEF PRE_COMMIT_PARALLEL}
   if Reason = mtrReplayFromScratch then
-  begin
-    FAccumulatedOK := true;
-    FAccumulatedExceptionMsg := '';
-
-    Assert(FPoolRequests = 0);
-    FPoolEvent.SetEvent;
-    //Table pre-commit step.
-    //Increment the pool request count before starting any workitems to remove a race.
-    for i := 0 to Pred(FUserObjs.Count) do
-    begin
-      ObjI := FUserObjs[i];
-      Assert((ObjI is TMemDBTablePersistent) or (ObjI is TMemDBForeignKeyPersistent));
-      if FPoolRequests = 0 then
-        FPoolEvent.ResetEvent;
-      Inc(FPoolRequests);
-    end;
-    for i := 0 to Pred(FUserObjs.Count) do
-    begin
-      ObjI := FUserObjs[i];
-      Assert((ObjI is TMemDBTablePersistent) or (ObjI is TMemDBForeignKeyPersistent));
-      WI := TDBParallelWorkItem.Create;
-      WI.CanAutoFree := true;
-      WI.CanAutoReset := false;
-      WI.Entity := ObjI;
-      WI.Parent := self;
-      WI.Reason := Reason;
-      WI.Op := dbpopCommit;
-      GCommonPool.AddWorkItem(FPoolRec, WI);
-    end;
-    FPoolEvent.WaitFor(INFINITE); //Wait for all table pre-commits to finish.
-    if not FAccumulatedOK then
-      raise EMemDBException.Create(FAccumulatedExceptionMsg);
-
-    Assert(FPoolRequests = 0);
-    FPoolRequests := 0;
-  end
+    CommitParallel
   else
   begin
-{$ENDIF}
     for i := 0 to Pred(FUserObjs.Count) do
       FUserObjs.Items[i].Commit(Reason);
-{$IFDEF PRE_COMMIT_PARALLEL}
   end;
-{$ENDIF}
 end;
 
 procedure TMemDBDatabasePersistent.Rollback(Reason: TMemDbTransReason);

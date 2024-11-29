@@ -149,7 +149,7 @@ type
     function InitDB(RootLocation: string;
                     JournalType: TMemDBJournalType = jtV2;
                     Async: boolean = false): boolean;
-    procedure StopDB(CheckpointOnClose: boolean = true);
+    procedure StopDB;
     function GetDBStats: TMemDBStats;
     function Checkpoint: boolean;
     function StartSession: TMemDBSession;
@@ -637,12 +637,10 @@ begin
   end;
 end;
 
-procedure TMemDB.StopDB(CheckpointOnClose: boolean = true);
+procedure TMemDB.StopDB;
 begin
   //Speculative attempt to checkpoint if currently in running state.
   //If race on stop path, no checkpoint.
-  if CheckpointOnClose then
-    Checkpoint;
   FSessionLock.Acquire;
   try
     StopDBLocked;

@@ -6,7 +6,7 @@
         <MainSource>MemDBTest.dpr</MainSource>
         <Base>True</Base>
         <Config Condition="'$(Config)'==''">Release</Config>
-        <Platform Condition="'$(Platform)'==''">Win64</Platform>
+        <Platform Condition="'$(Platform)'==''">Win32</Platform>
         <TargetedPlatforms>3</TargetedPlatforms>
         <AppType>Application</AppType>
     </PropertyGroup>
@@ -144,9 +144,8 @@
         <DCCReference Include="..\..\WorkItems\DLThreadQueue.pas"/>
         <DCCReference Include="..\MemDBApi.pas"/>
         <DCCReference Include="..\..\CachedStream\BufferedFileStream.pas"/>
-        <DCCReference Include="..\..\WorkItems\CommonPool.pas"/>
-        <DCCReference Include="..\..\WorkItems\WorkItems.pas"/>
         <DCCReference Include="..\..\Logging\GlobalLog.pas"/>
+        <DCCReference Include="..\..\Parallelizer\Parallelizer.pas"/>
         <None Include="..\Ideas, and TODO.txt"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>

@@ -529,16 +529,33 @@ begin
   Tag := PMemDBMetaTags(IndexTag);
 
   //First off, deal with NULL abData cases.
+{$IFOPT C+}
   OwnRow := OwnItem as TMemDBRow;
   OtherRow := OtherItem as TMemDbRow;
+{$ELSE}
+  OwnRow := TMemDBRow(OwnItem);
+  OtherRow := TMemDBRow(OtherItem);
+{$ENDIF}
 
   if AssignedNotSentinel(OwnRow.ABData[Tag.abBuf]) then
-    OwnFieldList := OwnRow.ABData[Tag.abBuf] as TMemStreamableList
+  begin
+{$IFOPT C+}
+    OwnFieldList := OwnRow.ABData[Tag.abBuf] as TMemStreamableList;
+{$ELSE}
+    OwnFieldList := TMemStreamableList(OwnRow.ABData[Tag.abBuf]);
+{$ENDIF}
+  end
   else
     OwnFieldList := nil;
 
   if AssignedNotSentinel(OtherRow.ABData[Tag.abBuf]) then
-    OtherFieldList := OtherRow.ABData[Tag.abBuf] as TMemStreamableList
+  begin
+{$IFOPT C+}
+    OtherFieldList := OtherRow.ABData[Tag.abBuf] as TMemStreamableList;
+{$ELSE}
+    OtherFieldList := TMemStreamableList(OtherRow.ABData[Tag.abBuf]);
+{$ENDIF}
+  end
   else
     OtherFieldList := nil;
 
@@ -593,10 +610,20 @@ begin
   Tag := PMemDBMetaTags(IndexTag);
 
   //First off, deal with NULL abData cases.
+{$IFOPT C+}
   OtherRow := OtherItem as TMemDbRow;
+{$ELSE}
+  OtherRow := TMemDbRow(OtherItem);
+{$ENDIF}
 
   if AssignedNotSentinel(OtherRow.ABData[Tag.abBuf]) then
+  begin
+{$IFOPT C+}
     OtherFieldList := OtherRow.ABData[Tag.abBuf] as TMemStreamableList
+{$ELSE}
+    OtherFieldList := TMemStreamableList(OtherRow.ABData[Tag.abBuf]);
+{$ENDIF}
+  end
   else
     OtherFieldList := nil;
 

@@ -462,7 +462,7 @@ begin
     begin
       FJournalThread := TMemDBJournalThread.Create(true);
       FJournalThread.FParentJournal := self;
-      FJournalThread.Resume;
+      FJournalThread.Start;
     end;
     Action := TMemDbJournalAction.Create;
     Action.ActionType := jatInitialLoad;

@@ -42,6 +42,7 @@ uses
 {$IFDEF USE_TRACKABLES_LOCAL_MEMDBMISC}
   , Trackables
 {$ENDIF}
+  , Parallelizer
   ;
 
 
@@ -51,6 +52,8 @@ type
   EMemDBInternalException = class(EMemDBException);
   EMemDBConsistencyException = class(EMemDBException);
   EMemDBAPIException = class(EMemDBException);
+  //N.B. If you add to this exception list, then
+  //please update MemDBXLateExceptions
 
   TMDBAccessMode = (amRead, amReadWrite);
   TMDBSyncMode = (amLazyWrite, amFlushBuffers);
@@ -246,8 +249,8 @@ type
     procedure CommitRestoreToPermanent;
     procedure RollbackRestoreToPermanent;
 
-    procedure CommitAddIdxsToStore(Store: TIndexedStoreO);
-    procedure CommitRmIdxsFromStore;
+    procedure CommitAddIdxsToStore(Store: TIndexedStoreO; Async: boolean);
+    procedure CommitRmIdxsFromStore(Async:boolean);
     procedure RollbackRestoreIdxsToStore(Store: TIndexedStoreO);
     procedure RollbackRmIdxsFromStore;
 
@@ -289,6 +292,7 @@ const
 
 var
   AllIndexAttrs: TMDBIndexAttrs;
+  MemDBXlateExceptions: TExceptionHandlerChain;
 
 procedure AppendTrailingDirSlash(var Path: string);
 
@@ -452,7 +456,7 @@ begin
   FInit := true;
 end;
 
-procedure TMemDBITagData.CommitAddIdxsToStore(Store: TIndexedStoreO);
+procedure TMemDBITagData.CommitAddIdxsToStore(Store: TIndexedStoreO; Async: boolean);
 var
   rv: TIsRetVal;
 begin
@@ -461,18 +465,18 @@ begin
   if IdxsSetToStore then
     raise EMemDBInternalException.Create(S_IDXS_ALREADY_SET); //Overwriting prev init?
 
-  if Store.AddIndex(TMemDBIndexNode, @FCurrentTagStruct) <> rvOK then
+  if Store.AddIndex(TMemDBIndexNode, @FCurrentTagStruct, Async) <> rvOK then
     raise EMemDbInternalException.Create(S_INDEX_ADD_FAILED);
-  if Store.AddIndex(TMemDBIndexNode, @FLatestTagStruct) <> rvOK then
+  if Store.AddIndex(TMemDBIndexNode, @FLatestTagStruct, Async) <> rvOK then
   begin
-    rv := Store.DeleteIndex(@FCurrentTagStruct);
+    rv := Store.DeleteIndex(@FCurrentTagStruct, false);
     Assert(rv = rvOK);
     raise EMemDbInternalException.Create(S_INDEX_ADD_FAILED);
   end;
   FStoreIdxSet := Store;
 end;
 
-procedure TMemDBITagData.CommitRmIdxsFromStore;
+procedure TMemDBITagData.CommitRmIdxsFromStore(Async: boolean);
 var
   rv: TIsRetVal;
 begin
@@ -480,11 +484,11 @@ begin
     raise EMemDBInternalException.Create(S_IDXS_NOT_USER);
   if not IdxsSetToStore then
     raise EMemDBInternalException.Create(S_IDXS_NOT_SET); //Overwriting prev init?
-  if (FStoreIdxSet.DeleteIndex(@FCurrentTagStruct) <> rvOK) then
+  if (FStoreIdxSet.DeleteIndex(@FCurrentTagStruct, Async) <> rvOK) then
     raise EMemDbInternalException.Create(S_INDEX_DELETE_FAILED);
-  if FStoreIdxSet.DeleteIndex(@FLatestTagStruct) <> rvOK then
+  if FStoreIdxSet.DeleteIndex(@FLatestTagStruct, Async) <> rvOK then
   begin
-    rv := FStoreIdxSet.AddIndex(TMemDBIndexNode, @FCurrentTagStruct);
+    rv := FStoreIdxSet.AddIndex(TMemDBIndexNode, @FCurrentTagStruct, false);
     Assert(rv = rvOK);
     raise EMemDbInternalException.Create(S_INDEX_DELETE_FAILED);
   end;
@@ -497,11 +501,11 @@ var
 begin
   Assert(FIndexClass in [micPermanent, micTemporary]);
   Assert(not Assigned(FStoreIdxSet) or (FStoreIdxSet = Store));
-  rv := Store.AddIndex(TMemDBIndexNode, @FCurrentTagStruct);
+  rv := Store.AddIndex(TMemDBIndexNode, @FCurrentTagStruct, false);
   Assert(rv = rvOK);
   if (FIndexClass <> micInternal) then
   begin
-    rv := Store.AddIndex(TMemDBIndexNode, @FLatestTagStruct);
+    rv := Store.AddIndex(TMemDBIndexNode, @FLatestTagStruct, false);
     Assert(rv = rvOK);
   end;
   FStoreIdxSet := Store;
@@ -513,9 +517,9 @@ var
 begin
   Assert(FIndexClass in [micPermanent, micTemporary]);
   Assert(IdxsSetToStore);
-  rv := FStoreIdxSet.DeleteIndex(@FCurrentTagStruct);
+  rv := FStoreIdxSet.DeleteIndex(@FCurrentTagStruct, false);
   Assert(rv = rvOK);
-  rv := FStoreIdxSet.DeleteIndex(@FLatestTagStruct);
+  rv := FStoreIdxSet.DeleteIndex(@FLatestTagStruct, false);
   Assert(rv = rvOK);
   FStoreIdxSet := nil;
 end;
@@ -526,7 +530,7 @@ begin
     raise EMemDBInternalException.Create(S_IDXS_NOT_INTERNAL);
   if IdxsSetToStore then
     raise EMemDBInternalException.Create(S_INTERNAL_INDEX_HAS_STORE_LINK);
-  if Store.AddIndex(TMemDBIndexNode, @FCurrentTagStruct) <> rvOK then
+  if Store.AddIndex(TMemDBIndexNode, @FCurrentTagStruct, false) <> rvOK then
     raise EMemDBInternalException.Create(S_INDEX_ADD_FAILED);
 end;
 
@@ -734,8 +738,29 @@ begin
   inherited;
 end;
 
-
+function MemDBGeneralXlateExceptions(EClass: SysUtils.ExceptClass;
+                              EMsg: string): boolean;
+begin
+  if EClass = EMemDBInternalException then
+    raise EMemDBInternalException.Create(EMsg);
+  if EClass = EMemDBConsistencyException then
+    raise EMemDBConsistencyException.Create(EMsg);
+  if EClass = EMemDBAPIException then
+    raise EMemDBAPIException.Create(EMsg);
+  while Assigned(EClass) do
+  begin
+    if EClass = EMemDBException then
+      raise EMemDbException.Create(EMsg);
+    EClass := SysUtils.ExceptClass(EClass.ClassParent);
+  end;
+  result := false;
+end;
 
 initialization
   AllIndexAttrs := GetAllIndexAttrs;
+  with MemDBXlateExceptions do
+  begin
+    Func := MemDBGeneralXlateExceptions;
+    Next := nil;
+  end;
 end.

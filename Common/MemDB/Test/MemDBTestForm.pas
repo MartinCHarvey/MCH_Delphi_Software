@@ -55,11 +55,11 @@ uses
   IOUtils, MemDBMisc, MemDBAPI, Math, MemDbBuffered;
 
 const
-  LIMIT = 10000;
-  TRANS_LIMIT = 1024;
-  BIG_ROWS = 1024 * 64;
-  BIG_NTABLES = 3;
-  BIG_NINDEXES = 3;
+  LIMIT = 1000;
+  TRANS_LIMIT = 65535;
+  BIG_ROWS = 1024 * 1024;
+  BIG_NTABLES = 6;
+  BIG_NINDEXES = 6;
 
 type
   EMemDBTestException = class(EMemDBException);
@@ -99,7 +99,6 @@ begin
   else
     TimeS := '('+ InttoStr(SecsElapsed) + '.' + IntToStr(MSecsElapsed) + ' secs)';
   ResMemo.Lines.Add(TimeS + ' ' + S);
-  Application.ProcessMessages;
 end;
 
 procedure TForm1.BasicTestBtnClick(Sender: TObject);
@@ -329,17 +328,6 @@ begin
       LogTimeIncr('Big tables data fill failed' + E.Message);
     end;
   end;
-  FSession.Free;
-  FDB.StopDB(false);
-  LogtimeIncr('DB Stopped. Reload, no checkpoint.');
-  FDB.InitDB(DB_LOCATION, jtV2);
-  LogtimeIncr('DB Loaded, possibly implicit checkpoint.');
-  FDB.StopDB(false);
-  LogtimeIncr('DB Stopped.');
-  FDB.InitDB(DB_LOCATION, jtV2);
-  LogtimeIncr('DB Loaded, Probably from checkpoint.');
-  FSession := FDB.StartSession;
-  FSession.TempStorageMode := tsmMemory;
 end;
 
 procedure TForm1.CheckpointBtnClick(Sender: TObject);
@@ -1117,6 +1105,7 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
+    LogTimeIncr('FK Test 3a, master key add fields OK.');
   except
     on E: Exception do
     begin
@@ -1180,12 +1169,12 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-      LogTimeIncr('FK Test 3b, master key add fields OK.');
+      LogTimeIncr('FK Test 3b, master key populate fields OK.');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      LogTimeIncr('FK Test 3b, master key add fields failed.');
+      LogTimeIncr('FK Test 3b, master key populate fields failed.');
       raise;
     end;
   end;
