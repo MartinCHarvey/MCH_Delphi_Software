@@ -81,10 +81,7 @@ const
   S_INDEXING_INTERNAL_FIELD_TYPE_2 = 'Internal indexing error: Unsupported field type.';
 
 var
-  MDBInternalIndexPtr,
-  MDBInternalIndexRowId,
-  MDBInternalIndexCurrCopy,
-  MDBInternalIndexNextCopy:TMemDBITagData;
+  MDBInternalIndexRowId:TMemDBITagData;
 
 implementation
 
@@ -200,6 +197,7 @@ var
   OwnFieldOffsets, OtherFieldOffsets: TFieldOffsets;
   UsingNextCopy, OtherUsingNextCopy: boolean;
   ff:integer;
+  LOfs: integer;
 begin
   Assert(Assigned(OwnItem));
   Assert(Assigned(OtherItem));
@@ -221,14 +219,8 @@ begin
   if TagData.MainIndexClass = micInternal then
   begin
     case TagData.InternalIndexClass of
-    iicPtr:
-      result := ComparePointers(OwnRow, OtherRow);
     iicRowId:
       result:= CompareStr(OwnRow.RowId, OtherRow.RowId);
-    iicCurCopy:
-      result := ComparePointers(OwnRow.ABData[abCurrent], OtherRow.ABData[abCurrent]);
-    iicNextCopy:
-      result := ComparePointers(OwnRow.ABData[abNext], OtherRow.ABData[abNext])
     else
       Assert(false);
       result :=0;
@@ -347,11 +339,12 @@ begin
 
       //Check field indexes in range.
       //However, do not need to have the same number of fields in each...
-      Assert(Length(OwnFieldOffsets) > 0);
-      Assert(Length(OwnFieldOffsets) = Length(OtherFieldOffsets));
+      LOfs := Length(OwnFieldOffsets);
+      Assert(LOfs > 0);
+      Assert(LOfs = Length(OtherFieldOffsets));
       result := 0;
       ff := 0;
-      while (result = 0) and (ff < Length(OwnFieldOffsets)) do
+      while (result = 0) and (ff < LOfs) do
       begin
         Assert(OwnFieldOffsets[ff] <= OwnFieldList.Count);
         Assert(OtherFieldOffsets[ff] <= OtherFieldList.Count);
@@ -387,6 +380,7 @@ var
   OtherFieldOffsets: TFieldOffsets;
   OtherUsingNextCopy: boolean;
   ff:integer;
+  LOfs: integer;
 
 begin
   Assert(not Assigned(OwnItem));
@@ -402,14 +396,8 @@ begin
   if TagData.MainIndexClass = micInternal then
   begin
     case TagData.InternalIndexClass of
-    iicPtr:
-      result := ComparePointers(FPointerSearchVal, OtherRow);
     iicRowId:
       result:= CompareStr(FIdSearchVal, OtherRow.RowId);
-    iicCurCopy:
-      result := ComparePointers(FPointerSearchVal, OtherRow.ABData[abCurrent]);
-    iicNextCopy:
-      result := ComparePointers(FPointerSearchVal, OtherRow.ABData[abNext]);
     else
       Assert(false);
       result := 0;
@@ -488,11 +476,12 @@ begin
 
       //Check field indexes in range.
       //However, do not need to have the same number of fields in each...
-      Assert(Length(OtherFieldOffsets) > 0);
-      Assert(Length(OtherFieldOffsets) = Length(FFieldSearchVals));
+      LOfs := Length(OtherFieldOffsets);
+      Assert(LOfs > 0);
+      Assert(LOfs = Length(FFieldSearchVals));
       result := 0;
       ff := 0;
-      while (result = 0) and (ff < Length(OtherFieldOffsets)) do
+      while (result = 0) and (ff < LOfs) do
       begin
         Assert(OtherFieldOffsets[ff] <= OtherFieldList.Count);
 
@@ -654,17 +643,8 @@ end;
 
 
 initialization
-  MDBInternalIndexPtr := TMemDBITagData.Create;
-  MDBInternalIndexPtr.InitInternal(iicPtr);
   MDBInternalIndexRowId := TMemDBITagData.Create;
   MDBInternalIndexRowId.InitInternal(iicRowId);
-  MDBInternalIndexCurrCopy := TMemDBITagData.Create;
-  MDBInternalIndexCurrCopy.InitINternal(iicCurCopy);
-  MDBInternalIndexNextCopy := TMemDBITagData.Create;
-  MDBInternalIndexNextCopy.InitInternal(iicNextCopy);
 finalization
-  MDBInternalIndexPtr.Free;
   MDBInternalIndexRowId.Free;
-  MDBInternalIndexCurrCopy.Free;
-  MDBInternalIndexNextCopy.Free;
 end.

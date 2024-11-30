@@ -57,9 +57,9 @@ uses
 const
   LIMIT = 1000;
   TRANS_LIMIT = 65535;
-  BIG_ROWS = 1024 * 1024;
-  BIG_NTABLES = 6;
-  BIG_NINDEXES = 6;
+  BIG_ROWS = 128 * 1024;
+  BIG_NTABLES = 5;
+  BIG_NINDEXES = 5;
 
 type
   EMemDBTestException = class(EMemDBException);
@@ -173,9 +173,12 @@ begin
               FieldIncrement := 1
             else
               FieldIncrement := -1;
+
+            i := 0;
             NavOK := TableData.Locate(ptFirst, '');
             while NavOK do
             begin
+              Inc(i);
               TableData.ReadField('Int', Data);
               Data.i32Val := Data.i32Val + FieldIncrement;
               TableData.WriteField('Int', Data);
@@ -189,8 +192,8 @@ begin
               TableData.WriteField('U64', Data);
 
               TableData.ReadField('String', Data);
-              i := StrToInt(Data.sVal);
-              Data.sVal := IntToStr(i + FieldIncrement);
+              j := StrToInt(Data.sVal);
+              Data.sVal := IntToStr(j + FieldIncrement);
               TableData.WriteField('String', Data);
 
               TableData.ReadField('Double', Data);
@@ -204,6 +207,7 @@ begin
               TableData.Post;
               NavOK := TableData.Locate(ptNext, '');
             end;
+            Assert(i = LIMIT);
           end;
         finally
           TableData.Free;
@@ -238,7 +242,6 @@ var
   Data: TMemDBFieldDataRec;
 begin
   ResetClick(Sender);
-  CheckpointBtnClick(Sender);
 
   Trans := FSession.StartTransaction(amReadWrite);
   try

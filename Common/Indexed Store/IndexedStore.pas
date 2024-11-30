@@ -254,9 +254,13 @@ type
     //comparison.
 
     function AddItem(NewItem: TObject; var Res: TItemRec): TISRetVal;
+    function AddItemInPlace(NewItem: TObject; const LPos: PDLEntry; var Res: TItemRec): TISRetVal;
     function RemoveItem(ItemRec: TItemRec): TISRetVal;
+    function RemoveItemInPlace(ItemRec: TItemRec; var LPos:PDLEntry): TIsRetVal;
     function GetAnItem: TItemRec;
     function GetAnotherItem(var AnItem: TItemRec): TISRetVal;
+    function GetLastItem: TItemRec;
+    function GetPreviousItem(var AnItem: TItemRec): TIsRetVal;
     function GetAnotherItemWraparound(var AnItem: TItemRec): TISRetVal;
 
     destructor Destroy; override;
@@ -1090,6 +1094,11 @@ begin
 end;
 
 function TIndexedStoreG.AddItem(NewItem: TObject; var Res: TItemRec): TISRetVal;
+begin
+  result := AddItemInPlace(NewItem, nil, Res);
+end;
+
+function TIndexedStoreG.AddItemInPlace(NewItem: TObject; const LPos: PDLEntry; var Res: TItemRec): TISRetVal;
 var
   Index: TSIndex;
 {$IFOPT C+}
@@ -1135,7 +1144,10 @@ begin
   //No exception handler here, first allocation, can fall straight out.
 
   //Try to add the item to the list.
-  DLListInsertTail(@FItemRecList, @Res.FSiblingListEntryRec);
+  if Assigned(LPos) then
+    DlItemInsertAfter(LPos, @Res.FSiblingListEntryRec)
+  else
+    DLListInsertTail(@FItemRecList, @Res.FSiblingListEntryRec);
 
   //For all the indices that exist try and add, protect with exception handler
   //for out of memory cases.
@@ -1179,6 +1191,13 @@ begin
 end;
 
 function TIndexedStoreG.RemoveItem(ItemRec: TItemRec): TISRetVal;
+var
+  LPos: PDLEntry;
+begin
+  result := RemoveItemInPlace(ItemRec, LPos);
+end;
+
+function TIndexedStoreG.RemoveItemInPlace(ItemRec: TItemRec; var LPos:PDLEntry): TIsRetVal;
 var
   Link: TIndexNodeLink;
   Index: TSIndex;
@@ -1236,7 +1255,7 @@ begin
 {$IFOPT C+}
   Assert(DlItemIsEmpty(@ItemRec.FIndexNodes));
 {$ENDIF}
-
+  LPos := ItemRec.FSiblingListEntryRec.BLink;
   DLListRemoveObj(@ItemRec.FSiblingListEntryRec);
   ItemRec.Free;
   Dec(FCount);
@@ -1570,6 +1589,33 @@ begin
   AnItem := AnItem.FSiblingListEntryRec.FLink.Owner as TItemRec;
 {$ELSE}
   AnItem := TItemRec(AnItem.FSiblingListEntryRec.FLink.Owner);
+{$ENDIF}
+  if Assigned(AnItem) then
+    result := rvOK
+  else
+    result := rvNotFound;
+end;
+
+function TIndexedStoreG.GetLastItem: TItemRec;
+begin
+{$IFOPT C+}
+  result := self.FItemRecList.BLink.Owner as TItemRec;
+{$ELSE}
+  result := TItemRec(self.FItemRecList.BLink.Owner);
+{$ENDIF}
+end;
+
+function TIndexedStoreG.GetPreviousItem(var AnItem: TItemRec): TIsRetVal;
+begin
+  if not Assigned(AnItem) then
+  begin
+    result := rvInvalidItem;
+    exit;
+  end;
+{$IFOPT C+}
+  AnItem := AnItem.FSiblingListEntryRec.BLink.Owner as TItemRec;
+{$ELSE}
+  AnItem := TItemRec(AnItem.FSiblingListEntryRec.BLink.Owner);
 {$ENDIF}
   if Assigned(AnItem) then
     result := rvOK

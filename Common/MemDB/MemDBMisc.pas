@@ -81,7 +81,7 @@ type
 
   TSubIndexClass = (sicCurrent, sicLatest);
   TMainIndexClass = (micPermanent, micTemporary, micInternal);
-  TInternalIndexClass = (iicPtr, iicRowId, iicCurCopy, iicNextCopy);
+  TInternalIndexClass = (iicRowId); //By-Pointer indexes now gone.
   TTempStorageMode = (tsmMemory, tsmDisk);
 
   TTagCheckIndexState = (tciPermanentAgreesCurrent, tciPermanentAgreesNext,
@@ -288,7 +288,7 @@ const
   SubIndexClassStrings: TSubIndexClassStrings
     = ('sicCurrent', 'sicLatest');
   InternalIndexClassStrings: TInternalIndexClassStrings
-   = ('iicPtr', 'iicRowId', 'iicCurCopy', 'iicNextCopy');
+   = ('iicRowId');
 
 var
   AllIndexAttrs: TMDBIndexAttrs;
