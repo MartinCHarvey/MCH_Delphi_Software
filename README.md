@@ -49,6 +49,7 @@ Common: Common utility code, including:
 - Custom threadpool implementation.
 - Sparse Matrices.
 - DLX like "Algorithm X" implementation for the exact cover problem.
+- Parallelizer: Spawn threads to run method invocations in parallel.
 
 Additional testapps and utility code.
 
