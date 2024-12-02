@@ -1,9 +1,7 @@
 
 MemDB: TODO and notes.
 
-TODO: Decide what to do with these silly assertions:
--            RV := PStruct.OutList.AddItem(LatestField, IRecAdd);
--            Assert(RV in [rvOk, rvDuplicateKey]);
+TODO: Fix app builds using indexed store.
 
 TODO: review mem alloc on rollback path?
 

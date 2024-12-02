@@ -36,16 +36,12 @@ interface
 {$DEFINE DEBUG_DATABASE_NAVIGATE}
 {$ENDIF}
 
-{$DEFINE PRE_COMMIT_PARALLEL}
-
 uses
 {$IFDEF USE_TRACKABLES}
   Trackables,
 {$ENDIF}
-{$IFDEF PRE_COMMIT_PARALLEL}
-  CommonPool, Workitems,
-{$ENDIF}
-  IndexedStore, MemDbStreamable, Classes, MemDBMisc, SyncObjs;
+  IndexedStore, MemDbStreamable, Classes, MemDBMisc, SyncObjs, Parallelizer,
+  DLList;
 
 type
   TMemDBTransReason = (mtrUserOp,
@@ -209,12 +205,19 @@ type
   TMemDBIndexedList = class(TMemDBJournalCreator)
   protected
     FStore: TIndexedStoreO;
+    FRefChangedRows: TDLEntry;
+    FRefEmptyRows: TDLEntry;
 
     //IRec is assigned if row already in list.
     function LookaheadHelper(Stream: TStream; var IRec: TItemRec): TMemDBRow;
+
+    function WhichList(Row:TMemDbRow): PDLEntry;
   public
     constructor Create;
     destructor Destroy; override;
+
+    procedure RmRowQuickLists(Row: TMemDBRow; var LPos:PDLEntry; var LHead: PDLEntry);
+    procedure AddRowQuicklists(Row: TMemDbRow; LPos: PDLEntry; LHead: PDLEntry);
 
     procedure ToScratchV2(Stream: TStream); override;
     procedure FromJournalV2(Stream: TStream); override;
@@ -223,8 +226,7 @@ type
     property Store: TIndexedStoreO read FStore write FStore;
   end;
 
-  TSelectiveRowHandler = procedure(Row: TMemDBRow;
-                                   IRec: TItemRec; Ref1, Ref2: TObject; Store: TIndexedStoreO) of object;
+  TSelectiveRowHandler = procedure(Row: TMemDBRow; Ref1, Ref2: TObject; TblList: TMemDbIndexedList) of object;
 
 {$IFDEF USE_TRACKABLES}
   TEditRec = class(TTrackable)
@@ -232,27 +234,30 @@ type
   TEditRec = class
 {$ENDIF}
     IRec, NextIRec: TItemRec;
+    LPos: PDLEntry;
+    QLPos, QLHead: PDLEntry;
     RemovedItem: TMemDBRow;
   end;
 
   //Main table datastore.
   TMemDBTableList = class(TMemDBIndexedList)
   protected
+
     //Handle child items when we know they're
     //TMemDBRow.
-    procedure WriteRowToJournalV2(Row: TMemDBRow; IRec: TItemRec;  Ref1, Ref2: TObject; Store: TIndexedStoreO);
-    procedure CommitRollbackChangedRow(Row: TMemDBRow; IRec: TItemRec; Ref1, Ref2: TObject; Store: TIndexedStoreO);
-    procedure RemoveEmptyRow(Row: TMemDBRow; IRec: TItemRec; Ref1, Ref2: TObject; Store: TIndexedStoreO);
+    procedure WriteRowToJournalV2(Row: TMemDBRow; Ref1, Ref2: TObject; TblList: TMemDbIndexedList);
+    procedure CommitRollbackChangedRow(Row: TMemDBRow; Ref1, Ref2: TObject; TblList: TMemDbIndexedList);
+    procedure RemoveEmptyRow(Row: TMemDBRow; Ref1, Ref2: TObject; TblList: TMemDbIndexedList);
 
     procedure ForEachChangedRow(Handler: TSelectiveRowHandler;
                                 Ref1, Ref2: TObject);
     procedure ForEachEmptyRow(Handler: TSelectiveRowHandler;
                                 Ref1, Ref2: TObject);
     function GetChanged: boolean;
+
   public
     constructor Create;
     destructor Destroy; override;
-
     //Functions to modify data when metadata indicates change
     //in table structure necessary.
     function MetaEditFirst: TEditRec;
@@ -272,28 +277,35 @@ type
     //Navigation and change functions for user API.
     function MoveToRowByIndexTag(Iso: TMDBIsolationLevel;
                                  TagStruct: PITagStruct;
-                                 CurRow: TMemDBRow;
-                                 Pos: TMemAPIPosition): TMemDBRow;
+                                 Cursor: TItemRec;
+                                 Pos: TMemAPIPosition): TItemRec;
     function FindRowByIndexTag(Iso: TMDBIsolationLevel;
                                IndexDef: TMemIndexDef;
                                FieldDefs: TMemFieldDefs;
                                ITagStruct: PITagStruct;
-                               const DataRecs: TMemDbFieldDataRecs): TMemDBRow;
+                               const DataRecs: TMemDbFieldDataRecs): TItemRec;
 
     procedure ReadRowData(Row: TMemDBRow; Iso: TMDBIsolationLevel;
                           Fields: TMemStreamableList);
     //If row not assigned, then append.
-    procedure WriteRowData(Row: TMemDBRow; Iso: TMDBIsolationLevel;
+    procedure WriteRowData(var Cursor: TItemRec; Iso: TMDBIsolationLevel;
                           Fields: TMemStreamableList);
 
-    procedure DeleteRow(Row: TMemDBRow; Iso: TMDBIsolationLevel);
+    procedure DeleteRow(var Cursor: TItemRec; Iso: TMDBIsolationLevel);
   end;
 
   TMemDBRow = class(TMemDBDoubleBuffered)
   private
     FRowID: string;
   protected
+    FQuickRef: TDLEntry; //Quick-list link
+    FOwningListHead: PDLEntry; //Quick list owner.
+    FStoreBackRec: TItemRec;
+    //Very unfortunate, but now using quick-lists, need the back ptr too.
   public
+    constructor Create;
+    destructor Destroy; override;
+
     //And version 2 of the same ......
     procedure ToJournalV2(Stream: TStream); override;
     procedure ToScratchV2(Stream: TStream); override;
@@ -398,6 +410,7 @@ type
   TMemDBFKMetaTags = record
     abBuf: TABSelection;
     FieldAbsIdxs: TFieldOffsets;
+    FieldAbsIdxsFast: TFieldOffsetsFast;
   end;
   PMemDBMetaTags = ^TMemDbFKMetaTags;
 
@@ -423,6 +436,7 @@ type
 
     Lists: TMemDBFKMetaLists;
   end;
+  PMemDBFKMeta = ^TMemDBFKMeta;
 
   TIndexChangeType = (ictAdded,
                       ictDeleted,
@@ -437,6 +451,10 @@ type
   TMemDBForeignKeyPersistent = class(TMemDBEntity)
   private
   protected
+    function ReferringAddedHandler(Ref1, Ref2: Pointer):Pointer;
+    function ReferredDeletedHandler(Ref1, Ref2: Pointer):Pointer;
+
+
     procedure SetupIndexes(var Meta: TMemDBFKMeta);
     procedure ClearIndexes(var Meta: TMemDbFkMeta);
 
@@ -446,7 +464,7 @@ type
                           SubIndexClass: TSubIndexClass): PITagStruct;
 
     procedure ProcessRow(Row: TMemDBRow;
-                         IRec: TItemRec; Ref1, Ref2: TObject; Store: TIndexedStoreO);
+                         Ref1, Ref2: TObject; TblList: TMemDbIndexedList);
 
     procedure CreateCheckForeignKeyRowSets(var Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
     procedure CreateReferringAddedList(const Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
@@ -533,18 +551,18 @@ type
     procedure AddNewTagStructs;
     procedure RemoveNewlyAddedTagStructs;
     procedure RemoveOldTagStructs(DeleteAll: boolean = false);
-    procedure DeleteUnusedIndices;
+    procedure DeleteUnusedIndices(Reason: TMemDBTransReason);
     procedure ReinstateDeletedIndices;
     procedure AdjustTableStructureForMetadata;
-    procedure CommitAdjustIndicesToTemporary;
-    procedure CommitRestoreIndicesToPermanent;
+    procedure CommitAdjustIndicesToTemporary(Reason: TMemDBTransReason);
+    procedure CommitRestoreIndicesToPermanent(Reason: TMemDbTransReason);
     procedure RollbackRestoreIndicesToPermanent;
 
     procedure RevalidateEntireUserIndex(RawIndexDefNumber: integer);
     procedure CheckStreamedInTableRowCount;
-    procedure CheckStreamedInRowStructure(Row: TMemDBRow; IRec: TItemRec;  Ref1, Ref2: TObject;  Store: TIndexedStoreO);
+    procedure CheckStreamedInRowStructure(Row: TMemDBRow; Ref1, Ref2: TObject;  TblList: TMemDbIndexedList);
     procedure CheckStreamedInRowIndexing;
-    procedure CheckIndexForRow(Row: TMemDBRow; IRec: TItemRec;  Ref1, Ref2: TObject;  Store: TIndexedStoreO);
+    procedure CheckIndexForRow(Row: TMemDBRow; Ref1, Ref2: TObject; TblList: TMemDbIndexedList);
 
     procedure LookaheadHelper(Stream: TStream;
                               var MetadataInStream: boolean;
@@ -579,6 +597,7 @@ type
   protected
     function GetItem(Idx: integer): TMemDBEntity;
     procedure SetItem(Idx: integer; New: TMemDBEntity);
+    function ParallelFree(Ref1, Ref2: Pointer): pointer;
   public
     destructor Destroy; override;
     property Items[Idx:integer]: TMemDBEntity read GetItem write SetItem;
@@ -596,23 +615,15 @@ type
   protected
     FUserObjs: TDBObjList;
     FInterfaced: TMemDBAPIInterfacedObject;
-{$IFDEF PRE_COMMIT_PARALLEL}
-    FAccumulatedOK: boolean;
-    FAccumulatedExceptionMsg: string;
-    FPoolRec: TClientRec;
-    FPoolRequests: integer;
-    FPoolEvent: TEvent;
-{$ENDIF}
-    procedure CleanupCommon;
+    procedure CleanupCommon(Reason: TMemDBTransReason);
     function HandleInterfacedObjRequest(Transaction: TObject; ID: TMemDBAPIId): TMemDBAPI;virtual;
     procedure LookaheadHelper(Stream: TStream;
                              var ChangeType: TMemDBEntityChangeType;
                              var EntityName: string);
-{$IFDEF PRE_COMMIT_PARALLEL}
-    procedure WorkItemCompleteCommon(WorkItem: TWorkItem);
-    procedure HandlePoolNormalCompletion(Sender: TObject);
-    procedure HandlePoolCancelledCompletion(Sender: TObject);
-{$ENDIF}
+    function PreCommitParallelHandler(Ref1, Ref2: pointer):pointer;
+    procedure PreCommitParallel(Reason: TMemDBTransReason);
+    function CommitParallelHandler(Ref1, Ref2: pointer):pointer;
+    procedure CommitParallel(Reason: TMemDBTransReason);
   public
     function EntitiesByName(AB: TABSelection; Name: string; var Idx: integer): TMemDBEntity;
 
@@ -744,6 +755,7 @@ function AllFieldsZero(FieldList: TMemStreamableList;
 const
   S_TABLE_DATA_CHANGED = 'Cannot change table field layout when uncommitted data changes.';
   S_FIELD_LAYOUT_CHANGED = 'Cannot change table data when uncommited field layout changes.';
+  S_QUICK_LIST_DUPLICATE_INSERTION = 'Quick lookaside lists: Duplicate insertion.';
 
 implementation
 
@@ -807,6 +819,7 @@ const
   S_API_NEXT_PREV_INTERNAL_ERROR = 'Internal error, couldn''t find current row';
   S_API_SEARCH_VAL_BAD_TYPE = 'Search key data must be of same type as field.';
   S_API_SEARCH_BAD_FIELD_COUNT = 'Bad field count in search data, or indexed fields';
+  S_API_SEARCH_NO_INDEX_SPECIFIED = 'No index tag specified for API search on user index';
   S_API_SEARCH_INTERNAL = 'Data A/B buffer type disagrees with transaction isolation level';
   S_API_UNDELETING_ROW_AT_POST_TIME = 'Can''t modify a record previously deleted in same transaction';
   S_API_POST_COMMITTED_OVERWRITE =
@@ -857,31 +870,28 @@ const
   S_FIELD_LIST_BAD_FOR_COMPARISON = 'Bad field list object comparing sets of fields.';
   S_ZERO_LENGTH_FIELD_LIST_COMPARING = 'Comparing sets of fields, given a zero length field list.';
   S_DIFF_LENGTH_FIELD_LIST_COMPARING = 'Comparing sets of fields, given different length field lists.';
-
-{$IFDEF PRE_COMMIT_PARALLEL}
-type
-  TDBParallelOp = (dbpopPreCommit, dbpopCommit);
-
-  TDBParallelWorkItem = class(TCommonPoolWorkItem)
-  private
-    FExceptionMsg: string;
-    FEntity: TMemDBEntity;
-    FParent: TMemDBDatabasePersistent;
-    FOK: boolean;
-    FReason: TMemDBTransReason;
-    FOp: TDBParallelOp;
-  protected
-    function DoWork: integer; override;
-    property Entity: TMemDBEntity read FEntity write FEntity;
-    property Parent: TMemDBDatabasePersistent read FParent write FParent;
-    property OK: boolean read FOK write FOK;
-    property ExceptionMsg: string read FExceptionMsg write FExceptionMsg;
-    property Reason: TMemDBTransReason read FReason write FReason;
-    property Op: TDBParallelOp read FOP write FOP;
-  end;
-{$ENDIF}
+  S_ASYNC_INDEX_OP_FAILED = 'Asynchronous index build failed. Indexes are probably toast.';
+  S_CURSOR_HAS_NO_ROW_AT_MODIFY = 'User mod of fields broken: no cursor assigned.';
+  S_CURSOR_NOT_ASSIGNED_AT_DELETE = 'User delete of row broken: no cursor assigned';
+  S_CURSOR_HAS_NO_ROW_AT_DELETE = 'User delete of row broken: no row associated with cursor';
+  S_INTERNAL_UNSTREAM_EDIT = 'Internal indexing error during unstream operation';
+  S_INTERNAL_META_EDIT = 'Internal indexing error during metadata processing';
 
 { Misc Functions }
+
+function OptimizationApplies(const OptLevel: TOptimizeLevel;
+                             Reason: TMemDbTransReason): boolean;
+begin
+  result := (OptLevel = olAlways) or
+  ((OptLevel >= olInitFirstTrans) and (Reason = mtrReplayFromScratch)) or
+  ((OptLevel >= olInitAllTrans) and (Reason = mtrReplayFromJournal))
+end;
+
+function QuickIndexingOptimizationApplies(Reason: TMemDBTransReason): boolean;
+begin
+  result := Optimizations.QuickIndexFirstTransaction and
+    (Reason = TMemDbTransReason.mtrReplayFromScratch);
+end;
 
 function AssignedNotSentinel(X: TMemDBStreamable): boolean;
 begin
@@ -1454,12 +1464,83 @@ constructor TMemDBIndexedList.Create;
 begin
   inherited;
   FStore := TIndexedStoreO.Create;
+  DLList.DLItemInitList(@self.FRefChangedRows);
+  DLList.DLItemInitList(@self.FRefEmptyRows);
 end;
 
 destructor TMemDBIndexedList.Destroy;
 begin
+  Assert(DLList.DlItemIsEmpty(@FRefChangedRows));
+  Assert(DLList.DlItemIsEmpty(@FRefEmptyRows));
   FStore.Free;
   inherited;
+end;
+
+//This is just a refactor of Row consistency flags,
+//hopefully more speedily, whilst not using the is
+//operator too much.
+function TMemDbIndexedList.WhichList(Row:TMemDbRow): PDLEntry;
+begin
+  if (Row.Added or Row.Changed or Row.Deleted) then
+  begin
+    Assert(not Row.Null);
+    Result := @FRefChangedRows;
+  end
+  else if Row.Null then
+  begin
+    Assert(not (Row.Added or Row.Changed or Row.Deleted));
+    Result := @FRefEmptyRows;
+  end
+  else
+    Result := nil;
+end;
+
+procedure TMemDbIndexedList.RmRowQuickLists(Row: TMemDBRow; var LPos:PDLEntry; var LHead: PDLEntry);
+begin
+  //Allow removal if not already in any lists.
+  Assert(DlItemIsEmpty(@Row.FQuickRef) = not Assigned(Row.FOwningListHead));
+  if not DLItemIsEmpty(@Row.FQuickRef) then
+  begin
+    Assert(Row.FOwningListHead = WhichList(Row));
+    LPos := Row.FQuickRef.BLink;
+    LHead := Row.FOwningListHead;
+    DLList.DLListRemoveObj(@Row.FQuickRef);
+    Row.FOwningListHead := nil;
+  end
+  else
+  begin
+    LPos := nil;
+    LHead := nil;
+  end;
+  Assert(Assigned(LPos) = Assigned(LHead));
+  Assert(DlItemIsEmpty(@Row.FQuickRef) = not Assigned(Row.FOwningListHead));
+end;
+
+procedure TMemDBIndexedList.AddRowQuicklists(Row: TMemDbRow; LPos: PDLEntry; LHead: PDLEntry);
+var
+  NewLHead: PDLEntry;
+begin
+  //Do not allow addition if already in a list.
+  Assert(Assigned(LPos) = Assigned(LHead));
+  Assert(DlItemIsEmpty(@Row.FQuickRef) = not Assigned(Row.FOwningListHead));
+
+  if not DLItemIsEmpty(@Row.FQuickRef) then
+    raise EMemDBInternalException.Create(S_QUICK_LIST_DUPLICATE_INSERTION);
+  //Where we previously removed it from.
+
+  NewLHead := WhichList(Row);
+  if Assigned(NewLHead) then
+  begin
+    //Insert it back into a list.
+    if NewLHead = LHead then
+      //Insert onto old list where it was.
+      DLList.DLItemInsertAfter(LPos, @Row.FQuickRef)
+    else
+      //Insert into different list at the end.
+      DLList.DLListInsertTail(NewLHead, @Row.FQuickRef);
+    Row.FOwningListHead := NewLHead;
+  end;
+  //Else don't insert.
 end;
 
 procedure TMemDBIndexedList.ToScratchV2(Stream: TStream);
@@ -1485,6 +1566,8 @@ var
   Row: TMemDBRow;
   IRec: TItemRec;
   RV: TIsRetVal;
+  LPos: PDLEntry;
+  QLPos, QLHead: PDLEntry;
 begin
   ExpectTag(Stream, mstIndexedListStart);
   Row := LookaheadHelper(Stream, IRec);
@@ -1493,13 +1576,26 @@ begin
     if Assigned(IRec) then
     begin
       Row := IRec.Item as TMemDBRow;
-      RV := FStore.RemoveItem(IRec);
+      RV := FStore.RemoveItemInPlace(IRec, LPos);
+      if RV <> rvOK then
+        raise EMemDBInternalException.Create(S_INTERNAL_UNSTREAM_EDIT);
       Assert(RV = rvOK);
+      Row.FStoreBackRec := nil;
+      RmRowQuickLists(Row, QLPos, QLHead);
+    end
+    else
+    begin
+      LPos := nil;
+      QLPos := nil;
+      QLHead := nil;
     end;
     Row.FromJournalV2(Stream);
-    RV := FStore.AddItem(Row, IRec);
-    Assert(RV = rvOK);
+    RV := FStore.AddItemInPlace(Row, LPos, IRec);
+    if RV <> rvOK then
+      raise EMemDBInternalException.Create(S_INTERNAL_UNSTREAM_EDIT);
     Assert(Assigned(IRec));
+    Row.FStoreBackRec := IRec;
+    AddRowQuicklists(Row, QLPos, QLHead);
     Row := LookaheadHelper(Stream, IRec);
   end;
   ExpectTag(Stream, mstIndexedListEnd);
@@ -1519,8 +1615,11 @@ begin
       raise EMemDBException.Create(S_JOURNAL_REPLAY_DUP_INST);
     Row.FromJournalV2(Stream);
     RV := FStore.AddItem(Row, IRec);
-    Assert(RV = rvOK);
+    if RV <> rvOK then
+      raise EMemDBInternalException.Create(S_INTERNAL_UNSTREAM_EDIT);
+    AddRowQuicklists(Row, nil, nil);
     Assert(Assigned(IRec));
+    Row.FStoreBackRec := IRec;
     Row := LookaheadHelper(Stream, IRec);
   end;
   ExpectTag(Stream, mstIndexedListEnd);
@@ -1571,13 +1670,7 @@ var
   RV: TIsRetVal;
 begin
   inherited;
-  RV := FStore.AddIndex(TMemDBIndexNode, MDBInternalIndexPtr.TagStructs[sicCurrent]);
-  Assert(RV = rvOK);
-  RV := FStore.AddIndex(TMemDBIndexNode, MDBInternalIndexRowId.TagStructs[sicCurrent]);
-  Assert(RV = rvOK);
-  RV := FStore.AddIndex(TMemDBIndexNode, MDBInternalIndexCurrCopy.TagStructs[sicCurrent]);
-  Assert(RV = rvOK);
-  RV := FStore.AddIndex(TMemDBIndexNode, MDBInternalIndexNextCopy.TagStructs[sicCurrent]);
+  RV := FStore.AddIndex(TMemDBIndexNode, MDBInternalIndexRowId.TagStructs[sicCurrent], false);
   Assert(RV = rvOK);
 end;
 
@@ -1588,15 +1681,18 @@ var
   Tag: pointer;
   NodeClass: TIndexNodeClass;
   RV: TIsRetVal;
+  Idx: integer;
 begin
-  //Clear all the indexes before removing items (for speed).
-  while FStore.IndexCount > 0 do
+  //Clear all the indexes in parallel before removing items (for speed).
+  for Idx := 0 to Pred(FStore.IndexCount) do
   begin
-    RV := FStore.IndexInfoByOrdinal(0, Tag, NodeClass);
+    RV := FStore.IndexInfoByOrdinal(Idx, Tag, NodeClass);
     Assert(RV = rvOK);
-    RV := FStore.DeleteIndex(Tag);
+    RV := FStore.DeleteIndex(Tag, true);
     Assert(RV = rvOK);
   end;
+  RV := FStore.PerformAsyncActions(@MemDBXlateExceptions);
+  Assert(RV = rvOK);
   //Unlike other arbitrary indexed lists, we almost definitely own
   //the table rows.
   while FStore.Count > 0 do
@@ -1604,6 +1700,7 @@ begin
     IRec := FStore.GetAnItem;
     O := IRec.Item;
     RV := FStore.RemoveItem(IRec);
+    //Remove from quick lists performed by free.
     Assert(RV = rvOK);
     O.Free;
   end;
@@ -1611,34 +1708,8 @@ begin
 end;
 
 function TMemDBTableList.GetChanged: boolean;
-var
-  IRec: TItemRec;
-  Row: TMemDBRow;
-  RV: TIsRetVal;
 begin
-  result := false;
-  RV := Store.FirstByIndex(MDBInternalIndexNextCopy.TagStructs[sicCurrent], IRec);
-  Assert(RV in [rvOK, rvNotFound]);
-  if Assigned(IRec) then
-  begin
-    Row := IRec.Item as TMemDbRow;
-    if Row.Added or Row.Changed or Row.Deleted then
-    begin
-      result := true;
-      exit;
-    end;
-  end;
-  RV := Store.LastByIndex(MDBInternalIndexNextCopy.TagStructs[sicCurrent], IRec);
-  Assert(RV in [rvOK, rvNotFound]);
-  if Assigned(IRec) then
-  begin
-    Row := IRec.Item as TMemDbRow;
-    if Row.Added or Row.Changed or Row.Deleted then
-    begin
-      result := true;
-      exit;
-    end;
-  end;
+  result := not DLItemIsEmpty(@Self.FRefChangedRows);
 end;
 
 procedure TMemDBTableList.CheckNoChanges;
@@ -1651,47 +1722,23 @@ end;
 procedure TMemDBTableList.ForEachChangedRow(Handler: TSelectiveRowHandler;
                             Ref1, Ref2: TObject);
 var
-  Current, Next: TItemRec;
+  Current, Next: PDLEntry;
   CurrentRow: TMemDBRow;
-  Down: boolean;
-  RV: TIsRetVal;
 begin
-  Down := true;
-  RV := Store.FirstByIndex(MDBInternalIndexNextCopy.TagStructs[sicCurrent], Current);
-  Assert(RV in [rvOK, rvNotFound]);
-  if not Assigned(Current) then
-    exit;
-  CurrentRow := Current.Item as TMemDBRow;
-  if not Assigned(CurrentRow.ABData[abNext]) then
+  Current := FRefChangedRows.FLink;
+  while Assigned(Current.Owner) do
   begin
-    //Humm, thought we started at lowest poss value, go up instead.
-    Down := false;
-    RV := Store.LastByIndex(MDBInternalIndexNextCopy.TagStructs[sicCurrent], Current);
-    Assert(RV in [rvOK, rvNotFound]);
-    if not Assigned(Current) then
-    begin
-      Assert(false);
-      exit;
-    end;
-    CurrentRow := Current.Item as TMemDbRow;
-    if not Assigned(CurrentRow.ABData[abNext]) then
-      exit;
-  end;
-  while Assigned(Current) and Assigned(CurrentRow.ABData[abNext]) do
-  begin
-    //Just in case handler deletes.
-    Next := Current;
-    if Down then
-      RV := Store.NextByIndex(MDBInternalIndexNextCopy.TagStructs[sicCurrent], Next)
-    else
-      RV := Store.PreviousByIndex(MDBInternalIndexNextCopy.TagStructs[sicCurrent], Next);
-    Assert(RV in [rvOK, rvNotFound]);
-    Handler(CurrentRow, Current, Ref1, Ref2, Store);
+    Next := Current.FLink;
+{$IFOPT C+}
+    CurrentRow := Current.Owner as TMemDbRow;
+{$ELSE}
+    CurrentRow := TMemDbRow(Current.Owner);
+{$ENDIF}
+    //If handler removes and reinserts, then it should use store and quicklist
+    //"in-place" functions to ensure ordering in all three lists is kept same,
+    //otherwise chaos will ensue.
+    Handler(CurrentRow, Ref1, Ref2, self);
     Current := Next;
-    if Assigned(Current) then
-      CurrentRow := Current.Item as TMemDBRow
-    else
-      CurrentRow := nil;
   end;
 end;
 
@@ -1702,51 +1749,27 @@ end;
 procedure TMemDBTableList.ForEachEmptyRow(Handler: TSelectiveRowHandler;
                                               Ref1, Ref2: TObject);
 var
-  Current, Next: TItemRec;
+  Current, Next: PDLEntry;
   CurrentRow: TMemDBRow;
-  Down: boolean;
-  RV: TIsRetVal;
 begin
-  Down := true;
-  RV := Store.FirstByIndex(MDBInternalIndexCurrCopy.TagStructs[sicCurrent], Current);
-  Assert(RV in [rvOK, rvNotFound]);
-  if not Assigned(Current) then
-    exit;
-  CurrentRow := Current.Item as TMemDBRow;
-  if Assigned(CurrentRow.ABData[abCurrent]) then
+  Current := FRefEmptyRows.FLink;
+  while Assigned(Current.Owner) do
   begin
-    //Humm, thought we started at lowest poss value, go up instead.
-    Down := false;
-    RV := Store.LastByIndex(MDBInternalIndexCurrCopy.TagStructs[sicCurrent], Current);
-    Assert(RV in [rvOK, rvNotFound]);
-    if not Assigned(Current) then
-    begin
-      Assert(false);
-      exit;
-    end;
-    CurrentRow := Current.Item as TMemDbRow;
-    if Assigned(CurrentRow.ABData[abCurrent]) then
-      exit;
-  end;
-  while Assigned(Current) and not Assigned(CurrentRow.ABData[abCurrent]) do
-  begin
-    //Just in case handler deletes.
-    Next := Current;
-    if Down then
-      RV := Store.NextByIndex(MDBInternalIndexCurrCopy.TagStructs[sicCurrent], Next)
-    else
-      RV := Store.PreviousByIndex(MDBInternalIndexCurrCopy.TagStructs[sicCurrent], Next);
-    Assert(RV in [rvOK, rvNotFound]);
-    Handler(CurrentRow, Current, Ref1, Ref2, Store);
-    Current:= Next;
-    if Assigned(Current) then
-      CurrentRow := Current.Item as TMemDBRow
-    else
-      CurrentRow := nil;
+    Next := Current.FLink;
+{$IFOPT C+}
+    CurrentRow := Current.Owner as TMemDbRow;
+{$ELSE}
+    CurrentRow := TMemDbRow(Current.Owner);
+{$ENDIF}
+    //If handler removes and reinserts, then it should use store and quicklist
+    //"in-place" functions to ensure ordering in all three lists is kept same,
+    //otherwise chaos will ensue.
+    Handler(CurrentRow, Ref1, Ref2, self);
+    Current := Next;
   end;
 end;
 
-procedure TMemDBTableList.WriteRowToJournalV2(Row: TMemDBRow; IRec: TItemRec; Ref1, Ref2: TObject; Store: TIndexedStoreO);
+procedure TMemDBTableList.WriteRowToJournalV2(Row: TMemDBRow; Ref1, Ref2: TObject; TblList: TMemDbIndexedList);
 var
   Stream: TStream;
 begin
@@ -1765,29 +1788,41 @@ begin
   end;
 end;
 
-procedure TMemDBTableList.CommitRollbackChangedRow(Row: TMemDBRow; IRec: TItemRec; Ref1, Ref2: TObject;  Store: TIndexedStoreO);
+procedure TMemDBTableList.CommitRollbackChangedRow(Row: TMemDBRow; Ref1, Ref2: TObject; TblList: TMemDbIndexedList);
 var
   rv: TIsRetVal;
+  LPos: PDLEntry;
+  QLPos, QLHead: PDLEntry;
 begin
   //Bad indexing will most likely show up here.
-  rv := FStore.RemoveItem(IRec);
-  if rv <> rvOK then
-    raise EMemDBInternalException.Create(S_COMMIT_ROLLBACK_FAILED_INDEXES_CORRUPTED);
+  if not QuickIndexingOptimizationApplies(TMemDbTransReason(Ref2)) then
+  begin
+    rv := FStore.RemoveItemInPlace(Row.FStoreBackRec, LPos);
+    if rv <> rvOK then
+      raise EMemDBInternalException.Create(S_COMMIT_ROLLBACK_FAILED_INDEXES_CORRUPTED);
+    Row.FStoreBackRec := nil;
+  end;
+  RmRowQuickLists(Row, QLPos, QLHead);
   //Remove before comitting (indexing)
   if LongBool(Ref1) then
     Row.Commit(TMemDbTransReason(Ref2))
   else
     Row.Rollback(TMemDBTransReason(Ref2));
   //And re-add after comitting (indexing)
-  rv := FStore.AddItem(Row, IRec);
-  if rv <> rvOK then
-    raise EMemDBInternalException.Create(S_COMMIT_ROLLBACK_FAILED_INDEXES_CORRUPTED);
-  Assert(Assigned(IRec));
+  if not QuickIndexingOptimizationApplies(TMemDbTransReason(Ref2)) then
+  begin
+    rv := FStore.AddItemInPlace(Row, LPos, Row.FStoreBackRec);
+    if rv <> rvOK then
+      raise EMemDBInternalException.Create(S_COMMIT_ROLLBACK_FAILED_INDEXES_CORRUPTED);
+    Assert(Assigned(Row.FStoreBackRec));
+  end;
+  AddRowQuicklists(Row, QLPos, QLHead);
 end;
 
-procedure TMemDBTableList.RemoveEmptyRow(Row: TMemDBRow; IRec: TItemRec; Ref1, Ref2: TObject; Store: TIndexedStoreO);
+procedure TMemDBTableList.RemoveEmptyRow(Row: TMemDBRow; Ref1, Ref2: TObject; TblList: TMemDbIndexedList);
 begin
-  FStore.RemoveItem(IRec);
+  FStore.RemoveItem(Row.FStoreBackRec);
+  //Back ptr, quicklists cleared by free.
   Row.Free;
 end;
 
@@ -1854,10 +1889,16 @@ begin
   Assert(Assigned(EditRec));
   Assert(Assigned(EditRec.IRec));
   Assert(not Assigned(EditRec.RemovedItem));
+  Assert(not Assigned(EditRec.Lpos));
+  Assert(not Assigned(EditRec.QLpos));
+  Assert(not Assigned(EditRec.QLhead));
   result := EditRec.IRec.Item as TMemDBRow;
-  rv := FStore.RemoveItem(EditRec.IRec);
-  Assert(rv = RVOK);
+  rv := FStore.RemoveItemInPlace(EditRec.IRec, EditRec.LPos);
+  if RV <> rvOK then
+    raise EMemDBInternalException.Create(S_INTERNAL_META_EDIT);
   EditRec.RemovedItem := result;
+  result.FStoreBackRec := nil;
+  RmRowQuickLists(result, EditRec.QLPos, EditRec.QLHead);
   EditRec.IRec := nil;
 end;
 
@@ -1868,25 +1909,32 @@ begin
   Assert(Assigned(EditRec));
   Assert(Assigned(Row));
   Assert(EditRec.RemovedItem = Row);
+  Assert(Assigned(EditRec.LPos));
   Assert(not Assigned(EditRec.IRec));
-  rv := FStore.AddItem(Row, EditRec.IRec);
-  Assert(rv = rvOK);
+  rv := FStore.AddItemInPlace(Row, EditRec.LPos, EditRec.IRec);
+  if RV <> rvOK then
+    raise EMemDBInternalException.Create(S_INTERNAL_META_EDIT);
+  Assert(Assigned(EditRec.IRec));
+  Row.FStoreBackRec := EditRec.IRec;
+  AddRowQuicklists(Row,EditRec.QLPos, EditRec.QLHead);
   EditRec.RemovedItem := nil;
+  EditRec.LPos := nil;
+  EditRec.QLPos := nil;
+  EditRec.QLHead := nil;
   //But next item will be that previously determined, not that obtained
   //by a new "get next" call.
 end;
 
 function TMemDBTableList.MoveToRowByIndexTag(Iso: TMDBIsolationLevel; TagStruct: PITagStruct;
-                             CurRow: TMemDBRow;
-                             Pos: TMemAPIPosition): TMemDBRow;
+                             Cursor: TItemRec;
+                             Pos: TMemAPIPosition): TItemRec;
 var
-  Res: TItemRec;
   RV: TIsRetVal;
   AB: TABSelection;
-  SearchVal: TMemDBIndexNodeSearchVal;
+  Row: TMemDBRow;
 begin
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
-  if Assigned(CurRow) then
+  if Assigned(Cursor) then
   begin
     GLogLog(SV_INFO, 'MoveToRowByIndexTag, with starting row ' +
       MDBIsoStrings[Iso] + ' ' + MemAPIPositionStrings[Pos] +
@@ -1901,33 +1949,56 @@ begin
 {$ENDIF}
   RV := rvInternalError;
   case Pos of
-    ptFirst: RV := FStore.FirstByIndex(TagStruct, Res);
-    ptLast: RV := FStore.LastByIndex(TagStruct, Res);
+    ptFirst:
+    begin
+      if Assigned(TagStruct) then
+        RV := FStore.FirstByIndex(TagStruct, result)
+      else
+      begin
+         result := FStore.GetAnItem;
+         if Assigned(result) then
+           RV := rvOK
+         else
+           RV := rvNotFound;
+      end;
+    end;
+    ptLast:
+    begin
+      if Assigned(TagStruct) then
+        RV := FStore.LastByIndex(TagStruct, result)
+      else
+      begin
+         result := FStore.GetLastItem;
+         if Assigned(result) then
+           RV := rvOK
+         else
+           RV := rvNotFound;
+      end;
+    end;
     ptNext, ptPrevious:
     begin
-      if not Assigned(CurRow) then
+      if not Assigned(Cursor) then
         raise EMemDBAPIException.Create(S_API_NEXT_PREV_REQUIRES_CURRENT_ROW);
-      SearchVal := TMemDBIndexNodeSearchVal.Create;
-      try
-        SearchVal.PointerSearchVal := CurRow;
-        RV := FStore.FindByIndex(MDBInternalIndexPtr.TagStructs[sicCurrent], SearchVal, Res);
-        if RV <> rvOK then
-          raise EMemDBInternalException.Create(S_API_NEXT_PREV_INTERNAL_ERROR);
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-        GLogLog(SV_INFO, 'MoveToRowByIndexTag, find of previous cursor OK.');
-{$ENDIF}
+      result := Cursor;
+      if Assigned(TagStruct) then
+      begin
         if Pos = ptNext then
-          RV := FStore.NextByIndex(TagStruct, Res)
+          RV := FStore.NextByIndex(TagStruct, result)
         else
-          RV := FStore.PreviousByIndex(TagStruct, Res);
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-        if RV = rvOK then
-          GLogLog(SV_INFO, 'MoveToRowByIndexTag, move by 1 from previous cursor OK.')
+          RV := FStore.PreviousByIndex(TagStruct, result);
+  {$IFDEF DEBUG_DATABASE_NAVIGATE}
+          if RV = rvOK then
+            GLogLog(SV_INFO, 'MoveToRowByIndexTag, move by 1 from previous cursor OK.')
+          else
+            GLogLog(SV_INFO, 'MoveToRowByIndexTag, move by 1 from previous cursor failed');
+  {$ENDIF}
+      end
+      else
+      begin
+        if Pos = ptNext then
+          RV := FStore.GetAnotherItem(result)
         else
-          GLogLog(SV_INFO, 'MoveToRowByIndexTag, move by 1 from previous cursor failed');
-{$ENDIF}
-      finally
-        SearchVal.Free;
+          RV := FStore.GetPreviousItem(result);
       end;
     end;
   else
@@ -1939,10 +2010,7 @@ begin
   else
     GLogLog(SV_INFO, 'MoveToRowByIndexTag, move to row failed');
 {$ENDIF}
-  if RV = RVOK then
-    result := Res.Item as TMemDBRow
-  else
-    result := nil;
+  Assert(Assigned(result) = (rv = RVOK));
   if not (RV in [rvOK, rvNotFound]) then
   begin
     if RV = rvTagNotFound then
@@ -1955,21 +2023,51 @@ begin
   //Now, just because we have specified a current or most recent index
   //class does not mean that the current / next AB buffer will be valid,
   //it's just that they end up at the top (or maybe bottom) of the index...
-  while Assigned(result) and NotAssignedOrSentinel(result.ABData[AB]) do
+  if Assigned(result) then
+  begin
+{$IFOPT C+}
+    row := result.Item as TMemDBROw;
+{$ELSE}
+    row := TMemDbRow(result.Item);
+{$ENDIF}
+  end
+  else
+    row := nil;
+
+  while Assigned(row) and NotAssignedOrSentinel(row.ABData[AB]) do
   begin
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
     GLogLog(SV_INFO, 'MoveToRowByIndexTag, row is sentinel, skip ' + MDBABStrings[AB]);
 {$ENDIF}
     case Pos of
-      ptFirst, ptNext: RV := FStore.NextByIndex(TagStruct, Res);
-      ptLast, ptPrevious: RV := FStore.PreviousByIndex(TagStruct, Res);
+      ptFirst, ptNext:
+      begin
+        if Assigned(TagStruct) then
+          RV := FStore.NextByIndex(TagStruct, result)
+        else
+          RV := FStore.GetAnotherItem(result);
+      end;
+      ptLast, ptPrevious:
+      begin
+        if Assigned(TagStruct) then
+          RV := FStore.PreviousByIndex(TagStruct, result)
+        else
+          RV := FStore.GetPreviousItem(result);
+      end;
     else
       Assert(false);
     end;
+    Assert(Assigned(result) = (rv = RVOK));
     if RV = RVOK then
-      result := Res.Item as TMemDBRow
+    begin
+{$IFOPT C+}
+      row := result.Item as TMemDBROw;
+{$ELSE}
+      row := TMemDbRow(result.Item);
+{$ENDIF}
+    end
     else
-      result := nil;
+      row := nil;
     if not (RV in [rvOK, rvNotFound]) then
       raise EMemDBInternalException.Create(S_API_NEXT_PREV_INTERNAL_ERROR);
   end;
@@ -1985,14 +2083,15 @@ function TMemDBTableList.FindRowByIndexTag(Iso: TMDBIsolationLevel;
                                            IndexDef: TMemIndexDef;
                                            FieldDefs: TMemFieldDefs;
                                            ITagStruct: PITagStruct;
-                                           const DataRecs: TMemDbFieldDataRecs): TMemDBRow;
+                                           const DataRecs: TMemDbFieldDataRecs): TItemRec;
 var
   RV: TIsRetVal;
-  IRec: TItemRec;
   SearchVal: TMemDBIndexNodeSearchVal;
   ABSel: TABSelection;
   i: integer;
 begin
+  if not Assigned(ITagStruct) then
+    raise EMemDbInternalException.Create(S_API_SEARCH_NO_INDEX_SPECIFIED);
   if (Length(FieldDefs) <> Length(DataRecs)) or (Length(DataRecs) = 0) then
     raise EMemDbInternalException.Create(S_API_SEARCH_BAD_FIELD_COUNT);
     //Internal, should have been spotted before now.
@@ -2017,7 +2116,7 @@ begin
   SearchVal := TMemDBIndexNodeSearchVal.Create;
   try
     SearchVal.FieldSearchVals := CopyDataRecs(DataRecs);
-    RV := Store.FindByIndex(ITagStruct, SearchVal, IRec);
+    RV := Store.FindByIndex(ITagStruct, SearchVal, result);
     if not (RV in [rvOK, rvNotFound]) then
     begin
       if RV = rvTagNotFound then
@@ -2034,19 +2133,17 @@ begin
   else
     GLogLog(SV_INFO, 'FindRowByIndexTag failed');
 {$ENDIF}
+  Assert((RV = rvOk) = Assigned(result));
   if RV = rvOK then
   begin
     ABSel := IsoToAB(Iso);
-    result := IRec.Item as TMemDBRow;
     //We are searching on current metadata, and either current or latest
     //index. Do some quick checking of AB result based on isolation level.
     //We passed in some fields, so we should definitely have some result
     //fields in the required AB buffer.
-    if NotAssignedOrSentinel(result.ABData[ABSel]) then
+    if NotAssignedOrSentinel((result.Item as TMemDBRow).ABData[ABSel]) then
       raise EMemDbInternalException.Create(S_API_SEARCH_INTERNAL);
   end
-  else
-    result := nil;
 end;
 
 procedure TMemDBTableList.ReadRowData(Row: TMemDBRow; Iso: TMDBIsolationLevel;
@@ -2064,24 +2161,36 @@ begin
   Fields.DeepAssign(RowFields);
 end;
 
-procedure TMemDBTableList.WriteRowData(Row: TMemDBRow; Iso: TMDBIsolationLevel;
+procedure TMemDBTableList.WriteRowData(var Cursor: TItemRec; Iso: TMDBIsolationLevel;
                       Fields: TMemStreamableList);
 var
   Appending: boolean;
   CreateNext: boolean;
-  SearchVal: TMemDBIndexNodeSearchVal;
   IRet: TISRetVal;
-  IRec: TItemRec;
+  LPos: PDLEntry;
+  Row: TMemDBRow;
+  QLPos, QLHead: PDLEntry;
 begin
   //If Row not assigned, then appending else modifying existing.
-  Appending := not Assigned(Row);
+  Appending := not Assigned(Cursor);
   if Appending then
   begin
     Row := TMemDBRow.Create;
     Row.Init(nil, '');
+  end
+  else
+  begin
+    if not Assigned(Cursor.Item) then
+      raise EMemDbInternalException.Create(S_CURSOR_HAS_NO_ROW_AT_MODIFY);
+{$IFOPT C+}
+    Row := Cursor.Item as TMemDBRow;
+{$ELSE}
+    Row := TMemDBRow(Cursor.Item);
+{$ENDIF}
   end;
+
   CreateNext := not Assigned(Row.ABData[abNext]);
-  if Assigned(Row.ABData[abNext]) then
+  if not CreateNext then
   begin
     //Already deleted.
     if Row.ABData[abNext] is TMemDeleteSentinel then
@@ -2092,33 +2201,44 @@ begin
   end;
   if not Appending then
   begin
-    SearchVal := TMemDBIndexNodeSearchVal.Create;
-    try
-      SearchVal.PointerSearchVal := Row;
-      IRet := Store.FindByIndex(MDBInternalIndexPtr.TagStructs[sicCurrent], SearchVal, IRec);
-      if IRet <> rvOK then
-        raise EMemDBInternalException.Create(S_API_POST_INTERNAL);
-      IRet := Store.RemoveItem(IRec);
-      if IRet <> rvOK then
-        raise EMemDBInternalException.Create(S_API_POST_INTERNAL);
-    finally
-      SearchVal.Free;
-    end;
+    IRet := Store.RemoveItemInPlace(Cursor, LPos);
+    if IRet <> rvOK then
+      raise EMemDBInternalException.Create(S_API_POST_INTERNAL);
+    Row.FStoreBackRec := nil;
+    RmRowQuickLists(Row, QLPos, QLHead);
+  end
+  else
+  begin
+    LPos := nil;
+    QLPos := nil;
+    QLHead := nil;
   end;
   if CreateNext then
     Row.ABData[abNext] := TMemStreamableList.Create;
   Row.ABData[abNext].DeepAssign(Fields);
-  IRet := Store.AddItem(Row, IRec);
+  IRet := Store.AddItemInPlace(Row, LPos, Cursor);
   if IRet <> rvOK then
     raise EMemDBInternalException.Create(S_API_POST_INTERNAL);
+  Row.FStoreBackRec := Cursor;
+  AddRowQuickLists(Row, QLPos, QLHead);
 end;
 
-procedure TMemDBTableList.DeleteRow(Row: TMemDBRow; Iso: TMDBIsolationLevel);
+procedure TMemDBTableList.DeleteRow(var Cursor: TItemRec; Iso: TMDBIsolationLevel);
 var
-  SearchVal: TMemDBIndexNodeSearchVal;
   IRet: TISRetVal;
-  IRec: TItemRec;
+  LPos: PDLEntry;
+  Row: TMemDbRow;
+  QLPos, QLHead: PDLEntry;
 begin
+  if not Assigned(Cursor) then
+    raise EMemDbInternalException.Create(S_CURSOR_NOT_ASSIGNED_AT_DELETE);
+{$IFOPT C+}
+  Row := Cursor.Item as TMemDBRow;
+{$ELSE}
+  Row := TMemDBRow(Cursor.Item);
+{$ENDIF}
+  if not Assigned(Row) then
+    raise EMemDbInternalException.Create(S_CURSOR_HAS_NO_ROW_AT_DELETE);
   if Assigned(Row.ABData[abNext]) then
   begin
     //Already deleted.
@@ -2128,22 +2248,17 @@ begin
     if Iso <> ilDirtyRead then
       raise EMemDBAPIException.Create(S_API_DELETE_OVERWRITE);
   end;
-  SearchVal := TMemDBIndexNodeSearchVal.Create;
-  try
-    SearchVal.PointerSearchVal := Row;
-    IRet := Store.FindByIndex(MDBInternalIndexPtr.TagStructs[sicCurrent], SearchVal, IRec);
-    if IRet <> rvOK then
-      raise EMemDBInternalException.Create(S_API_DELETE_INTERNAL);
-    IRet := Store.RemoveItem(IRec);
-    if IRet <> rvOK then
-      raise EMemDBInternalException.Create(S_API_DELETE_INTERNAL);
-  finally
-    SearchVal.Free;
-  end;
-  Row.Delete;
-  IRet := Store.AddItem(Row, IRec);
+  IRet := Store.RemoveItemInPlace(Cursor, LPos);
   if IRet <> rvOK then
     raise EMemDBInternalException.Create(S_API_DELETE_INTERNAL);
+  Row.FStoreBackRec := nil;
+  RmRowQuickLists(Row, QLPos, QLHead);
+  Row.Delete;
+  IRet := Store.AddItemInPlace(Row, LPos, Cursor);
+  if IRet <> rvOK then
+    raise EMemDBInternalException.Create(S_API_DELETE_INTERNAL);
+  Row.FStoreBackRec := Cursor;
+  AddRowQuickLists(Row, QLPos, QLHead);
 end;
 
 { TMemDbDatabaseMetadata }
@@ -2855,7 +2970,7 @@ begin
 end;
 
 
-procedure TMemDbTablePersistent.CheckStreamedInRowStructure(Row: TMemDBRow; IRec: TItemRec;  Ref1, Ref2: TObject; Store: TIndexedStoreO);
+procedure TMemDbTablePersistent.CheckStreamedInRowStructure(Row: TMemDBRow; Ref1, Ref2: TObject; TblList: TMemDbIndexedList);
 var
   MostRecent: TMemTableMetadataItem;
   RowFields: TMemStreamableList;
@@ -2905,11 +3020,14 @@ begin
 end;
 
 
-procedure TMemDBTablePersistent.DeleteUnusedIndices;
+procedure TMemDBTablePersistent.DeleteUnusedIndices(Reason: TMemDBTransReason);
 var
   i: integer;
   TagData: TMemDBITagData;
+  RV: TIsRetVal;
+  Parallel: boolean;
 begin
+  Parallel := OptimizationApplies(Optimizations.IndexBuildParallel, Reason);
   if FIndexingChangeRequired then
   begin
     for i := 0 to Pred(Length(FIndexChangesets)) do
@@ -2918,10 +3036,16 @@ begin
       begin
         TagData := FTagDataList[i];
         CheckTagAgreesWithMetadata(i, TagData, tciPermanentAgreesCurrent, tcpProgrammed);
-        TagData.CommitRmIdxsFromStore;
+        TagData.CommitRmIdxsFromStore(Parallel);
         FCommitChangesMade := FCommitChangesMade + [ccmDeleteUnusedIndices];
         CheckTagAgreesWithMetadata(i, TagData, tciPermanentAgreesCurrent, tcpNotProgrammed);
       end;
+    end;
+    if Parallel then
+    begin
+      RV := FData.Store.PerformAsyncActions(@MemDBXlateExceptions);
+      if RV <> rvOK then
+        raise EMemDbInternalException.Create(S_ASYNC_INDEX_OP_FAILED);
     end;
   end;
 end;
@@ -3127,7 +3251,7 @@ begin
 end;
 
 
-procedure TMemDbTablePersistent.CommitAdjustIndicesToTemporary;
+procedure TMemDbTablePersistent.CommitAdjustIndicesToTemporary(Reason: TMemDBTransReason);
 var
   CC, NC: TMemTableMetadataItem;
   i: integer;
@@ -3137,7 +3261,11 @@ var
   NewOffsets: TFieldOffsets;
   TagData: TMemDbITagData;
   ff: integer;
+  RV: TIsRetVal;
+  Parallel: boolean;
+  AddCurrIdx, AddNextIdx: boolean;
 begin
+  Parallel := OptimizationApplies(Optimizations.IndexBuildParallel, Reason);
   if FIndexingChangeRequired then
   begin
     GetCurrNxtMetaCopies(CC,NC);
@@ -3176,6 +3304,9 @@ begin
       end
       else if ictAdded in FIndexChangesets[i] then
       begin
+        AddNextIdx := true;
+        AddCurrIdx :=  not QuickIndexingOptimizationApplies(Reason);
+
         //Newly created tag needs to be made temporary, and we create the
         //"previous" field index to take into account possible field rearrangements.
         for ff := 0 to Pred(Length(FieldDefs1)) do
@@ -3189,10 +3320,17 @@ begin
           NewOffsets[ff] := FieldDefs1[ff].FieldIndex;
         TagData.MakePermanentTemporary(NewOffsets);
         CheckTagAgreesWithMetadata(i, TagData, tciTemporaryAgreesNextOnly, tcpNotProgrammed);
-        TagData.CommitAddIdxsToStore(FData.Store);
+        TagData.CommitAddIdxsToStore(FData.Store, Parallel, AddCurrIdx, AddNextIdx);
         CheckTagAgreesWithMetadata(i, TagData, tciTemporaryAgreesNextOnly, tcpProgrammed);
       end;
       FTemporaryIndexLimit := Succ(i);
+    end;
+
+    if Parallel then
+    begin
+      RV := FData.Store.PerformAsyncActions(@MemDBXlateExceptions);
+      if RV <> rvOK then
+        raise EMemDbInternalException.Create(S_ASYNC_INDEX_OP_FAILED);
     end;
 
     for i := 0 to Pred(Length(FIndexChangesets)) do
@@ -3210,6 +3348,10 @@ begin
 {$ENDIF}
         ]) <> [] then
       begin
+
+        //TODO - Not considered Parallel index validation yet, but
+        //could do it pretty easily.
+
         //Handle index validation.
         if IndexDef1.IndexAttrs * [iaUnique, iaNotEmpty] <> [] then
           RevalidateEntireUserIndex(i);
@@ -3220,12 +3362,16 @@ begin
   end;
 end;
 
-procedure TMemDbTablePersistent.CommitRestoreIndicesToPermanent;
+procedure TMemDbTablePersistent.CommitRestoreIndicesToPermanent(Reason: TMemDbTransReason);
 var
   i: integer;
   Limit: integer;
   TagData: TMemDBITagData;
+  Parallel: boolean;
+  RV: TIsRetVal;
+
 begin
+  Parallel := OptimizationApplies(Optimizations.IndexBuildParallel, Reason);
   //Adjust temporary indices back to permanent ones.
   //Temporary index tags are such that commit removal and addition should have
   //gone OK.
@@ -3249,8 +3395,22 @@ begin
       CheckTagAgreesWithMetadata(i, TagData, tciTemporaryAgreesNextOnly, tcpProgrammed);
       TagData.CommitRestoreToPermanent;
       CheckTagAgreesWithMetadata(i, TagData, tciPermanentAgreesNext, tcpProgrammed);
+      //We have pre-built the next index only, and now we can build the current index.
+      if QuickIndexingOptimizationApplies(Reason) then
+      begin
+        //Pre-built next is now the current.
+        TagData.SwizzleLatestToCurrent;
+        TagData.CommitAddIdxsToStore(FData.Store, Parallel, false, true);
+      end;
     end;
   end;
+  if Parallel then
+  begin
+    RV := FData.Store.PerformAsyncActions(@MemDBXlateExceptions);
+    if RV <> rvOK then
+      raise EMemDbInternalException.Create(S_ASYNC_INDEX_OP_FAILED);
+  end;
+
 end;
 
 procedure TMemDBTablePersistent.RollbackRestoreIndicesToPermanent;
@@ -3381,7 +3541,7 @@ begin
   end;
 end;
 
-procedure TMemDbTablePersistent.CheckIndexForRow(Row: TMemDBRow; IRec: TItemRec;  Ref1, Ref2: TObject;  Store: TIndexedStoreO);
+procedure TMemDbTablePersistent.CheckIndexForRow(Row: TMemDBRow; Ref1, Ref2: TObject; TblList: TMemDbIndexedList);
 
   function MostRecentFieldsFromRow(Row: TMemDBRow): TMemStreamableList;
   begin
@@ -3447,11 +3607,12 @@ begin
       TagStruct := TagData.TagStructs[sicLatest];
       if not FData.Store.HasIndex(TagStruct) then
         raise EMemDBInternalException.Create(S_INDEX_TAG_NOT_FOUND);
-      PrevRec := IRec;
-      NextRec := IRec;
-      RV := Store.NextByIndex(TagStruct, NextRec);
+      Assert(Assigned(Row.FStoreBackRec));
+      PrevRec := Row.FStoreBackRec;
+      NextRec := Row.FStoreBackRec;
+      RV := TblList.Store.NextByIndex(TagStruct, NextRec);
       Assert(RV in [rvOK, rvNotFound]);
-      RV := Store.PreviousByIndex(TagStruct, PrevRec);
+      RV := TblList.Store.PreviousByIndex(TagStruct, PrevRec);
       Assert(RV in [rvOK, rvNotFound]);
       if Assigned(PrevRec) then
         PrevRow := PrevRec.Item as TMemDbRow
@@ -3688,7 +3849,7 @@ begin
     //(Indices need to be set up to allow foreign key checking).
 
     AddNewTagStructs;    //Changes FCommitChangesMade
-    DeleteUnusedIndices; //Changes FCommitChangesMade.
+    DeleteUnusedIndices(Reason); //Changes FCommitChangesMade.
 
     //When we adjust table structure, add and delete should be OK
     //(we just need to consider deletion case).
@@ -3696,7 +3857,7 @@ begin
     if FDataChangeRequired and (Reason <> mtrReplayFromScratch) then
       AdjustTableStructureForMetadata;
 
-    CommitAdjustIndicesToTemporary; //Changes FCommitChangesMade
+    CommitAdjustIndicesToTemporary(Reason); //Changes FCommitChangesMade
 
     //Partial validation of indexes. when data changes.
     //In other cases (fromScratch, indexAdd), we expect to revalidate
@@ -3718,7 +3879,7 @@ begin
     FData.Commit(Reason);
     if ccmIndexesToTemporary in FCommitChangesMade then
     begin
-      CommitRestoreIndicesToPermanent;
+      CommitRestoreIndicesToPermanent(Reason);
       FCommitChangesMade := FCommitChangesMade - [ccmIndexesToTemporary];
     end;
   end;
@@ -3990,7 +4151,6 @@ type
                           rpaReferredDeletedFieldsToList,
                           rpaReferredAddedFieldsToList);
 
-  PMemDBFKMeta = ^TMemDBFKMeta;
   TProcessRowFKStruct = record
     OutList: TIndexedStoreO;
     PMeta: PMemDBFKMeta;
@@ -4000,7 +4160,7 @@ type
   PProcessRowFKStruct = ^TProcessRowFKStruct;
 
 procedure TMemDBForeignKeyPersistent.ProcessRow(Row: TMemDBRow;
-                     IRec: TItemRec; Ref1, Ref2: TObject; Store: TIndexedStoreO);
+                     Ref1, Ref2: TObject; TblList: TMemDbIndexedList);
 var
   PStruct: PProcessRowFKStruct;
   CurrentRowFields, NextRowFields: TMemStreamableList;
@@ -4141,7 +4301,8 @@ begin
     IRec := Meta.TableReferring.Data.Store.GetAnItem;
     while Assigned(IRec) do
     begin
-      ProcessRow(IRec.Item as TMemDBRow, IRec, @PStruct, nil, Meta.TableReferring.Data.Store);
+      Assert((IRec.Item as TMemDBRow).FStoreBackRec = IRec);
+      ProcessRow(IRec.Item as TMemDBRow, @PStruct, nil, Meta.TableReferring.Data);
       RV := Meta.TableReferring.Data.Store.GetAnotherItem(IRec);
       Assert(RV in [rvOK, rvNotFound]);
     end;
@@ -4487,16 +4648,20 @@ begin
 end;
 
 procedure TMemDbForeignKeyPersistent.SetupIndexes(var Meta: TMemDBFkMeta);
+var
+  RV: TIsRetVal;
 begin
   with Meta.Lists do
   begin
     TagReferredAddedNext.abBuf := abNext;
     TagReferredAddedNext.FieldAbsIdxs := CopyFieldOffsets(Meta.FieldDefsReferredAbsIdx);
+    SyncFastOffsets(TagReferredAddedNext.FieldAbsIdxs, TagReferredAddedNext.FieldAbsIdxsFast);
 
     FReferringAdded := TIndexedStoreO.Create;
     FReferredDeleted := TIndexedStoreO.Create;
     FReferredAdded := TIndexedStoreO.Create;
-    FReferredAdded.AddIndex(TMemDBRowLookasideIndexNode, @TagReferredAddedNext);
+    RV := FReferredAdded.AddIndex(TMemDBRowLookasideIndexNode, @TagReferredAddedNext, false);
+    Assert(RV = rvOK);
   end;
 end;
 
@@ -4510,6 +4675,8 @@ begin
     FReferringAdded := nil;
     FReferredDeleted := nil;
     FReferredAdded := nil;
+    SetLength(TagReferredAddedNext.FieldAbsIdxs, 0);
+    SyncFastOffsets(TagReferredAddedNext.FieldAbsIdxs, TagReferredAddedNext.FieldAbsIdxsFast);
   end;
 end;
   //Referential integrity is violated when:
@@ -4545,7 +4712,38 @@ end;
   //For each item left in referring added list, there should be a row in the referrer table.
   //For each item left in the referred deleted list, there should not be a row in the referring table.
 
+function TMemDBForeignKeyPersistent.ReferringAddedHandler(Ref1, Ref2: Pointer):Pointer;
+var
+  P :PMemDBFKMeta;
+  Reason: TMemDBTransReason;
+begin
+  P := PMemDBFKMeta(Ref1);
+  Reason := TMemDBTransReason(Ref2);
+  CreateReferringAddedList(P^, Reason);
+  TrimReferringAddedList(P^, Reason);
+  result := nil;
+end;
+
+function TMemDBForeignKeyPersistent.ReferredDeletedHandler(Ref1, Ref2: Pointer):Pointer;
+var
+  P :PMemDBFKMeta;
+  Reason: TMemDBTransReason;
+begin
+  P := PMemDBFKMeta(Ref1);
+  Reason := TMemDBTransReason(Ref2);
+  CreateReferredDeletedList(P^, Reason);
+  TrimReferredDeletedList(P^, Reason);
+  result := nil;
+end;
+
 procedure TMemDBForeignKeyPersistent.CreateCheckForeignKeyRowSets(var  Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
+
+var
+  Handlers:TParallelHandlers;
+  Refs1, Refs2: TPHRefs;
+  Excepts: TPHExcepts;
+  Rets: TPHRefs;
+  i: Integer;
 
 begin
   //Create some "lookaside lists" of values that have been added / deleted.
@@ -4553,10 +4751,29 @@ begin
   try
     //N.B. Indexed store gives us a "duplicate key" error code, which we should use.
     SetupIndexes(Meta);
-    CreateReferringAddedList(Meta, Reason);
-    TrimReferringAddedList(Meta, Reason);
-    CreateReferredDeletedList(Meta, Reason);
-    TrimReferredDeletedList(Meta, Reason);
+    if OptimizationApplies(Optimizations.FKListsParallel, Reason) then
+    begin
+      SetLength(Handlers,2);
+      SetLength(Refs1, 2);
+      SetLength(Refs2, 2);
+      for i := 0 to 1 do
+      begin
+        if i = 0 then
+          Handlers[i] := ReferringAddedHandler
+        else
+          Handlers[i] := ReferredDeletedHandler;
+        Refs1[i] := @Meta;
+        Refs2[i] := Pointer(Reason);
+      end;
+      ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
+    end
+    else
+    begin
+      CreateReferringAddedList(Meta, Reason);
+      TrimReferringAddedList(Meta, Reason);
+      CreateReferredDeletedList(Meta, Reason);
+      TrimReferredDeletedList(Meta, Reason);
+    end;
     CheckOutstandingCrossRefs(Meta, Reason);
   finally
     ClearIndexes(Meta);
@@ -4671,6 +4888,21 @@ begin
 end;
 
 { TMemDBRow }
+
+constructor TMemDbRow.Create;
+begin
+  inherited;
+  DLItemInitObj(self, @FQuickRef);
+end;
+
+destructor TMemDbRow.Destroy;
+begin
+  if not DlItemIsEmpty(@FQuickRef) then
+    DLListRemoveObj(@FQuickRef);
+  FOwningListHead := nil;
+  inherited;
+end;
+
 
 procedure TMemDbRow.Init(Context: TObject; Name:string);
 var
@@ -5043,81 +5275,45 @@ begin
   result := TObject(TList(self).Items[Idx]) as TMemDBEntity;
 end;
 
+function TDBObjList.ParallelFree(Ref1: Pointer; Ref2: Pointer): pointer;
+begin
+  (TObject(Ref1) as TMemDBEntity).Free;
+  result := nil;
+end;
+
 destructor TDBObjList.Destroy;
 var
   Idx: integer;
+  Refs1, Refs2:TPHRefs;
+  Rets: TPHRefs;
+  Handlers: TParallelHandlers;
+  Excepts: TPHExcepts;
 begin
-  for Idx := 0 to Pred(Count) do
-    Items[Idx].Free;
+  //Startup / shutdown optimization.
+  if OptimizationApplies(Optimizations.TearDownParallel, mtrReplayFromScratch) then
+  begin
+    if Count > 0 then
+    begin
+      SetLength(Refs1, Count);
+      SetLength(Handlers, Count);
+      for Idx := 0 to Pred(Count) do
+      begin
+        Refs1[Idx] := Items[Idx];
+        Handlers[Idx] := ParallelFree;
+      end;
+      Parallelizer.ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
+    end;
+  end
+  else
+  begin
+    for Idx := 0 to Pred(Count) do
+      Items[Idx].Free;
+  end;
   inherited;
 end;
 
 
-{$IFDEF PRE_COMMIT_PARALLEL}
-{ TDBParallelWorkitem }
-
-function TDBParallelWorkItem.DoWork;
-begin
-  result := 0;
-  try
-    case Op of
-      dbpopPreCommit: Entity.PreCommit(Reason);
-      dbpopCommit: Entity.Commit(Reason);
-    else
-      raise EMemDBInternalException.Create(S_INTERNAL_PARALLEL_OP);
-    end;
-    FOK := true;
-  except
-    on E: Exception do
-    begin
-      FOK := false;
-      result := -1;
-      FExceptionMsg := E.Message;
-    end;
-  end;
-end;
-
-{$ENDIF}
-
 { TMemDBDatabasePersistent }
-
-{$IFDEF PRE_COMMIT_PARALLEL}
-procedure TMemDBDatabasePersistent.WorkItemCompleteCommon(WorkItem: TWorkItem);
-var
-  WI: TDBParallelWorkItem;
-begin
-  //Bit cheeky, but I think strings use interlocked Ops for multi-thread,
-  //so will simply write last failure msg in. It's an error case anyway...
-  WI := WorkItem as TDBParallelWorkItem;
-  if not WI.OK then
-    FAccumulatedOK := false;
-  if Length(WI.ExceptionMsg) > 0 then
-    FAccumulatedExceptionMsg := WI.ExceptionMsg;
-  if TInterlocked.Decrement(FPoolRequests) = 0 then
-    FPoolEvent.SetEvent;
-end;
-
-procedure TMemDBDatabasePersistent.HandlePoolNormalCompletion(Sender: TObject);
-var
-  WI: TDBParallelWorkItem;
-begin
-  WI := Sender as TDBParallelWorkItem;
-  WorkItemCompleteCommon(WI);
-end;
-
-procedure TMemDBDatabasePersistent.HandlePoolCancelledCompletion(Sender: TObject);
-var
-  WI: TDBParallelWorkItem;
-begin
-  WI := Sender as TDBParallelWorkItem;
-  if WI.OK then
-    WI.OK := false;
-  if Length(WI.ExceptionMsg) = 0 then
-    WI.ExceptionMsg := S_ASYNC_PROCESS_CANCELLED;
-  WorkItemCompleteCommon(WI);
-end;
-{$ENDIF}
-
 
 procedure TMemDBDatabasePersistent.CheckNoChanges;
 var
@@ -5128,13 +5324,72 @@ begin
 end;
 
 
+function TMemDBDatabasePersistent.PreCommitParallelHandler(Ref1, Ref2: pointer):pointer;
+var
+  ObjI :TMemDBEntity;
+begin
+  ObjI := TMemDBEntity(Ref1);
+  Assert(Assigned(ObjI));
+  Assert(ObjI is TMemDbEntity);
+  ObjI.PreCommit(TMemDbTransReason(Ref2));
+  result := nil;
+end;
+
+procedure TMemDBDatabasePersistent.PreCommitParallel(Reason: TMemDBTransReason);
+var
+  Handlers: TParallelHandlers;
+  Refs1, Refs2: TPHRefs;
+  Rets: TPHRefs;
+  Excepts: TPHExcepts;
+  Count, i: integer;
+  ObjI: TMemDbEntity;
+  DoTables, Include: boolean;
+begin
+  for DoTables := True downto False do
+  begin
+    Count := 0;
+    for i := 0 to Pred(FUserObjs.Count) do
+    begin
+      ObjI := FUserObjs[i];
+      Assert((ObjI is TMemDBTablePersistent) or (ObjI is TMemDBForeignKeyPersistent));
+      if DoTables then
+        Include := ObjI is TMemDBTablePersistent
+      else
+        Include := ObjI is TMemDBForeignKeyPersistent;
+      if Include then
+        Inc(Count);
+    end;
+    if (Count > 0) then
+    begin
+      SetLength(Handlers, Count);
+      SetLength(Refs1, Count);
+      SetLength(Refs2, Count);
+      Count := 0;
+      for i := 0 to Pred(FUserObjs.Count) do
+      begin
+        ObjI := FUserObjs[i];
+        Assert((ObjI is TMemDBTablePersistent) or (ObjI is TMemDBForeignKeyPersistent));
+        if DoTables then
+          Include := ObjI is TMemDBTablePersistent
+        else
+          Include := ObjI is TMemDBForeignKeyPersistent;
+        if Include then
+        begin
+          Handlers[Count] := PreCommitParallelHandler;
+          Refs1[Count] := Pointer(ObjI);
+          Refs2[Count] := Pointer(Reason);
+          Inc(Count)
+        end;
+      end;
+      Parallelizer.ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
+    end;
+  end;
+end;
+
 procedure TMemDBDatabasePersistent.PreCommit(Reason: TMemDBTransReason);
 var
   i, j: integer;
   ObjI, ObjJ: TMemDBEntity;
-{$IFDEF PRE_COMMIT_PARALLEL}
-  WI: TDBParallelWorkItem;
-{$ENDIF}
 begin
   inherited;
   //Check no duplicate object names.
@@ -5158,85 +5413,12 @@ begin
   //(so changesets done, indexes in temporary state if applicable).
 
   //Can also do tables and foreign keys in parallel.
-{$IFDEF PRE_COMMIT_PARALLEL}
-  if Reason = mtrReplayFromScratch then
+  if OptimizationApplies(Optimizations.PreAndCommitParallel, Reason) then
   begin
-    FAccumulatedOK := true;
-    FAccumulatedExceptionMsg := '';
-
-    Assert(FPoolRequests = 0);
-    FPoolEvent.SetEvent;
-    //Table pre-commit step.
-    //Increment the pool request count before starting any workitems to remove a race.
-    for i := 0 to Pred(FUserObjs.Count) do
-    begin
-      ObjI := FUserObjs[i];
-      Assert((ObjI is TMemDBTablePersistent) or (ObjI is TMemDBForeignKeyPersistent));
-      if ObjI is TMemDBTablePersistent then
-      begin
-        if FPoolRequests = 0 then
-          FPoolEvent.ResetEvent;
-        Inc(FPoolRequests);
-      end;
-    end;
-    for i := 0 to Pred(FUserObjs.Count) do
-    begin
-      ObjI := FUserObjs[i];
-      Assert((ObjI is TMemDBTablePersistent) or (ObjI is TMemDBForeignKeyPersistent));
-      if ObjI is TMemDBTablePersistent then
-      begin
-        WI := TDBParallelWorkItem.Create;
-        WI.CanAutoFree := true;
-        WI.CanAutoReset := false;
-        WI.Entity := ObjI;
-        WI.Parent := self;
-        WI.Reason := Reason;
-        WI.Op := dbpopPreCommit;
-        GCommonPool.AddWorkItem(FPoolRec, WI);
-      end;
-    end;
-    FPoolEvent.WaitFor(INFINITE); //Wait for all table pre-commits to finish.
-    if not FAccumulatedOK then
-      raise EMemDBException.Create(FAccumulatedExceptionMsg);
-
-    //Foreign key pre-commit step.
-    Assert(FPoolRequests = 0);
-    FPoolEvent.SetEvent;
-    for i := 0 to Pred(FUserObjs.Count) do
-    begin
-      ObjI := FUserObjs[i];
-      if ObjI is TMemDBForeignKeyPersistent then
-      begin
-        if FPoolRequests = 0 then
-          FPoolEvent.ResetEvent;
-        Inc(FPoolRequests);
-      end;
-    end;
-    for i := 0 to Pred(FUserObjs.Count) do
-    begin
-      ObjI := FUserObjs[i];
-      if ObjI is TMemDBForeignKeyPersistent then
-      begin
-        WI := TDBParallelWorkItem.Create;
-        WI.CanAutoFree := true;
-        WI.CanAutoReset := false;
-        WI.Entity := ObjI;
-        WI.Parent := self;
-        WI.Reason := Reason;
-        WI.Op := dbpopPreCommit;
-        GCommonPool.AddWorkItem(FPoolRec, WI);
-      end;
-    end;
-    FPoolEvent.WaitFor(INFINITE); //Wait for all foreign key pre-commits to finish.
-    if not FAccumulatedOK then
-      raise EMemDBException.Create(FAccumulatedExceptionMsg);
-
-    Assert(FPoolRequests = 0);
-    FPoolRequests := 0;
+    PreCommitParallel(Reason);
   end
   else
   begin
-{$ENDIF}
     for i := 0 to Pred(FUserObjs.Count) do
     begin
       ObjI := FUserObjs[i];
@@ -5250,9 +5432,7 @@ begin
       if ObjI is TMemDBForeignKeyPersistent then
         ObjI.PreCommit(Reason);
     end;
-{$IFDEF PRE_COMMIT_PARALLEL}
   end;
-{$ENDIF}
 end;
 
 procedure TMemDBDatabasePersistent.LookaheadHelper(Stream: TStream;
@@ -5455,62 +5635,52 @@ begin
   end;
 end;
 
+function TMemDBDatabasePersistent.CommitParallelHandler(Ref1, Ref2: pointer):pointer;
+var
+  ObjI :TMemDBEntity;
+begin
+  ObjI := TMemDBEntity(Ref1);
+  Assert(Assigned(ObjI));
+  Assert(ObjI is TMemDbEntity);
+  ObjI.Commit(TMemDbTransReason(Ref2));
+  result := nil;
+end;
+
+procedure TMemDbDatabasePersistent.CommitParallel(Reason: TMemDBTransReason);
+var
+  Handlers: TParallelHandlers;
+  Refs1, Refs2: TPHRefs;
+  Excepts: TPHExcepts;
+  Rets: TPHRefs;
+  i: integer;
+begin
+  if FUserObjs.Count > 0 then
+  begin
+    SetLength(Handlers, FUserObjs.Count);
+    SetLength(Refs1, FUserObjs.Count);
+    SetLength(Refs2, FUserObjs.Count);
+    for i := 0 to Pred(FUserObjs.Count) do
+    begin
+      Handlers[i] := CommitParallelHandler;
+      Refs1[i] := FUserObjs.Items[i];
+      Refs2[i] := Pointer(Reason);
+    end;
+    ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
+  end;
+end;
 
 procedure TMemDBDatabasePersistent.Commit(Reason: TMemDbTransReason);
 var
   i: integer;
-{$IFDEF PRE_COMMIT_PARALLEL}
-  ObjI: TMemDBEntity;
-  WI: TDBParallelWorkItem;
-{$ENDIF}
 begin
   inherited;
-{$IFDEF PRE_COMMIT_PARALLEL}
-  if Reason = mtrReplayFromScratch then
-  begin
-    FAccumulatedOK := true;
-    FAccumulatedExceptionMsg := '';
-
-    Assert(FPoolRequests = 0);
-    FPoolEvent.SetEvent;
-    //Table pre-commit step.
-    //Increment the pool request count before starting any workitems to remove a race.
-    for i := 0 to Pred(FUserObjs.Count) do
-    begin
-      ObjI := FUserObjs[i];
-      Assert((ObjI is TMemDBTablePersistent) or (ObjI is TMemDBForeignKeyPersistent));
-      if FPoolRequests = 0 then
-        FPoolEvent.ResetEvent;
-      Inc(FPoolRequests);
-    end;
-    for i := 0 to Pred(FUserObjs.Count) do
-    begin
-      ObjI := FUserObjs[i];
-      Assert((ObjI is TMemDBTablePersistent) or (ObjI is TMemDBForeignKeyPersistent));
-      WI := TDBParallelWorkItem.Create;
-      WI.CanAutoFree := true;
-      WI.CanAutoReset := false;
-      WI.Entity := ObjI;
-      WI.Parent := self;
-      WI.Reason := Reason;
-      WI.Op := dbpopCommit;
-      GCommonPool.AddWorkItem(FPoolRec, WI);
-    end;
-    FPoolEvent.WaitFor(INFINITE); //Wait for all table pre-commits to finish.
-    if not FAccumulatedOK then
-      raise EMemDBException.Create(FAccumulatedExceptionMsg);
-
-    Assert(FPoolRequests = 0);
-    FPoolRequests := 0;
-  end
+  if OptimizationApplies(Optimizations.PreAndCommitParallel, Reason) then
+    CommitParallel(Reason)
   else
   begin
-{$ENDIF}
     for i := 0 to Pred(FUserObjs.Count) do
       FUserObjs.Items[i].Commit(Reason);
-{$IFDEF PRE_COMMIT_PARALLEL}
   end;
-{$ENDIF}
 end;
 
 procedure TMemDBDatabasePersistent.Rollback(Reason: TMemDbTransReason);
@@ -5522,19 +5692,52 @@ begin
     FUserObjs.Items[i].Rollback(Reason);
 end;
 
-procedure TMemDBDatabasePersistent.CleanupCommon;
+procedure TMemDBDatabasePersistent.CleanupCommon(Reason: TMemDBTransReason);
 var
   i: integer;
+  NullIdx: integer;
+  Refs1, Refs2: TPHRefs;
+  Rets: TPHRefs;
+  Excepts: TPHExcepts;
+  Handlers: TParallelHandlers;
 begin
-  for i := 0 to Pred(FUserObjs.Count) do
+  //Unfortunately not quite the same at TDBObjList parallel free.
+  if OptimizationApplies(Optimizations.TearDownParallel, Reason) then
   begin
-    if FUserObjs.Items[i].Null then
+    NullIdx := 0;
+    for i := 0 to Pred(FuserObjs.Count) do
+      if FUserObjs.Items[i].Null then
+        Inc(NullIdx);
+    if NullIdx > 0 then
     begin
-      FUserObjs.Items[i].Free;
-      FUserObjs.Items[i] := nil;
+      SetLength(Refs1, NullIdx);
+      SetLength(Handlers, NullIdx);
+      NullIdx := 0;
+      for i := 0 to Pred(FuserObjs.Count) do
+      begin
+        if FUserObjs.Items[i].Null then
+        begin
+          Refs1[NullIdx] := FUserObjs.Items[i];
+          FUserObjs.Items[i] := nil; //So can pack later.
+          Handlers[NullIdx] := FUserObjs.ParallelFree;
+          Inc(NullIdx);
+        end;
+      end;
+      Parallelizer.ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
+    end;
+  end
+  else
+  begin
+    for i := 0 to Pred(FUserObjs.Count) do
+    begin
+      if FUserObjs.Items[i].Null then
+      begin
+        FUserObjs.Items[i].Free;
+        FUserObjs.Items[i] := nil;
+      end;
     end;
   end;
-    FUserObjs.Pack;
+  FUserObjs.Pack;
 end;
 
 procedure TMemDBDatabasePersistent.PostCommitCleanup(Reason: TMemDbTransReason);
@@ -5544,7 +5747,7 @@ begin
   inherited;
   for i := 0 to Pred(FUserObjs.Count) do
     FUserObjs.Items[i].PostCommitCleanup(Reason);
-  CleanupCommon;
+  CleanupCommon(reason);
 end;
 
 procedure TMemDBDatabasePersistent.PostRollbackCleanup(Reason: TMemDbTransReason);
@@ -5554,7 +5757,7 @@ begin
   inherited;
   for i := 0 to Pred(FUserObjs.Count) do
     FUserObjs.Items[i].PostRollbackCleanup(Reason);
-  CleanupCommon;
+  CleanupCommon(Reason);
 end;
 
 function TMemDBDatabasePersistent.EntitiesByName(AB:TABSelection; Name: string; var Idx: integer): TMemDBEntity;

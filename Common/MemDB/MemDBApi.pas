@@ -37,7 +37,8 @@ interface
 {$ENDIF}
 
 uses
-  MemDBBuffered, MemDbMisc, MemDbStreamable, MemDBIndexing, Classes;
+  MemDBBuffered, MemDbMisc, MemDbStreamable, MemDBIndexing, Classes,
+  IndexedStore;
 
 type
   TMemDBDatabase = class;
@@ -122,11 +123,7 @@ type
 
   TMemAPITableData = class(TMemAPITable)
   private
-    //Cursor actually MemDBRow, but not to be modified directly here
-    //Use table object API calls.
-    //Poss create row object API calls.
-    //Field list always exists.
-    FCursor: TObject;
+    FCursor: TItemRec;
     FAdding: boolean;
     FFieldList: TMemStreamableList;
     FFieldListDirty: boolean;
@@ -223,33 +220,33 @@ type
     function API_GetIndexNames(Iso: TMDBIsolationLevel): TStringList;
 
     function API_DataLocate(Iso: TMDBIsolationLevel;
-                            Cursor: TObject;
+                            Cursor: TItemRec;
                             Pos: TMemAPIPosition;
-                            IdxName: string): TObject; //Returns cursor.
+                            IdxName: string): TItemRec; //Returns cursor.
 
     function API_DataFindByIndex(Iso: TMDBIsolationLevel;
                                 IdxName: string;
-                                const DataRecs: TMemDbFieldDataRecs): TObject; //Returns cursor
+                                const DataRecs: TMemDbFieldDataRecs): TItemRec; //Returns cursor
 
     function API_DataFindEdgeByIndex(Iso: TMDBIsolationLevel;
                                      IdxName: string;
                                      const DataRecs: TMemDbFieldDataRecs;
-                                     Pos: TMemAPIPosition): TObject; //Returns cursor.
+                                     Pos: TMemAPIPosition): TItemRec; //Returns cursor.
 
     procedure API_DataReadRow(Iso: TMDBIsolationLevel;
-                             Cursor: TObject;
+                             Cursor: TItemRec;
                              FieldList: TMemStreamableList);
 
     procedure API_DataInitRowForAppend(Iso: TMDBIsolationLevel;
-                                      Cursor: TObject;
+                                      Cursor: TItemRec;
                                       FieldList: TMemStreamableList);
 
     procedure API_DataRowModOrAppend(Iso: TMDBIsolationLevel;
-                                    Cursor: TObject;
+                                    var Cursor: TItemRec;
                                     FieldList: TMemStreamableList);
 
     procedure API_DataRowDelete(Iso: TMDBIsolationLevel;
-                                Cursor: TObject);
+                                var Cursor: TItemRec);
 
     function API_DataGetFieldAbsIdx(Iso: TMDBIsolationLevel;
                                     FieldName: string): integer;
@@ -286,6 +283,7 @@ uses
 const
   S_API_POST_OR_DISCARD_BEFORE_NAVIGATING =
     'Data at cursor locally changed. Post changes or discard before navigating around table.';
+  S_API_NO_FIELDS_DUP_POST_OR_DISCARD = 'No fields in field list. Duplicate post or discard?';
   S_API_BAD_FIELD_INDEX = 'Internal API error, bad field index. (IsoLevel confusion?)';
   S_API_CANNOT_CHANGE_FIELD_TYPES_DIRECTLY =
     'Don''t change field types in data records, use metadata functions instead.';
@@ -500,6 +498,12 @@ begin
   FAdding := false;
 end;
 
+procedure TMemAPITableData.Discard;
+begin
+  FFieldListDirty := false;
+  DiscardInternal;
+end;
+
 constructor TMemAPITableData.Create;
 begin
   inherited;
@@ -579,6 +583,8 @@ var
 begin
   if not (Assigned(FCursor) or FAdding) then
     raise EMemDBAPIException.Create(S_API_NO_ROW_SELECTED);
+  if FFieldList.Count = 0 then
+    raise EMemDBAPiException.Create(S_API_NO_FIELDS_DUP_POST_OR_DISCARD);
   FieldAbsIdx := Table.API_DataGetFieldAbsIdx(FIsolation, FieldName);
   if (FieldAbsIdx < 0) or (FieldAbsIdx >= FFieldList.Count) then
     raise EMemDBInternalException.Create(S_API_BAD_FIELD_INDEX);
@@ -596,6 +602,8 @@ begin
   CheckReadWriteTransaction;
   if not (Assigned(FCursor) or FAdding) then
     raise EMemDBAPIException.Create(S_API_NO_ROW_SELECTED);
+  if FFieldList.Count = 0 then
+    raise EMemDBAPiException.Create(S_API_NO_FIELDS_DUP_POST_OR_DISCARD);
   FieldAbsIdx := Table.API_DataGetFieldAbsIdx(FIsolation, FieldName);
   if (FieldAbsIdx < 0) or (FieldAbsIdx >= FFieldList.Count) then
     raise EMemDBInternalException.Create(S_API_BAD_FIELD_INDEX);
@@ -626,11 +634,14 @@ begin
   //Do the post.
   Table.API_DataRowModOrAppend(FIsolation, FCursor, FFieldList);
   Discard; //Discard temp data.
+  //TODO - Arguably, we could re-read the data in and remove
+  //exceptions about no fields in field list.
+  //Table.API_DataReadRow(FIsolation, FCursor, FFieldList);
 end;
 
 procedure TMemAPITableData.Delete;
 var
-  NextCursor: TObject;
+  NextCursor: TItemRec;
 begin
   CheckReadWriteTransaction;
   if not Assigned(FCursor) then
@@ -649,13 +660,6 @@ end;
 function TMemAPITableData.RowSelected: boolean;
 begin
   result := Assigned(FCursor);
-end;
-
-
-procedure TMemAPITableData.Discard;
-begin
-  FFieldListDirty := false;
-  DiscardInternal;
 end;
 
 { TMemAPIForeignKey }
@@ -1214,15 +1218,15 @@ begin
 end;
 
 function TMemDBTable.API_DataLocate(Iso: TMDBIsolationLevel;
-                        Cursor: TObject;
+                        Cursor: TItemRec;
                         Pos: TMemAPIPosition;
-                        IdxName: string): TObject; //Returns cursor.
+                        IdxName: string): TItemRec; //Returns cursor.
 var
   PTagStruct: PITagStruct;
   Idx: TMemIndexDef;
 begin
   if Length(IdxName) = 0 then
-    PTagStruct := MDBInternalIndexRowId.TagStructs[sicCurrent]
+    PTagStruct := nil
   else
   begin
     PTagStruct := IndexNameToIndexAndTag(Iso, Idx, IdxName);
@@ -1244,13 +1248,13 @@ begin
   end;
 {$ENDIF}
   result := Data.MoveToRowByIndexTag(Iso, PTagStruct,
-                                     Cursor as TMemDBRow,
+                                     Cursor,
                                      Pos);
 end;
 
 function TMemDBTable.API_DataFindByIndex(Iso: TMDBIsolationLevel;
                             IdxName: string;
-                            const DataRecs: TMemDbFieldDataRecs): TObject; //Returns cursor
+                            const DataRecs: TMemDbFieldDataRecs): TItemRec; //Returns cursor
 var
   ITagStruct: PITagStruct;
   Idx: TMemIndexDef;
@@ -1283,13 +1287,13 @@ end;
 function TMemDBTable.API_DataFindEdgeByIndex(Iso: TMDBIsolationLevel;
                                              IdxName: string;
                                              const DataRecs: TMemDbFieldDataRecs;
-                                             Pos: TMemAPIPosition): TObject;
+                                             Pos: TMemAPIPosition): TItemRec;
 var
   ITagStruct: PITagStruct;
   Idx: TMemIndexDef;
   FieldDefs: TMemFieldDefs;
   FieldAbsIdxs: TFieldOffsets;
-  Next: TObject;
+  Next: TItemRec;
   NextFields, ResultFields: TMemStreamableList;
   AB: TABSelection;
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
@@ -1341,8 +1345,8 @@ begin
 {$ENDIF}
     repeat
       Next := self.Data.MoveToRowByIndexTag(Iso, ITagStruct,
-                                         result as TMemDBRow,
-                                         Pos);
+                                             result,
+                                             Pos);
       if Assigned(Next) then
       begin
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
@@ -1350,8 +1354,8 @@ begin
 {$ENDIF}
 
         //Pretty sure we shouldn't have any sentinels at this point.
-        NextFields := (Next as TMemDBRow).ABData[AB] as TMemStreamableList;
-        ResultFields := (result as TMemDBRow).ABData[AB] as TMemStreamableList;
+        NextFields := (Next.Item as TMemDBRow).ABData[AB] as TMemStreamableList;
+        ResultFields := (result.Item as TMemDBRow).ABData[AB] as TMemStreamableList;
 
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
         //Compare all fields.
@@ -1386,7 +1390,7 @@ begin
 end;
 
 procedure TMemDBTable.API_DataReadRow(Iso: TMDBIsolationLevel;
-                         Cursor: TObject;
+                         Cursor: TItemRec;
                          FieldList: TMemStreamableList);
 var
   Row: TMemDBRow;
@@ -1395,7 +1399,7 @@ begin
   if not (Assigned(Cursor) and Assigned(FieldList)) then
     raise EMemDBInternalException.Create(S_API_INTERNAL_READING_ROW);
   FieldList.FreeAndClear;
-  Row := Cursor as TMemDBRow;
+  Row := Cursor.Item as TMemDBRow;
   RowFields := Row.ABData[IsoToAB(Iso)] as TMemStreamableList;
   FieldList.DeepAssign(RowFields);
 end;
@@ -1415,7 +1419,7 @@ begin
 end;
 
 procedure TMemDBTable.API_DataInitRowForAppend(Iso: TMDBIsolationLevel;
-                                  Cursor: TObject;
+                                  Cursor: TItemRec;
                                   FieldList: TMemStreamableList);
 var
   MFields: TMemStreamableList;
@@ -1442,7 +1446,7 @@ begin
 end;
 
 procedure TMemDBTable.API_DataRowModOrAppend(Iso: TMDBIsolationLevel;
-                                Cursor: TObject;
+                                var Cursor: TItemRec;
                                 FieldList: TMemStreamableList);
 var
   MFields: TMemStreamableList;
@@ -1464,11 +1468,11 @@ begin
     if MField.FieldType <> MData.FDataRec.FieldType then
       raise EMemDBInternalException.Create(S_API_ROW_BAD_STRUCTURE);
   end;
-  self.Data.WriteRowData(Cursor as TMemDBRow, Iso, FieldList);
+  self.Data.WriteRowData(Cursor, Iso, FieldList);
 end;
 
 procedure TMemDBTable.API_DataRowDelete(Iso: TMDBIsolationLevel;
-                                Cursor: TObject);
+                                        var Cursor: TItemRec);
 begin
   //In an ideal world we could prob allow the row to be deleted anyway...
   //but not sure what would happen with journal replay,
@@ -1479,7 +1483,7 @@ begin
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
   GLogLog(SV_INFO, 'API_DataRowDelete: Actual deletion.');
 {$ENDIF}
-  Data.DeleteRow(Cursor as TMemDBRow, Iso);
+  Data.DeleteRow(Cursor, Iso);
 end;
 
 

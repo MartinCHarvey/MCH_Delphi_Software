@@ -3,7 +3,7 @@ object Form1: TForm1
   Top = 0
   Caption = 'Form1'
   ClientHeight = 480
-  ClientWidth = 640
+  ClientWidth = 580
   FormFactor.Width = 320
   FormFactor.Height = 480
   FormFactor.Devices = [dkDesktop, dkiPhone, dkiPad]
@@ -71,7 +71,7 @@ object Form1: TForm1
     Position.Y = 8.000000000000000000
     TabOrder = 6
     Text = 'Checkpoint'
-    Width = 80.000000000000000000
+    Width = 97.000000000000000000
     OnClick = CheckpointBtnClick
   end
   object SmallTrans: TButton
@@ -115,8 +115,17 @@ object Form1: TForm1
     Position.X = 360.000000000000000000
     Position.Y = 40.000000000000000000
     TabOrder = 11
-    Text = 'Load Unload 1G'
+    Text = 'Build 1G'
     Width = 97.000000000000000000
     OnClick = BigTableClick
+  end
+  object BigTblMod: TButton
+    Height = 22.000000000000000000
+    Position.X = 472.000000000000000000
+    Position.Y = 40.000000000000000000
+    TabOrder = 12
+    Text = 'Mod 1G ChkIdx'
+    Width = 97.000000000000000000
+    OnClick = BigTblModClick
   end
 end

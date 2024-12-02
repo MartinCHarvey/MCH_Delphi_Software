@@ -42,6 +42,7 @@ uses
 {$IFDEF USE_TRACKABLES_LOCAL_MEMDBMISC}
   , Trackables
 {$ENDIF}
+  , Parallelizer
   ;
 
 
@@ -51,6 +52,8 @@ type
   EMemDBInternalException = class(EMemDBException);
   EMemDBConsistencyException = class(EMemDBException);
   EMemDBAPIException = class(EMemDBException);
+  //N.B. If you add to this exception list, then
+  //please update MemDBXLateExceptions
 
   TMDBAccessMode = (amRead, amReadWrite);
   TMDBSyncMode = (amLazyWrite, amFlushBuffers);
@@ -78,7 +81,7 @@ type
 
   TSubIndexClass = (sicCurrent, sicLatest);
   TMainIndexClass = (micPermanent, micTemporary, micInternal);
-  TInternalIndexClass = (iicPtr, iicRowId, iicCurCopy, iicNextCopy);
+  TInternalIndexClass = (iicRowId); //By-Pointer indexes now gone.
   TTempStorageMode = (tsmMemory, tsmDisk);
 
   TTagCheckIndexState = (tciPermanentAgreesCurrent, tciPermanentAgreesNext,
@@ -104,6 +107,12 @@ type
   TOldFieldOffset = 0.. $3FFF; //14 bits.
   TFieldOffset = integer;
   TFieldOffsets = array of TFieldOffset;
+  PFieldOffset = ^TFieldOffset;
+
+  TFieldOffsetsFast = record
+    PtrFirst: PFieldOffset;
+    Count: integer;
+  end;
   //Field offsets used for two slightly different things: Standard ND field offsets
   //and also a list of field absolute indexes. They're close enough the same now.
 
@@ -117,6 +126,7 @@ type
   // Removed MCH hg changeset 1201, 25/11/24
   //function MultiDataRecsSame(const A,B: TMemDbFieldDataRecs; AssertSameFormat:boolean = true): boolean;
   function CopyFieldOffsets(A: TFieldOffsets): TFieldOffsets;
+  procedure SyncFastOffsets(const Offsets: TFieldOffsets; var Fast: TFieldOffsetsFast);
   // Removed MCH hg changeset 1201, 25/11/24
   //function FieldOffsetsSame(A,B: TFieldOffsets; AssertSameFormat:boolean = true): boolean;
 
@@ -221,6 +231,10 @@ type
     //Do not need encap index class.
     FDefaultFieldOffsets: TFieldOffsets;
     FExtraFieldOffsets: TFieldOffsets;
+
+    FDefaultFastOffsets: TFieldOffsetsFast;
+    FExtraFastOffsets: TFieldOffsetsFast;
+
     FInit: boolean;
     FStoreIdxSet: TIndexedStoreO;
 
@@ -236,6 +250,7 @@ type
 
     function GetDefaultFieldOffsets: TFieldOffsets;
     function GetExtraFieldOffsets: TFieldOffsets;
+
   public
     constructor Create;
     destructor Destroy; override;
@@ -246,14 +261,19 @@ type
     procedure CommitRestoreToPermanent;
     procedure RollbackRestoreToPermanent;
 
-    procedure CommitAddIdxsToStore(Store: TIndexedStoreO);
-    procedure CommitRmIdxsFromStore;
+    procedure CommitAddIdxsToStore(Store: TIndexedStoreO; Async: boolean; AddCurrent, AddLatest: boolean);
+    procedure CommitRmIdxsFromStore(Async:boolean);
     procedure RollbackRestoreIdxsToStore(Store: TIndexedStoreO);
+    procedure SwizzleLatestToCurrent;
     procedure RollbackRmIdxsFromStore;
 
     //For internal indexes, classes shared between all instances.
     procedure InitInternal(InternalClass: TInternalIndexClass);
     procedure AddInternalIndexToStore(Store:TIndexedStoreO);
+
+    //No interlocked ops on DynArray refcounts.
+    procedure GetDefaultFieldOffsetsFast(var OfsFast: TFieldOffsetsFast); inline;
+    procedure GetExtraFieldOffsetsFast(var OfsFast: TFieldOffsetsFast); inline;
 
     property IdxsSetToStore: boolean read GetIdxsSetToStore;
 
@@ -264,9 +284,19 @@ type
 
     property DefaultFieldOffsets: TFieldOffsets read GetDefaultFieldOffsets;
     property ExtraFieldOffsets: TFieldOffsets read GetExtraFieldOffsets;
-
   end;
 
+  //Initializations for 1st transaction at startup best when first is
+  //large "from scratch" transaction, and later xations are smaller.
+  TOptimizeLevel = (olNever, olInitFirstTrans, olInitAllTrans, olAlways);
+
+  TOptimizations = record
+    PreAndCommitParallel: TOptimizeLevel;
+    IndexBuildParallel: TOptimizeLevel;
+    TearDownParallel: TOptimizeLevel;
+    FKListsParallel: TOptimizeLevel;
+    QuickIndexFirstTransaction: boolean;
+  end;
 
 const
   IndexableFieldTypes: TMDBFieldTypeSet = [ftInteger,
@@ -285,10 +315,12 @@ const
   SubIndexClassStrings: TSubIndexClassStrings
     = ('sicCurrent', 'sicLatest');
   InternalIndexClassStrings: TInternalIndexClassStrings
-   = ('iicPtr', 'iicRowId', 'iicCurCopy', 'iicNextCopy');
+   = ('iicRowId');
 
 var
   AllIndexAttrs: TMDBIndexAttrs;
+  MemDBXlateExceptions: TExceptionHandlerChain;
+  Optimizations: TOptimizations;
 
 procedure AppendTrailingDirSlash(var Path: string);
 
@@ -318,6 +350,7 @@ const
   S_IDXS_NOT_INTERNAL = 'Index tag data not for an internal index, cannot add/remove in this way';
   S_INTERNAL_INDEX_HAS_STORE_LINK = 'Internal index tagdata attached to specific db';
   S_INDEXTAG_DATA_NOT_VALID = 'Data in index tag not valid for this index type';
+  S_OPTIMIZED_INDEX_SWIZZLE_FAILED = 'Internal error, optimised index building failed';
 
 {  TMemDBITagData }
 
@@ -405,8 +438,46 @@ destructor TMemDBITagData.Destroy;
 begin
   if IdxsSetToStore then
     raise EMemDBInternalException.Create(S_TAG_FREED_IDX_SET);
+  SetLength(FDefaultFieldOffsets, 0);
+  SetLength(FExtraFieldOffsets, 0);
+  SyncFastOffsets(FDefaultFieldOffsets, FDefaultFastOffsets);
+  SyncFastOffsets(FExtraFieldOffsets, FExtraFastOffsets);
   inherited;
 end;
+
+procedure SyncFastOffsets(const Offsets: TFieldOffsets; var Fast: TFieldOffsetsFast);
+var
+  i: integer;
+  PtrSome: PFieldOffset;
+begin
+  Assert(Assigned(Fast.PtrFirst) = (Fast.Count <> 0));
+  if Assigned(Fast.PtrFirst) then
+    FreeMem(Fast.PtrFirst);
+  Fast.Count := Length(Offsets);
+  if Fast.Count > 0 then
+  begin
+    GetMem(Fast.PtrFirst, Fast.Count * sizeof(TFieldOffset));
+    PtrSome := Fast.PtrFirst;
+    for i := 0 to Pred(Fast.Count) do
+    begin
+      PtrSome^ := Offsets[i];
+      Inc(PtrSome);
+    end;
+  end
+  else
+    Fast.PtrFirst := nil;
+end;
+
+procedure TMemDbITagData.GetDefaultFieldOffsetsFast(var OfsFast: TFieldOffsetsFast);
+begin
+  OfsFast := FDefaultFastOffsets;
+end;
+
+procedure TMemDbITagData.GetExtraFieldOffsetsFast(var OfsFast: TFieldOffsetsFast);
+begin
+  OfsFast := FExtraFastOffsets;
+end;
+
 
 procedure TMemDbITagData.InitPermanent(DefaultFieldOffsets: TFieldOffsets);
 begin
@@ -415,6 +486,7 @@ begin
   FIndexClass := micPermanent;
   FDefaultFieldOffsets := CopyFieldOffsets(DefaultFieldOffsets);
   FInit := true;
+  SyncFastOffsets(FDefaultFieldOffsets, FDefaultFastOffsets);
 end;
 
 procedure TMemDbITagData.MakePermanentTemporary(NewOffsets: TFieldOffsets);
@@ -424,6 +496,8 @@ begin
   FIndexClass := micTemporary;
   FExtraFieldOffsets := FDefaultFieldOffsets;
   FDefaultFieldOffsets := CopyFieldOffsets(NewOffsets);
+  SyncFastOffsets(FDefaultFieldOffsets, FDefaultFastOffsets);
+  SyncFastOffsets(FExtraFieldOffsets, FExtraFastOffsets);
 end;
 
 procedure TMemDBITagData.CommitRestoreToPermanent;
@@ -433,6 +507,7 @@ begin
   //Default field offset unchanged as new offset.
   SetLength(FExtraFieldOffsets, 0);
   FIndexClass := micPermanent;
+  SyncFastOffsets(FExtraFieldOffsets, FExtraFastOffsets);
 end;
 
 procedure TMemDBITagData.RollbackRestoreToPermanent;
@@ -441,6 +516,8 @@ begin
   FDefaultFieldOffsets := CopyFieldOffsets(FExtraFieldOffsets); //Rollback default changes.
   SetLength(FExtraFieldOffsets, 0);
   FIndexClass := micPermanent;
+  SyncFastOffsets(FDefaultFieldOffsets, FDefaultFastOffsets);
+  SyncFastOffsets(FExtraFieldOffsets, FExtraFastOffsets);
 end;
 
 procedure TMemDBITagData.InitInternal(InternalClass: TInternalIndexClass);
@@ -452,27 +529,49 @@ begin
   FInit := true;
 end;
 
-procedure TMemDBITagData.CommitAddIdxsToStore(Store: TIndexedStoreO);
+procedure TMemDBItagData.SwizzleLatestToCurrent;
+begin
+  if not (FIndexClass in [micPermanent, micTemporary]) then
+    raise EMemDBInternalException.Create(S_IDXS_NOT_USER);
+  if not IdxsSetToStore then
+    raise EMemDBInternalException.Create(S_IDXS_NOT_SET); //Overwriting prev init?
+  if not (FStoreIdxSet.AdjustIndexTag(@FLatestTagStruct, @FCurrentTagStruct) = rvOK) then
+    raise EMemDbInternalException.Create(S_OPTIMIZED_INDEX_SWIZZLE_FAILED);
+end;
+
+procedure TMemDBITagData.CommitAddIdxsToStore(Store: TIndexedStoreO; Async: boolean; AddCurrent, AddLatest: boolean);
 var
   rv: TIsRetVal;
 begin
   if not (FIndexClass in [micPermanent, micTemporary]) then
     raise EMemDBInternalException.Create(S_IDXS_NOT_USER);
-  if IdxsSetToStore then
-    raise EMemDBInternalException.Create(S_IDXS_ALREADY_SET); //Overwriting prev init?
 
-  if Store.AddIndex(TMemDBIndexNode, @FCurrentTagStruct) <> rvOK then
-    raise EMemDbInternalException.Create(S_INDEX_ADD_FAILED);
-  if Store.AddIndex(TMemDBIndexNode, @FLatestTagStruct) <> rvOK then
+  //Deal with optimization case where not all set at once.
+  if AddCurrent and AddLatest then
+    if IdxsSetToStore then
+      raise EMemDBInternalException.Create(S_IDXS_ALREADY_SET); //Overwriting prev init?
+
+  if AddCurrent then
   begin
-    rv := Store.DeleteIndex(@FCurrentTagStruct);
-    Assert(rv = rvOK);
-    raise EMemDbInternalException.Create(S_INDEX_ADD_FAILED);
+    if Store.AddIndex(TMemDBIndexNode, @FCurrentTagStruct, Async) <> rvOK then
+      raise EMemDbInternalException.Create(S_INDEX_ADD_FAILED);
+  end;
+  if AddLatest then
+  begin
+    if Store.AddIndex(TMemDBIndexNode, @FLatestTagStruct, Async) <> rvOK then
+    begin
+      if AddCurrent then
+      begin
+        rv := Store.DeleteIndex(@FCurrentTagStruct, false);
+        Assert(rv = rvOK);
+      end;
+      raise EMemDbInternalException.Create(S_INDEX_ADD_FAILED);
+    end;
   end;
   FStoreIdxSet := Store;
 end;
 
-procedure TMemDBITagData.CommitRmIdxsFromStore;
+procedure TMemDBITagData.CommitRmIdxsFromStore(Async: boolean);
 var
   rv: TIsRetVal;
 begin
@@ -480,11 +579,11 @@ begin
     raise EMemDBInternalException.Create(S_IDXS_NOT_USER);
   if not IdxsSetToStore then
     raise EMemDBInternalException.Create(S_IDXS_NOT_SET); //Overwriting prev init?
-  if (FStoreIdxSet.DeleteIndex(@FCurrentTagStruct) <> rvOK) then
+  if (FStoreIdxSet.DeleteIndex(@FCurrentTagStruct, Async) <> rvOK) then
     raise EMemDbInternalException.Create(S_INDEX_DELETE_FAILED);
-  if FStoreIdxSet.DeleteIndex(@FLatestTagStruct) <> rvOK then
+  if FStoreIdxSet.DeleteIndex(@FLatestTagStruct, Async) <> rvOK then
   begin
-    rv := FStoreIdxSet.AddIndex(TMemDBIndexNode, @FCurrentTagStruct);
+    rv := FStoreIdxSet.AddIndex(TMemDBIndexNode, @FCurrentTagStruct, false);
     Assert(rv = rvOK);
     raise EMemDbInternalException.Create(S_INDEX_DELETE_FAILED);
   end;
@@ -497,11 +596,11 @@ var
 begin
   Assert(FIndexClass in [micPermanent, micTemporary]);
   Assert(not Assigned(FStoreIdxSet) or (FStoreIdxSet = Store));
-  rv := Store.AddIndex(TMemDBIndexNode, @FCurrentTagStruct);
+  rv := Store.AddIndex(TMemDBIndexNode, @FCurrentTagStruct, false);
   Assert(rv = rvOK);
   if (FIndexClass <> micInternal) then
   begin
-    rv := Store.AddIndex(TMemDBIndexNode, @FLatestTagStruct);
+    rv := Store.AddIndex(TMemDBIndexNode, @FLatestTagStruct, false);
     Assert(rv = rvOK);
   end;
   FStoreIdxSet := Store;
@@ -513,9 +612,12 @@ var
 begin
   Assert(FIndexClass in [micPermanent, micTemporary]);
   Assert(IdxsSetToStore);
-  rv := FStoreIdxSet.DeleteIndex(@FCurrentTagStruct);
+  //Don't deal with optimization here, we'll just muddle thru as best we can
+  //In any release build, the failure to RM index not created will be
+  //silent and harmless.
+  rv := FStoreIdxSet.DeleteIndex(@FCurrentTagStruct, false);
   Assert(rv = rvOK);
-  rv := FStoreIdxSet.DeleteIndex(@FLatestTagStruct);
+  rv := FStoreIdxSet.DeleteIndex(@FLatestTagStruct, false);
   Assert(rv = rvOK);
   FStoreIdxSet := nil;
 end;
@@ -526,7 +628,7 @@ begin
     raise EMemDBInternalException.Create(S_IDXS_NOT_INTERNAL);
   if IdxsSetToStore then
     raise EMemDBInternalException.Create(S_INTERNAL_INDEX_HAS_STORE_LINK);
-  if Store.AddIndex(TMemDBIndexNode, @FCurrentTagStruct) <> rvOK then
+  if Store.AddIndex(TMemDBIndexNode, @FCurrentTagStruct, false) <> rvOK then
     raise EMemDBInternalException.Create(S_INDEX_ADD_FAILED);
 end;
 
@@ -734,8 +836,47 @@ begin
   inherited;
 end;
 
+function MemDBGeneralXlateExceptions(EClass: SysUtils.ExceptClass;
+                              EMsg: string): boolean;
+begin
+  if EClass = EMemDBInternalException then
+    raise EMemDBInternalException.Create(EMsg);
+  if EClass = EMemDBConsistencyException then
+    raise EMemDBConsistencyException.Create(EMsg);
+  if EClass = EMemDBAPIException then
+    raise EMemDBAPIException.Create(EMsg);
+  while Assigned(EClass) do
+  begin
+    if EClass = EMemDBException then
+      raise EMemDbException.Create(EMsg);
+    EClass := SysUtils.ExceptClass(EClass.ClassParent);
+  end;
+  result := false;
+end;
 
+{
+  TOptimizeLevel = (olNever, olInitAndShutdown, olAlways);
+  TOptimizations = record
+    PreAndCommitParallel: TOptimizeLevel;
+    IndexBuildParallel: TOptimizeLevel;
+    TearDownParallel: TOptimizeLevel;
+    FKListsParallel: TOptimizeLevel;
+  end;
+}
 
 initialization
   AllIndexAttrs := GetAllIndexAttrs;
+  with MemDBXlateExceptions do
+  begin
+    Func := MemDBGeneralXlateExceptions;
+    Next := nil;
+  end;
+  with Optimizations do
+  begin
+    PreAndCommitParallel := olInitAllTrans;
+    IndexBuildParallel := olAlways;
+    TearDownParallel := olInitAllTrans;
+    FKListsParallel := olNever;
+    QuickIndexFirstTransaction := True;
+  end;
 end.
