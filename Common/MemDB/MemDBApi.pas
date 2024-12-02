@@ -283,6 +283,7 @@ uses
 const
   S_API_POST_OR_DISCARD_BEFORE_NAVIGATING =
     'Data at cursor locally changed. Post changes or discard before navigating around table.';
+  S_API_NO_FIELDS_DUP_POST_OR_DISCARD = 'No fields in field list. Duplicate post or discard?';
   S_API_BAD_FIELD_INDEX = 'Internal API error, bad field index. (IsoLevel confusion?)';
   S_API_CANNOT_CHANGE_FIELD_TYPES_DIRECTLY =
     'Don''t change field types in data records, use metadata functions instead.';
@@ -497,6 +498,12 @@ begin
   FAdding := false;
 end;
 
+procedure TMemAPITableData.Discard;
+begin
+  FFieldListDirty := false;
+  DiscardInternal;
+end;
+
 constructor TMemAPITableData.Create;
 begin
   inherited;
@@ -576,6 +583,8 @@ var
 begin
   if not (Assigned(FCursor) or FAdding) then
     raise EMemDBAPIException.Create(S_API_NO_ROW_SELECTED);
+  if FFieldList.Count = 0 then
+    raise EMemDBAPiException.Create(S_API_NO_FIELDS_DUP_POST_OR_DISCARD);
   FieldAbsIdx := Table.API_DataGetFieldAbsIdx(FIsolation, FieldName);
   if (FieldAbsIdx < 0) or (FieldAbsIdx >= FFieldList.Count) then
     raise EMemDBInternalException.Create(S_API_BAD_FIELD_INDEX);
@@ -593,6 +602,8 @@ begin
   CheckReadWriteTransaction;
   if not (Assigned(FCursor) or FAdding) then
     raise EMemDBAPIException.Create(S_API_NO_ROW_SELECTED);
+  if FFieldList.Count = 0 then
+    raise EMemDBAPiException.Create(S_API_NO_FIELDS_DUP_POST_OR_DISCARD);
   FieldAbsIdx := Table.API_DataGetFieldAbsIdx(FIsolation, FieldName);
   if (FieldAbsIdx < 0) or (FieldAbsIdx >= FFieldList.Count) then
     raise EMemDBInternalException.Create(S_API_BAD_FIELD_INDEX);
@@ -623,6 +634,9 @@ begin
   //Do the post.
   Table.API_DataRowModOrAppend(FIsolation, FCursor, FFieldList);
   Discard; //Discard temp data.
+  //TODO - Arguably, we could re-read the data in and remove
+  //exceptions about no fields in field list.
+  //Table.API_DataReadRow(FIsolation, FCursor, FFieldList);
 end;
 
 procedure TMemAPITableData.Delete;
@@ -646,13 +660,6 @@ end;
 function TMemAPITableData.RowSelected: boolean;
 begin
   result := Assigned(FCursor);
-end;
-
-
-procedure TMemAPITableData.Discard;
-begin
-  FFieldListDirty := false;
-  DiscardInternal;
 end;
 
 { TMemAPIForeignKey }

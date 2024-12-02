@@ -155,8 +155,8 @@ type
     //I need a really lightweight lock here - one of these is created for
     //every single DB row. Additionally, we expect the chances of conflict to be
     //low, and gets lower as dataset gets larger.
-    procedure LockIndexNodeList;
-    procedure UnlockIndexNodeList;
+    procedure LockIndexNodeList; inline; //like that makes any difference with lock prefix...
+    procedure UnlockIndexNodeList; inline;
   public
     constructor Create;
     property Item: TObject read FItem write SetItem;
@@ -1020,7 +1020,7 @@ begin
   //and failed additions, and once that's happened re-raise if necessary.
   //Only exceptions we expect to handle explicitly here are ENoMem, everything
   //else gets forwarded thru.
-  for AsyncIdx := Low(0) to Pred(AsyncCount) do
+  for AsyncIdx := 0 to Pred(AsyncCount) do
   begin
     Index := Refs1[AsyncIdx];
     case Index.AsyncState of
@@ -1039,7 +1039,7 @@ begin
     end;
     Index.AsyncState := iasNone;
   end;
-  for AsyncIdx := Low(0) to Pred(AsyncCount) do
+  for AsyncIdx := 0 to Pred(AsyncCount) do
   begin
     if Excepts[AsyncIdx] = EOutOfMemory then
       raise EOutOfMemory.Create(S_NO_MEM_FORWARDED);

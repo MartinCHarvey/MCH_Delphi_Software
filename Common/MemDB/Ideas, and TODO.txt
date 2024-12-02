@@ -3,12 +3,6 @@ MemDB: TODO and notes.
 
 TODO: Fix app builds using indexed store.
 
-TODO: Fast path commit.
-  - At very initial creation, don't create current index,
-  - Swizzle next index for current index,
-    don't remove/reinsert nodes if next/current index consistent.
-  - TODO - Check that indices not garbarged by swizzle.
-
 TODO: review mem alloc on rollback path?
 
 TODO: Find out why validate FK stuff so slow. Building indexes?

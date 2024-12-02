@@ -101,7 +101,7 @@ procedure ExecParallel(Handlers: TParallelHandlers;
                        var  Rets: TPHRefs;
                        const Xlators: PExceptionHandlerChain = nil);
 var
-  L, i: integer;
+  L, BatchL, BatchOfs, i: integer;
   Threads: TThreadArray;
   WaitHandles: THandleArray;
   WaitRet: DWORD;
@@ -129,13 +129,21 @@ begin
         if Length(Refs2) > 0 then
           FRef2 := Refs2[i];
         FHandler := Handlers[i];
+        Start;
       end;
     end;
-    for i := 0 to Pred(L) do
-      Threads[i].Start;
-    WaitRet := Windows.WaitForMultipleObjects(L, @WaitHandles[0], true, INFINITE);
-    if not ((WaitRet >= WAIT_OBJECT_0) and (WaitRet < (WAIT_OBJECT_0 + MAXIMUM_WAIT_OBJECTS))) then
-      raise EParallelException.Create(S_UNEXPECTED_WAIT_RET + IntToStr(WaitRet));
+    BatchOfs := 0;
+    while BatchOfs < L do
+    begin
+      if L < MAXIMUM_WAIT_OBJECTS then
+        BatchL := L
+      else
+        BatchL := MAXIMUM_WAIT_OBJECTS;
+      WaitRet := Windows.WaitForMultipleObjects(BatchL, @WaitHandles[BatchOfs], true, INFINITE);
+      if not ((WaitRet >= WAIT_OBJECT_0) and (WaitRet < (WAIT_OBJECT_0 + MAXIMUM_WAIT_OBJECTS))) then
+        raise EParallelException.Create(S_UNEXPECTED_WAIT_RET + IntToStr(WaitRet));
+      Inc(BatchOfs, BatchL);
+    end;
     for i := 0 to Pred(L) do
     begin
       if Threads[i].FRaised then

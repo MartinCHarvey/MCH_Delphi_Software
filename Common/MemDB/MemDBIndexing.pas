@@ -194,7 +194,9 @@ var
   OwnRow, OtherRow: TMemDBRow;
   OwnFieldList, OtherFieldList: TMemStreamableList;
   OwnField, OtherField: TMemDBStreamable;
-  OwnFieldOffsets, OtherFieldOffsets: TFieldOffsets;
+//  OwnFieldOffsets, OtherFieldOffsets: TFieldOffsets;
+  OwnFieldOffsetsFast, OtherFieldOffsetsFast: TFieldOffsetsFast;
+  PtrOwnOffset, PtrOtherOffset: PFieldOffset;
   UsingNextCopy, OtherUsingNextCopy: boolean;
   ff:integer;
   LOfs: integer;
@@ -323,33 +325,36 @@ begin
         //Dynamic array assignment by reference - no dynamic array allocation
         //or copying here.
         if UsingNextCopy then
-          OwnFieldOffsets := TagData.ExtraFieldOffsets
+          TagData.GetExtraFieldOffsetsFast(OwnFieldOffsetsFast)
         else
-          OwnFieldOffsets := TagData.DefaultFieldOffsets;
+          TagData.GetDefaultFieldOffsetsFast(OwnFieldOffsetsFast);
+
         if OtherUsingNextCopy then
-          OtherFieldOffsets := TagData.ExtraFieldOffsets
+          TagData.GetExtraFieldOffsetsFast(OtherFieldOffsetsFast)
         else
-          OtherFieldOffsets := TagData.DefaultFieldOffsets;
+          TagData.GetDefaultFieldOffsetsFast(OtherFieldOffsetsFast);
       end
       else
       begin
-        OwnFieldOffsets := TagData.DefaultFieldOffsets;
-        OtherFieldOffsets := TagData.DefaultFieldOffsets;
+        TagData.GetDefaultFieldOffsetsFast(OwnFieldOffsetsFast);
+        TagData.GetDefaultFieldOffsetsFast(OtherFieldOffsetsFast);
       end;
 
       //Check field indexes in range.
       //However, do not need to have the same number of fields in each...
-      LOfs := Length(OwnFieldOffsets);
+      LOfs := OwnFieldOffsetsFast.Count;
       Assert(LOfs > 0);
-      Assert(LOfs = Length(OtherFieldOffsets));
+      Assert(LOfs = OtherFieldOffsetsFast.Count);
       result := 0;
       ff := 0;
+      PtrOwnOffset := OwnFieldOffsetsFast.PtrFirst;
+      PtrOtherOffset := OtherFieldOffsetsFast.PtrFirst;
       while (result = 0) and (ff < LOfs) do
       begin
-        Assert(OwnFieldOffsets[ff] <= OwnFieldList.Count);
-        Assert(OtherFieldOffsets[ff] <= OtherFieldList.Count);
-        OwnField := OwnFieldList.Items[OwnFieldOffsets[ff]];
-        OtherField := OtherFieldList.Items[OtherFieldOffsets[ff]];
+        Assert(PtrOwnOffset^ < OwnFieldList.Count);
+        Assert(PtrOtherOffset^ < OtherFieldList.Count);
+        OwnField := OwnFieldList.Items[PtrOwnOffset^];
+        OtherField := OtherFieldList.Items[PtrOtherOffset^];
         Assert(not (OwnField is TMemDeleteSentinel));
         Assert(not (OtherField is TMemDeleteSentinel));
 {$IFOPT C+}
@@ -360,6 +365,8 @@ begin
                                 TMemFieldData(OtherField).FDataRec);
 {$ENDIF}
         Inc(ff);
+        Inc(PtrOwnOffset);
+        Inc(PtrOtherOffset);
       end;
     end;
   end;
@@ -377,7 +384,10 @@ var
   OtherRow: TMemDBRow;
   OtherFieldList: TMemStreamableList;
   OtherField: TMemDBStreamable;
-  OtherFieldOffsets: TFieldOffsets;
+//  OtherFieldOffsets: TFieldOffsets;
+  OtherFieldOffsetsFast: TFieldOffsetsFast;
+  PtrOtherOffset: PFieldOffset;
+
   OtherUsingNextCopy: boolean;
   ff:integer;
   LOfs: integer;
@@ -467,25 +477,26 @@ begin
         //Dynamic array assignment by reference - no dynamic array allocation
         //or copying here.
         if OtherUsingNextCopy then
-          OtherFieldOffsets := TagData.ExtraFieldOffsets
+          TagData.GetExtraFieldOffsetsFast(OtherfieldOffsetsFast)
         else
-          OtherFieldOffsets := TagData.DefaultFieldOffsets;
+          TagData.GetDefaultFieldOffsetsFast(OtherFieldOffsetsFast);
       end
       else
-        OtherFieldOffsets := TagData.DefaultFieldOffsets;
+        TagData.GetDefaultFieldOffsetsFast(OtherFieldOffsetsFast);
+
 
       //Check field indexes in range.
       //However, do not need to have the same number of fields in each...
-      LOfs := Length(OtherFieldOffsets);
+      LOfs := OtherFieldOffsetsFast.Count;
       Assert(LOfs > 0);
       Assert(LOfs = Length(FFieldSearchVals));
       result := 0;
       ff := 0;
+      PtrOtherOffset := OtherFieldOffsetsFast.PtrFirst;
       while (result = 0) and (ff < LOfs) do
       begin
-        Assert(OtherFieldOffsets[ff] <= OtherFieldList.Count);
-
-        OtherField := OtherFieldList.Items[OtherFieldOffsets[ff]];
+        Assert(PtrOtherOffset^ < OtherFieldList.Count);
+        OtherField := OtherFieldList.Items[PtrOtherOffset^];
         Assert(not (OtherField is TMemDeleteSentinel));
   {$IFOPT C+}
         result := CompareFields(FFieldSearchVals[ff],
@@ -495,6 +506,7 @@ begin
                                 TMemFieldData(OtherField).FDataRec);
   {$ENDIF}
         Inc(ff);
+        Inc(PtrOtherOffset);
       end;
     end;
   end;
@@ -509,6 +521,7 @@ var
   OwnRow, OtherRow: TMemDbRow;
   OwnField, OtherField: TMemDBStreamable;
   ff: integer;
+  PtrFieldOffset: PFieldOffset;
 
 begin
   Assert(Assigned(OwnItem));
@@ -559,15 +572,16 @@ begin
   end
   else //Both assigned.
   begin
-      Assert(Length(Tag.FieldAbsIdxs) > 0);
+      Assert(Tag.FieldAbsIdxsFast.Count > 0);
       result := 0;
       ff := 0;
-      while (result = 0) and (ff < Length(Tag.FieldAbsIdxs)) do
+      PtrFieldOffset := Tag.FieldAbsIdxsFast.PtrFirst;
+      while (result = 0) and (ff < Tag.FieldAbsIdxsFast.Count) do
       begin
-        Assert(Tag.FieldAbsIdxs[ff] <= OwnFieldList.Count);
-        Assert(Tag.FieldAbsIdxs[ff] <= OtherFieldList.Count);
-        OwnField := OwnFieldList.Items[Tag.FieldAbsIdxs[ff]];
-        OtherField := OtherFieldList.Items[Tag.FieldAbsIdxs[ff]];
+        Assert(PtrFieldOffset^ < OwnFieldList.Count);
+        Assert(PtrFieldOffset^ < OtherFieldList.Count);
+        OwnField := OwnFieldList.Items[PtrFieldOffset^];
+        OtherField := OtherFieldList.Items[PtrFieldOffset^];
         Assert(not (OwnField is TMemDeleteSentinel));
         Assert(not (OtherField is TMemDeleteSentinel));
 {$IFOPT C+}
@@ -578,6 +592,7 @@ begin
                                 TMemFieldData(OtherField).FDataRec);
 {$ENDIF}
         Inc(ff);
+        Inc(PtrFieldOffset);
       end;
   end;
 end;
@@ -591,6 +606,7 @@ var
   OtherRow: TMemDbRow;
   OtherField: TMemDBStreamable;
   ff: integer;
+  PtrFieldOffset: PFieldOffset;
 
 begin
   Assert(not Assigned(OwnItem));
@@ -620,14 +636,15 @@ begin
       result := 1
   else //Both assigned.
   begin
-      Assert(Length(Tag.FieldAbsIdxs) > 0);
-      Assert(Length(Tag.FieldAbsIdxs) = Length(FFieldSearchVals));
+      Assert(Tag.FieldAbsIdxsFast.Count > 0);
+      Assert(Tag.FieldAbsIdxsFast.Count = Length(FFieldSearchVals));
       result := 0;
       ff := 0;
-      while (result = 0) and (ff < Length(Tag.FieldAbsIdxs)) do
+      PtrFieldOffset := Tag.FieldAbsIdxsFast.PtrFirst;
+      while (result = 0) and (ff < Tag.FieldAbsIdxsFast.Count) do
       begin
-        Assert(Tag.FieldAbsIdxs[ff] <= OtherFieldList.Count);
-        OtherField := OtherFieldList.Items[Tag.FieldAbsIdxs[ff]];
+        Assert(PtrFieldOffset^ < OtherFieldList.Count);
+        OtherField := OtherFieldList.Items[PtrFieldOffset^];
         Assert(not (OtherField is TMemDeleteSentinel));
 {$IFOPT C+}
         result := CompareFields(FFieldSearchVals[ff],
@@ -637,6 +654,7 @@ begin
                                 TMemFieldData(OtherField).FDataRec);
 {$ENDIF}
         Inc(ff);
+        Inc(PtrFieldOffset);
       end;
   end;
 end;

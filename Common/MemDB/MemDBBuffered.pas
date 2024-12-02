@@ -410,6 +410,7 @@ type
   TMemDBFKMetaTags = record
     abBuf: TABSelection;
     FieldAbsIdxs: TFieldOffsets;
+    FieldAbsIdxsFast: TFieldOffsetsFast;
   end;
   PMemDBMetaTags = ^TMemDbFKMetaTags;
 
@@ -554,7 +555,7 @@ type
     procedure ReinstateDeletedIndices;
     procedure AdjustTableStructureForMetadata;
     procedure CommitAdjustIndicesToTemporary(Reason: TMemDBTransReason);
-    procedure CommitRestoreIndicesToPermanent;
+    procedure CommitRestoreIndicesToPermanent(Reason: TMemDbTransReason);
     procedure RollbackRestoreIndicesToPermanent;
 
     procedure RevalidateEntireUserIndex(RawIndexDefNumber: integer);
@@ -614,15 +615,15 @@ type
   protected
     FUserObjs: TDBObjList;
     FInterfaced: TMemDBAPIInterfacedObject;
-    procedure CleanupCommon;
+    procedure CleanupCommon(Reason: TMemDBTransReason);
     function HandleInterfacedObjRequest(Transaction: TObject; ID: TMemDBAPIId): TMemDBAPI;virtual;
     procedure LookaheadHelper(Stream: TStream;
                              var ChangeType: TMemDBEntityChangeType;
                              var EntityName: string);
     function PreCommitParallelHandler(Ref1, Ref2: pointer):pointer;
-    procedure PreCommitParallel;
+    procedure PreCommitParallel(Reason: TMemDBTransReason);
     function CommitParallelHandler(Ref1, Ref2: pointer):pointer;
-    procedure CommitParallel;
+    procedure CommitParallel(Reason: TMemDBTransReason);
   public
     function EntitiesByName(AB: TABSelection; Name: string; var Idx: integer): TMemDBEntity;
 
@@ -754,6 +755,7 @@ function AllFieldsZero(FieldList: TMemStreamableList;
 const
   S_TABLE_DATA_CHANGED = 'Cannot change table field layout when uncommitted data changes.';
   S_FIELD_LAYOUT_CHANGED = 'Cannot change table data when uncommited field layout changes.';
+  S_QUICK_LIST_DUPLICATE_INSERTION = 'Quick lookaside lists: Duplicate insertion.';
 
 implementation
 
@@ -872,11 +874,24 @@ const
   S_CURSOR_HAS_NO_ROW_AT_MODIFY = 'User mod of fields broken: no cursor assigned.';
   S_CURSOR_NOT_ASSIGNED_AT_DELETE = 'User delete of row broken: no cursor assigned';
   S_CURSOR_HAS_NO_ROW_AT_DELETE = 'User delete of row broken: no row associated with cursor';
-  S_QUICK_LIST_DUPLICATE_INSERTION = 'Quick lookaside lists: Duplicate insertion.';
   S_INTERNAL_UNSTREAM_EDIT = 'Internal indexing error during unstream operation';
   S_INTERNAL_META_EDIT = 'Internal indexing error during metadata processing';
 
 { Misc Functions }
+
+function OptimizationApplies(const OptLevel: TOptimizeLevel;
+                             Reason: TMemDbTransReason): boolean;
+begin
+  result := (OptLevel = olAlways) or
+  ((OptLevel >= olInitFirstTrans) and (Reason = mtrReplayFromScratch)) or
+  ((OptLevel >= olInitAllTrans) and (Reason = mtrReplayFromJournal))
+end;
+
+function QuickIndexingOptimizationApplies(Reason: TMemDBTransReason): boolean;
+begin
+  result := Optimizations.QuickIndexFirstTransaction and
+    (Reason = TMemDbTransReason.mtrReplayFromScratch);
+end;
 
 function AssignedNotSentinel(X: TMemDBStreamable): boolean;
 begin
@@ -1461,22 +1476,23 @@ begin
   inherited;
 end;
 
+//This is just a refactor of Row consistency flags,
+//hopefully more speedily, whilst not using the is
+//operator too much.
 function TMemDbIndexedList.WhichList(Row:TMemDbRow): PDLEntry;
 begin
-  Assert(Assigned(Row));
-  //Changed list if:
   if (Row.Added or Row.Changed or Row.Deleted) then
   begin
     Assert(not Row.Null);
-    result := @FRefChangedRows;
+    Result := @FRefChangedRows;
   end
   else if Row.Null then
   begin
     Assert(not (Row.Added or Row.Changed or Row.Deleted));
-    result := @FRefEmptyRows;
+    Result := @FRefEmptyRows;
   end
   else
-    result := nil;
+    Result := nil;
 end;
 
 procedure TMemDbIndexedList.RmRowQuickLists(Row: TMemDBRow; var LPos:PDLEntry; var LHead: PDLEntry);
@@ -1779,10 +1795,13 @@ var
   QLPos, QLHead: PDLEntry;
 begin
   //Bad indexing will most likely show up here.
-  rv := FStore.RemoveItemInPlace(Row.FStoreBackRec, LPos);
-  if rv <> rvOK then
-    raise EMemDBInternalException.Create(S_COMMIT_ROLLBACK_FAILED_INDEXES_CORRUPTED);
-  Row.FStoreBackRec := nil;
+  if not QuickIndexingOptimizationApplies(TMemDbTransReason(Ref2)) then
+  begin
+    rv := FStore.RemoveItemInPlace(Row.FStoreBackRec, LPos);
+    if rv <> rvOK then
+      raise EMemDBInternalException.Create(S_COMMIT_ROLLBACK_FAILED_INDEXES_CORRUPTED);
+    Row.FStoreBackRec := nil;
+  end;
   RmRowQuickLists(Row, QLPos, QLHead);
   //Remove before comitting (indexing)
   if LongBool(Ref1) then
@@ -1790,10 +1809,13 @@ begin
   else
     Row.Rollback(TMemDBTransReason(Ref2));
   //And re-add after comitting (indexing)
-  rv := FStore.AddItemInPlace(Row, LPos, Row.FStoreBackRec);
-  if rv <> rvOK then
-    raise EMemDBInternalException.Create(S_COMMIT_ROLLBACK_FAILED_INDEXES_CORRUPTED);
-  Assert(Assigned(Row.FStoreBackRec));
+  if not QuickIndexingOptimizationApplies(TMemDbTransReason(Ref2)) then
+  begin
+    rv := FStore.AddItemInPlace(Row, LPos, Row.FStoreBackRec);
+    if rv <> rvOK then
+      raise EMemDBInternalException.Create(S_COMMIT_ROLLBACK_FAILED_INDEXES_CORRUPTED);
+    Assert(Assigned(Row.FStoreBackRec));
+  end;
   AddRowQuicklists(Row, QLPos, QLHead);
 end;
 
@@ -3003,7 +3025,9 @@ var
   i: integer;
   TagData: TMemDBITagData;
   RV: TIsRetVal;
+  Parallel: boolean;
 begin
+  Parallel := OptimizationApplies(Optimizations.IndexBuildParallel, Reason);
   if FIndexingChangeRequired then
   begin
     for i := 0 to Pred(Length(FIndexChangesets)) do
@@ -3012,12 +3036,12 @@ begin
       begin
         TagData := FTagDataList[i];
         CheckTagAgreesWithMetadata(i, TagData, tciPermanentAgreesCurrent, tcpProgrammed);
-        TagData.CommitRmIdxsFromStore(Reason = mtrReplayFromScratch);
+        TagData.CommitRmIdxsFromStore(Parallel);
         FCommitChangesMade := FCommitChangesMade + [ccmDeleteUnusedIndices];
         CheckTagAgreesWithMetadata(i, TagData, tciPermanentAgreesCurrent, tcpNotProgrammed);
       end;
     end;
-    if Reason = mtrReplayFromScratch then
+    if Parallel then
     begin
       RV := FData.Store.PerformAsyncActions(@MemDBXlateExceptions);
       if RV <> rvOK then
@@ -3238,7 +3262,10 @@ var
   TagData: TMemDbITagData;
   ff: integer;
   RV: TIsRetVal;
+  Parallel: boolean;
+  AddCurrIdx, AddNextIdx: boolean;
 begin
+  Parallel := OptimizationApplies(Optimizations.IndexBuildParallel, Reason);
   if FIndexingChangeRequired then
   begin
     GetCurrNxtMetaCopies(CC,NC);
@@ -3277,6 +3304,9 @@ begin
       end
       else if ictAdded in FIndexChangesets[i] then
       begin
+        AddNextIdx := true;
+        AddCurrIdx :=  not QuickIndexingOptimizationApplies(Reason);
+
         //Newly created tag needs to be made temporary, and we create the
         //"previous" field index to take into account possible field rearrangements.
         for ff := 0 to Pred(Length(FieldDefs1)) do
@@ -3290,13 +3320,13 @@ begin
           NewOffsets[ff] := FieldDefs1[ff].FieldIndex;
         TagData.MakePermanentTemporary(NewOffsets);
         CheckTagAgreesWithMetadata(i, TagData, tciTemporaryAgreesNextOnly, tcpNotProgrammed);
-        TagData.CommitAddIdxsToStore(FData.Store, Reason = mtrReplayFromScratch);
+        TagData.CommitAddIdxsToStore(FData.Store, Parallel, AddCurrIdx, AddNextIdx);
         CheckTagAgreesWithMetadata(i, TagData, tciTemporaryAgreesNextOnly, tcpProgrammed);
       end;
       FTemporaryIndexLimit := Succ(i);
     end;
 
-    if Reason = mtrReplayFromScratch then
+    if Parallel then
     begin
       RV := FData.Store.PerformAsyncActions(@MemDBXlateExceptions);
       if RV <> rvOK then
@@ -3318,6 +3348,10 @@ begin
 {$ENDIF}
         ]) <> [] then
       begin
+
+        //TODO - Not considered Parallel index validation yet, but
+        //could do it pretty easily.
+
         //Handle index validation.
         if IndexDef1.IndexAttrs * [iaUnique, iaNotEmpty] <> [] then
           RevalidateEntireUserIndex(i);
@@ -3328,12 +3362,16 @@ begin
   end;
 end;
 
-procedure TMemDbTablePersistent.CommitRestoreIndicesToPermanent;
+procedure TMemDbTablePersistent.CommitRestoreIndicesToPermanent(Reason: TMemDbTransReason);
 var
   i: integer;
   Limit: integer;
   TagData: TMemDBITagData;
+  Parallel: boolean;
+  RV: TIsRetVal;
+
 begin
+  Parallel := OptimizationApplies(Optimizations.IndexBuildParallel, Reason);
   //Adjust temporary indices back to permanent ones.
   //Temporary index tags are such that commit removal and addition should have
   //gone OK.
@@ -3357,8 +3395,22 @@ begin
       CheckTagAgreesWithMetadata(i, TagData, tciTemporaryAgreesNextOnly, tcpProgrammed);
       TagData.CommitRestoreToPermanent;
       CheckTagAgreesWithMetadata(i, TagData, tciPermanentAgreesNext, tcpProgrammed);
+      //We have pre-built the next index only, and now we can build the current index.
+      if QuickIndexingOptimizationApplies(Reason) then
+      begin
+        //Pre-built next is now the current.
+        TagData.SwizzleLatestToCurrent;
+        TagData.CommitAddIdxsToStore(FData.Store, Parallel, false, true);
+      end;
     end;
   end;
+  if Parallel then
+  begin
+    RV := FData.Store.PerformAsyncActions(@MemDBXlateExceptions);
+    if RV <> rvOK then
+      raise EMemDbInternalException.Create(S_ASYNC_INDEX_OP_FAILED);
+  end;
+
 end;
 
 procedure TMemDBTablePersistent.RollbackRestoreIndicesToPermanent;
@@ -3827,7 +3879,7 @@ begin
     FData.Commit(Reason);
     if ccmIndexesToTemporary in FCommitChangesMade then
     begin
-      CommitRestoreIndicesToPermanent;
+      CommitRestoreIndicesToPermanent(Reason);
       FCommitChangesMade := FCommitChangesMade - [ccmIndexesToTemporary];
     end;
   end;
@@ -4603,6 +4655,7 @@ begin
   begin
     TagReferredAddedNext.abBuf := abNext;
     TagReferredAddedNext.FieldAbsIdxs := CopyFieldOffsets(Meta.FieldDefsReferredAbsIdx);
+    SyncFastOffsets(TagReferredAddedNext.FieldAbsIdxs, TagReferredAddedNext.FieldAbsIdxsFast);
 
     FReferringAdded := TIndexedStoreO.Create;
     FReferredDeleted := TIndexedStoreO.Create;
@@ -4622,6 +4675,8 @@ begin
     FReferringAdded := nil;
     FReferredDeleted := nil;
     FReferredAdded := nil;
+    SetLength(TagReferredAddedNext.FieldAbsIdxs, 0);
+    SyncFastOffsets(TagReferredAddedNext.FieldAbsIdxs, TagReferredAddedNext.FieldAbsIdxsFast);
   end;
 end;
   //Referential integrity is violated when:
@@ -4696,7 +4751,7 @@ begin
   try
     //N.B. Indexed store gives us a "duplicate key" error code, which we should use.
     SetupIndexes(Meta);
-    if Reason = mtrReplayFromScratch then
+    if OptimizationApplies(Optimizations.FKListsParallel, Reason) then
     begin
       SetLength(Handlers,2);
       SetLength(Refs1, 2);
@@ -5234,16 +5289,25 @@ var
   Handlers: TParallelHandlers;
   Excepts: TPHExcepts;
 begin
-  if Count > 0 then
+  //Startup / shutdown optimization.
+  if OptimizationApplies(Optimizations.TearDownParallel, mtrReplayFromScratch) then
   begin
-    SetLength(Refs1, Count);
-    SetLength(Handlers, Count);
-    for Idx := 0 to Pred(Count) do
+    if Count > 0 then
     begin
-      Refs1[Idx] := Items[Idx];
-      Handlers[Idx] := ParallelFree;
+      SetLength(Refs1, Count);
+      SetLength(Handlers, Count);
+      for Idx := 0 to Pred(Count) do
+      begin
+        Refs1[Idx] := Items[Idx];
+        Handlers[Idx] := ParallelFree;
+      end;
+      Parallelizer.ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
     end;
-    Parallelizer.ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
+  end
+  else
+  begin
+    for Idx := 0 to Pred(Count) do
+      Items[Idx].Free;
   end;
   inherited;
 end;
@@ -5267,11 +5331,11 @@ begin
   ObjI := TMemDBEntity(Ref1);
   Assert(Assigned(ObjI));
   Assert(ObjI is TMemDbEntity);
-  ObjI.PreCommit(mtrReplayFromScratch);
+  ObjI.PreCommit(TMemDbTransReason(Ref2));
   result := nil;
 end;
 
-procedure TMemDBDatabasePersistent.PreCommitParallel;
+procedure TMemDBDatabasePersistent.PreCommitParallel(Reason: TMemDBTransReason);
 var
   Handlers: TParallelHandlers;
   Refs1, Refs2: TPHRefs;
@@ -5299,6 +5363,7 @@ begin
     begin
       SetLength(Handlers, Count);
       SetLength(Refs1, Count);
+      SetLength(Refs2, Count);
       Count := 0;
       for i := 0 to Pred(FUserObjs.Count) do
       begin
@@ -5312,6 +5377,7 @@ begin
         begin
           Handlers[Count] := PreCommitParallelHandler;
           Refs1[Count] := Pointer(ObjI);
+          Refs2[Count] := Pointer(Reason);
           Inc(Count)
         end;
       end;
@@ -5347,9 +5413,9 @@ begin
   //(so changesets done, indexes in temporary state if applicable).
 
   //Can also do tables and foreign keys in parallel.
-  if Reason = mtrReplayFromScratch then
+  if OptimizationApplies(Optimizations.PreAndCommitParallel, Reason) then
   begin
-    PreCommitParallel;
+    PreCommitParallel(Reason);
   end
   else
   begin
@@ -5576,11 +5642,11 @@ begin
   ObjI := TMemDBEntity(Ref1);
   Assert(Assigned(ObjI));
   Assert(ObjI is TMemDbEntity);
-  ObjI.Commit(mtrReplayFromScratch);
+  ObjI.Commit(TMemDbTransReason(Ref2));
   result := nil;
 end;
 
-procedure TMemDbDatabasePersistent.CommitParallel;
+procedure TMemDbDatabasePersistent.CommitParallel(Reason: TMemDBTransReason);
 var
   Handlers: TParallelHandlers;
   Refs1, Refs2: TPHRefs;
@@ -5592,10 +5658,12 @@ begin
   begin
     SetLength(Handlers, FUserObjs.Count);
     SetLength(Refs1, FUserObjs.Count);
+    SetLength(Refs2, FUserObjs.Count);
     for i := 0 to Pred(FUserObjs.Count) do
     begin
       Handlers[i] := CommitParallelHandler;
       Refs1[i] := FUserObjs.Items[i];
+      Refs2[i] := Pointer(Reason);
     end;
     ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
   end;
@@ -5606,8 +5674,8 @@ var
   i: integer;
 begin
   inherited;
-  if Reason = mtrReplayFromScratch then
-    CommitParallel
+  if OptimizationApplies(Optimizations.PreAndCommitParallel, Reason) then
+    CommitParallel(Reason)
   else
   begin
     for i := 0 to Pred(FUserObjs.Count) do
@@ -5624,19 +5692,52 @@ begin
     FUserObjs.Items[i].Rollback(Reason);
 end;
 
-procedure TMemDBDatabasePersistent.CleanupCommon;
+procedure TMemDBDatabasePersistent.CleanupCommon(Reason: TMemDBTransReason);
 var
   i: integer;
+  NullIdx: integer;
+  Refs1, Refs2: TPHRefs;
+  Rets: TPHRefs;
+  Excepts: TPHExcepts;
+  Handlers: TParallelHandlers;
 begin
-  for i := 0 to Pred(FUserObjs.Count) do
+  //Unfortunately not quite the same at TDBObjList parallel free.
+  if OptimizationApplies(Optimizations.TearDownParallel, Reason) then
   begin
-    if FUserObjs.Items[i].Null then
+    NullIdx := 0;
+    for i := 0 to Pred(FuserObjs.Count) do
+      if FUserObjs.Items[i].Null then
+        Inc(NullIdx);
+    if NullIdx > 0 then
     begin
-      FUserObjs.Items[i].Free;
-      FUserObjs.Items[i] := nil;
+      SetLength(Refs1, NullIdx);
+      SetLength(Handlers, NullIdx);
+      NullIdx := 0;
+      for i := 0 to Pred(FuserObjs.Count) do
+      begin
+        if FUserObjs.Items[i].Null then
+        begin
+          Refs1[NullIdx] := FUserObjs.Items[i];
+          FUserObjs.Items[i] := nil; //So can pack later.
+          Handlers[NullIdx] := FUserObjs.ParallelFree;
+          Inc(NullIdx);
+        end;
+      end;
+      Parallelizer.ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
+    end;
+  end
+  else
+  begin
+    for i := 0 to Pred(FUserObjs.Count) do
+    begin
+      if FUserObjs.Items[i].Null then
+      begin
+        FUserObjs.Items[i].Free;
+        FUserObjs.Items[i] := nil;
+      end;
     end;
   end;
-    FUserObjs.Pack;
+  FUserObjs.Pack;
 end;
 
 procedure TMemDBDatabasePersistent.PostCommitCleanup(Reason: TMemDbTransReason);
@@ -5646,7 +5747,7 @@ begin
   inherited;
   for i := 0 to Pred(FUserObjs.Count) do
     FUserObjs.Items[i].PostCommitCleanup(Reason);
-  CleanupCommon;
+  CleanupCommon(reason);
 end;
 
 procedure TMemDBDatabasePersistent.PostRollbackCleanup(Reason: TMemDbTransReason);
@@ -5656,7 +5757,7 @@ begin
   inherited;
   for i := 0 to Pred(FUserObjs.Count) do
     FUserObjs.Items[i].PostRollbackCleanup(Reason);
-  CleanupCommon;
+  CleanupCommon(Reason);
 end;
 
 function TMemDBDatabasePersistent.EntitiesByName(AB:TABSelection; Name: string; var Idx: integer): TMemDBEntity;

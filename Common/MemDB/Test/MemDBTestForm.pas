@@ -21,6 +21,7 @@ type
     MFIndexTest: TButton;
     MFFKeyTest: TButton;
     BigTable: TButton;
+    BigTblMod: TButton;
     procedure BasicTestBtnClick(Sender: TObject);
     procedure ResetClick(Sender: TObject);
     procedure IndexTestClick(Sender: TObject);
@@ -33,6 +34,7 @@ type
     procedure MFFKeyTestClick(Sender: TObject);
     procedure FormCreate(Sender: TObject);
     procedure BigTableClick(Sender: TObject);
+    procedure BigTblModClick(Sender: TObject);
   private
     { Private declarations }
     FTimeStamp: TDateTime;
@@ -46,6 +48,7 @@ const
 
 var
   Form1: TForm1;
+  DBStartTime: TDateTime;
 
 implementation
 
@@ -60,6 +63,39 @@ const
   BIG_ROWS = 128 * 1024;
   BIG_NTABLES = 5;
   BIG_NINDEXES = 5;
+
+{ With (x64, release build):
+
+  LIMIT = 1000;
+  TRANS_LIMIT = 65535;
+  BIG_ROWS = 128 * 1024;
+  BIG_NTABLES = 5;
+  BIG_NINDEXES = 5;
+
+    PreAndCommitParallel := olInitAllTrans;
+    IndexBuildParallel := olAlways;
+    TearDownParallel := olInitAllTrans;
+    FKListsParallel := olNever;
+
+Before checkpoint (actually adding data): 59.3s
+Before checkpoint: 53.3s
+After checkpoint: 37.5 secs
+
+Better figures with no DynArray in indexing.
+
+Before checkpoint (actually adding data): 43.2s
+Before checkpoint: 74.7 (/2 = 37.35)
+After checkpoint: 31.6s.
+
+Now add a very funky optimization:
+
+    QuickIndexFirstTransaction := True;
+
+Main bottleneck is memory alloc of small item rec and index node structs:
+
+After checkpoint: 11.1s.
+
+}
 
 type
   EMemDBTestException = class(EMemDBException);
@@ -329,6 +365,58 @@ begin
     begin
       Trans.RollbackAndFree;
       LogTimeIncr('Big tables data fill failed' + E.Message);
+    end;
+  end;
+end;
+
+procedure TForm1.BigTblModClick(Sender: TObject);
+var
+  Trans: TMemDbTransaction;
+  DBAPI: TMemAPIDatabase;
+  FieldIndexI: integer;
+  TabI: integer;
+  Table: TMemDbHandle;
+  TDatAPI: TMemAPITableData;
+  Found: boolean;
+  Data: TMemDBFieldDataRec;
+
+begin
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      for TabI := 0 to Pred(BIG_NTABLES) do
+      begin
+        Table := DBAPI.OpenTableOrKey('BIGTABLE_'+IntToStr(TabI));
+        TDatAPI := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+        try
+          Found:= TDatAPI.Locate(ptFirst, '');
+          while Found do
+          begin
+            for FieldIndexI := 0 to Pred(BIG_NINDEXES) do
+            begin
+              TDatAPI.ReadField('FIELD_'+InttoStr(FieldIndexI), Data);
+              Assert(Data.FieldType = ftInteger);
+              Data.i32Val := Data.i32Val * 2;
+              TDatAPI.WriteField('FIELD_'+InttoStr(FieldIndexI), Data);
+            end;
+            TDatAPI.Post;
+            Found:= TDatAPI.Locate(ptNext, '');
+          end;
+        finally
+          TDatAPI.Free;
+        end;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+    LogTimeIncr('Big table data modded OK.');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('Big table data mod failed' + E.Message);
     end;
   end;
 end;
@@ -1367,7 +1455,8 @@ end;
 
 procedure TForm1.FormCreate(Sender: TObject);
 begin
-  FTimeStamp := Now;
+  FTimeStamp := DBStartTime;
+  LogTimeIncr('DB load time.');
 end;
 
 procedure TForm1.IndexTest2Click(Sender: TObject);
@@ -2797,6 +2886,7 @@ initialization
   if LIMIT_CUBEROOT < 2 then
     LIMIT_CUBEROOT := 2;
   FDB := TMemDB.Create;
+  DBStartTime := Now;
   FDB.InitDB(DB_LOCATION, jtV2);
   FSession := FDB.StartSession;
   FSession.TempStorageMode := tsmMemory;
