@@ -30,7 +30,8 @@ uses
   CocoBase in '..\CoCoDM\Distributable\Frames\CocoBase.pas',
   ErrorRecovery in '..\Common\HTMLParser\ErrorRecovery.pas',
   SoftLexer in '..\Common\SoftLexer\SoftLexer.pas',
-  OrdinalSets in '..\Common\OrdinalSets\OrdinalSets.pas';
+  OrdinalSets in '..\Common\OrdinalSets\OrdinalSets.pas',
+  Parallelizer in '..\Common\Parallelizer\Parallelizer.pas';
 
 {$R *.res}
 

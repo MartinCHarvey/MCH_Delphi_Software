@@ -90,7 +90,8 @@ uses
   StreamSysXML in '..\..\Common\StreamingSystem\StreamSysXML.pas',
   TrivXML in '..\..\Common\StreamingSystem\TrivXML.PAS',
   TrivXMLDefs in '..\..\Common\StreamingSystem\TrivXMLDefs.pas',
-  PrefsEditForm in 'PrefsEditForm.pas' {PrefsEditFrm};
+  PrefsEditForm in 'PrefsEditForm.pas' {PrefsEditFrm},
+  Parallelizer in '..\..\Common\Parallelizer\Parallelizer.pas';
 
 {$R *.res}
 

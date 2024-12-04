@@ -17,7 +17,8 @@ uses
   SparseMatrix in '..\..\..\..\Common\SparseMatrix\SparseMatrix.pas',
   ExactCover in '..\..\..\..\Common\ExactCover\ExactCover.pas',
   IndexedStore in '..\..\..\..\Common\Indexed Store\IndexedStore.pas',
-  CellCountShared in '..\..\Shared\CellCountShared.pas';
+  CellCountShared in '..\..\Shared\CellCountShared.pas',
+  Parallelizer in '..\..\..\..\Common\Parallelizer\Parallelizer.pas';
 
 begin
   try

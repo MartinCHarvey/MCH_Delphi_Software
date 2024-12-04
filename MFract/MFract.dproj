@@ -8,7 +8,7 @@
         <AppType>Application</AppType>
         <FrameworkType>VCL</FrameworkType>
         <ProjectVersion>14.6</ProjectVersion>
-        <Platform Condition="'$(Platform)'==''">Win32</Platform>
+        <Platform Condition="'$(Platform)'==''">Win64</Platform>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Base' or '$(Base)'!=''">
         <Base>true</Base>
@@ -116,6 +116,8 @@
         <VerInfo_Locale>1033</VerInfo_Locale>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_1_Win64)'!=''">
+        <DCC_DebugInformation>true</DCC_DebugInformation>
+        <DCC_LocalDebugSymbols>true</DCC_LocalDebugSymbols>
         <DCC_Optimize>true</DCC_Optimize>
         <Manifest_File>$(BDS)\bin\default_app.manifest</Manifest_File>
         <VerInfo_Build>21</VerInfo_Build>
@@ -184,6 +186,7 @@
         <DCCReference Include="..\MFractCommon\FractStreaming.pas"/>
         <DCCReference Include="..\CoCoDM\Distributable\Frames\CocoBase.pas"/>
         <DCCReference Include="..\Common\Indexed Store\IndexedStore.pas"/>
+        <DCCReference Include="..\Common\Parallelizer\Parallelizer.pas"/>
         <None Include="todo.txt">
             <ContainerId>File</ContainerId>
         </None>
@@ -274,12 +277,12 @@
                         <RemoteName>blues2.mfp</RemoteName>
                     </Platform>
                 </DeployFile>
-                <DeployFile LocalName="help\pal_length2.png" Class="File">
+                <DeployFile LocalName="Win64\Release\MFract.exe" Class="File">
                     <Platform Name="Win64">
-                        <RemoteName>pal_length2.png</RemoteName>
+                        <RemoteName>MFract.exe</RemoteName>
                     </Platform>
                     <Platform Name="Win32">
-                        <RemoteName>pal_length2.png</RemoteName>
+                        <RemoteName>MFract.exe</RemoteName>
                     </Platform>
                 </DeployFile>
                 <DeployFile LocalName="All Platforms\Release\MFract.rsm" Configuration="Release" Class="DebugSymbols">
@@ -386,20 +389,20 @@
                         <RemoteName>greens3.mfp</RemoteName>
                     </Platform>
                 </DeployFile>
-                <DeployFile LocalName="help\MFract.html" Class="File">
-                    <Platform Name="Win64">
-                        <RemoteName>MFract.html</RemoteName>
-                    </Platform>
-                    <Platform Name="Win32">
-                        <RemoteName>MFract.html</RemoteName>
-                    </Platform>
-                </DeployFile>
                 <DeployFile LocalName="Samples\bubbles_logarithmic.mff" Class="File">
                     <Platform Name="Win64">
                         <RemoteName>bubbles_logarithmic.mff</RemoteName>
                     </Platform>
                     <Platform Name="Win32">
                         <RemoteName>bubbles_logarithmic.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="help\MFract.html" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>MFract.html</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>MFract.html</RemoteName>
                     </Platform>
                 </DeployFile>
                 <DeployFile LocalName="Samples\neon.mfp" Class="File">
@@ -570,20 +573,20 @@
                         <RemoteName>triangles.mff</RemoteName>
                     </Platform>
                 </DeployFile>
-                <DeployFile LocalName="Samples\frothy swirl2.mff" Class="File">
-                    <Platform Name="Win64">
-                        <RemoteName>frothy swirl2.mff</RemoteName>
-                    </Platform>
-                    <Platform Name="Win32">
-                        <RemoteName>frothy swirl2.mff</RemoteName>
-                    </Platform>
-                </DeployFile>
                 <DeployFile LocalName="Samples\leaves2.mff" Class="File">
                     <Platform Name="Win64">
                         <RemoteName>leaves2.mff</RemoteName>
                     </Platform>
                     <Platform Name="Win32">
                         <RemoteName>leaves2.mff</RemoteName>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="Samples\frothy swirl2.mff" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>frothy swirl2.mff</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>frothy swirl2.mff</RemoteName>
                     </Platform>
                 </DeployFile>
                 <DeployFile LocalName="Samples\ferns.mff" Class="File">
@@ -842,20 +845,20 @@
                         <RemoteName>frothy islands.mff</RemoteName>
                     </Platform>
                 </DeployFile>
+                <DeployFile LocalName="help\pal_length2.png" Class="File">
+                    <Platform Name="Win64">
+                        <RemoteName>pal_length2.png</RemoteName>
+                    </Platform>
+                    <Platform Name="Win32">
+                        <RemoteName>pal_length2.png</RemoteName>
+                    </Platform>
+                </DeployFile>
                 <DeployFile LocalName="Samples\frothy islands 4.mff" Class="File">
                     <Platform Name="Win64">
                         <RemoteName>frothy islands 4.mff</RemoteName>
                     </Platform>
                     <Platform Name="Win32">
                         <RemoteName>frothy islands 4.mff</RemoteName>
-                    </Platform>
-                </DeployFile>
-                <DeployFile LocalName="Win64\Release\MFract.exe" Class="File">
-                    <Platform Name="Win64">
-                        <RemoteName>MFract.exe</RemoteName>
-                    </Platform>
-                    <Platform Name="Win32">
-                        <RemoteName>MFract.exe</RemoteName>
                     </Platform>
                 </DeployFile>
                 <DeployClass Required="true" Name="DependencyPackage">

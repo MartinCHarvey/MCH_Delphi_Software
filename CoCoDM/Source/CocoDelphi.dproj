@@ -89,7 +89,8 @@
         <DCC_Optimize>false</DCC_Optimize>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_2_Win32)'!=''">
-        <Debugger_RunParams>&quot;c:\MCH stuff\Delphi XE Progs\Common\HTMLParser\CSSGrammar.ATG&quot;</Debugger_RunParams>
+        <Debugger_CWD>C:\MCH Stuff\Delphi XE Progs\Common\HTMLParser</Debugger_CWD>
+        <Debugger_RunParams>&quot;C:\MCH Stuff\Delphi XE Progs\Common\HTMLParser\HTMLGrammar&quot;</Debugger_RunParams>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_2_Win64)'!=''">
         <Debugger_RunParams>&quot;c:\MCH stuff\Delphi XE Progs\Common\HTMLParser\CSSGrammar.ATG&quot;</Debugger_RunParams>

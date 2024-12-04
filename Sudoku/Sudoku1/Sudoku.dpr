@@ -21,7 +21,8 @@ uses
   SudokuStreaming in '..\SudokuShared\SudokuStreaming.pas',
   SudokuExactCover in '..\SudokuShared\SudokuExactCover.pas',
   ExactCover in '..\..\Common\ExactCover\ExactCover.pas',
-  SparseMatrix in '..\..\Common\SparseMatrix\SparseMatrix.pas';
+  SparseMatrix in '..\..\Common\SparseMatrix\SparseMatrix.pas',
+  Parallelizer in '..\..\Common\Parallelizer\Parallelizer.pas';
 
 {$R *.res}
 

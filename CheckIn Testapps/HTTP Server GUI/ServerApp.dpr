@@ -40,7 +40,8 @@ uses
   BufferedFileStream in '..\..\Common\CachedStream\BufferedFileStream.pas',
   HTTPForwarder in '..\..\Common\HTTPServerDispatcher\HTTPForwarder.pas',
   HTTPMisc in '..\..\Common\HTTPServerDispatcher\HTTPMisc.pas',
-  CheckInServiceCoOrdinator in '..\..\CheckIn\CheckInServiceCoOrdinator.pas';
+  CheckInServiceCoOrdinator in '..\..\CheckIn\CheckInServiceCoOrdinator.pas',
+  Parallelizer in '..\..\Common\Parallelizer\Parallelizer.pas';
 
 {$R *.res}
 

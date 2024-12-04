@@ -157,6 +157,7 @@
         <DCCReference Include="..\Common\HTMLParser\ErrorRecovery.pas"/>
         <DCCReference Include="..\Common\SoftLexer\SoftLexer.pas"/>
         <DCCReference Include="..\Common\OrdinalSets\OrdinalSets.pas"/>
+        <DCCReference Include="..\Common\Parallelizer\Parallelizer.pas"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>

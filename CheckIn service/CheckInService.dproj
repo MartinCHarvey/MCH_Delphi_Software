@@ -166,6 +166,7 @@
         <DCCReference Include="..\Common\Logging\GlobalLog.pas"/>
         <DCCReference Include="..\Common\HTMLParser\HTMLEscapeHelper.pas"/>
         <DCCReference Include="..\Common\QueuedMailer\QueuedMailer.pas"/>
+        <DCCReference Include="..\Common\Parallelizer\Parallelizer.pas"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>

@@ -126,6 +126,7 @@
         <DCCReference Include="..\..\Indexed Store\IndexedStore.pas"/>
         <DCCReference Include="..\..\Balanced Tree\BinaryTree.pas"/>
         <DCCReference Include="..\..\Tracking\Trackables.pas"/>
+        <DCCReference Include="..\..\Parallelizer\Parallelizer.pas"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>

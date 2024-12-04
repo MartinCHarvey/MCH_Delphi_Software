@@ -126,6 +126,7 @@
         <DCCReference Include="..\..\..\..\Common\Tracking\Trackables.pas"/>
         <DCCReference Include="..\..\..\..\Common\WorkItems\WorkItems.pas"/>
         <DCCReference Include="..\..\Shared\CellCountShared.pas"/>
+        <DCCReference Include="..\..\..\..\Common\Parallelizer\Parallelizer.pas"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>
