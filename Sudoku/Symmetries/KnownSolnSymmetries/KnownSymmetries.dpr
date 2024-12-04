@@ -16,7 +16,8 @@ uses
   DLList in '..\..\..\Common\DLList\DLList.pas',
   Trackables in '..\..\..\Common\Tracking\Trackables.pas',
   SharedSymmetries in '..\Shared\SharedSymmetries.pas',
-  CellCountShared in '..\Shared\CellCountShared.pas';
+  CellCountShared in '..\Shared\CellCountShared.pas',
+  Parallelizer in '..\..\..\Common\Parallelizer\Parallelizer.pas';
 
 begin
   try

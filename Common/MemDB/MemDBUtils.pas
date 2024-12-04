@@ -89,7 +89,7 @@ var
   FieldType: TMDBFieldType;
   OK: boolean;
   GotRow: boolean;
-  IndexedField: string;
+  IndexedFields: TMDBFieldNames;
   IndexAttrs: TMDBIndexAttrs;
   Data: TMemDbFieldDataRec;
 begin
@@ -121,9 +121,9 @@ begin
           try
             for idx := 0 to Pred(SList.Count) do
             begin
-              OK := SrcTableMeta.IndexInfo(SList[idx], IndexedField, IndexAttrs);
+              OK := SrcTableMeta.IndexInfo(SList[idx], IndexedFields, IndexAttrs);
               Assert(OK);
-              DstTableMeta.CreateIndex(SList[idx], IndexedField, IndexAttrs);
+              DstTableMeta.CreateMultiFieldIndex(SList[idx], IndexedFields, IndexAttrs);
             end;
           finally
             SList.Free;

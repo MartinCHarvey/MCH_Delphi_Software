@@ -40,7 +40,8 @@ uses
   BufferedFileStream in '..\Common\CachedStream\BufferedFileStream.pas',
   GlobalLog in '..\Common\Logging\GlobalLog.pas',
   HTMLEscapeHelper in '..\Common\HTMLParser\HTMLEscapeHelper.pas',
-  QueuedMailer in '..\Common\QueuedMailer\QueuedMailer.pas';
+  QueuedMailer in '..\Common\QueuedMailer\QueuedMailer.pas',
+  Parallelizer in '..\Common\Parallelizer\Parallelizer.pas';
 
 {$R *.RES}
 

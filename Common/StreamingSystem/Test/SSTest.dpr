@@ -17,7 +17,8 @@ uses
   IndexedStore in '..\..\Indexed Store\IndexedStore.pas',
   DLList in '..\..\DLList\DLList.pas',
   StreamSysBinary in '..\StreamSysBinary.pas',
-  BufferedFileStream in '..\..\CachedStream\BufferedFileStream.pas';
+  BufferedFileStream in '..\..\CachedStream\BufferedFileStream.pas',
+  Parallelizer in '..\..\Parallelizer\Parallelizer.pas';
 
 {$R *.RES}
 

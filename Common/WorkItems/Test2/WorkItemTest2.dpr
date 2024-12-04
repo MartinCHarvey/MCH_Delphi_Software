@@ -10,7 +10,8 @@ uses
   BinaryTree in '..\..\Balanced Tree\BinaryTree.pas',
   Vcl.Themes,
   Vcl.Styles,
-  Trackables in '..\..\Tracking\Trackables.pas';
+  Trackables in '..\..\Tracking\Trackables.pas',
+  Parallelizer in '..\..\Parallelizer\Parallelizer.pas';
 
 {$R *.res}
 

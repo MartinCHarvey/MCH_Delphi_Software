@@ -130,6 +130,7 @@
         <DCCReference Include="..\..\..\..\Common\ExactCover\ExactCover.pas"/>
         <DCCReference Include="..\..\..\..\Common\Indexed Store\IndexedStore.pas"/>
         <DCCReference Include="..\..\Shared\CellCountShared.pas"/>
+        <DCCReference Include="..\..\..\..\Common\Parallelizer\Parallelizer.pas"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>
