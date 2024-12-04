@@ -95,6 +95,10 @@ uses
 { Misc functions }
 
 function CompareFields(const OwnRec: TMemDbFieldDataRec; const OtherRec: TMemDbFieldDataRec): integer;
+var
+  OwnP, OtherP: PByte;
+  OwnB, OtherB: Byte;
+  Cnt: Uint64;
 begin
   if OwnRec.FieldType <> OtherRec.FieldType then
     raise EMemDBInternalException.Create(S_INDEXING_INTERNAL_FIELD_TYPE_1);
@@ -136,6 +140,39 @@ begin
       else
         result := 0;
     ftGuid: result := CompareGuids(OtherRec.gVal, OwnRec.gVal);
+    ftBlob:
+    begin
+      if OtherRec.size > OwnRec.size then
+        result := 1
+      else if OtherRec.size < OwnRec.Size then
+        result := -1
+      else
+      begin
+        Assert(Assigned(OwnRec.Data) = Assigned(OtherRec.Data));
+        result := 0;
+        if Assigned(OwnRec.Data) then
+        begin
+          //Slow byte compare, but correct.
+          //Not in the mood to deal with endian today.
+          //Write a loop unroll another day.
+          OwnP := OwnRec.Data;
+          OtherP := OtherRec.Data;
+          Cnt := OwnRec.size;
+          while (result = 0) and (Cnt > 0) do
+          begin
+            OwnB := OwnP^;
+            OtherB := OtherP^;
+            if OtherB > OwnB then
+              result := 1
+            else if OtherB < OwnB then
+              result := -1;
+            Inc(OwnP);
+            Inc(OtherP);
+            Dec(Cnt);
+          end;
+        end;
+      end;
+    end;
   else
     raise EMemDBInternalException.Create(S_INDEXING_INTERNAL_FIELD_TYPE_2);
     result := 0;

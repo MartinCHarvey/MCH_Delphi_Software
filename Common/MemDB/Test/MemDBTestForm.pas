@@ -22,6 +22,7 @@ type
     MFFKeyTest: TButton;
     BigTable: TButton;
     BigTblMod: TButton;
+    ChkBlobs: TButton;
     procedure BasicTestBtnClick(Sender: TObject);
     procedure ResetClick(Sender: TObject);
     procedure IndexTestClick(Sender: TObject);
@@ -35,6 +36,7 @@ type
     procedure FormCreate(Sender: TObject);
     procedure BigTableClick(Sender: TObject);
     procedure BigTblModClick(Sender: TObject);
+    procedure ChkBlobsClick(Sender: TObject);
   private
     { Private declarations }
     FTimeStamp: TDateTime;
@@ -63,39 +65,7 @@ const
   BIG_ROWS = 128 * 1024;
   BIG_NTABLES = 5;
   BIG_NINDEXES = 5;
-
-{ With (x64, release build):
-
-  LIMIT = 1000;
-  TRANS_LIMIT = 65535;
-  BIG_ROWS = 128 * 1024;
-  BIG_NTABLES = 5;
-  BIG_NINDEXES = 5;
-
-    PreAndCommitParallel := olInitAllTrans;
-    IndexBuildParallel := olAlways;
-    TearDownParallel := olInitAllTrans;
-    FKListsParallel := olNever;
-
-Before checkpoint (actually adding data): 59.3s
-Before checkpoint: 53.3s
-After checkpoint: 37.5 secs
-
-Better figures with no DynArray in indexing.
-
-Before checkpoint (actually adding data): 43.2s
-Before checkpoint: 74.7 (/2 = 37.35)
-After checkpoint: 31.6s.
-
-Now add a very funky optimization:
-
-    QuickIndexFirstTransaction := True;
-
-Main bottleneck is memory alloc of small item rec and index node structs:
-
-After checkpoint: 11.1s.
-
-}
+  BLOB_SIZE = 1024;
 
 type
   EMemDBTestException = class(EMemDBException);
@@ -431,6 +401,247 @@ begin
   else
   begin
     LogTimeIncr('Cannot checkpoint at this time')
+  end;
+end;
+
+procedure TForm1.ChkBlobsClick(Sender: TObject);
+var
+  Trans: TMemDBTransaction;
+  DBAPI: TMemAPIDatabase;
+  TableData: TMemAPITableData;
+  TableMeta: TMemAPITableMetadata;
+  Table: TMemDBHandle;
+  SearchData, Data, IData: TMemDbFieldDataRec;
+  i, j: integer;
+  OK: boolean;
+  PD: PAnsiChar;
+
+begin
+  ResetClick(Sender);
+  //Create a table with the right structure.
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      Table := DBAPI.OpenTableOrKey('Test table');
+      if Assigned(Table) then
+        DBAPI.DeleteTableOrKey('Test table');
+      Table := DBAPI.CreateTable('Test table');
+      TableMeta := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata) as TMemAPITableMetadata;
+      try
+        TableMeta.CreateField('Int', ftInteger);
+        TableMeta.CreateIndex('IntIdx', 'Int', []);
+        TableMeta.CreateField('Blob', ftBlob);
+        TableMeta.CreateIndex('BlobIdx', 'Blob', []);
+      finally
+        TableMeta.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+
+    LogTimeIncr('Blob table setup OK');
+  except
+    Trans.RollbackAndFree;
+    LogTimeIncr('Blob table setup failed');
+    raise;
+  end;
+
+  //Add some data.
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      Table := DBAPI.OpenTableOrKey('Test table');
+      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+      try
+        for i := 0 to LIMIT do
+        begin
+          TableData.Append;
+          Data.FieldType := ftInteger;
+          Data.i32Val := i;
+          TableData.WriteField('Int', Data);
+          TableData.Post;
+        end;
+        try
+          FillChar(Data, sizeof(Data), 0);
+          OK := TableData.Locate(ptFirst, '');
+          while OK do
+          begin
+            IData.FieldType := ftInteger;
+            TableData.ReadField('Int', IData);
+            Data.FieldType := ftBlob;
+            Data.size := BLOB_SIZE;
+            if not Assigned(Data.Data) then
+              GetMem(Data.Data, BLOB_SIZE);
+            FillChar(Data.Data^, BLOB_SIZE, IData.i32Val);
+            TableData.WriteField('Blob', Data);
+            TableData.Post;
+            OK := TableData.Locate(ptNext, '');
+          end;
+        finally
+          FreeMem(Data.Data);
+        end;
+      finally
+        TableData.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+    LogTimeIncr('Blob test (1) OK');
+  except
+    Trans.RollbackAndFree;
+    LogTimeIncr('Blob test (1) failed');
+    raise;
+  end;
+
+  //Modify a byte in the blobs to check replay from journal.
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      Table := DBAPI.OpenTableOrKey('Test table');
+      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+      try
+        FillChar(Data, sizeof(Data), 0);
+        OK := TableData.Locate(ptFirst, '');
+        while OK do
+        begin
+          IData.FieldType := ftInteger;
+          TableData.ReadField('Int', IData);
+          i := IData.i32Val;
+          Data.FieldType := ftBlob;
+          TableData.ReadField('Blob', Data);
+          //Find out how big our buffer needs to be.
+          if Data.size > 0 then
+          begin
+            GetMem(Data.Data, Data.size);
+            try
+              //Get the actual data.
+              TableData.ReadField('Blob', Data);
+              //Mod one byte.
+              PAnsiChar(Data.Data)^ := #42;
+              //Write back.
+              TableData.WriteField('Blob', Data);
+            finally
+              FreeMem(Data.Data);
+            end;
+          end;
+          FillChar(Data, sizeof(Data), 0);
+
+          //Re-read back see if OK after write to local copy.
+
+          Data.FieldType := ftBlob;
+          TableData.ReadField('Blob', Data);
+          //Find out how big our buffer needs to be.
+          if Data.size > 0 then
+          begin
+            GetMem(Data.Data, Data.size);
+            try
+              //Get the actual data.
+              TableData.ReadField('Blob', Data);
+              PD := Data.Data;
+              for j := 0 to Pred(Data.size) do
+              begin
+                if j = 0  then
+                begin
+                  if PD^ <> #42 then
+                    raise Exception.Create('Blob test (2) failed.');
+                end
+                else
+                begin
+                  if PD^ <> AnsiChar(i) then
+                    raise Exception.Create('Blob test (2) failed.');
+                end;
+                Inc(PD);
+              end;
+            finally
+              FreeMem(Data.Data);
+              FillChar(Data, sizeof(Data), 0);
+            end;
+          end;
+          TableData.Post;
+          OK := TableData.Locate(ptNext, '');
+        end;
+      finally
+        TableData.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+    LogTimeIncr('Blob test (2) OK');
+  except
+    Trans.RollbackAndFree;
+    LogTimeIncr('Blob test (2) failed');
+    raise;
+  end;
+
+  //Now check that the blob data is as we expect, after commited
+  //all the way back AB buffers, and re-read.
+  Trans := FSession.StartTransaction(amRead);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      Table := DBAPI.OpenTableOrKey('Test table');
+      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+      try
+        try
+          OK := TableData.Locate(ptFirst, '');
+          while OK do
+          begin
+            Data.FieldType := ftInteger;
+            TableData.ReadField('Int', Data);
+            i := Data.i32Val;
+            FillChar(Data, sizeof(Data), 0);
+            Data.FieldType := ftBlob;
+            TableData.ReadField('Blob', Data);
+            //Find out how big our buffer needs to be.
+            if Data.size > 0 then
+            begin
+              GetMem(Data.Data, Data.size);
+              try
+                //Get the actual data.
+                TableData.ReadField('Blob', Data);
+                PD := Data.Data;
+                for j := 0 to Pred(Data.size) do
+                begin
+                  if j = 0  then
+                  begin
+                    if PD^ <> #42 then
+                      raise Exception.Create('Blob test (3) failed.');
+                  end
+                  else
+                  begin
+                    if PD^ <> AnsiChar(i) then
+                      raise Exception.Create('Blob test (3) failed.');
+                  end;
+                  Inc(PD);
+                end;
+              finally
+                FreeMem(Data.Data);
+                FillChar(Data, sizeof(Data), 0);
+              end;
+            end;
+            OK := TableData.Locate(ptNext, '');
+          end;
+        finally
+          FreeMem(Data.Data);
+        end;
+      finally
+        TableData.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+    LogTimeIncr('Blob test (3) OK');
+  except
+    Trans.RollbackAndFree;
+    LogTimeIncr('Blob test (3) failed');
+    raise;
   end;
 end;
 

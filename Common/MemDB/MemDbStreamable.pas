@@ -52,7 +52,9 @@ type
 {$ENDIF}
   public
     constructor Create; virtual;
+    //Assign to copy across local fields.
     procedure Assign(Source: TMemDBStreamable); virtual;
+    //DeepAssign to recursively copy entire tree.
     procedure DeepAssign(Source: TMemDBStreamable); virtual;
     //TODO - Do we need the "same" function any more?
     function Same(Other: TMemDBStreamable):boolean; virtual;
@@ -82,7 +84,6 @@ type
   public
     constructor Create; override;
     destructor Destroy; override;
-    procedure Assign(Source: TMemDBStreamable); override;
     procedure DeepAssign(Source: TMemDBStreamable); override;
     //TODO - Remove same functions.
     function Same(Other: TMemDBStreamable):boolean; override;
@@ -132,6 +133,8 @@ type
     procedure RecFromStream(Stream: TStream; var Rec: TMemDbFieldDataRec);
   public
     FDataRec: TMemDbFieldDataRec;
+    constructor Create; override;
+    destructor Destroy; override;
 
     procedure Assign(Source: TMemDBStreamable); override;
     function Same(Other: TMemDBStreamable):boolean; override;
@@ -327,7 +330,7 @@ end;
 
 procedure TMemDBStreamable.DeepAssign(Source: TMemDBStreamable);
 begin
-  Assign(Source);
+  Assign(Source); //To copy local fields.
 end;
 
 function TMemDBStreamable.Same(Other: TMemDBStreamable):boolean;
@@ -480,18 +483,6 @@ begin
   ExpectTag(Stream, mstStreamableListEnd);
 end;
 
-procedure TMemStreamableList.Assign(Source: TMemDBStreamable);
-var
-  i: integer;
-  S: TMemStreamableList;
-begin
-  inherited;
-  FreeAndClear;
-  S := Source as TMemStreamableList;
-  for i := 0 to Pred(S.Count) do
-    Add(Clone(S.Items[i]));
-end;
-
 procedure TMemStreamableList.DeepAssign(Source: TMemDBStreamable);
 var
   i: integer;
@@ -503,7 +494,6 @@ begin
   for i := 0 to Pred(S.Count) do
     Add(DeepClone(S.Items[i]));
 end;
-
 
 function TMemStreamableList.Same(Other: TMemDBStreamable):boolean;
 var
@@ -904,11 +894,14 @@ var
   LocalRec: TMemDbFieldDataRec;
   OK: boolean;
 begin
+  FillChar(LocalRec, sizeof(LocalRec), 0);
   RecFromStream(Stream, LocalRec);
-  OK := DataRecsSame(FDataRec, LocalRec);
-  if (LocalRec.FieldType = ftBlob)
-    and Assigned(LocalRec.Data) then
-    FreeMem(LocalRec.Data);
+  try
+    OK := DataRecsSame(FDataRec, LocalRec);
+  finally
+    if (LocalRec.FieldType = ftBlob) then
+      FreeMem(LocalRec.Data);
+  end;
   if not OK then
     raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
 end;
@@ -924,20 +917,48 @@ begin
     Assert(Assigned(FDataRec.Data) = (FDataRec.size > 0));
     if Assigned(FDataRec.Data) then
       FreeMem(FDataRec.Data);
+    FDataRec.Data := nil;
+    FDataRec.size := 0;
   end;
-  FDataRec := S.FDataRec;
+  FDataRec.FieldType := S.FDataRec.FieldType;
   if FDataRec.FieldType = ftBlob then
   begin
-    Assert(Assigned(FDataRec.Data) = (FDataRec.size > 0));
-    if Assigned(FDataRec.Data) then
-    begin
-      if FDataRec.size > High(Integer) then
-        raise EMemDBInternalException.Create(S_BLOB_TOO_LARGE);
-      GetMem(FDataRec.Data, Integer(FDataRec.size));
-      Move(S.FDataRec.Data, FDataRec.Data, FDataRec.size);
+    Assert(Assigned(S.FDataRec.Data) = (S.FDataRec.size > 0));
+    try
+      if Assigned(S.FDataRec.Data) then
+      begin
+        GetMem(FDataRec.Data, S.FDataRec.size);
+        Move(S.FDataRec.Data^, FDataRec.Data^, S.FDataRec.size);
+        FDataRec.size := S.FDataRec.size;
+      end
+      else
+      begin
+        FDataRec.Data := nil;
+        FDataRec.size := 0;
+      end;
+    except
+      FreeMem(FDataRec.Data);
+      FDataRec.size := 0;
+      raise;
     end;
-  end;
+  end
+  else
+    FDataRec := S.FDataRec;
 end;
+
+constructor TMemFieldData.Create;
+begin
+  inherited;
+  FillChar(FDataRec, sizeof(FDataRec), 0);
+end;
+
+destructor TMemFieldData.Destroy;
+begin
+  if FDataRec.FieldType = ftBlob then
+    FreeMem(FDataRec.Data);
+  inherited;
+end;
+
 
 function TMemFieldData.Same(Other: TMemDBStreamable): boolean;
 var

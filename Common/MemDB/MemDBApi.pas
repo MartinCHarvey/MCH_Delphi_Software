@@ -278,7 +278,7 @@ uses
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
   GlobalLog,
 {$ENDIF}
-  MemDB, SysUtils, IoUtils, BufferedFileStream;
+  MemDB, SysUtils, IoUtils, BufferedFileStream, Math;
 
 const
   S_API_POST_OR_DISCARD_BEFORE_NAVIGATING =
@@ -580,6 +580,9 @@ procedure TMemAPITableData.ReadField(FieldName: string;
                     var Data: TMemDbFieldDataRec);
 var
   FieldAbsIdx: integer;
+  MemFieldData: TMemFieldData;
+  NewData: pointer;
+  NewSize: UInt64;
 begin
   if not (Assigned(FCursor) or FAdding) then
     raise EMemDBAPIException.Create(S_API_NO_ROW_SELECTED);
@@ -588,9 +591,42 @@ begin
   FieldAbsIdx := Table.API_DataGetFieldAbsIdx(FIsolation, FieldName);
   if (FieldAbsIdx < 0) or (FieldAbsIdx >= FFieldList.Count) then
     raise EMemDBInternalException.Create(S_API_BAD_FIELD_INDEX);
-  //Blobs: Treat the memory as read-only, but you can re-write the pointer & size,
-  //DB engine will free existing memory, and grab your new buffer.
-  Data := (FFieldList.Items[FieldAbsIdx] as TMemFieldData).FDataRec
+  MemFieldData := (FFieldList.Items[FieldAbsIdx] as TMemFieldData);
+  Data.FieldType := MemFieldData.FDataRec.FieldType;
+  if Data.FieldType = ftBlob then
+  begin
+  { Change in blob semantics here. If you give me:
+    1. nil and zero size, I  will indicate size and return.
+    2. nil and nonzero size, I will indicate size and return.
+    2. non-nil and zero size, I will indicate copied 0 bytes.
+    3. non-nil and too few bytes, I will copy only the amount you asked.
+    4. non-nil and correct bytes, I will copy all.
+    5. non-nil and too many bytes, I will indicate how much copied.
+    N.B.
+    6. Except if data field is zero, then I can potentially indicate
+       zero bytes copied. Hopefully you knew how large your buffer was,
+       or you're happy to free it.}
+    if not Assigned(Data.Data) then
+      Data.size := MemFieldData.FDataRec.size
+    else
+    begin
+      if Assigned(MemFieldData.FDataRec.Data) then
+      begin
+        NewSize := Math.Min(Data.size, MemFieldData.FDataRec.size);
+        Move(MemFieldData.FDataRec.Data^, Data.Data^, NewSize);
+        Data.size := NewSize;
+      end
+      else
+      begin
+        Assert(MemFieldData.FDataRec.size = 0);
+        Data.size := 0;
+      end;
+    end;
+  end
+  else
+  begin
+    Data := MemFieldData.FDataRec
+  end;
 end;
 
 procedure TMemAPITableData.WriteField(FieldName: string;
@@ -598,6 +634,8 @@ procedure TMemAPITableData.WriteField(FieldName: string;
 var
   FieldAbsIdx: integer;
   Field: TMemFieldData;
+  NewData: pointer;
+  NewSize: UInt64;
 begin
   CheckReadWriteTransaction;
   if not (Assigned(FCursor) or FAdding) then
@@ -608,23 +646,35 @@ begin
   if (FieldAbsIdx < 0) or (FieldAbsIdx >= FFieldList.Count) then
     raise EMemDBInternalException.Create(S_API_BAD_FIELD_INDEX);
   Field := (FFieldList.Items[FieldAbsIdx] as TMemFieldData);
-  if Data.FieldType <> FIeld.FDataRec.FieldType then
+  if Data.FieldType <> Field.FDataRec.FieldType then
     raise EMemDBAPIException.Create(S_API_CANNOT_CHANGE_FIELD_TYPES_DIRECTLY);
-  //Blobs: Treat the memory as read-only, but you can re-write the pointer & size,
-  //DB engine will free existing memory, and grab your new buffer.
   if Data.FieldType = ftBlob then
   begin
+  { Change in blob semantics here. Instead of taking ownership of the memory buffer,
+    I will allocate my own, and assume you're giving me new content on every write }
     if (Data.size > 0) <> Assigned(Data.Data) then
       raise EMemDBAPIException.Create(S_API_BLOB_SIZE_INCONSISTENT_WITH_PTR);
-    if Field.FDataRec.Data <> Data.Data then
-    begin
-      //OK, you've changed the buffer, I'll grab the memory.
-      if Assigned(Field.FDataRec.Data) then
-        FreeMem(Field.FDataRec.Data);
+    NewData := nil;
+    NewSize := 0;
+    try
+      if Data.size > 0 then
+      begin
+        GetMem(NewData, Data.size);
+        Move(Data.Data^, NewData^, Data.size);
+        NewSize := Data.size;
+      end;
+    except
+      FreeMem(NewData); //Exception in alloc or copy (most likely here).
+      raise;
     end;
-    //else you've not changed the buffer, it's still my own one.
+    FreeMem(Field.FDataRec.Data);
+    Field.FDataRec.Data := NewData;
+    Field.FDataRec.size := NewSize;
+  end
+  else
+  begin
+    Field.FDataRec := Data;
   end;
-  Field.FDataRec := Data;
   FFieldListDirty := true;
 end;
 

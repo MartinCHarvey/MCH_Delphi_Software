@@ -305,7 +305,8 @@ const
                                            ftUint64,
                                            ftUnicodeString,
                                            ftDouble,
-                                           ftGuid];
+                                           ftGuid,
+                                           ftBlob];
   MDBIsoStrings: TMDBIsoStrings = ('ilDirtyRead', 'ilCommittedRead');
   MDBABStrings: TMDBABStrings = ('abCurrent', 'abNext', 'abLatest');
   MemAPIPositionStrings:TMemAPIPositionStrings
@@ -871,11 +872,12 @@ initialization
     Func := MemDBGeneralXlateExceptions;
     Next := nil;
   end;
+  //TOptimizeLevel = (olNever, olInitFirstTrans, olInitAllTrans, olAlways);
   with Optimizations do
   begin
-    PreAndCommitParallel := olInitAllTrans;
+    PreAndCommitParallel := olInitFirstTrans;
     IndexBuildParallel := olAlways;
-    TearDownParallel := olInitAllTrans;
+    TearDownParallel := olAlways;
     FKListsParallel := olNever;
     QuickIndexFirstTransaction := True;
   end;
