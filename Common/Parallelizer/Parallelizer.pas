@@ -72,7 +72,6 @@ type
     FHandler: TParallelHandler;
   public
     procedure Execute; override;
-  published
   end;
 
   //Not same as SyncObjs THandleObjectArray,that's architecture astronautix.

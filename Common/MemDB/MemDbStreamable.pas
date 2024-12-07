@@ -33,8 +33,6 @@ IN THE SOFTWARE.
 
 interface
 
-//TODO - We should be able to phase out most of the V1 streaming classes.
-
 uses
   SysUtils,
 {$IFDEF USE_TRACKABLES}
@@ -56,7 +54,7 @@ type
     procedure Assign(Source: TMemDBStreamable); virtual;
     //DeepAssign to recursively copy entire tree.
     procedure DeepAssign(Source: TMemDBStreamable); virtual;
-    //TODO - Do we need the "same" function any more?
+
     function Same(Other: TMemDBStreamable):boolean; virtual;
     procedure ToStreamV2(Stream: TStream); virtual; abstract;
     procedure FromStreamV2(Stream: TStream); virtual; abstract;
@@ -85,7 +83,7 @@ type
     constructor Create; override;
     destructor Destroy; override;
     procedure DeepAssign(Source: TMemDBStreamable); override;
-    //TODO - Remove same functions.
+
     function Same(Other: TMemDBStreamable):boolean; override;
     procedure FreeAndClear;
     procedure RemoveDeleteSentinels;
@@ -259,6 +257,8 @@ type
     DEPRECATED_mstIndexDefStart_V2,
     DEPRECATED_mstIndexDefStartV3,
     mstIndexDefStartV4,
+    mstMultiChangesetsStart,
+    mstMultiChangesetsEnd,
 
     mstReservedForEscape = $FE,
     mstReservedForEscape2 = $FF
@@ -337,7 +337,7 @@ function TMemDBStreamable.Same(Other: TMemDBStreamable):boolean;
 begin
   result := Assigned(Other) = Assigned(Self);
   if Assigned(Other) and Assigned(Self) then
-    result := Other is Self.ClassType;
+    result := (Other is Self.ClassType) and (Self is Other.ClassType);
 end;
 
 class function TMemDBStreamable.Clone(Source: TMemDBStreamable):TMemDBStreamable;
@@ -434,7 +434,7 @@ begin
   else
     raise EMemDBException.Create(S_STREAMABLE_LIST_LOOKAHEAD_FAILED + IntToStr(Ord(Tag)));
   end;
-  Stream.Seek(Pos, soFromBeginning);
+  Stream.Seek(Pos, TSeekOrigin.soBeginning);
 end;
 
 
@@ -500,9 +500,7 @@ var
  O: TMemStreamableList;
  I: integer;
 begin
-  result := Assigned(Other) = Assigned(Self);
-  if Assigned(Other) and Assigned(Self) then
-    result := Other is Self.ClassType;
+  result := inherited;
   if Result then
   begin
     O := Other as TMemStreamableList;
@@ -731,7 +729,7 @@ begin
   if DepTag = DEPRECATED_mstIndexFieldDeconflict then
     Stream.Read(DEPRECATED_Deconflict, sizeof(DEPRECATED_Deconflict))
   else
-    Stream.Seek(CurPos, soFromBeginning);
+    Stream.Seek(CurPos, TSeekOrigin.soBeginning);
 
     ExpectTag(Stream, mstIndexDefEnd);
 end;
@@ -796,7 +794,7 @@ begin
   if Tag = DEPRECATED_mstIndexFieldDeconflict then
     Stream.Read(DEPRECATED_Deconflict, sizeof(DEPRECATED_Deconflict))
   else
-    Stream.Seek(CurPos, soFromBeginning);
+    Stream.Seek(CurPos, TSeekOrigin.soBeginning);
   ExpectTag(Stream, mstIndexDefEnd);
 end;
 

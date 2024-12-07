@@ -379,8 +379,6 @@ begin
                     and ((Action.ActionObj as TMemDbTransaction).Sync = amLazyWrite) do
                   begin
                     Action := FActionsPendingQueue.RemoveHeadObj as TMemDBJournalAction;
-                    Assert((Action.ActionType = jatCommitTransaction)
-                    and ((Action.ActionObj as TMemDbTransaction).Sync = amLazyWrite));
                     T := Action.ActionObj as TMemDBTransaction;
                     AmalgamatedTrans.Add(T);
                     Action.Free;
@@ -786,7 +784,7 @@ begin
           except
             on E: Exception do
             begin
-              ErrMsg := S_EXCEPTION + E.Message;
+              ErrMsg := S_EXCEPTION + E.Message + '(' + FileName + ')';
               exit; //Result := false;
             end;
           end;
@@ -829,49 +827,52 @@ var
   result: boolean;
   OutputStream: TStream;
   FileName: string;
-  StreamableList: TMemStreamableList;
   Idx: integer;
   Transaction: TMemDBTransaction;
   DoFlush: boolean;
   FlushOK: boolean;
   ErrMsg: string;
+
+  procedure CopyTransactionStreamsToOutput;
+  var
+    i: integer;
+    S: TStream;
+  begin
+    for i := 0 to Pred(Transaction.FinalStreams.Count) do
+    begin
+      S := TObject(Transaction.FinalStreams[i]) as TStream;
+      S.Seek(0, TSeekOrigin.soBeginning);
+      OutputStream.CopyFrom(S, S.Size);
+    end;
+  end;
+
 begin
   try
     FileName := FBaseDirectory + IntToStr(FWriteSeq) + FileExts[jftIncremental];
     OutputStream := TWriteCachedFileStream.Create(FileName, FILE_CACHE_SIZE);
     DoFlush := false;
     try
-      StreamableList := TMemStreamableList.Create;
-      try
-        for Idx := 0 to Pred(Transactions.Count) do
-        begin
-          //TODO - Eventually if all writes plain stream copy can make
-          //noncached file stream (remove memcopy).
-          Transaction := TMemDbTransaction(Transactions[idx]);
-          Assert(Transaction.Mode = amReadWrite);
-          DoFlush := DoFlush or (Transaction.Sync = amFlushBuffers);
-          Transaction.V2Changeset.Seek(0, soFromBeginning);
-          OutputStream.CopyFrom(Transaction.V2Changeset, Transaction.V2Changeset.Size);
-        end;
-        result := true; //Errors in this path caught via exceptions.
-        if DoFlush then
-        begin
-          (OutputStream as TWriteCachedFileStream).FlushCache;
-          FlushOK := FlushFileBuffers((OutputStream as TWriteCachedFileStream).Handle);
-          Assert(FlushOK);
-        end;
-        for Idx := 0 to Pred(Transactions.Count) do
-        begin
-          Transaction := TMemDbTransaction(Transactions[idx]);
-          if Transaction.Sync = amFlushBuffers then
-            DoJournalWriteFlush(Transaction);
-          Transaction.DecRefConditionalFree;
-        end;
-      finally
-        //Don't free changeset data, will free that with transaction.
-        StreamableList.Clear;
-        StreamableList.Free;
+      for Idx := 0 to Pred(Transactions.Count) do
+      begin
+        Transaction := TMemDbTransaction(Transactions[idx]);
+        Assert(Transaction.Mode = amReadWrite);
+        DoFlush := DoFlush or (Transaction.Sync = amFlushBuffers);
+        CopyTransactionStreamsToOutput;
       end;
+      if DoFlush then
+      begin
+        (OutputStream as TWriteCachedFileStream).FlushCache;
+        FlushOK := FlushFileBuffers((OutputStream as TWriteCachedFileStream).Handle);
+        Assert(FlushOK);
+      end;
+      for Idx := 0 to Pred(Transactions.Count) do
+      begin
+        Transaction := TMemDbTransaction(Transactions[idx]);
+        if Transaction.Sync = amFlushBuffers then
+          DoJournalWriteFlush(Transaction);
+        Transaction.DecRefConditionalFree;
+      end;
+      result := true; //Errors in this path caught via exceptions.
     finally
       Inc(FWriteSeq);
       OutputStream.Free;
@@ -893,7 +894,6 @@ end;
 procedure TMemDbDefaultJournal.PerformCheckpoint(Action: TMemDBJournalAction);
 var
   FileName: string;
-  TmpName: string;
   OutputStream: TStream;
   result: boolean;
   ErrMsg: string;
@@ -908,15 +908,13 @@ begin
         Assert(Assigned(Action.ActionObj));
         Assert(Action.ActionObj is TStream);
         ActionStream := Action.ActionObj as TStream;
-        TmpName := (ActionStream as TMemDBWriteCachedFileStream).FileName;
         ActionStream.Seek(0, soFromBeginning);
         OutputStream.CopyFrom(ActionStream, ActionStream.Size);
         result := true; //Errors on this path caught by exceptions.
       finally
         //Do free changeset data, no associated transaction obj.
         Action.ActionObj.Free;
-        DeleteFile(TmpName);
-        //TODO If changeset stream temporary file, may need to delete from disk.
+        Action.ActionObj := nil;
       end;
     finally
       Inc(FWriteSeq);
