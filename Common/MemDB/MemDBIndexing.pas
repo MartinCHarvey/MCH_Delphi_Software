@@ -46,13 +46,13 @@ type
   TMemDBIndexNodeSearchVal = class(TMemDbIndexNode)
   private
     FPointerSearchVal: pointer;
-    FIdSearchVal: string;
+    FIdSearchVal: TGUID;
     FFieldSearchVals: TMemDbFieldDataRecs;
   protected
     function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer; override;
   public
     property PointerSearchVal: pointer read FPointerSearchVal write FPointerSearchVal;
-    property IdSearchVal: string read FIdSearchVal write FIdSearchVal;
+    property IdSearchVal: TGUID read FIdSearchVal write FIdSearchVal;
     property FieldSearchVals: TMemDbFieldDataRecs read FFieldSearchVals write FFieldSearchVals;
   end;
 
@@ -259,7 +259,7 @@ begin
   begin
     case TagData.InternalIndexClass of
     iicRowId:
-      result:= CompareStr(OwnRow.RowId, OtherRow.RowId);
+      result:= CompareGuids(OwnRow.RowId, OtherRow.RowId);
     else
       Assert(false);
       result :=0;
@@ -444,7 +444,7 @@ begin
   begin
     case TagData.InternalIndexClass of
     iicRowId:
-      result:= CompareStr(FIdSearchVal, OtherRow.RowId);
+      result:= CompareGuids(FIdSearchVal, OtherRow.RowId);
     else
       Assert(false);
       result := 0;

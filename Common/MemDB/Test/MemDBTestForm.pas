@@ -141,8 +141,8 @@ begin
         finally
           TableMeta.Free;
         end;
-        Trans.CommitAndFree;
         DBAPI.Free;
+        Trans.CommitAndFree;
         LogTimeIncr('Table create OK');
         Trans := FSession.StartTransaction(amReadWrite, amLazyWrite, ilDirtyRead);
         DBAPI := Trans.GetAPI;
@@ -299,6 +299,7 @@ begin
     begin
       Trans.RollbackAndFree;
       LogTimeIncr('Big table structure setup failed' + E.Message);
+      raise;
     end;
   end;
   Trans := FSession.StartTransaction(amReadWrite);
@@ -335,6 +336,7 @@ begin
     begin
       Trans.RollbackAndFree;
       LogTimeIncr('Big tables data fill failed' + E.Message);
+      raise;
     end;
   end;
 end;
@@ -387,6 +389,7 @@ begin
     begin
       Trans.RollbackAndFree;
       LogTimeIncr('Big table data mod failed' + E.Message);
+      raise;
     end;
   end;
 end;
@@ -527,9 +530,9 @@ begin
               TableData.WriteField('Blob', Data);
             finally
               FreeMem(Data.Data);
+              FillChar(Data, sizeof(Data), 0);
             end;
           end;
-          FillChar(Data, sizeof(Data), 0);
 
           //Re-read back see if OK after write to local copy.
 
@@ -588,47 +591,43 @@ begin
       Table := DBAPI.OpenTableOrKey('Test table');
       TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
       try
-        try
-          OK := TableData.Locate(ptFirst, '');
-          while OK do
+        OK := TableData.Locate(ptFirst, '');
+        while OK do
+        begin
+          Data.FieldType := ftInteger;
+          TableData.ReadField('Int', Data);
+          i := Data.i32Val;
+          FillChar(Data, sizeof(Data), 0);
+          Data.FieldType := ftBlob;
+          TableData.ReadField('Blob', Data);
+          //Find out how big our buffer needs to be.
+          if Data.size > 0 then
           begin
-            Data.FieldType := ftInteger;
-            TableData.ReadField('Int', Data);
-            i := Data.i32Val;
-            FillChar(Data, sizeof(Data), 0);
-            Data.FieldType := ftBlob;
-            TableData.ReadField('Blob', Data);
-            //Find out how big our buffer needs to be.
-            if Data.size > 0 then
-            begin
-              GetMem(Data.Data, Data.size);
-              try
-                //Get the actual data.
-                TableData.ReadField('Blob', Data);
-                PD := Data.Data;
-                for j := 0 to Pred(Data.size) do
+            GetMem(Data.Data, Data.size);
+            try
+              //Get the actual data.
+              TableData.ReadField('Blob', Data);
+              PD := Data.Data;
+              for j := 0 to Pred(Data.size) do
+              begin
+                if j = 0  then
                 begin
-                  if j = 0  then
-                  begin
-                    if PD^ <> #42 then
-                      raise Exception.Create('Blob test (3) failed.');
-                  end
-                  else
-                  begin
-                    if PD^ <> AnsiChar(i) then
-                      raise Exception.Create('Blob test (3) failed.');
-                  end;
-                  Inc(PD);
+                  if PD^ <> #42 then
+                    raise Exception.Create('Blob test (3) failed.');
+                end
+                else
+                begin
+                  if PD^ <> AnsiChar(i) then
+                    raise Exception.Create('Blob test (3) failed.');
                 end;
-              finally
-                FreeMem(Data.Data);
-                FillChar(Data, sizeof(Data), 0);
+                Inc(PD);
               end;
+            finally
+              FreeMem(Data.Data);
+              FillChar(Data, sizeof(Data), 0);
             end;
-            OK := TableData.Locate(ptNext, '');
           end;
-        finally
-          FreeMem(Data.Data);
+          OK := TableData.Locate(ptNext, '');
         end;
       finally
         TableData.Free;
@@ -641,6 +640,53 @@ begin
   except
     Trans.RollbackAndFree;
     LogTimeIncr('Blob test (3) failed');
+    raise;
+  end;
+
+  //Search for an existent, and nonexistent blob.
+  Trans := FSession.StartTransaction(amRead);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      Table := DBAPI.OpenTableOrKey('Test table');
+      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+      try
+        FillChar(SearchData, sizeof(SearchData), 0);
+        SearchData.FieldType := ftBlob;
+        SearchData.size := BLOB_SIZE;
+        GetMem(SearchData.Data, SearchData.size);
+        try
+          //Search for a blob we know exists.
+          FillChar(SearchData.Data^, SearchData.size, #50);
+          PAnsiChar(SearchData.Data)^ := #42;
+          OK := TableData.FindByIndex('BlobIdx', SearchData);
+          if not OK then
+            raise Exception.Create('Blob test (4) - find blob failed');
+          //And one that we know doesn't.
+          PD := PAnsiChar(SearchData.Data);
+          for i := 0 to Pred(SearchData.size) do
+          begin
+            PD^ := AnsiChar(i);
+            Inc(PD);
+          end;
+          OK := TableData.FindByIndex('BlobIdx', SearchData);
+          if OK then
+            raise Exception.Create('Blob test (4) - find blob succeeded erroneously.');
+        finally
+          FreeMem(SearchData.Data);
+          FillChar(SearchData, sizeof(SearchData), 0);
+        end;
+      finally
+        TableData.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.RollbackAndFree;
+    LogTimeIncr('Blob test (4) OK');
+  except
+    Trans.RollbackAndFree;
+    LogTimeIncr('Blob test (4) Failed.');
     raise;
   end;
 end;
@@ -2588,6 +2634,7 @@ begin
     on E: Exception do
     begin
       LogTimeIncr('1: Foreign key test (Add keys before data) failed:' + E.Message);
+      raise;
     end;
   end;
 
@@ -2615,6 +2662,7 @@ begin
     on E: Exception do
     begin
       LogTimeIncr('2: Foreign key test (Add data before keys) failed:' + E.Message);
+      raise;
     end;
   end;
 
@@ -2629,6 +2677,7 @@ begin
     begin
       Trans.RollbackAndFree;
       LogTimeIncr('3. Added new unique row to master table failed: ' + E.Message);
+      raise;
     end;
   end;
 
@@ -2643,6 +2692,7 @@ begin
     begin
       Trans.RollbackAndFree;
       LogTimeIncr('4. Removed new unique row from master table failed:' + E.Message);
+      raise;
     end;
   end;
 
@@ -2663,7 +2713,10 @@ begin
         LogTimeIncr('5. Add duplicate item to master table foreign key OK.')
       end
       else
+      begin
         LogTimeIncr('5. Add duplicate item to master table foreign key Failed: ' + E.Message);
+        raise;
+      end;
     end;
   end;
 
@@ -2678,6 +2731,7 @@ begin
     begin
       Trans.RollbackAndFree;
       LogTimeIncr('6. Re add unique item to master table failed:' + E.Message);
+      raise;
     end;
   end;
 
@@ -2700,6 +2754,7 @@ begin
       else
       begin
         LogTimeIncr('7. Remove item in master required by FK failed:' + E.Message);
+        raise;
       end;
     end;
   end;
@@ -2715,6 +2770,7 @@ begin
     begin
       Trans.RollbackAndFree;
       LogTimeIncr('8. Add duplicate item in referring failed:' + E.Message);
+      raise;
     end;
   end;
 
@@ -2729,6 +2785,7 @@ begin
     begin
       Trans.RollbackAndFree;
       LogTimeIncr('9. Add new item in referring, same as new master val failed:' + E.Message);
+      raise;
     end;
   end;
 
@@ -2751,6 +2808,7 @@ begin
       else
       begin
         LogTimeIncr('10. Add new item in referring, master key not present Failed: '+ E.Message);
+        raise;
       end;
     end;
   end;
@@ -2790,7 +2848,6 @@ begin
       finally
         TblMeta.Free;
       end;
-      Trans.CommitAndFree;
     finally
       DBAPI.Free;
     end;
@@ -3002,6 +3059,7 @@ begin
         else
         begin
           LogTimeIncr('MF Indexes, constraints: (' + E.Message +'): failed.');
+          raise;
         end;
       end;
     end;
@@ -3018,7 +3076,7 @@ var
   i: integer;
 begin
   FTimeStamp := Now;
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(amReadWrite, amLazyWrite, ilCommittedRead);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -3059,6 +3117,7 @@ begin
     begin
       Trans.RollbackAndFree;
       LogTimeIncr('Reset state failed.');
+      raise;
     end;
   end;
 end;
@@ -3088,6 +3147,7 @@ begin
     on E: Exception do
     begin
       LogTimeIncr('Many small transactions failed: ' + E.Message);
+      raise;
     end;
   end;
 end;
@@ -3100,7 +3160,6 @@ initialization
   DBStartTime := Now;
   FDB.InitDB(DB_LOCATION, jtV2);
   FSession := FDB.StartSession;
-  FSession.TempStorageMode := tsmMemory;
 finalization
   FSession.Free;
   FDB.Free;

@@ -851,9 +851,6 @@ end;
 function TIndexedStoreG._AddIndex(IndNodeClassType: TIndexNodeClass; Tag:TTagType; Async: boolean): TISRetVal;
 var
   NewIndex: TSIndex;
-{$IFOPT C+}
-  res2: TISRetVal;
-{$ENDIF}
 
 begin
   NewIndex := TSIndex.Create;
@@ -1199,7 +1196,6 @@ end;
 
 function TIndexedStoreG.RemoveItemInPlace(ItemRec: TItemRec; var LPos:PDLEntry): TIsRetVal;
 var
-  Link: TIndexNodeLink;
   Index: TSIndex;
   CallRes: TISRetVal;
 begin

@@ -46,7 +46,8 @@ uses
 type
   TMemDBTransReason = (mtrUserOp,
                        mtrReplayFromScratch,
-                       mtrReplayFromJournal);
+                       mtrReplayFromJournal,
+                       mtrUserOpMultiRollback);
 
   TMemDBAPIInterfacedObject = class;
 
@@ -59,10 +60,6 @@ type
     FAssociatedTransaction: TObject;
     FInterfacedObject: TMemDBAPIInterfacedObject;
     FIsolation: TMDBIsolationLevel;
-    //See if we can segment the R/O R/W API calls, by class type
-    //RW superclass of RO.
-    //User state required is held in these objects to prevent thread
-    //conflicts.
     procedure CheckReadWriteTransaction;
   public
     function GetApiObjectFromHandle(Handle: TMemDBHandle; ID: TMemDBAPIId; RaiseIfNoAPI: boolean = true): TMemDBAPI;
@@ -91,7 +88,8 @@ type
     function GetAPIObject(Transaction: TObject; ID: TMemDBAPIId; RaiseIfNoAPI: boolean = true): TMemDBAPI;
     constructor Create;
     destructor Destroy; override;
-    procedure HandleTransactionDestruction(Transaction: TObject);
+    procedure CheckNoDanglingTransactionRefs(Transaction: TObject; CanThrow: boolean);
+    procedure CheckNoAPIsBeforeDestruction(CanThrow: boolean);
     property Parent: TObject read FParent;
   end;
 
@@ -103,15 +101,26 @@ type
 {$ENDIF}
   protected
   public
-    procedure ToJournalV2(Stream: TStream); virtual; abstract;
-    procedure ToScratchV2(Stream: TStream); virtual; abstract;
-    procedure FromJournalV2(Stream: TStream); virtual; abstract;
-    procedure FromScratchV2(Stream: TStream); virtual; abstract;
+    procedure ToJournal(FwdStream: TStream; InverseStream: TStream); virtual; abstract;
+{$IFOPT C+}
+    //N.B. This checks for "obvious" non-invertibility, (i.e. stupid typing errors).
+    //however some things (like table deletes), where metadata delete -> all delete
+    //need to be handled separately.
+
+    //Is a class function just to make sure we don't rely on the internal state
+    //of the class implementing it. Of course it's OK to create temporaries, and
+    //check taks between streams.
+    class procedure AssertStreamsInverse(FwdStream: TStream; InverseStream: TStream); virtual; abstract;
+{$ENDIF}
+    procedure ToScratch(Stream: TStream); virtual; abstract;
+    procedure FromJournal(Stream: TStream); virtual; abstract;
+    procedure FromScratch(Stream: TStream); virtual; abstract;
 
     //In order of operation from one consistent state to another:
     //Check no A/B buffered changes. (Possibly debug only).
     //Then journal setup replay changes
-    procedure CheckNoChanges; virtual; abstract;//Added, or changed, or deleted.
+    procedure CheckNoChanges;
+    function AnyChangesAtAll: boolean; virtual;
 
     //Commit / rollback functions generally do not call up the inheritance
     //heirarchy, and are "flat"
@@ -132,7 +141,10 @@ type
     function GetChanged: boolean; virtual; abstract;
     function GetDeleted: boolean; virtual; abstract;
     function GetNull: boolean; virtual; abstract;
+
   public
+    function AnyChangesAtAll: boolean; override;
+
     property Added: boolean read GetAdded;
     property Changed: boolean read GetChanged;
     property Deleted: boolean read GetDeleted;
@@ -166,7 +178,8 @@ type
     procedure SetABData(AB: TABSelection; New: TMemDBStreamable); inline;
 {$ENDIF}
     //Can't use AB copies here because lists may be lower in object heirarchy.
-    procedure CheckABStreamableListChange(Current, Next: TMemStreamableList; Reason: TMemDbTransReason);
+    procedure CheckABStreamableListChange(Current, Next: TMemStreamableList);
+    class procedure LookaheadHelperGeneric(Stream: TStream;var Copy: TMemDBStreamable);
     procedure LookaheadHelper(Stream: TStream);
   public
     procedure Delete; override;
@@ -174,13 +187,13 @@ type
 
     destructor Destroy; override;
 
-    //And version 2 of the same ......
-    procedure ToJournalV2(Stream: TStream); override;
-    procedure ToScratchV2(Stream: TStream); override;
-    procedure FromJournalV2(Stream: TStream); override;
-    procedure FromScratchV2(Stream: TStream); override;
-
-    procedure CheckNoChanges; override;
+    procedure ToJournal(FwdStream: TStream; InverseStream: TStream); override;
+{$IFOPT C+}
+    class procedure AssertStreamsInverse(FwdStream: TStream; InverseStream: TStream); override;
+{$ENDIF}
+    procedure ToScratch(Stream: TStream); override;
+    procedure FromJournal(Stream: TStream); override;
+    procedure FromScratch(Stream: TStream); override;
 
     procedure Commit(Reason: TMemDbTransReason); override;
     procedure Rollback(Reason: TMemDbTransReason); override;
@@ -219,9 +232,9 @@ type
     procedure RmRowQuickLists(Row: TMemDBRow; var LPos:PDLEntry; var LHead: PDLEntry);
     procedure AddRowQuicklists(Row: TMemDbRow; LPos: PDLEntry; LHead: PDLEntry);
 
-    procedure ToScratchV2(Stream: TStream); override;
-    procedure FromJournalV2(Stream: TStream); override;
-    procedure FromScratchV2(Stream: TStream); override;
+    procedure ToScratch(Stream: TStream); override;
+    procedure FromJournal(Stream: TStream); override;
+    procedure FromScratch(Stream: TStream); override;
 
     property Store: TIndexedStoreO read FStore write FStore;
   end;
@@ -245,7 +258,7 @@ type
 
     //Handle child items when we know they're
     //TMemDBRow.
-    procedure WriteRowToJournalV2(Row: TMemDBRow; Ref1, Ref2: TObject; TblList: TMemDbIndexedList);
+    procedure WriteRowToJournalV3(Row: TMemDBRow; Ref1, Ref2: TObject; TblList: TMemDbIndexedList);
     procedure CommitRollbackChangedRow(Row: TMemDBRow; Ref1, Ref2: TObject; TblList: TMemDbIndexedList);
     procedure RemoveEmptyRow(Row: TMemDBRow; Ref1, Ref2: TObject; TblList: TMemDbIndexedList);
 
@@ -253,8 +266,6 @@ type
                                 Ref1, Ref2: TObject);
     procedure ForEachEmptyRow(Handler: TSelectiveRowHandler;
                                 Ref1, Ref2: TObject);
-    function GetChanged: boolean;
-
   public
     constructor Create;
     destructor Destroy; override;
@@ -265,14 +276,15 @@ type
     function MetaRemoveRowForEdit(EditRec: TEditRec): TMemDbRow;
     procedure MetaInsertRowAfterEdit(EditRec: TEditRec; Row: TMemDbRow);
 
-    //Optimised versions that only go through changed rows.
-    //And version 2 of the same ......
-    procedure ToJournalV2(Stream: TStream); override;
+    procedure ToJournal(FwdStream: TStream; InverseStream: TStream); override;
+{$IFOPT C+}
+    class procedure AssertStreamsInverse(FwdStream: TStream; InverseStream: TStream); override;
+{$ENDIF}
 
-    procedure CheckNoChanges; override;
+    function AnyChangesAtAll: boolean; override;
+
     procedure Commit(Reason: TMemDbTransReason); override;
     procedure Rollback(Reason: TMemDbTransReason); override;
-    property Changed: boolean read GetChanged;
 
     //Navigation and change functions for user API.
     function MoveToRowByIndexTag(Iso: TMDBIsolationLevel;
@@ -296,7 +308,7 @@ type
 
   TMemDBRow = class(TMemDBDoubleBuffered)
   private
-    FRowID: string;
+    FRowID: TGUID;
   protected
     FQuickRef: TDLEntry; //Quick-list link
     FOwningListHead: PDLEntry; //Quick list owner.
@@ -306,14 +318,17 @@ type
     constructor Create;
     destructor Destroy; override;
 
-    //And version 2 of the same ......
-    procedure ToJournalV2(Stream: TStream); override;
-    procedure ToScratchV2(Stream: TStream); override;
-    procedure FromJournalV2(Stream: TStream); override;
-    procedure FromScratchV2(Stream: TStream); override;
+    procedure ToJournal(FwdStream: TStream; InverseStream: TStream); override;
+{$IFOPT C+}
+    class procedure AssertStreamsInverse(FwdStream: TStream; InverseStream: TStream); override;
+{$ENDIF}
+
+    procedure ToScratch(Stream: TStream); override;
+    procedure FromJournal(Stream: TStream); override;
+    procedure FromScratch(Stream: TStream); override;
 
     procedure Commit(Reason: TMemDbTransReason); override;
-    property RowId:string read FRowId write FRowId;
+    property RowId:TGUID read FRowId write FRowId;
 
     procedure Init(Context: TObject; Name:string); override;
   end;
@@ -330,10 +345,10 @@ type
   TMemDBTableMetadata = class(TMemDBEntityMetadata)
   private
     //A/B buffer holds TMemTableMetadataItem
-    procedure CheckABListChanges(Reason: TMemDbTransReason);
+    procedure CheckABListChanges;
   public
-    procedure FromJournalV2(Stream: TStream); override;
-    procedure FromScratchV2(Stream: TStream); override;
+    procedure FromJournal(Stream: TStream); override;
+    procedure FromScratch(Stream: TStream); override;
 
     procedure PreCommit(Reason: TMemDbTransReason);override;
     procedure Commit(Reason: TMemDbTransReason); override;
@@ -385,14 +400,16 @@ type
     function HasAbMetadata(AB: TABSelection):boolean;
 
     function HandleInterfacedObjRequest(Transaction: TObject; ID: TMemDBAPIId): TMemDBAPI;virtual;
-    procedure HandleTransactionDestruction(Transaction: TObject);
+    procedure CheckNoDanglingTransactionRefs(Transaction: TObject; CanThrow: boolean);
   public
     constructor Create;
     destructor Destroy; override;
 
     procedure Delete; override;
     procedure RequestChange; override;
-    procedure CheckNoChanges; override;
+    function AnyChangesAtAll: boolean; override;
+
+    procedure PreCommit(Reason: TMemDBTransReason); override;
     procedure Commit(Reason: TMemDbTransReason); override;
     procedure Rollback(Reason: TMemDbTransReason); override;
 
@@ -478,10 +495,13 @@ type
     destructor Destroy; override;
     procedure PreCommit(Reason: TMemDBTransReason); override;
 
-    procedure ToJournalV2(Stream: TStream); override;
-    procedure ToScratchV2(Stream: TStream); override;
-    procedure FromJournalV2(Stream: TStream); override;
-    procedure FromScratchV2(Stream: TStream); override;
+    procedure ToJournal(FwdStream: TStream; InverseStream: TStream); override;
+{$IFOPT C+}
+    class procedure AssertStreamsInverse(FwdStream: TStream; InverseStream: TStream); override;
+{$ENDIF}
+    procedure ToScratch(Stream: TStream); override;
+    procedure FromJournal(Stream: TStream); override;
+    procedure FromScratch(Stream: TStream); override;
 
     procedure CheckAPITableDelete(Iso: TMDBIsolationLevel; TableName: string);
     procedure CheckAPIIndexDelete(Iso: TMDBIsolationLevel; IsoDeterminedTableName, IndexName: string);
@@ -573,12 +593,16 @@ type
     constructor Create;
     destructor Destroy; override;
 
-    procedure ToJournalV2(Stream: TStream); override;
-    procedure ToScratchV2(Stream: TStream); override;
-    procedure FromJournalV2(Stream: TStream); override;
-    procedure FromScratchV2(Stream: TStream); override;
+    procedure ToJournal(FwdStream: TStream; InverseStream: TStream); override;
+{$IFOPT C+}
+    class procedure AssertStreamsInverse(FwdStream: TStream; InverseStream: TStream); override;
+{$ENDIF}
+    procedure ToScratch(Stream: TStream); override;
+    procedure FromJournal(Stream: TStream); override;
+    procedure FromScratch(Stream: TStream); override;
 
-    procedure CheckNoChanges; override;
+    function AnyChangesAtAll: boolean; override;
+    function HasTableData: boolean;
 
     procedure PreCommit(Reason: TMemDBTransReason); override;
     procedure Commit(Reason: TMemDbTransReason); override;
@@ -627,12 +651,16 @@ type
   public
     function EntitiesByName(AB: TABSelection; Name: string; var Idx: integer): TMemDBEntity;
 
-    procedure ToJournalV2(Stream: TStream); override;
-    procedure ToScratchV2(Stream: TStream); override;
-    procedure FromJournalV2(Stream: TStream); override;
-    procedure FromScratchV2(Stream: TStream); override;
+    procedure ToJournal(FwdStream: TStream; InverseStream: TStream); override;
+{$IFOPT C+}
+    class procedure AssertStreamsInverse(FwdStream: TStream; InverseStream: TStream); override;
+{$ENDIF}
+    procedure ToScratch(Stream: TStream); override;
+    procedure FromJournal(Stream: TStream); override;
+    procedure FromScratch(Stream: TStream); override;
 
-    procedure CheckNoChanges; override;
+    function AnyChangesAtAll: boolean; override;
+
     //Replay journal here....
     //Check A/B buffered changes consistent and logical.
     procedure PreCommit(Reason: TMemDBTransReason); override;
@@ -646,7 +674,7 @@ type
     constructor Create;
     destructor Destroy; override;
 
-    procedure HandleTransactionDestruction(Transaction: TObject);
+    procedure CheckNoDanglingTransactionRefs(Transaction: TObject; CanThrow: boolean);
     procedure CheckAPITableDelete(Iso: TMDBIsolationLevel; TableName: string);
     procedure CheckAPIIndexDelete(Iso: TMDBIsolationLevel; IsoDeterminedTableName, IndexName: string);
     function HandleAPITableRename(Iso: TMDBIsolationLevel; OldName, NewName: string): boolean;
@@ -876,6 +904,9 @@ const
   S_CURSOR_HAS_NO_ROW_AT_DELETE = 'User delete of row broken: no row associated with cursor';
   S_INTERNAL_UNSTREAM_EDIT = 'Internal indexing error during unstream operation';
   S_INTERNAL_META_EDIT = 'Internal indexing error during metadata processing';
+  S_TRANSACTION_HAS_API_OBJECTS = 'Transaction has associated API objects. You should have freed them before commit/rollback';
+  S_MINI_OR_COMMIT_DELETES_API_OBECTS = 'Mini-commit or commit deletes an object underlying some API''s. Free the API''s first please.';
+  S_JOURNAL_ROW_NOT_NEW = 'Expected row to be newly added, but it isn''t.';
 
 { Misc Functions }
 
@@ -1126,7 +1157,7 @@ begin
   end;
 end;
 
-procedure TMemDBAPIInterfacedObject.HandleTransactionDestruction(Transaction: TObject);
+procedure TMemDBAPIInterfacedObject.CheckNoAPIsBeforeDestruction(CanThrow: boolean);
 var
   Idx: integer;
   API:TMemDBAPI;
@@ -1134,17 +1165,41 @@ begin
   Idx := 0;
   FAPIListLock.Acquire;
   try
+    while Idx <FAPIObjects.Count do
+    begin
+      API := TMemDBAPI(FAPIObjects.Items[Idx]);
+      if CanThrow then
+        raise EMemDBAPIException.Create(S_MINI_OR_COMMIT_DELETES_API_OBECTS)
+      else
+        Assert(false);
+      API.Free;
+    end;
+  finally
+    FAPIListLock.Release;
+  end;
+end;
+
+procedure TMemDBAPIInterfacedObject.CheckNoDanglingTransactionRefs(Transaction: TObject; CanThrow: boolean);
+var
+  Idx: integer;
+  API:TMemDBAPI;
+begin
+  FAPIListLock.Acquire;
+  try
+    Idx := 0;
     while Idx < FAPIObjects.Count do
     begin
       API := TMemDBAPI(FAPIObjects.Items[Idx]);
       if API.FAssociatedTransaction = Transaction then
       begin
-        Assert(false); //Caller should have cleaned up beforehand.
+        if CanThrow then
+          raise EMemDBAPIException.Create(S_TRANSACTION_HAS_API_OBJECTS);
         API.Free;
       end
       else
         Inc(Idx);
     end;
+    FAPIObjects.Pack;
   finally
     FAPIListLock.Release;
   end;
@@ -1164,6 +1219,24 @@ procedure TMemDBJournalCreator.PostRollbackCleanup(Reason: TMemDbTransReason);
 begin
 end;
 
+function TMemDbJournalCreator.AnyChangesAtAll: boolean;
+begin
+  result := false;
+end;
+
+procedure TMemDBJournalCreator.CheckNoChanges;
+begin
+  if AnyChangesAtAll then
+    raise EMemDBInternalException.Create(S_REPLAY_CHECK_FAILED + ClassName);
+end;
+
+{ TMemDBConsistencyFlagged }
+
+function TMemDBConsistencyFlagged.AnyChangesAtAll: boolean;
+begin
+  result := inherited;
+  result := result or Added or Changed or Deleted;
+end;
 
 { TMemDBDoubleBuffered }
 
@@ -1262,15 +1335,7 @@ begin
   end;
 end;
 
-
-procedure TMemDBDoubleBuffered.CheckNoChanges;
-begin
-  inherited;
-  if Added or Changed or Deleted then
-    raise EMemDBInternalException.Create(S_REPLAY_CHECK_FAILED + ClassName);
-end;
-
-procedure TMemDBDoubleBuffered.CheckABStreamableListChange(Current, Next: TMemStreamableList; Reason: TMemDBTransReason);
+procedure TMemDBDoubleBuffered.CheckABStreamableListChange(Current, Next: TMemStreamableList);
 var
   Idx: integer;
 begin
@@ -1282,18 +1347,21 @@ begin
       if NotAssignedOrSentinel(Current.Items[idx]) then
         raise EMemDBException.Create(S_CHANGESET_BAD_LISTS);
     end;
-    if Assigned(Next) then
+  end;
+  if Assigned(Next) then
+  begin
+    //No Nil's in next.
+    for Idx := 0 to Pred(Next.Count) do
+    begin
+      if not Assigned(Next.Items[Idx]) then
+        raise EMemDBException.Create(S_CHANGESET_BAD_LISTS);
+    end;
+    if Assigned(Current) then
     begin
       //Next has same or more items as current.
       if Next.Count < Current.Count then
         raise EMemDBException.Create(S_CHANGESET_BAD_LISTS);
-      //No Nil's in next.
-      for Idx := 0 to Pred(Next.Count) do
-      begin
-        if not Assigned(Next.Items[Idx]) then
-          raise EMemDBException.Create(S_CHANGESET_BAD_LISTS);
-      end;
-      //No delete sentinels in new items... ?? (To check... could be ignored??)
+      //No delete sentinels in *new* items unstreamed from disk?
       for Idx := Current.Count to Pred(Next.Count) do
       begin
         if Next.Items[Idx] is TMemDeleteSentinel then
@@ -1303,42 +1371,52 @@ begin
   end;
 end;
 
-
-procedure TMemDBDoubleBuffered.ToJournalV2(Stream: TStream);
+procedure TMemDBDoubleBuffered.ToJournal(FwdStream: TStream; InverseStream: TStream);
 begin
   inherited;
-  //Assume something worth streaming.
   Assert(Added or Changed or Deleted);
-  WrTag(Stream, mstDblBufferedStart);
+
+  WrTag(FwdStream, mstDblBufferedStart);
+  WrTag(InverseStream, mstDblBufferedStart);
 
   if NotAssignedOrSentinel(FCurrentCopy) then
   begin
     Assert(not (FNextCopy is TMemDeleteSentinel));
     Assert(Added);
-    WrStreamChangeType(Stream, mctAdd);
-    FNextCopy.ToStreamV2(Stream);
+    WrStreamChangeType(FwdStream, mctAdd);
+    FNextCopy.ToStream(FwdStream);
+
+    WrStreamChangeType(InverseStream, mctDelete);
+    FNextCopy.ToStream(InverseStream);
   end
   else
   begin
     if FNextCopy is TMemDeleteSentinel then
     begin
       Assert(Deleted);
-      WrStreamChangeType(Stream, mctDelete);
-      FCurrentCopy.ToStreamV2(Stream);
+      WrStreamChangeType(FwdStream, mctDelete);
+      FCurrentCopy.ToStream(FwdStream);
+
+      WrStreamChangeType(InverseStream, mctAdd);
+      FCurrentCopy.ToStream(InverseStream);
     end
     else
     begin
       Assert(Changed);
-      WrStreamChangeType(Stream, mctChange);
-      FCurrentCopy.ToStreamV2(Stream);
-      FNextCopy.ToStreamV2(Stream);
+      WrStreamChangeType(FwdStream, mctChange);
+      FCurrentCopy.ToStream(FwdStream);
+      FNextCopy.ToStream(FwdStream);
+
+      WrStreamChangeType(InverseStream, mctChange);
+      FNextCopy.ToStream(InverseStream);
+      FCurrentCopy.ToStream(InverseStream);
     end;
   end;
-  WrTag(Stream, mstDblBufferedEnd);
+  WrTag(FwdStream, mstDblBufferedEnd);
+  WrTag(InverseStream, mstDblBufferedEnd);
 end;
 
-
-procedure TMemDBDoubleBuffered.ToScratchV2(Stream: TStream);
+procedure TMemDBDoubleBuffered.ToScratch(Stream: TStream);
 begin
   inherited;
   Assert(not Assigned(FNextCopy));
@@ -1346,13 +1424,14 @@ begin
   begin
     WrTag(Stream, mstDblBufferedStart);
     WrStreamChangeType(Stream, mctAdd);
-    FCurrentCopy.ToStreamV2(Stream);
+    FCurrentCopy.ToStream(Stream);
     WrTag(Stream, mstDblBufferedEnd);
   end;
   //Else a NULL item, which we won't stream.
 end;
 
-procedure TMemDBDoubleBuffered.LookaheadHelper(Stream: TStream);
+class procedure TMemDBDoubleBuffered.LookaheadHelperGeneric(Stream: TStream;
+                                                            var Copy: TMemDBStreamable);
 var
   Pos: Int64;
   Tag: TMemStreamTag;
@@ -1361,17 +1440,131 @@ begin
   Tag := RdTag(Stream);
   //No delete sentinels here.
   case Tag of
-    mstStreamableListStart: FNextCopy := TMemStreamableList.Create;
-    mstTableMetadataStart: FNextCopy := TMemTableMetadataItem.Create;
-    mstFKMetadataStart: FNextCopy := TMemForeignKeyMetadataItem.Create;
+    mstStreamableListStart: Copy := TMemStreamableList.Create;
+    mstTableMetadataStart: Copy := TMemTableMetadataItem.Create;
+    mstFKMetadataStart: Copy := TMemForeignKeyMetadataItem.Create;
   else
     raise EMemDBException.Create(S_DBL_BUF_LOOKAHEAD_FAILED + IntToStr(Ord(Tag)));
   end;
-  Stream.Seek(Pos, soFromBeginning);
+  Stream.Seek(Pos, TSeekOrigin.soBeginning);
 end;
 
 
-procedure TMemDBDoubleBuffered.FromJournalV2(Stream: TStream);
+procedure TMemDBDoubleBuffered.LookaheadHelper(Stream: TStream);
+begin
+  LookaheadHelperGeneric(Stream, FNextCopy);
+end;
+
+{$IFOPT C+}
+type
+  TMemDBDoubleBufferedDbg = class(TMemDBDoubleBuffered)
+  public
+    procedure Init(Context: TObject; Name:string); override;
+  end;
+
+procedure TMemDBDoubleBufferedDbg.Init(Context: TObject; Name:string);
+begin
+end;
+
+class procedure  TMemDBDoubleBuffered.AssertStreamsInverse(FwdStream: TStream; InverseStream: TStream);
+var
+  FwCurrCopy, FwNextCopy: TMemDBStreamable;
+  ICurrCopy, INextCopy: TMemDBStreamable;
+  FTag, ITag: TMemStreamTag;
+  FwChange, IChange: TMDBChangeType;
+begin
+  inherited;
+  //Assume mstDblBufferedStart already read.
+  //On this function, we will *not* assume
+  //This is to/from journal, not scratch, so follow streaming rules
+  //accordingly.
+  FwChange := RdStreamChangeType(FwdStream);
+  IChange := RdStreamChangeType(InverseStream);
+  case FwChange of
+    mctAdd: Assert(IChange = mctDelete);
+    mctChange: Assert(IChange = mctChange);
+    mctDelete: Assert(IChange = mctAdd);
+  else
+    Assert(false);
+  end;
+  FwCurrCopy := nil;
+  FwNextCopy := nil;
+  ICurrCopy := nil;
+  INextCopy := nil;
+  try
+    case FwChange of
+      mctAdd: begin
+        LookaheadHelperGeneric(FwdStream, FwNextCopy);
+        FwNextCopy.FromStream(FwdStream);
+      end;
+      mctChange: begin
+        LookaheadHelperGeneric(FwdStream, FwCurrCopy);
+        FwCurrCopy.FromStream(FwdStream);
+        LookaheadHelperGeneric(FwdStream, FwNextCopy);
+        FwNextCopy.FromStream(FwdStream);
+      end;
+      mctDelete: begin
+        LookaheadHelperGeneric(FwdStream, FwCurrCopy);
+        FwCurrCopy.FromStream(FwdStream);
+      end;
+    else
+      Assert(false);
+    end;
+
+    case IChange of
+      mctAdd: begin
+        LookaheadHelperGeneric(InverseStream, INextCopy);
+        INextCopy.FromStream(InverseStream);
+      end;
+      mctChange: begin
+        LookaheadHelperGeneric(InverseStream, ICurrCopy);
+        ICurrCopy.FromStream(InverseStream);
+        LookaheadHelperGeneric(InverseStream, INextCopy);
+        INextCopy.FromStream(InverseStream);
+      end;
+      mctDelete: begin
+        LookaheadHelperGeneric(InverseStream, ICurrCopy);
+        ICurrCopy.FromStream(InverseStream);
+      end;
+    else
+      Assert(false);
+    end;
+
+    case FwChange of
+      mctAdd: begin
+        Assert(FwNextCopy.Same(ICurrCopy));
+        Assert(ICurrCopy.Same(FwNextCopy));
+      end;
+      mctChange: begin
+        Assert(FwNextCopy.Same(ICurrCopy));
+        Assert(ICurrCopy.Same(FwNextCopy));
+
+        Assert(FwCurrCopy.Same(INextCopy));
+        Assert(INextCopy.Same(FwCurrCopy));
+      end;
+      mctDelete: begin
+        Assert(FwCurrCopy.Same(INextCopy));
+        Assert(INextCopy.Same(FwCurrCopy));
+      end;
+    else
+      Assert(false);
+    end;
+
+  finally
+    FwCurrCopy.Free;
+    FwNextCopy.Free;
+    ICurrCopy.Free;
+    INextCopy.Free;
+  end;
+  FTag := RdTag(FwdStream);
+  ITag := RdTag(InverseStream);
+  Assert(FTag = ITag);
+  Assert(FTag = mstDblBufferedEnd);
+end;
+{$ENDIF}
+
+
+procedure TMemDBDoubleBuffered.FromJournal(Stream: TStream);
 var
   ChangeType: TMDBChangeType;
 begin
@@ -1386,21 +1579,21 @@ begin
       if AssignedNotSentinel(FCurrentCopy) then
         raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
       LookaheadHelper(Stream);
-      FNextCopy.FromStreamV2(Stream);
+      FNextCopy.FromStream(Stream);
     end;
     mctChange:
     begin
       if NotAssignedOrSentinel(FCurrentCopy) then
         raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
-      FCurrentCopy.CheckSameAsStreamV2(Stream);
+      FCurrentCopy.CheckSameAsStream(Stream);
       LookaheadHelper(Stream);
-      FNextCopy.FromStreamV2(Stream);
+      FNextCopy.FromStream(Stream);
     end;
     mctDelete:
     begin
       if NotAssignedOrSentinel(FCurrentCopy) then
         raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
-      FCurrentCopy.CheckSameAsStreamV2(Stream);
+      FCurrentCopy.CheckSameAsStream(Stream);
       FNextCopy := TMemDeleteSentinel.Create;
     end;
   else
@@ -1409,7 +1602,7 @@ begin
   ExpectTag(Stream, mstDblBufferedEnd);
 end;
 
-procedure TMemDBDoubleBuffered.FromScratchV2(Stream: TStream);
+procedure TMemDBDoubleBuffered.FromScratch(Stream: TStream);
 var
   ChangeType: TMDBChangeType;
 begin
@@ -1425,7 +1618,7 @@ begin
       if AssignedNotSentinel(FCurrentCopy) then
         raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
       LookaheadHelper(Stream);
-      FNextCopy.FromStreamV2(Stream);
+      FNextCopy.FromStream(Stream);
     end;
   else
     raise EMemDBException.Create(S_JOURNAL_REPLAY_CHANGETYPE_DISAGREES);
@@ -1543,7 +1736,7 @@ begin
   //Else don't insert.
 end;
 
-procedure TMemDBIndexedList.ToScratchV2(Stream: TStream);
+procedure TMemDBIndexedList.ToScratch(Stream: TStream);
 var
   IRec: TItemRec;
   Item: TMemDBJournalCreator;
@@ -1554,14 +1747,14 @@ begin
   while Assigned(IRec) do
   begin
     Item := IRec.Item as TMemDBJournalCreator;
-    Item.ToScratchV2(Stream);
+    Item.ToScratch(Stream);
     RV := FStore.GetAnotherItem(IRec);
     Assert(RV in [rvOK, rvNotFound]);
   end;
   WrTag(Stream, mstIndexedListEnd);
 end;
 
-procedure TMemDBIndexedList.FromJournalV2(Stream: TStream);
+procedure TMemDBIndexedList.FromJournal(Stream: TStream);
 var
   Row: TMemDBRow;
   IRec: TItemRec;
@@ -1589,7 +1782,7 @@ begin
       QLPos := nil;
       QLHead := nil;
     end;
-    Row.FromJournalV2(Stream);
+    Row.FromJournal(Stream);
     RV := FStore.AddItemInPlace(Row, LPos, IRec);
     if RV <> rvOK then
       raise EMemDBInternalException.Create(S_INTERNAL_UNSTREAM_EDIT);
@@ -1601,7 +1794,7 @@ begin
   ExpectTag(Stream, mstIndexedListEnd);
 end;
 
-procedure TMemDBIndexedList.FromScratchV2(Stream: TStream);
+procedure TMemDBIndexedList.FromScratch(Stream: TStream);
 var
   Row: TMemDbRow;
   IRec: TItemRec;
@@ -1613,7 +1806,7 @@ begin
   begin
     if Assigned(IRec) then
       raise EMemDBException.Create(S_JOURNAL_REPLAY_DUP_INST);
-    Row.FromJournalV2(Stream);
+    Row.FromScratch(Stream);
     RV := FStore.AddItem(Row, IRec);
     if RV <> rvOK then
       raise EMemDBInternalException.Create(S_INTERNAL_UNSTREAM_EDIT);
@@ -1630,16 +1823,25 @@ function TMemDBIndexedList.LookaheadHelper(Stream: TStream; var IRec: TItemRec):
 var
   Pos: Int64;
   Tag: TMemStreamTag;
-  RowId: string;
+  RowId: TGUID;
+  RowIDString: string;
   SV: TMemDBIndexNodeSearchVal;
   RV: TISRetVal;
 begin
   Pos := Stream.Position;
   Tag := RdTag(Stream);
   case Tag of
-    mstRowStart:
+    DEPRECATED_mstRowStartV1, mstRowStartV2:
     begin
-      RowId := RdStreamString(Stream);
+      if Tag = DEPRECATED_mstRowStartV1 then
+      begin
+        RowIdString := RdStreamString(Stream);
+        RowId := StringToGUID(RowIdString);
+      end
+      else
+      begin
+        RowId := RdGuid(Stream);
+      end;
       SV := TMemDBIndexNodeSearchVal.Create;
       try
         SV.IdSearchVal := RowId;
@@ -1660,7 +1862,7 @@ begin
   else
     raise EMemDBException.Create(S_INDEXED_LIST_LOOKAHEAD_FAILED + IntToStr(Ord(Tag)));
   end;
-  Stream.Seek(Pos, soFromBeginning);
+  Stream.Seek(Pos, TSeekOrigin.soBeginning);
 end;
 
 { TMemDBTableList }
@@ -1707,16 +1909,10 @@ begin
   inherited;
 end;
 
-function TMemDBTableList.GetChanged: boolean;
+function TMemDBTableList.AnyChangesAtAll:boolean;
 begin
-  result := not DLItemIsEmpty(@Self.FRefChangedRows);
-end;
-
-procedure TMemDBTableList.CheckNoChanges;
-begin
-  inherited;
-  if Changed then
-    raise EMemDBInternalException.Create(S_REPLAY_CHECK_FAILED + ClassName);
+  result := inherited;
+  result := result or (not DLItemIsEmpty(@Self.FRefChangedRows));
 end;
 
 procedure TMemDBTableList.ForEachChangedRow(Handler: TSelectiveRowHandler;
@@ -1769,24 +1965,60 @@ begin
   end;
 end;
 
-procedure TMemDBTableList.WriteRowToJournalV2(Row: TMemDBRow; Ref1, Ref2: TObject; TblList: TMemDbIndexedList);
+procedure TMemDBTableList.WriteRowToJournalV3(Row: TMemDBRow; Ref1, Ref2: TObject; TblList: TMemDbIndexedList);
 var
-  Stream: TStream;
+  FwdStream, InverseStream: TStream;
 begin
-  Stream := Ref1 as TStream;
-  Row.ToJournalV2(Stream);
+  FwdStream := Ref1 as TStream;
+  InverseStream := Ref2 as TStream;
+  Row.ToJournal(FwdStream, InverseStream);
 end;
 
-//Optimised version that only goes through changed rows.
-procedure TMemDbTableList.ToJournalV2(Stream: TStream);
+
+procedure TMemDbTableList.ToJournal(FwdStream: TStream; InverseStream: TStream);
 begin
-  if Changed then
+  if AnyChangesAtAll then
   begin
-    WrTag(Stream, mstIndexedListStart);
-    ForEachChangedRow(WriteRowToJournalV2, Stream, nil);
-    WrTag(Stream, mstIndexedListEnd);
+    WrTag(FwdStream, mstIndexedListStart);
+    WrTag(InverseStream, mstIndexedListStart);
+    ForEachChangedRow(WriteRowToJournalV3, FwdStream, InverseStream);
+    WrTag(FwdStream, mstIndexedListEnd);
+    WrTag(InverseStream, mstIndexedListEnd);
   end;
 end;
+
+{$IFOPT C+}
+class procedure TMemDbTableList.AssertStreamsInverse(FwdStream: TStream; InverseStream: TStream);
+var
+  FTag, ITag: TMemStreamTag;
+  FPos, IPos: Int64;
+begin
+  //Assume already encountered mstIndexedListStart
+  FPos := FwdStream.Position;
+  IPos := InverseStream.Position;
+  FTag := RdTag(FwdStream);
+  ITag := RdTag(InverseStream);
+  Assert(FTag = ITag);
+  Assert(FTag in [DEPRECATED_mstRowStartV1, mstRowStartV2, mstIndexedListEnd]);
+
+  while FTag in [DEPRECATED_mstRowStartV1, mstRowStartV2] do
+  begin
+    FwdStream.Seek(FPos, TSeekOrigin.soBeginning);
+    InverseStream.Seek(IPos, TSeekOrigin.soBeginning);
+
+    //For this specific call, rewind back to the start tag, so the called
+    //function knows what format it is.
+    TMemDBRow.AssertStreamsInverse(FwdStream, InverseStream);
+
+    FPos := FwdStream.Position;
+    IPos := InverseStream.Position;
+    FTag := RdTag(FwdStream);
+    ITag := RdTag(InverseStream);
+    Assert(FTag = ITag);
+    Assert(FTag in [DEPRECATED_mstRowStartV1, mstRowStartV2, mstIndexedListEnd]);
+  end;
+end;
+{$ENDIF}
 
 procedure TMemDBTableList.CommitRollbackChangedRow(Row: TMemDBRow; Ref1, Ref2: TObject; TblList: TMemDbIndexedList);
 var
@@ -2284,9 +2516,9 @@ begin
   result := nil;
 end;
 
-procedure TMemDBEntity.HandleTransactionDestruction(Transaction: TObject);
+procedure TMemDBEntity.CheckNoDanglingTransactionRefs(Transaction: TObject; CanThrow: boolean);
 begin
-  FInterfaced.HandleTransactionDestruction(Transaction);
+  FInterfaced.CheckNoDanglingTransactionRefs(Transaction, CanThrow);
 end;
 
 function TMemDBEntity.HasAbMetadata(AB: TABSelection):boolean;
@@ -2329,10 +2561,17 @@ begin
   FMetadata.RequestChange;
 end;
 
-procedure TMemDBEntity.CheckNoChanges;
+function TMemDBEntity.AnyChangesAtAll: boolean;
+begin
+  result := inherited;
+  result := result or FMetadata.AnyChangesAtAll;
+end;
+
+procedure TMemDBEntity.PreCommit(Reason: TMemDBTransReason);
 begin
   inherited;
-  FMetadata.CheckNoChanges;
+  if Metadata.Deleted then
+    FInterfaced.CheckNoAPIsBeforeDestruction(Reason = mtrUserOp); //Not mtrUserOpMultiRollback
 end;
 
 procedure TMemDBEntity.Commit(Reason: TMemDbTransReason);
@@ -2394,13 +2633,18 @@ end;
 
 function TMemDbTablePersistent.GetDataChanged: boolean;
 begin
-  result := FData.Changed;
+  result := FData.AnyChangesAtAll;
 end;
 
-procedure TMemDbTablePersistent.CheckNoChanges;
+function TMemDBTablePersistent.HasTableData: boolean;
 begin
-  inherited;
-  FData.CheckNoChanges;
+  result := FData.Store.Count > 0;
+end;
+
+function TMemDBTablePersistent.AnyChangesAtAll: boolean;
+begin
+  result := inherited;
+  result := result or FData.AnyChangesAtAll;
 end;
 
 procedure TMemDBTablePersistent.UpdateListHelpers;
@@ -2456,37 +2700,92 @@ begin
   else
     raise EMemDBException.Create(S_TABLE_LOOKAHEAD_FAILED + IntToStr(Ord(Tag)));
   end;
-  Stream.Seek(Pos, soFromBeginning);
+  Stream.Seek(Pos, TSeekOrigin.soBeginning);
 end;
 
-procedure TMemDBTablePersistent.ToJournalV2(Stream: TStream);
+procedure TMemDBTablePersistent.ToJournal(FwdStream: TStream; InverseStream: TStream);
 begin
-  if FMetadata.Added or FMetadata.Changed or FMetadata.Deleted
-    or (FData.Changed and not LayoutChangeRequired) then
+  if FMetadata.AnyChangesAtAll
+    or (FData.AnyChangesAtAll and not LayoutChangeRequired) then
   begin
-    WrTag(Stream, mstTableStart);
-    if FMetadata.Added or FMetadata.Changed or FMetadata.Deleted then
-      FMetadata.ToJournalV2(Stream)
+    WrTag(FwdStream, mstTableStart);
+    WrTag(InverseStream, mstTableStart);
+    if FMetadata.AnyChangesAtAll then
+      FMetadata.ToJournal(FwdStream, InverseStream)
     else
     begin
-      WrTag(Stream, mstTableUnchangedName);
-      WrStreamString(Stream, FMetadata.Name[abLatest]);
+      WrTag(FwdStream, mstTableUnchangedName);
+      WrTag(InverseStream, mstTableUnchangedName);
+      WrStreamString(FwdStream, FMetadata.Name[abLatest]);
+      WrStreamString(InverseStream, FMetadata.Name[abLatest]);
     end;
-    if FData.Changed and not LayoutChangeRequired then
-      FData.ToJournalV2(Stream);
-    WrTag(Stream, mstTableEnd);
+    if FData.AnyChangesAtAll and not LayoutChangeRequired then
+      FData.ToJournal(FwdStream, InverseStream);
+    WrTag(FwdStream, mstTableEnd);
+    WrTag(InverseStream, mstTableEnd);
   end;
 end;
 
-procedure TMemDBTablePersistent.ToScratchV2(Stream: TStream);
+{$IFOPT C+}
+class procedure TMemDbTablePersistent.AssertStreamsInverse(FwdStream: TStream; InverseStream: TStream);
+var
+  FTag, ITag: TMemStreamTag;
+  FPos, IPos: Int64;
+  GotMeta, GotTblData: boolean;
+  StrNameFwd, StrNameInverse: string;
+begin
+  //Assumes mstTableStart already read.
+  FTag := mstTableStart;
+
+  GotMeta := false;
+  GotTblData := false;
+  while true do
+  begin
+
+   FPos := FwdStream.Position;
+   IPos := InverseStream.Position;
+   FTag := RdTag(FwdStream);
+   ITag := RdTag(InverseStream);
+   Assert(FTag = ITag);
+   Assert(FTag in [mstDblBufferedStart, mstTableUnchangedName, mstIndexedListStart, mstTableEnd]);
+
+   //Metadata changes just streamed as raw dbl buffered changes.
+   if FTag = mstDblBufferedStart then
+   begin
+     Assert(not GotMeta);
+     GotMeta := true;
+     TMemDBDoubleBuffered.AssertStreamsInverse(FwdStream, InverseStream);
+   end
+   else if FTag = mstTableUnchangedName then
+   begin
+     Assert(not GotMeta);
+     GotMeta := true;
+     StrNameFwd := RdStreamString(FwdStream);
+     StrNameInverse := RdStreamString(InverseStream);
+     Assert(StrNameFwd = StrNameInverse);
+   end
+   else if FTag = mstIndexedListStart then
+   begin
+     Assert(not GotTblData);
+     GotTbldata := true;
+     TMemDbTableList.AssertStreamsInverse(FwdStream, InverseStream);
+   end
+   else
+     break;
+  end;
+  Assert(FTag = mstTableEnd);
+end;
+{$ENDIF}
+
+procedure TMemDBTablePersistent.ToScratch(Stream: TStream);
 begin
   WrTag(Stream, mstTableStart);
-  FMetadata.ToScratchV2(Stream);
-  FData.ToScratchV2(Stream);
+  FMetadata.ToScratch(Stream);
+  FData.ToScratch(Stream);
   WrTag(Stream, mstTableEnd);
 end;
 
-procedure TMemDBTablePersistent.FromJournalV2(Stream: TStream);
+procedure TMemDBTablePersistent.FromJournal(Stream: TStream);
 var
   MetadataInStream, DataInStream: boolean;
   TblName: string;
@@ -2498,7 +2797,7 @@ begin
   //to unstream data anyway.
   LookaheadHelper(Stream, MetadataInStream, DataInStream);
   if MetadataInStream then
-    FMetadata.FromJournalV2(Stream)
+    FMetadata.FromJournal(Stream)
   else
   begin
     ExpectTag(Stream, mstTableUnchangedName);
@@ -2508,18 +2807,18 @@ begin
   end;
   LookaheadHelper(Stream, MetadataInStream, DataInStream);
   if DataInStream then
-    FData.FromJournalV2(Stream);
+    FData.FromJournal(Stream);
   ExpectTag(Stream, mstTableEnd);
 end;
 
-procedure TMemDBTablePersistent.FromScratchV2(Stream: TStream);
+procedure TMemDBTablePersistent.FromScratch(Stream: TStream);
 begin
   if not (FMetadata.Null and (FData.Store.Count = 0)) then
     raise EMemDBInternalException.Create(S_FROM_SCRATCH_REQUIRES_EMPTY_OBJ);
 
   ExpectTag(Stream, mstTableStart);
-  FMetadata.FromScratchV2(Stream);
-  FData.FromScratchV2(Stream);
+  FMetadata.FromScratch(Stream);
+  FData.FromScratch(Stream);
   ExpectTag(Stream, mstTableEnd);
 end;
 
@@ -3828,6 +4127,7 @@ end;
 
 procedure TMemDbTablePersistent.PreCommit(Reason: TMemDBTransReason);
 begin
+  inherited;
   if not (FMetadata.Deleted or FMetadata.Null) then
   begin
     //Set up changeset info, arguably should have been re-gen before, but
@@ -3835,7 +4135,7 @@ begin
     //Structure checking, no modifications yet.
     if FDataChangeRequired and (Reason <> mtrReplayFromScratch) then
     begin
-      if FData.Changed then
+      if FData.AnyChangesAtAll then
         raise EMemDBConsistencyException.Create(S_TABLE_DATA_CHANGED);
     end
     else
@@ -3973,40 +4273,60 @@ begin
   inherited;
 end;
 
-procedure TMemDBForeignKeyPersistent.ToJournalV2(Stream: TStream);
+procedure TMemDBForeignKeyPersistent.ToJournal(FwdStream: TStream; InverseStream: TStream);
 begin
-  if FMetadata.Added or FMetadata.Changed or FMetadata.Deleted then
+  if FMetadata.AnyChangesAtAll then
   begin
-    WrTag(Stream, mstFkStart);
-    FMetadata.ToJournalV2(Stream);
-    WrTag(Stream, mstFkEnd);
+    WrTag(FwdStream, mstFkStart);
+    WrTag(InverseStream, mstFkStart);
+    FMetadata.ToJournal(FwdStream, InverseStream);
+    WrTag(FwdStream, mstFkEnd);
+    WrTag(InverseStream, mstFkEnd);
   end;
 end;
 
-procedure TMemDBForeignKeyPersistent.ToScratchV2(Stream: TStream);
+{$IFOPT C+}
+class procedure TMemDBForeignKeyPersistent.AssertStreamsInverse(FwdStream: TStream; InverseStream: TStream);
+var
+  FTag, ITag: TMemStreamTag;
+begin
+  //mstFkStart already read.
+  FTag := RdTag(FwdStream);
+  ITag := RdTag(InverseStream);
+  Assert(FTag = ITag);
+  Assert(FTag = mstDblBufferedStart);
+  TMemDbEntityMetadata.AssertStreamsInverse(FwdStream, InverseStream);
+  FTag := RdTag(FwdStream);
+  ITag := RdTag(InverseStream);
+  Assert(FTag = ITag);
+  Assert(FTag = mstFkEnd);
+end;
+{$ENDIF}
+
+procedure TMemDBForeignKeyPersistent.ToScratch(Stream: TStream);
 begin
   WrTag(Stream, mstFkStart);
-  FMetadata.ToScratchV2(Stream);
+  FMetadata.ToScratch(Stream);
   WrTag(Stream, mstFkEnd);
 end;
 
-procedure TMemDBForeignKeyPersistent.FromJournalV2(Stream: TStream);
+procedure TMemDBForeignKeyPersistent.FromJournal(Stream: TStream);
 begin
   //Premise is that this is being called given appropriate previous lookahead
   //and construction.
   ExpectTag(Stream, mstFkStart);
-  FMetadata.FromJournalV2(Stream);
+  FMetadata.FromJournal(Stream);
   ExpectTag(Stream, mstFkEnd);
 end;
 
-procedure TMemDBForeignKeyPersistent.FromScratchV2(Stream: TStream);
+procedure TMemDBForeignKeyPersistent.FromScratch(Stream: TStream);
 begin
   //Premise is that this is being called given appropriate previous lookahead
   //and construction.
   if not FMetadata.Null then
     raise EMemDBInternalException.Create(S_FROM_SCRATCH_REQUIRES_EMPTY_OBJ);
   ExpectTag(Stream, mstFkStart);
-  FMetadata.FromScratchV2(Stream);
+  FMetadata.FromScratch(Stream);
   ExpectTag(Stream, mstFkEnd);
 end;
 
@@ -4021,6 +4341,7 @@ var
   ff: integer;
 
 begin
+  inherited;
   if FMetadata.Deleted or FMetadata.Null then
     exit;
   FillChar(Meta, sizeof(Meta), 0);
@@ -4905,42 +5226,91 @@ end;
 
 
 procedure TMemDbRow.Init(Context: TObject; Name:string);
-var
-  GUID: TGUID;
 begin
   inherited;
-  CreateGUID(GUID);
-  FRowID := GUIDToString(GUID);
+  CreateGUID(FRowID);
 end;
 
-procedure TMemDbRow.ToJournalV2(Stream: TStream);
+procedure TMemDbRow.ToJournal(FwdStream: TStream; InverseStream: TStream);
 begin
   if Added or Changed or Deleted then
   begin
-    WrTag(Stream, mstRowStart);
-    WrStreamString(Stream, RowId);
+    WrTag(FwdStream, mstRowStartV2);
+    WrTag(InverseStream, mstRowStartV2);
+    WrGuid(FwdStream, RowId);
+    WrGuid(InverseStream, RowId);
     inherited;
-    WrTag(Stream, mstRowEnd);
+    WrTag(FwdStream, mstRowEnd);
+    WrTag(InverseStream, mstRowEnd);
   end;
 end;
 
-procedure TMemDbRow.ToScratchV2(Stream: TStream);
+{$IFOPT C+}
+class procedure TMemDbRow.AssertStreamsInverse(FwdStream: TStream; InverseStream: TStream);
+var
+  FTag, ITag: TMemStreamTag;
+  FId, IId: string;
+  FGid, IGid: TGUID;
 begin
-  WrTag(Stream, mstRowStart);
-  WrStreamString(Stream, RowId);
+  //Assume NOT encountered mstRowStart(V2), so we know what sort of row to read.
+  FTag := RdTag(FwdStream);
+  ITag := RdTag(InverseStream);
+  Assert(FTag = ITag);
+  Assert(FTag in [mstRowStartV2, DEPRECATED_mstRowStartV1]);
+  if FTag = DEPRECATED_mstRowStartV1 then
+  begin
+    FId := RdStreamString(FwdStream);
+    IId := RdStreamString(InverseStream);
+    Assert(FId = IId);
+  end
+  else
+  begin
+    FGid := RdGuid(FwdStream);
+    IGid := RdGuid(InverseStream);
+    Assert(CompareGuids(FGid, IGid) = 0);
+  end;
+  Assert(FId = IId);
+  FTag := RdTag(FwdStream);
+  ITag := RdTag(InverseStream);
+  Assert(FTag = ITag);
+  Assert(FTag = mstDBlBufferedStart);
+  inherited;
+
+  FTag := RdTag(FwdStream);
+  ITag := RdTag(InverseStream);
+  Assert(FTag = ITag);
+  Assert(FTag = mstRowEnd);
+end;
+{$ENDIF}
+
+procedure TMemDbRow.ToScratch(Stream: TStream);
+begin
+  WrTag(Stream, mstRowStartV2);
+  WrGuid(Stream, RowId);
   inherited;
   WrTag(Stream, mstRowEnd);
 end;
 
-procedure TMemDbRow.FromJournalV2(Stream: TStream);
+procedure TMemDbRow.FromJournal(Stream: TStream);
 var
   StreamRowId: string;
+  StreamRowGuid: TGUID;
   CheckItemCurrent, CheckItemNext: TMemStreamableList;
+  Tag: TMemStreamTag;
 begin
-  ExpectTag(Stream, mstRowStart);
-  StreamRowId := RdStreamString(Stream);
+  Tag := RdTag(Stream);
+  if not (Tag in [DEPRECATED_mstRowStartV1, mstRowStartV2]) then
+    raise EMemDBException.Create(S_WRONG_TAG);
+  if Tag = DEPRECATED_mstRowStartV1 then
+  begin
+    StreamRowId := RdStreamString(Stream);
+    StreamRowGUID := StringToGUID(StreamRowId);
+  end
+  else
+    StreamRowGUID := RdGuid(Stream);
+
   inherited;
-  if CompareStr(RowId, StreamRowId) <> 0 then
+  if CompareGuids(RowId, StreamRowGUID) <> 0 then
     raise EMemDBInternalException.Create(S_ROW_IDS_DISAGREE);
   ExpectTag(Stream, mstRowEnd);
   CheckItemCurrent := nil;
@@ -4951,24 +5321,38 @@ begin
     CheckItemNext := ABData[abNext] as TMemStreamableList;
   CheckABStreamableListChange(
     CheckItemCurrent,
-    CheckItemNext, mtrReplayFromJournal);
+    CheckItemNext);
 end;
 
-procedure TMemDbRow.FromScratchV2(Stream: TStream);
+procedure TMemDbRow.FromScratch(Stream: TStream);
 var
   StreamRowId: string;
+  StreamRowGUID: TGUID;
+  Tag: TMemStreamTag;
 begin
-  ExpectTag(Stream, mstRowStart);
-  StreamRowId := RdStreamString(Stream);
+  Tag := RdTag(Stream);
+  if not (Tag in [DEPRECATED_mstRowStartV1, mstRowStartV2]) then
+    raise EMemDBException.Create(S_WRONG_TAG);
+  if Tag = DEPRECATED_mstRowStartV1 then
+  begin
+    StreamRowId := RdStreamString(Stream);
+    StreamRowGUID := StringToGuid(StreamRowId);
+  end
+  else
+    StreamRowGUID := RdGuid(Stream);
+
   inherited;
-  if CompareStr(RowId, StreamRowId) <> 0 then
+  if CompareGuids(RowId, StreamRowGuid) <> 0 then
     raise EMemDBInternalException.Create(S_ROW_IDS_DISAGREE);
   ExpectTag(Stream, mstRowEnd);
-  //Assuming no delete sentinels in A/B top level copies, but delete
-  //sentinels in lists.
+  //Assuming no delete sentinels in A/B top level copies, and every row is an add.
+  if AssignedNotSentinel(ABData[abCurrent] as TMemStreamableList)
+    or (NotAssignedOrSentinel(ABData[abNext] as TMemStreamableList)) then
+    raise EMemDbInternalException.Create(S_JOURNAL_ROW_NOT_NEW);
+
   CheckABStreamableListChange(
-    ABData[abCurrent] as TMemStreamableList,
-    ABData[abNext] as TMemStreamableList, mtrReplayFromScratch);
+    nil,
+    ABData[abNext] as TMemStreamableList);
 end;
 
 procedure TMemDbRow.Commit(Reason: TMemDbTransReason);
@@ -4999,7 +5383,7 @@ begin
   inherited;
 end;
 
-procedure TMemDbTableMetadata.CheckABListChanges(Reason: TMemDBTransReason);
+procedure TMemDbTableMetadata.CheckABListChanges;
 var
   Cur, Nxt: TMemTableMetadataItem;
   CurF, NextF, CurI, NextI: TMemStreamableList;
@@ -5034,27 +5418,27 @@ begin
   end;
   //Assuming no delete sentinels in A/B top level copies, but delete
   //sentinels in lists.
-  CheckABStreamableListChange(CurF, NextF, Reason);
-  CheckABStreamableListChange(CurI, NextI, Reason);
+  CheckABStreamableListChange(CurF, NextF);
+  CheckABStreamableListChange(CurI, NextI);
 end;
 
 
-procedure TMemDbTableMetadata.FromJournalV2(Stream: TStream);
+procedure TMemDbTableMetadata.FromJournal(Stream: TStream);
 begin
   inherited;
-  CheckABListChanges(mtrReplayFromJournal);
+  CheckABListChanges;
 end;
 
-procedure TMemDbTableMetadata.FromScratchV2(Stream: TStream);
+procedure TMemDbTableMetadata.FromScratch(Stream: TStream);
 begin
   inherited;
-  CheckABListChanges(mtrReplayFromScratch);
+  CheckABListChanges;
 end;
 
 procedure TMemDbTableMetadata.PreCommit(Reason: TMemDbTransReason);
 begin
   inherited;
-  CheckABListChanges(mtrUserOp);
+  CheckABListChanges;
 end;
 
 procedure TMemDbTableMetadata.Commit(Reason: TMemDbTransReason);
@@ -5315,14 +5699,14 @@ end;
 
 { TMemDBDatabasePersistent }
 
-procedure TMemDBDatabasePersistent.CheckNoChanges;
+function TMemDBDatabasePersistent.AnyChangesAtAll;
 var
   i: integer;
 begin
+  result := inherited;
   for i := 0 to Pred(FUserObjs.Count) do
-    FUserObjs.Items[i].CheckNoChanges;
+    result := result or FUserObjs.Items[i].AnyChangesAtAll;
 end;
-
 
 function TMemDBDatabasePersistent.PreCommitParallelHandler(Ref1, Ref2: pointer):pointer;
 var
@@ -5511,31 +5895,67 @@ begin
   else
     raise EMemDBException.Create(S_DATABASE_LOOKAHEAD_FAILED + IntToStr(Ord(Tag)));
   end;
-  Stream.Seek(Pos, soFromBeginning);
+  Stream.Seek(Pos, TSeekOrigin.soBeginning);
 end;
 
-
-procedure TMemDBDatabasePersistent.ToJournalV2(Stream: TStream);
+procedure TMemDBDatabasePersistent.ToJournal(FwdStream: TStream; InverseStream: TStream);
 var
-  i:integer;
+  i: integer;
 begin
-  WrTag(Stream, mstDBStart);
+  WrTag(FwdStream, mstDBStart);
+  WrTag(InverseStream, mstDBStart);
   for i := 0 to Pred(FUserObjs.Count) do
-    FUSerObjs.Items[i].ToJournalV2(Stream);
-  WrTag(Stream, mstDBEnd);
+    FUserObjs.Items[i].ToJournal(FwdStream, InverseStream);
+  WrTag(FwdStream, mstDBEnd);
+  WrTag(InverseStream, mstDBEnd);
 end;
 
-procedure TMemDBDatabasePersistent.ToScratchV2(Stream: TStream);
+{$IFOPT C+}
+class procedure TMemDBDatabasePersistent.AssertStreamsInverse(FwdStream: TStream; InverseStream: TStream);
+var
+  FTag, ITag: TMemStreamTag;
+  FPos, IPos: Int64;
+begin
+  FTag := RdTag(FwdStream);
+  ITag := RdTag(InverseStream);
+  Assert(FTag = ITag);
+  Assert(FTag = mstDbStart);
+
+  FPos := FwdStream.Position;
+  IPos := InverseStream.Position;
+
+  FTag := RdTag(FwdStream);
+  ITag := RdTag(InverseStream);
+  Assert(FTag = ITag);
+  Assert(FTag in [mstTableStart, mstFKStart, mstdbEnd]);
+  while FTag <> mstDBEnd do
+  begin
+    case FTag of
+       mstTableStart: TMemDBTablePersistent.AssertStreamsInverse(FwdStream, InverseStream);
+       mstFkStart: TMemDBForeignKeyPersistent.AssertStreamsInverse(FwdStream, InverseStream);
+    else
+      Assert(false);
+    end;
+    FTag := RdTag(FwdStream);
+    ITag := RdTag(InverseStream);
+    Assert(FTag = ITag);
+    Assert(FTag in [mstTableStart, mstFKStart, mstdbEnd]);
+  end;
+end;
+{$ENDIF}
+
+
+procedure TMemDBDatabasePersistent.ToScratch(Stream: TStream);
 var
   i: integer;
 begin
   WrTag(Stream, mstDBStart);
   for i := 0 to Pred(FUserObjs.Count) do
-    FUserObjs.Items[i].ToScratchV2(Stream);
+    FUserObjs.Items[i].ToScratch(Stream);
   WrTag(Stream, mstDBEnd);
 end;
 
-procedure TMemDBDatabasePersistent.FromJournalV2(Stream: TStream);
+procedure TMemDBDatabasePersistent.FromJournal(Stream: TStream);
 var
   StrPos: int64;
   NxtTag: TMemStreamTag;
@@ -5549,7 +5969,7 @@ begin
   NxtTag := RdTag(Stream);
   while NxtTag <> mstDBEnd do
   begin
-    Stream.Seek(StrPos, soFromBeginning);
+    Stream.Seek(StrPos, TSeekOrigin.soBeginning);
     LookaheadHelper(Stream, ChangeType, EntityName);
     case ChangeType of
       mectNewTable,
@@ -5565,7 +5985,7 @@ begin
           DBU := TMemDBForeignKey.Create;
         DBU.FParentDB := self;
         FUserObjs.Add(DBU);
-        DBU.FromJournalV2(Stream);
+        DBU.FromJournal(Stream);
         Assert(DBU.Added);
       end;
       mectChangedDeletedEntity, mectChangedDataTable:
@@ -5577,7 +5997,7 @@ begin
         DBU := EntitiesByName(abCurrent, EntityName, TmpIdx);
         if Assigned(DBU) then
         begin
-          DBU.FromJournalV2(Stream);
+          DBU.FromJournal(Stream);
           Assert((DBU.Changed or DBU.Deleted)
             = (ChangeType = mectChangedDeletedEntity));
 
@@ -5595,7 +6015,7 @@ begin
   end;
 end;
 
-procedure TMemDBDatabasePersistent.FromScratchV2(Stream: TStream);
+procedure TMemDBDatabasePersistent.FromScratch(Stream: TStream);
 var
   StrPos: int64;
   NxtTag: TMemStreamTag;
@@ -5609,7 +6029,7 @@ begin
   NxtTag := RdTag(Stream);
   while NxtTag <> mstDBEnd do
   begin
-    Stream.Seek(StrPos, soFromBeginning);
+    Stream.Seek(StrPos, TSeekOrigin.soBeginning);
     LookaheadHelper(Stream, ChangeType, EntityName);
     case ChangeType of
       mectNewTable,
@@ -5623,7 +6043,7 @@ begin
           DBU := TMemDBForeignKey.Create;
         DBU.FParentDB := self;
         FUserObjs.Add(DBU);
-        DBU.FromScratchV2(Stream);
+        DBU.FromScratch(Stream);
         Assert(DBU.Added);
       end
     else
@@ -5816,13 +6236,13 @@ begin
   end;
 end;
 
-procedure TMemDBDatabasePersistent.HandleTransactionDestruction(Transaction: TObject);
+procedure TMemDBDatabasePersistent.CheckNoDanglingTransactionRefs(Transaction: TObject; CanThrow: boolean);
 var
   Idx: integer;
 begin
   for Idx := 0 to Pred(FUserObjs.Count) do
-    FUserObjs.Items[Idx].HandleTransactionDestruction(Transaction);
-  FInterfaced.HandleTransactionDestruction(Transaction);
+    FUserObjs.Items[Idx].CheckNoDanglingTransactionRefs(Transaction, CanThrow);
+  FInterfaced.CheckNoDanglingTransactionRefs(Transaction, CanThrow);
   inherited;
 end;
 

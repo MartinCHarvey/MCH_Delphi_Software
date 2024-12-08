@@ -136,7 +136,10 @@ type
                  APIDatabase,
                  APITableMetadata,
                  APITableData,
-                 APIForeignKey);
+                 APIForeignKey,
+                 APIUserTransactionControl,
+                 APIDatabaseComposite,
+                 APITableComposite);
 
   TMDBIsoStrings = array[TMDBIsolationLevel] of string;
   TMDBABStrings = array[TABSelection] of string;
@@ -145,7 +148,20 @@ type
   TInternalIndexClassStrings = array[TInternalIndexClass] of string;
   TSubIndexClassStrings = array[TSubIndexClass] of string;
 
-  TMemDBWriteCachedFileStream = class(TWriteCachedFileStream)
+{$IFOPT C+}
+  TMemDBMiniSet = class(TTrackable)
+{$ELSE}
+  TMemDBMiniSet = class
+{$ENDIF}
+  private
+    FFwdStream, FInverseStream: TStream;
+  public
+    destructor Destroy; override;
+    property FwdStream: TStream read FFwdStream write FFwdStream;
+    property InverseStream: TStream read FInverseStream write FInverseStream;
+  end;
+
+  TMemDBTempFileStream = class(TWriteCachedFileStream)
   private
     FFileName: string;
 {$IFOPT C+}
@@ -169,6 +185,8 @@ const
 
   ONE_MEG = 1024*1024;
   FILE_CACHE_SIZE = ONE_MEG; //Let's not mess about with small cache sizes.
+
+  S_API_NOT_IMPLEMENTED = 'API not yet implemented.';
 
 type
 {$IFDEF USE_TRACKABLES}
@@ -337,7 +355,6 @@ uses
   MemDBIndexing;
 
 const
-  S_NOT_IMPLEMENTED = 'Change field type not yet implemented.';
   S_TAG_FREED_IDX_SET = 'Index tag data freed whilst index still set.';
   S_IDXTAG_BAD_REFCOUNT = 'Index tag reference counting bad.';
   S_IDXTAG_BAD_INIT = 'Bad or duplicate initialization of index tag data.';
@@ -633,9 +650,18 @@ begin
     raise EMemDBInternalException.Create(S_INDEX_ADD_FAILED);
 end;
 
-{ TMemDBWriteCachedFileStream }
+{ TMemDBMiniSet }
 
-constructor TMemDBWriteCachedFileStream.Create(const FileName: string);
+destructor TMemDbMiniSet.Destroy;
+begin
+  FFwdStream.Free;
+  FInverseStream.Free;
+  inherited;
+end;
+
+{ TMemDBTempFileStream }
+
+constructor TMemDBTempFileStream.Create(const FileName: string);
 begin
   FFileName := FileName;
   inherited Create(FileName, FILE_CACHE_SIZE);
@@ -644,12 +670,20 @@ begin
 {$ENDIF}
 end;
 
-destructor TMemDBWriteCachedFileStream.Destroy;
+destructor TMemDBTempFileStream.Destroy;
+var
+  Tmp: string;
 begin
-{$IFOPT C+}
-  FProxy.Free;
-{$ENDIF}
-  inherited;
+  Tmp := FFileName;
+  try
+  {$IFOPT C+}
+    FProxy.Free;
+  {$ENDIF}
+    inherited;
+  finally
+    if Length(Tmp) > 0 then
+      DeleteFile(Tmp);
+  end;
 end;
 
 { Misc functions }
@@ -873,6 +907,16 @@ initialization
     Next := nil;
   end;
   //TOptimizeLevel = (olNever, olInitFirstTrans, olInitAllTrans, olAlways);
+  //Optimizations enabled in release build.
+  //
+  // N.B. There's a trade-off here as to whether to parallelize: there's a fixed
+  // overhead of a few 10ths of a second for spawning and joining all the threads.
+  // So if your journal consists of thousands of tiny updates, then
+  // PreAnCommitParallel = olInitFirstTrans is best.
+  // However, if you have big chunks of tables updated at a time, then
+  // olInitAlltrans might be more sensible.
+
+{$IFOPT C-}
   with Optimizations do
   begin
     PreAndCommitParallel := olInitFirstTrans;
@@ -881,4 +925,5 @@ initialization
     FKListsParallel := olNever;
     QuickIndexFirstTransaction := True;
   end;
+{$ENDIF}
 end.

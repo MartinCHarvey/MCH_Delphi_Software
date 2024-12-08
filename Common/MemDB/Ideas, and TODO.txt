@@ -1,23 +1,60 @@
 
 MemDB: TODO and notes.
 
-TODO: Fix app builds using indexed store.
+TODO - Mini-Commit / Commit / Rollback / Delete.
+  - Much more testing for mini-commit / mini-rollback.
 
-TODO: review mem alloc on rollback path?
+TODO - Later. Further optimisation possible at initial load time:
+  - Don't need/use quick lists.
+  - Traverse main store list in reverse order for
+    increased chance of things being in ram / cache.
 
-TODO: Find out why validate FK stuff so slow. Building indexes?
+TODO - Later.
+  - Need a case insensitive comparison for string indexes.
 
-2. Blob handling - do memcopies properly.
-    Testapp for basic blob handling.
-
-3. Need a case insensitive comparison for string indexes.
-
-(FK not allowed on case insensitive index).
-
-4. Yeah, go,on. Allow a memcmp for indexing on blobs,
-     provided blobdata small (hash etc?).
+  (FK not allowed on case insensitive index?)
 
 5. Composite ops.
+
+Things to sort:
+
+1. Mini-commit API, and mini-rollback.
+   - Implement alongside internal rollback / commit API,
+     which needs modding to take a transaction object.
+
+- For mini-rollback and mini-commit need double buffered to check
+  whether changes exist, that needs correcting throughout heirarchy.
+
+2. Generating inverse changesets / streams.
+   - If no extra classes created, need to find a way to check
+     that the two streams are inverse, so creation and checking logic
+     is separate.
+
+   - N.B. Deleting things. We delete tables and foreign keys by metadata.
+     - Table deletion needs to be a two stage process so we can get the rows back,
+       via a mini-rollback.
+
+     - Also means if we want to delete all the rows, we need to check none are
+       unchanged?
+
+     - Current API lets you mod table rows, and then delete the table, search
+       by name is latest, so it's "gone" until you rollback changes.
+
+     - One or two mini-commits? One would let you undo the delete, but
+       you wouldn't get back the modded rows just before the delete ...
+
+     - Another example of overwrite / delete conflicts. You need to make these
+       explicit and consistent.
+
+     - The CheckAPI table rename and such like needs to be revisied with respect
+       to rename ops.
+
+3. Wrapping multi-changesets into transactions.
+
+4. Mini-commit / multi level rollback.
+
+5. Leave all protected by MRSW lock at the moment. We'll deal with finer
+   grained locking when we have transactions in parallel
 
 - Revisit the naming / renaming of entities indexes and fields
   - Rename / rename clashes.

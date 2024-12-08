@@ -33,8 +33,6 @@ IN THE SOFTWARE.
 
 interface
 
-//TODO - We should be able to phase out most of the V1 streaming classes.
-
 uses
   SysUtils,
 {$IFDEF USE_TRACKABLES}
@@ -56,11 +54,11 @@ type
     procedure Assign(Source: TMemDBStreamable); virtual;
     //DeepAssign to recursively copy entire tree.
     procedure DeepAssign(Source: TMemDBStreamable); virtual;
-    //TODO - Do we need the "same" function any more?
+
     function Same(Other: TMemDBStreamable):boolean; virtual;
-    procedure ToStreamV2(Stream: TStream); virtual; abstract;
-    procedure FromStreamV2(Stream: TStream); virtual; abstract;
-    procedure CheckSameAsStreamV2(Stream: TStream); virtual; abstract;
+    procedure ToStream(Stream: TStream); virtual; abstract;
+    procedure FromStream(Stream: TStream); virtual; abstract;
+    procedure CheckSameAsStream(Stream: TStream); virtual; abstract;
     class function Clone(Source: TMemDBStreamable):TMemDBStreamable;
     class function DeepClone(Source: TMemDBStreamable):TMemDBStreamable;
   end;
@@ -85,13 +83,13 @@ type
     constructor Create; override;
     destructor Destroy; override;
     procedure DeepAssign(Source: TMemDBStreamable); override;
-    //TODO - Remove same functions.
+
     function Same(Other: TMemDBStreamable):boolean; override;
     procedure FreeAndClear;
     procedure RemoveDeleteSentinels;
-    procedure ToStreamV2(Stream: TStream); override;
-    procedure FromStreamV2(Stream: TStream); override;
-    procedure CheckSameAsStreamV2(Stream: TStream); override;
+    procedure ToStream(Stream: TStream); override;
+    procedure FromStream(Stream: TStream); override;
+    procedure CheckSameAsStream(Stream: TStream); override;
     function Add(Item: TMemDBStreamable): integer;
     procedure Clear;
     procedure Pack;
@@ -105,9 +103,9 @@ type
 
   TMemDeleteSentinel = class(TMemDBStreamable)
   public
-    procedure ToStreamV2(Stream: TStream); override;
-    procedure FromStreamV2(Stream: TStream); override;
-    procedure CheckSameAsStreamV2(Stream: TStream); override;
+    procedure ToStream(Stream: TStream); override;
+    procedure FromStream(Stream: TStream); override;
+    procedure CheckSameAsStream(Stream: TStream); override;
   end;
 
   TMemFieldDef = class(TMemDBStreamable)
@@ -118,9 +116,9 @@ type
   public
     procedure Assign(Source: TMemDBStreamable); override;
     function Same(Other: TMemDBStreamable):boolean; override;
-    procedure ToStreamV2(Stream: TStream); override;
-    procedure FromStreamV2(Stream: TStream); override;
-    procedure CheckSameAsStreamV2(Stream: TStream); override;
+    procedure ToStream(Stream: TStream); override;
+    procedure FromStream(Stream: TStream); override;
+    procedure CheckSameAsStream(Stream: TStream); override;
     property FieldType: TMDBFieldType read FFieldType write FFieldType;
     property FieldName: string read FFieldName write FFieldName;
     property FieldIndex: TFieldOffset read FFieldIndex write FFieldIndex;
@@ -138,9 +136,9 @@ type
 
     procedure Assign(Source: TMemDBStreamable); override;
     function Same(Other: TMemDBStreamable):boolean; override;
-    procedure ToStreamV2(Stream: TStream); override;
-    procedure FromStreamV2(Stream: TStream); override;
-    procedure CheckSameAsStreamV2(Stream: TStream); override;
+    procedure ToStream(Stream: TStream); override;
+    procedure FromStream(Stream: TStream); override;
+    procedure CheckSameAsStream(Stream: TStream); override;
   end;
 
   TMemIndexDef = class(TMemDBStreamable)
@@ -156,9 +154,9 @@ type
   public
     procedure Assign(Source: TMemDBStreamable); override;
     function Same(Other: TMemDBStreamable):boolean; override;
-    procedure ToStreamV2(Stream: TStream); override;
-    procedure FromStreamV2(Stream: TStream); override;
-    procedure CheckSameAsStreamV2(Stream: TStream); override;
+    procedure ToStream(Stream: TStream); override;
+    procedure FromStream(Stream: TStream); override;
+    procedure CheckSameAsStream(Stream: TStream); override;
     property IndexName: string read FIndexName write FIndexName;
     property FieldNames[i: integer]: string read GetFieldName write SetFieldName;
     property FieldNameCount: integer read GetFieldNameCount write SetFieldNameCount;
@@ -172,9 +170,9 @@ type
   public
     procedure Assign(Source: TMemDBStreamable); override;
     function Same(Other: TMemDBStreamable):boolean; override;
-    procedure ToStreamV2(Stream: TStream); override;
-    procedure FromStreamV2(Stream: TStream); override;
-    procedure CheckSameAsStreamV2(Stream: TStream); override;
+    procedure ToStream(Stream: TStream); override;
+    procedure FromStream(Stream: TStream); override;
+    procedure CheckSameAsStream(Stream: TStream); override;
     property EntityName: string read FEntityName write FEntityName;
   end;
 
@@ -187,9 +185,9 @@ type
     constructor Create; override;
     destructor Destroy; override;
     function Same(Other: TMemDBStreamable):boolean; override;
-    procedure ToStreamV2(Stream: TStream); override;
-    procedure FromStreamV2(Stream: TStream); override;
-    procedure CheckSameAsStreamV2(Stream: TStream); override;
+    procedure ToStream(Stream: TStream); override;
+    procedure FromStream(Stream: TStream); override;
+    procedure CheckSameAsStream(Stream: TStream); override;
     property FieldDefs: TMemStreamableList read FFieldDefs write FFieldDefs;
     property IndexDefs: TMemStreamableList read FIndexDefs write FIndexDefs;
   end;
@@ -203,9 +201,9 @@ type
   public
     procedure Assign(Source: TMemDBStreamable); override;
     function Same(Other: TMemDBStreamable):boolean; override;
-    procedure ToStreamV2(Stream: TStream); override;
-    procedure FromStreamV2(Stream: TStream); override;
-    procedure CheckSameAsStreamV2(Stream: TStream); override;
+    procedure ToStream(Stream: TStream); override;
+    procedure FromStream(Stream: TStream); override;
+    procedure CheckSameAsStream(Stream: TStream); override;
     property TableReferer: string read FTableReferer write FTableReferer;
     property IndexReferer: string read FIndexReferer write FIndexReferer;
     property TableReferred: string read FTableReferred write FTableReferred;
@@ -243,7 +241,7 @@ type
     mstFieldDataEnd,
     DEPRECATED_mstIndexDefStart_V1,
     mstIndexDefEnd,
-    mstRowStart,
+    DEPRECATED_mstRowStartV1,
     mstRowEnd,
     mstIndexedListStart,
     mstIndexedListEnd,
@@ -259,6 +257,11 @@ type
     DEPRECATED_mstIndexDefStart_V2,
     DEPRECATED_mstIndexDefStartV3,
     mstIndexDefStartV4,
+    mstMultiChangesetsStart,
+    mstMultiChangesetsEnd,
+    mstRowStartV2,
+    mstGuidStart,
+    mstGuidEnd,
 
     mstReservedForEscape = $FE,
     mstReservedForEscape2 = $FF
@@ -272,6 +275,8 @@ type
   function RdStreamString(Stream: TStream): string;
   procedure WrStreamChangeType(Stream: TStream; Changetype: TMDBChangeType);
   function RdStreamChangeType(Stream: TStream): TMDBChangeType;
+  procedure WrGuid(Stream:TStream; const G:TGUID);
+  function RdGuid(Stream:TStream): TGUID;
 {$ELSE}
   procedure WrTag(Stream: TStream; Tag: TMemStreamTag); inline;
   function RdTag(Stream: TStream): TMemStreamTag; inline;
@@ -280,6 +285,8 @@ type
   function RdStreamString(Stream: TStream): string; inline;
   procedure WrStreamChangeType(Stream: TStream; Changetype: TMDBChangeType); inline;
   function RdStreamChangeType(Stream: TStream): TMDBChangeType; inline;
+  procedure WrGuid(Stream:TStream; const G:TGUID); inline;
+  function RdGuid(Stream:TStream): TGUID; inline;
 {$ENDIF}
 
 implementation
@@ -299,17 +306,17 @@ const
 
 { TMemDeleteSentinel }
 
-procedure TMemDeleteSentinel.ToStreamV2(Stream: TStream);
+procedure TMemDeleteSentinel.ToStream(Stream: TStream);
 begin
   WrTag(Stream, mstDeleteSentinel);
 end;
 
-procedure TMemDeleteSentinel.FromStreamV2(Stream: TStream);
+procedure TMemDeleteSentinel.FromStream(Stream: TStream);
 begin
   ExpectTag(Stream, mstDeleteSentinel);
 end;
 
-procedure TMemDeleteSentinel.CheckSameAsStreamV2(Stream: TStream);
+procedure TMemDeleteSentinel.CheckSameAsStream(Stream: TStream);
 begin
   ExpectTag(Stream, mstDeleteSentinel);
 end;
@@ -337,7 +344,7 @@ function TMemDBStreamable.Same(Other: TMemDBStreamable):boolean;
 begin
   result := Assigned(Other) = Assigned(Self);
   if Assigned(Other) and Assigned(Self) then
-    result := Other is Self.ClassType;
+    result := (Other is Self.ClassType) and (Self is Other.ClassType);
 end;
 
 class function TMemDBStreamable.Clone(Source: TMemDBStreamable):TMemDBStreamable;
@@ -434,11 +441,11 @@ begin
   else
     raise EMemDBException.Create(S_STREAMABLE_LIST_LOOKAHEAD_FAILED + IntToStr(Ord(Tag)));
   end;
-  Stream.Seek(Pos, soFromBeginning);
+  Stream.Seek(Pos, TSeekOrigin.soBeginning);
 end;
 
 
-procedure TMemStreamableList.ToStreamV2(Stream: TStream);
+procedure TMemStreamableList.ToStream(Stream: TStream);
 var
   Len, idx: integer;
 begin
@@ -447,11 +454,11 @@ begin
   Len := self.Count;
   Stream.Write(Len, sizeof(Len));
   for idx := 0 to Pred(Len) do
-    self.Items[idx].ToStreamV2(Stream);
+    self.Items[idx].ToStream(Stream);
   WrTag(Stream, mstStreamableListEnd);
 end;
 
-procedure TMemStreamableList.FromStreamV2(Stream: TStream);
+procedure TMemStreamableList.FromStream(Stream: TStream);
 var
   Len, idx: integer;
   NewItem: TMemDBStreamable;
@@ -463,13 +470,13 @@ begin
   for idx := 0 to Pred(Len) do
   begin
     NewItem := LookaheadHelper(Stream);
-    NewItem.FromStreamV2(Stream);
+    NewItem.FromStream(Stream);
     Add(NewItem);
   end;
   ExpectTag(Stream, mstStreamableListEnd);
 end;
 
-procedure TMemStreamableList.CheckSameAsStreamV2(Stream: TStream);
+procedure TMemStreamableList.CheckSameAsStream(Stream: TStream);
 var
   Len, Idx: integer;
 begin
@@ -479,7 +486,7 @@ begin
   if Len <> Count then
     raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
   for Idx := 0 to Pred(Count) do
-    Items[idx].CheckSameAsStreamV2(Stream);
+    Items[idx].CheckSameAsStream(Stream);
   ExpectTag(Stream, mstStreamableListEnd);
 end;
 
@@ -500,9 +507,7 @@ var
  O: TMemStreamableList;
  I: integer;
 begin
-  result := Assigned(Other) = Assigned(Self);
-  if Assigned(Other) and Assigned(Self) then
-    result := Other is Self.ClassType;
+  result := inherited;
   if Result then
   begin
     O := Other as TMemStreamableList;
@@ -549,7 +554,7 @@ end;
 
 { TMemFieldDef }
 
-procedure TMemFieldDef.ToStreamV2(Stream: TStream);
+procedure TMemFieldDef.ToStream(Stream: TStream);
 begin
   WrTag(Stream, mstFieldDefStartV2);
   Stream.Write(FFieldType, sizeof(FFieldType));
@@ -558,7 +563,7 @@ begin
   WrTag(Stream, mstFieldDefEnd);
 end;
 
-procedure TMemFieldDef.FromStreamV2(Stream: TStream);
+procedure TMemFieldDef.FromStream(Stream: TStream);
 var
   Tag: TMemStreamTag;
   OldFieldIndex: TOldFieldOffset;
@@ -583,7 +588,7 @@ begin
   ExpectTag(Stream, mstFieldDefEnd);
 end;
 
-procedure TMemFieldDef.CheckSameAsStreamV2(Stream: TStream);
+procedure TMemFieldDef.CheckSameAsStream(Stream: TStream);
 var
   StreamFieldType: TMDBFieldType;
   StreamFieldName: string;
@@ -664,7 +669,7 @@ begin
   SetLength(FFieldNames, i);
 end;
 
-procedure TMemIndexDef.ToStreamV2(Stream: TStream);
+procedure TMemIndexDef.ToStream(Stream: TStream);
 var
   i:integer;
 begin
@@ -678,7 +683,7 @@ begin
   WrTag(Stream, mstIndexDefEnd);
 end;
 
-procedure TMemIndexDef.FromStreamV2(Stream: TStream);
+procedure TMemIndexDef.FromStream(Stream: TStream);
 var
   CurPos: Int64;
   DepTag, InitialTag: TMemStreamTag;
@@ -731,12 +736,12 @@ begin
   if DepTag = DEPRECATED_mstIndexFieldDeconflict then
     Stream.Read(DEPRECATED_Deconflict, sizeof(DEPRECATED_Deconflict))
   else
-    Stream.Seek(CurPos, soFromBeginning);
+    Stream.Seek(CurPos, TSeekOrigin.soBeginning);
 
     ExpectTag(Stream, mstIndexDefEnd);
 end;
 
-procedure TMemIndexDef.CheckSameAsStreamV2(Stream: TStream);
+procedure TMemIndexDef.CheckSameAsStream(Stream: TStream);
 var
   LclIndexName: string;
   LclFieldNames: TMDBFieldNames;
@@ -796,7 +801,7 @@ begin
   if Tag = DEPRECATED_mstIndexFieldDeconflict then
     Stream.Read(DEPRECATED_Deconflict, sizeof(DEPRECATED_Deconflict))
   else
-    Stream.Seek(CurPos, soFromBeginning);
+    Stream.Seek(CurPos, TSeekOrigin.soBeginning);
   ExpectTag(Stream, mstIndexDefEnd);
 end;
 
@@ -828,7 +833,7 @@ end;
 
 { TMemFieldData }
 
-procedure TMemFieldData.ToStreamV2(Stream: TStream);
+procedure TMemFieldData.ToStream(Stream: TStream);
 begin
   WrTag(Stream, mstFieldDataStart);
   Stream.Write(FDataRec.FieldType, sizeof(FDataRec.FieldType));
@@ -884,12 +889,12 @@ begin
 end;
 
 
-procedure TMemFieldData.FromStreamV2(Stream: TStream);
+procedure TMemFieldData.FromStream(Stream: TStream);
 begin
   RecFromStream(Stream, FDataRec);
 end;
 
-procedure TMemFieldData.CheckSameAsStreamV2(Stream: TStream);
+procedure TMemFieldData.CheckSameAsStream(Stream: TStream);
 var
   LocalRec: TMemDbFieldDataRec;
   OK: boolean;
@@ -995,21 +1000,21 @@ begin
   end;
 end;
 
-procedure TMemEntityMetadataItem.ToStreamV2(Stream: TStream);
+procedure TMemEntityMetadataItem.ToStream(Stream: TStream);
 begin
   WrTag(Stream, mstEntityMetadataStart);
   WrStreamString(Stream, FEntityName);
   WrTag(Stream, mstEntityMetadataEnd);
 end;
 
-procedure TMemEntityMetadataItem.FromStreamV2(Stream: TStream);
+procedure TMemEntityMetadataItem.FromStream(Stream: TStream);
 begin
   ExpectTag(Stream, mstEntityMetadataStart);
   FEntityName := RdStreamString(Stream);
   ExpectTag(Stream, mstEntityMetadataEnd);
 end;
 
-procedure TMemEntityMetadataItem.CheckSameAsStreamV2(Stream: TStream);
+procedure TMemEntityMetadataItem.CheckSameAsStream(Stream: TStream);
 var
   SS: string;
 begin
@@ -1060,30 +1065,30 @@ begin
   inherited;
 end;
 
-procedure TMemTableMetadataItem.ToStreamV2(Stream: TStream);
+procedure TMemTableMetadataItem.ToStream(Stream: TStream);
 begin
   WrTag(Stream, mstTableMetadataStart);
   inherited;
-  FFieldDefs.ToStreamV2(Stream);
-  FIndexDefs.ToStreamV2(Stream);
+  FFieldDefs.ToStream(Stream);
+  FIndexDefs.ToStream(Stream);
   WrTag(Stream, mstTableMetadataEnd);
 end;
 
-procedure TMemTableMetadataItem.FromStreamV2(Stream: TStream);
+procedure TMemTableMetadataItem.FromStream(Stream: TStream);
 begin
   ExpectTag(Stream, mstTableMetadataStart);
   inherited;
-  FFieldDefs.FromStreamV2(Stream);
-  FIndexDefs.FromStreamV2(Stream);
+  FFieldDefs.FromStream(Stream);
+  FIndexDefs.FromStream(Stream);
   ExpectTag(Stream, mstTableMetadataEnd);
 end;
 
-procedure TMemTableMetadataItem.CheckSameAsStreamV2(Stream: TStream);
+procedure TMemTableMetadataItem.CheckSameAsStream(Stream: TStream);
 begin
   ExpectTag(Stream, mstTableMetadataStart);
   inherited;
-  FFieldDefs.CheckSameAsStreamV2(Stream);
-  FIndexDefs.CheckSameAsStreamV2(Stream);
+  FFieldDefs.CheckSameAsStream(Stream);
+  FIndexDefs.CheckSameAsStream(Stream);
   ExpectTag(Stream, mstTableMetadataEnd);
 end;
 
@@ -1116,7 +1121,7 @@ begin
   end;
 end;
 
-procedure TMemForeignKeyMetadataItem.ToStreamV2(Stream: TStream);
+procedure TMemForeignKeyMetadataItem.ToStream(Stream: TStream);
 begin
   WrTag(Stream, mstFKMetadataStart);
   inherited;
@@ -1127,7 +1132,7 @@ begin
   WrTag(Stream, mstFKMetadataEnd);
 end;
 
-procedure TMemForeignKeyMetadataItem.FromStreamV2(Stream: TStream);
+procedure TMemForeignKeyMetadataItem.FromStream(Stream: TStream);
 begin
   ExpectTag(Stream, mstFKMetadataStart);
   inherited;
@@ -1138,7 +1143,7 @@ begin
   ExpectTag(Stream, mstFKMetadataEnd);
 end;
 
-procedure TMemForeignKeyMetadataItem.CheckSameAsStreamV2(Stream: TStream);
+procedure TMemForeignKeyMetadataItem.CheckSameAsStream(Stream: TStream);
 var
   LclTableReferer,
   LclIndexReferer,
@@ -1188,6 +1193,20 @@ end;
 
 //Would like not to have string tags in the stream as well,
 //but reading a bad length marker could be a bit terminal.
+
+procedure WrGuid(Stream:TStream; const G:TGUID);
+begin
+  WrTag(Stream, mstGuidStart);
+  Stream.Write(G, sizeof(G));
+  WrTag(Stream, mstGuidEnd);
+end;
+
+function RdGuid(Stream:TStream): TGUID;
+begin
+  ExpectTag(Stream, mstGuidStart);
+  Stream.Read(result, sizeof(result));
+  ExpectTag(Stream, mstGuidEnd);
+end;
 
 procedure WrStreamString(Stream: TStream; const S: string);
 var

@@ -17,7 +17,8 @@ uses
   MemDBApi in '..\MemDBApi.pas',
   BufferedFileStream in '..\..\CachedStream\BufferedFileStream.pas',
   GlobalLog in '..\..\Logging\GlobalLog.pas',
-  Parallelizer in '..\..\Parallelizer\Parallelizer.pas';
+  Parallelizer in '..\..\Parallelizer\Parallelizer.pas',
+  NullStream in '..\..\NullStream\NullStream.pas';
 
 {$R *.res}
 
