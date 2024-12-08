@@ -1,25 +1,16 @@
 
 MemDB: TODO and notes.
 
-TODO - Streaming overheads.
-  - Insetad of having a string row key, have a GUID.
-  - Row V2 Tag.
-  - Search by RowId GUID, not string.
+TODO - Mini-Commit / Commit / Rollback / Delete.
+  - Much more testing for mini-commit / mini-rollback.
 
-  - Clean up names for streaming / unstreaming functions.
-
-TODO - Further optimisation possible at initial load time:
-
+TODO - Later. Further optimisation possible at initial load time:
   - Don't need/use quick lists.
   - Traverse main store list in reverse order for
     increased chance of things being in ram / cache.
 
-TODO - Mini-Commit / Commit / Rollback / Delete.
-  - Make a force-delete the default.
-  - Much more testing for mini-commit / mini-rollback.
-
 TODO - Later.
-  3. Need a case insensitive comparison for string indexes.
+  - Need a case insensitive comparison for string indexes.
 
   (FK not allowed on case insensitive index?)
 
