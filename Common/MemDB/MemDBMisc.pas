@@ -908,6 +908,14 @@ initialization
   end;
   //TOptimizeLevel = (olNever, olInitFirstTrans, olInitAllTrans, olAlways);
   //Optimizations enabled in release build.
+  //
+  // N.B. There's a trade-off here as to whether to parallelize: there's a fixed
+  // overhead of a few 10ths of a second for spawning and joining all the threads.
+  // So if your journal consists of thousands of tiny updates, then
+  // PreAnCommitParallel = olInitFirstTrans is best.
+  // However, if you have big chunks of tables updated at a time, then
+  // olInitAlltrans might be more sensible.
+
 {$IFOPT C-}
   with Optimizations do
   begin

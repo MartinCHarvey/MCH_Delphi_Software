@@ -79,7 +79,7 @@ type
     function OpenTableOrKey(Name: string): TMemDBHandle;
     function CreateForeignKey(Name: string): TMemDBHandle;
     procedure RenameTableOrKey(OldName, NewName: string);
-    procedure DeleteTableOrKey(Name: string; Force: boolean = false);
+    procedure DeleteTableOrKey(Name: string; Force: boolean = true);
     function GetEntityNames: TStringList;
   end;
 
@@ -394,9 +394,9 @@ begin
       DB.CheckNoChanges;
 {$ENDIF}
       if Initial then
-        DB.FromScratchV3(JournalEntry)
+        DB.FromScratch(JournalEntry)
       else
-        DB.FromJournalV3(JournalEntry);
+        DB.FromJournal(JournalEntry);
       DB.PreCommit(Reason);
       DB.Commit(Reason);
     finally
@@ -455,11 +455,11 @@ begin
     T.FinalStreams.Count := T.MiniChangesets.Count + 3;
     try
       DB.PreCommit(mtrUserOp);
-      DB.ToJournalV3(FinalPair.FwdStream, FinalPair.InverseStream);
+      DB.ToJournal(FinalPair.FwdStream, FinalPair.InverseStream);
 {$IFOPT C+}
         FinalPair.FwdStream.Seek(0, TSeekOrigin.soBeginning);
         FinalPair.InverseStream.Seek(0, TSeekOrigin.soBeginning);
-        DB.AssertStreamsInverseV3(FinalPair.FwdStream, FinalPair.InverseStream);
+        DB.AssertStreamsInverse(FinalPair.FwdStream, FinalPair.InverseStream);
 {$ENDIF}
       DB.Commit(mtrUserOp);
     finally
@@ -513,7 +513,7 @@ begin
   begin
     MiniSet := TObject(T.MiniChangesets.Items[i]) as TMemDBMiniset;
     try
-      DB.FromJournalV3(MiniSet.InverseStream);
+      DB.FromJournal(MiniSet.InverseStream);
       DB.PreCommit(mtrUserOpMultiRollback);
       DB.Commit(mtrUserOpMultiRollback);
     finally
@@ -561,11 +561,11 @@ begin
       T.MiniChangesets.Count := T.MiniChangesets.Count + 1;
       try
         DB.PreCommit(mtrUserOp);
-        DB.ToJournalV3(MiniPair.FwdStream, MiniPair.InverseStream);
+        DB.ToJournal(MiniPair.FwdStream, MiniPair.InverseStream);
 {$IFOPT C+}
         MiniPair.FwdStream.Seek(0, TSeekOrigin.soBeginning);
         MiniPair.InverseStream.Seek(0, TSeekOrigin.soBeginning);
-        DB.AssertStreamsInverseV3(MiniPair.FwdStream, MiniPair.InverseStream);
+        DB.AssertStreamsInverse(MiniPair.FwdStream, MiniPair.InverseStream);
 {$ENDIF}
         DB.Commit(mtrUserOp);
       finally
@@ -615,7 +615,7 @@ begin
       MiniCnt := Pred(T.MiniChangesets.Count);
       MiniSet := TObject(T.MiniChangesets.Items[MiniCnt]) as TMemDBMiniset;
       try
-        DB.FromJournalV3(MiniSet.InverseStream);
+        DB.FromJournal(MiniSet.InverseStream);
         DB.PreCommit(mtrUserOpMultiRollback);
         DB.Commit(mtrUserOpMultiRollback);
       finally

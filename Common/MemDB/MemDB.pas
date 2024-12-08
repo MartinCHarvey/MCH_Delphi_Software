@@ -345,6 +345,7 @@ var
   AsyncError: boolean;
 begin
   WaitJournalDone := false;
+  AsyncError := false; //Placate compiler.
   FSessionLock.Acquire;
   try
     if Transaction.FCommitedOrRolledBack then
@@ -912,7 +913,7 @@ begin
       TmpName := TPath.GetTempFileName();
       ChangesetStream := TMemDBTempFileStream.Create(TmpName);
       try
-        FDatabase.ToScratchV3(ChangesetStream);
+        FDatabase.ToScratch(ChangesetStream);
       except
         on E: Exception do
         begin

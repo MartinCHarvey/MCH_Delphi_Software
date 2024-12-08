@@ -663,7 +663,7 @@ begin
           if not OK then
             raise Exception.Create('Blob test (4) - find blob failed');
           //And one that we know doesn't.
-          PD := PAnsiChar(Data.Data);
+          PD := PAnsiChar(SearchData.Data);
           for i := 0 to Pred(SearchData.size) do
           begin
             PD^ := AnsiChar(i);
