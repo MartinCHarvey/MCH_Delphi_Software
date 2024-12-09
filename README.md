@@ -1,9 +1,7 @@
 # MCH_Delphi_Software
 GitHub repo for open sourced MCH Software.
 
-Most recent (2024) development is in Common/MemDB: I am updating my database engine for multiple
-field indexes and keys. Ongoing development involves implicit multiple changesets, commit
-and rollback across multi-changeset transactions.
+Most recent (2024) development is in Common/MemDB: SQL query engine, and a "lightweight locking" mode for parallel availability.
 
 Files / Folders:
 
@@ -68,10 +66,8 @@ Additional testapps and utility code.
 Future development plans:
 
 - Clean up parser error recovery code with a "standard" lexer.
-- MemDB: Segregate indexing to allow parallelism per-index when building.
-- Indexed Store: Equivalent using 2-3-4 trees?
 - MemDB: Query engine.
-- MemDB (long term): Store on disk, not mem, or is that a step to the past?
+- MemDB (long term): Have a "pessimistic" buffering and locking model (as currently) for full SQL compatiblity, and a "lightweight parallel" mode which does not allow composite ops, and/or big restructuring, but does allow lightweght parallel write operations.
 - Investigate compilability under FreePascal compiler.
 - Investigate portability to mobile apps.
 
