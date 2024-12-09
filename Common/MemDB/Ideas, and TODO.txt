@@ -4,149 +4,45 @@ MemDB: TODO and notes.
 TODO - Mini-Commit / Commit / Rollback / Delete.
   - Much more testing for mini-commit / mini-rollback.
 
+TODO - Composite ops to allow us to do SQL ALTER etc etc ..
+
+- Change index attrs.
+- Change field types.
+
+TODO - Mod API to do implicit mini commits for ops which are retryable.
+     - review rename/delete conflicts.
+
+TODO - Need a case insensitive attr for string indexes.
+
+TODO - SQL query engine.
+     - Parser - UTF8ToUnicode on LexString.
+
 TODO - Later. Further optimisation possible at initial load time:
-  - Don't need/use quick lists.
-  - Traverse main store list in reverse order for
-    increased chance of things being in ram / cache.
+  - Stream directly into current buffer, no A/B commit stage.
+  - Need to check indexing and FK still works.
 
-TODO - Later.
-  - Need a case insensitive comparison for string indexes.
 
-  (FK not allowed on case insensitive index?)
+Later:
 
-5. Composite ops.
+Have two distinct buffering models:
 
-Things to sort:
+- 1. Current A/B model with daisychained xactions.
+- Heavyweight locking.
+- Allows full SQL compliance (just a matter of codeing).
+- But doesn't allow multi-write at same time.
 
-1. Mini-commit API, and mini-rollback.
-   - Implement alongside internal rollback / commit API,
-     which needs modding to take a transaction object.
+2. Lighterweight locking with multiple writes in progress at same time.
+   (write shared vs write exclusive).
 
-- For mini-rollback and mini-commit need double buffered to check
-  whether changes exist, that needs correcting throughout heirarchy.
+- OK to disallow some sorts of operation (table restructure / delete / fkeys?).
+- Would use for higher throughput / availability.
 
-2. Generating inverse changesets / streams.
-   - If no extra classes created, need to find a way to check
-     that the two streams are inverse, so creation and checking logic
-     is separate.
+- Drop back to "heavyweight" mode on DB restart for admin operations.
 
-   - N.B. Deleting things. We delete tables and foreign keys by metadata.
-     - Table deletion needs to be a two stage process so we can get the rows back,
-       via a mini-rollback.
 
-     - Also means if we want to delete all the rows, we need to check none are
-       unchanged?
 
-     - Current API lets you mod table rows, and then delete the table, search
-       by name is latest, so it's "gone" until you rollback changes.
 
-     - One or two mini-commits? One would let you undo the delete, but
-       you wouldn't get back the modded rows just before the delete ...
-
-     - Another example of overwrite / delete conflicts. You need to make these
-       explicit and consistent.
-
-     - The CheckAPI table rename and such like needs to be revisied with respect
-       to rename ops.
-
-3. Wrapping multi-changesets into transactions.
-
-4. Mini-commit / multi level rollback.
-
-5. Leave all protected by MRSW lock at the moment. We'll deal with finer
-   grained locking when we have transactions in parallel
-
-- Revisit the naming / renaming of entities indexes and fields
-  - Rename / rename clashes.
-  - Rename / delete clashes.
-  - Resolved same way at all levels?
-
-  - What is retryable?
-  - When things related, determining which changes are "real" changes,
-    and which are implicit renames as a result of other stuff going on.
-
-- Composite ops.
-  - Do some things (eg change field type?) with create and then
-    rename.
-  - How much can we solve things by creating new/old versions of things,
-    (indexes / fields / tables) and then renaming things around?
-
-6a. Support mini transactions and changesets
-    - To Journal has optional inverse for all journalling funcs.
-    - Streamable now needs "Same" (as before) and also needs
-      "Am inverse".
-
-    - Revisit streaming of changesets in xactions. Used to be 1:1,
-      but we now need multiple changesets per transaction.
-
-    - Revisit UserCommitCycle / UserRollback Cycle.
-      - MiniCommit?
-      - Need to keep track of where we are in Xaction.
-      - For writing to journal only stream proverses,
-      - For distrib to other machines poss also stream inverses?
-
-    - Revisit all API functions with respect to which are auto-retryable
-      after a mini-commit.
-
-      Types of conflicts to consider:
-      - Multiple renames. (Disallow after mini-commit implemented).
-      - Rename / delete conflicts (Disallow after mini-commit implemented).
-      - If implement change field type / change attrs / etc
-        - disallow changes if metadata changes already present?
-
-    - Handling of mini-commit failure.
-
-    - Journalling: Backward compatibility for mini-changesets versus current changeset
-      functionality.
-
-    - Journalling: Revisit auto-batching of multi changesets into files.
-
-6b.
-   - Have a composite API (hangs off DB), which can be used manually.
-     - Does more complicated in-place changes, e.g.
-       - Change field type?
-       - Modify ops, which are actually a copy with multi-renames.
-       - Editing of indexes (actually copy / rename / deletecopy).
-
-     See if can wrap composite API into "normal" API functions.
-
-   - And revisit all exceptions, and allow auto-retry of API functions.
-     Possibly something in Xaction mode?
-
-- N.B. temporary index stage not strictly required for table field rearrangement.
-  We could just change the structure and the tags and run with it.
-  However, keep current permanent / temp for "safety" / "checking".
-  Consider for optimisation later.
-
-3b. Will handle more complex index/table rearrangements via some "extra-api"
-    that we put on top of existing API's.
-    - Will require support for "mini-commits" and "retryable" ops, which
-      we can do in due course.
-
-3. Further parallelisation on DB load. Not only tables in parallel but indexes parallel.
-   May need to seperate out between Main indexed store, and parallel indexed stores for indices.
-
-Suggestions:
-
-- Don't use threadpool, because possibility of deadlocks / starvation, spawn threads.
-- Now that you are subclassing TIndexedStore, have asycnhronous index add operations,
-  where you can do all the adds, and wait - spawn a thread for each index you need to build.
-
-So:
-  - Spawn threads as currently for entity precommit / commit at very initial journal replay.
-    (From Scratch and journal replay).
-  - Spawn threads in async index store class.
-
-  - Note that to get benefit of this, would be nice to checkpoint and have a big dbinit file
-    to start with.
-
-3b. "Retryable":
-    - Mini changesets in xactions, auto-retry of multi rename conflicts,
-      metadata / data conflicts, &c. &c.
-
-4. SQL / TSQL query engine.
-
-8. Transaction handling can be improved: nested calls to start transaction - solving that is easy(ish),
+---- Transaction handling can be improved: nested calls to start transaction - solving that is easy(ish),
    but more complicatedly, allowing multiple write transactions in progress at the same time,
    which requires a rethink to the buffering model.
 
