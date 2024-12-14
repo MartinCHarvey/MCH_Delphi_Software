@@ -117,10 +117,12 @@
         <DCC_SymbolReferenceInfo>0</DCC_SymbolReferenceInfo>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_2_Win32)'!=''">
+        <DCC_IOChecking>false</DCC_IOChecking>
         <VerInfo_IncludeVerInfo>true</VerInfo_IncludeVerInfo>
         <VerInfo_Locale>1033</VerInfo_Locale>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_2_Win64)'!=''">
+        <DCC_IOChecking>false</DCC_IOChecking>
         <DCC_DebugInfoInExe>true</DCC_DebugInfoInExe>
         <DCC_RemoteDebug>true</DCC_RemoteDebug>
         <DCC_MapFile>3</DCC_MapFile>
@@ -151,6 +153,7 @@
         <DCCReference Include="..\..\Parallelizer\Parallelizer.pas"/>
         <DCCReference Include="..\..\NullStream\NullStream.pas"/>
         <None Include="..\Ideas, and TODO.txt"/>
+        <None Include="Performance figures.txt"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>

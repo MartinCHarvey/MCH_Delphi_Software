@@ -193,6 +193,8 @@ const
   S_EXCEPTION = 'Internal error, exception: ';
   S_STREAM_SYSTEM_INTERNAL = 'Stream system internal error writing to file.';
 
+  CHECKPOINT_RATIO = 10; { More than 1/10th data in journal, re-checkpoint }
+
 type
   TJournalFileType = (jftInitOrCheckpoint, jftIncremental);
   TJournalFileExts = array[TJournalFileType] of string;
@@ -811,7 +813,7 @@ begin
     CreateCheckpoint :=
          (not AnyFiles)
       or
-         ((TotalIncrFileSize > (TotalInitFileSize div 2))
+         ((TotalIncrFileSize > (TotalInitFileSize div CHECKPOINT_RATIO))
          and (TotalIncrFileSize > ONE_MEG))
       or (ReadFileCount > MAX_INCR_JOURNAL_FILES);
     result := true;
