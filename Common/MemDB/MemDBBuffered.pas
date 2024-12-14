@@ -181,6 +181,7 @@ type
     procedure CheckABStreamableListChange(Current, Next: TMemStreamableList);
     class procedure LookaheadHelperGeneric(Stream: TStream;var Copy: TMemDBStreamable);
     procedure LookaheadHelper(Stream: TStream);
+    procedure LookaheadHelperOpt(Stream: TStream);
   public
     procedure Delete; override;
     procedure RequestChange; override;
@@ -262,6 +263,8 @@ type
     procedure CommitRollbackChangedRow(Row: TMemDBRow; Ref1, Ref2: TObject; TblList: TMemDbIndexedList);
     procedure RemoveEmptyRow(Row: TMemDBRow; Ref1, Ref2: TObject; TblList: TMemDbIndexedList);
 
+    procedure ForEachRow(Handler: TSelectiveRowHandler;
+                         Ref1, Ref2: TObject);
     procedure ForEachChangedRow(Handler: TSelectiveRowHandler;
                                 Ref1, Ref2: TObject);
     procedure ForEachEmptyRow(Handler: TSelectiveRowHandler;
@@ -574,6 +577,8 @@ type
     procedure DeleteUnusedIndices(Reason: TMemDBTransReason);
     procedure ReinstateDeletedIndices;
     procedure AdjustTableStructureForMetadata;
+    function  ValidateIndexesParallelHandler(Ref1, Ref2: pointer):pointer;
+    procedure ValidateIndexes(Reason: TMemDBTransReason);
     procedure CommitAdjustIndicesToTemporary(Reason: TMemDBTransReason);
     procedure CommitRestoreIndicesToPermanent(Reason: TMemDbTransReason);
     procedure RollbackRestoreIndicesToPermanent;
@@ -918,9 +923,9 @@ begin
   ((OptLevel >= olInitAllTrans) and (Reason = mtrReplayFromJournal))
 end;
 
-function QuickIndexingOptimizationApplies(Reason: TMemDBTransReason): boolean;
+function QuickBuildOptimizationApplies(Reason: TMemDBTransReason): boolean;
 begin
-  result := Optimizations.QuickIndexFirstTransaction and
+  result := Optimizations.QuickBuildFirstTransaction and
     (Reason = TMemDbTransReason.mtrReplayFromScratch);
 end;
 
@@ -1455,6 +1460,23 @@ begin
   LookaheadHelperGeneric(Stream, FNextCopy);
 end;
 
+//Optimize streaming of rows into FCurrentCopy, so never swizzle.
+procedure TMemDBDoubleBuffered.LookaheadHelperOpt(Stream: TStream);
+var
+  Pos: Int64;
+  Tag: TMemStreamTag;
+begin
+  Pos := Stream.Position;
+  Tag := RdTag(Stream);
+  //No delete sentinels here.
+  case Tag of
+    mstStreamableListStart: FCurrentCopy := TMemStreamableList.Create;
+  else
+    raise EMemDBException.Create(S_DBL_BUF_LOOKAHEAD_FAILED + IntToStr(Ord(Tag)));
+  end;
+  Stream.Seek(Pos, TSeekOrigin.soBeginning);
+end;
+
 {$IFOPT C+}
 type
   TMemDBDoubleBufferedDbg = class(TMemDBDoubleBuffered)
@@ -1617,8 +1639,18 @@ begin
     begin
       if AssignedNotSentinel(FCurrentCopy) then
         raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
-      LookaheadHelper(Stream);
-      FNextCopy.FromStream(Stream);
+      //Expect transaction reason is always mtrReplayFromScratch
+      if QuickBuildOptimizationApplies(mtrReplayFromScratch)
+        and (self is TMemDBRow) then
+      begin
+        LookaheadHelperOpt(Stream);
+        FCurrentCopy.FromStream(Stream);
+      end
+      else
+      begin
+        LookaheadHelper(Stream);
+        FNextCopy.FromStream(Stream);
+      end;
     end;
   else
     raise EMemDBException.Create(S_JOURNAL_REPLAY_CHANGETYPE_DISAGREES);
@@ -1915,6 +1947,30 @@ begin
   result := result or (not DLItemIsEmpty(@Self.FRefChangedRows));
 end;
 
+procedure TMemDBTableList.ForEachRow(Handler: TSelectiveRowHandler;
+                                     Ref1, Ref2: TObject);
+var
+  Current, Next: TItemRec;
+  CurrentRow: TMemDBRow;
+begin
+  Current := FStore.GetAnItem;
+  while Assigned(Current) do
+  begin
+    Next := Current;
+    FStore.GetAnotherItem(Next);
+{$IFOPT C+}
+    CurrentRow := Current.Item as TMemDbRow;
+{$ELSE}
+    CurrentRow := TMemDbRow(Current.Item);
+{$ENDIF}
+    //If handler removes and reinserts, then it should use store and quicklist
+    //"in-place" functions to ensure ordering in all three lists is kept same,
+    //otherwise chaos will ensue.
+    Handler(CurrentRow, Ref1, Ref2, self);
+    Current := Next;
+  end;
+end;
+
 procedure TMemDBTableList.ForEachChangedRow(Handler: TSelectiveRowHandler;
                             Ref1, Ref2: TObject);
 var
@@ -2027,13 +2083,10 @@ var
   QLPos, QLHead: PDLEntry;
 begin
   //Bad indexing will most likely show up here.
-  if not QuickIndexingOptimizationApplies(TMemDbTransReason(Ref2)) then
-  begin
-    rv := FStore.RemoveItemInPlace(Row.FStoreBackRec, LPos);
-    if rv <> rvOK then
-      raise EMemDBInternalException.Create(S_COMMIT_ROLLBACK_FAILED_INDEXES_CORRUPTED);
-    Row.FStoreBackRec := nil;
-  end;
+  rv := FStore.RemoveItemInPlace(Row.FStoreBackRec, LPos);
+  if rv <> rvOK then
+    raise EMemDBInternalException.Create(S_COMMIT_ROLLBACK_FAILED_INDEXES_CORRUPTED);
+  Row.FStoreBackRec := nil;
   RmRowQuickLists(Row, QLPos, QLHead);
   //Remove before comitting (indexing)
   if LongBool(Ref1) then
@@ -2041,13 +2094,10 @@ begin
   else
     Row.Rollback(TMemDBTransReason(Ref2));
   //And re-add after comitting (indexing)
-  if not QuickIndexingOptimizationApplies(TMemDbTransReason(Ref2)) then
-  begin
-    rv := FStore.AddItemInPlace(Row, LPos, Row.FStoreBackRec);
-    if rv <> rvOK then
-      raise EMemDBInternalException.Create(S_COMMIT_ROLLBACK_FAILED_INDEXES_CORRUPTED);
-    Assert(Assigned(Row.FStoreBackRec));
-  end;
+  rv := FStore.AddItemInPlace(Row, LPos, Row.FStoreBackRec);
+  if rv <> rvOK then
+    raise EMemDBInternalException.Create(S_COMMIT_ROLLBACK_FAILED_INDEXES_CORRUPTED);
+  Assert(Assigned(Row.FStoreBackRec));
   AddRowQuicklists(Row, QLPos, QLHead);
 end;
 
@@ -2062,8 +2112,17 @@ end;
 procedure TMemDBTableList.Commit(Reason: TMemDBTransReason);
 begin
   inherited;
-  ForEachChangedRow(CommitRollbackChangedRow, TObject(true), TObject(Reason));
-  ForEachEmptyRow(RemoveEmptyRow, nil, nil);
+  //Replay from scratch optimization, stream directly into current copy.
+  if not QuickBuildOptimizationApplies(Reason) then
+  begin
+    ForEachChangedRow(CommitRollbackChangedRow, TObject(true), TObject(Reason));
+    ForEachEmptyRow(RemoveEmptyRow, nil, nil);
+  end
+  else
+  begin
+    Assert(DlItemIsEmpty(@FRefChangedRows));
+    Assert(DlItemIsEmpty(@FRefEmptyRows));
+  end;
 end;
 
 procedure TMemDBTableList.Rollback(Reason: TMemDBTransReason);
@@ -3277,17 +3336,31 @@ var
   RowField: TMemFieldData;
   MetaFieldDef: TMemFieldDef;
   i: integer;
+  QuickBuildOptApplies: boolean;
 begin
+  QuickBuildOptApplies := Boolean(Ref2);
+
   Assert(AssignedNotSentinel(Ref1 as TMemDBStreamable));
   MostRecent := Ref1 as TMemTableMetadataItem;
 
   //Pattern of data and delete sentinels and types should be
   //the same in metadata as it is in row data.
-  if not Assigned(Row.ABData[abNext]) then
-    raise EMemDBInternalException.Create(S_INTERNAL_CHECKING_STRUCTURE);
+  if not QuickBuildOptApplies then
+  begin
+    if not Assigned(Row.ABData[abNext]) then
+      raise EMemDBInternalException.Create(S_INTERNAL_CHECKING_STRUCTURE);
+  end
+  else
+  begin
+    if not Assigned(Row.ABData[abCurrent]) then
+      raise EMemDBInternalException.Create(S_INTERNAL_CHECKING_STRUCTURE);
+  end;
   if not (Row.ABData[abNext] is TMemDeleteSentinel) then //Not deleted row.
   begin
-    RowFields := Row.ABData[abNext] as TMemStreamableList;
+    if not QuickBuildOptApplies then
+      RowFields := Row.ABData[abNext] as TMemStreamableList
+    else
+      RowFields := Row.ABData[abCurrent] as TMemStreamableList;
     Assert(Assigned(MostRecent));
     Assert(Assigned(MostRecent.FieldDefs));
     Assert(MostRecent.FieldDefs is TMemStreamableList);
@@ -3549,6 +3622,100 @@ begin
   end;
 end;
 
+function TMemDBTablePersistent.ValidateIndexesParallelHandler(Ref1, Ref2: pointer):pointer;
+var
+  i: integer;
+begin
+  i := integer(Ref1);
+  RevalidateEntireUserIndex(i);
+end;
+
+procedure TMemDBTablePersistent.ValidateIndexes(Reason: TMemDBTransReason);
+var
+  CC, NC: TMemTableMetadataItem;
+  i, j: integer;
+  IndexDef1: TMemIndexDef;
+  ValidateParallel: boolean;
+  CntParallel: integer;
+  Refs1, Refs2, Rets: TPHRefs;
+  Handlers: TParallelHandlers;
+  Excepts: TPHExcepts;
+  Finished: boolean;
+
+  function CheckHelper: boolean;
+  begin
+    result := false;
+    if (FIndexChangesets[i] * [ictAdded
+{$IFOPT C+}
+      ,ictChangedFieldNumber
+      //Other index checking stringent enough do not need to revalidate,
+      //if only a change in field number.
+{$ENDIF}
+      ]) <> [] then
+    begin
+
+      //Handle index validation.
+      if IndexDef1.IndexAttrs * [iaUnique, iaNotEmpty] <> [] then
+        result := true;
+    end;
+  end;
+
+begin
+  Assert(FIndexingChangeRequired);
+  GetCurrNxtMetaCopies(CC,NC);
+  ValidateParallel := OptimizationApplies(Optimizations.IndexValidateParallel, Reason);
+  CntParallel := 0;
+  Finished := false;
+  while not Finished do
+  begin
+    for i := 0 to Pred(Length(FIndexChangesets)) do
+    begin
+      if ictDeleted in FIndexChangesets[i] then
+        continue;
+      IndexDef1 := NC.IndexDefs.Items[i] as TMemIndexDef;
+      if CheckHelper then
+      begin
+        if ValidateParallel then
+          Inc(CntParallel)
+        else
+          RevalidateEntireUserIndex(i);
+      end;
+    end;
+    if ValidateParallel then
+    begin
+      if CntParallel <= 1 then
+        ValidateParallel := false //Finished := false;
+      else
+        Finished := true;
+    end
+    else
+      Finished := true;
+  end;
+
+  if ValidateParallel then
+  begin
+    SetLength(Refs1, CntParallel);
+    SetLength(Handlers, CntParallel);
+    SetLength(Rets, CntParallel);
+    SetLength(Excepts, CntParallel);
+
+    j := 0;
+    for i := 0 to Pred(Length(FIndexChangesets)) do
+    begin
+      if ictDeleted in FIndexChangesets[i] then
+        continue;
+      IndexDef1 := NC.IndexDefs.Items[i] as TMemIndexDef;
+      if CheckHelper then
+      begin
+        Refs1[j] := Pointer(i);
+        Handlers[j] := ValidateIndexesParallelHandler;
+        Inc(j);
+      end;
+    end;
+    Assert(j = CntParallel);
+    ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
+  end;
+end;
 
 procedure TMemDbTablePersistent.CommitAdjustIndicesToTemporary(Reason: TMemDBTransReason);
 var
@@ -3562,7 +3729,6 @@ var
   ff: integer;
   RV: TIsRetVal;
   Parallel: boolean;
-  AddCurrIdx, AddNextIdx: boolean;
 begin
   Parallel := OptimizationApplies(Optimizations.IndexBuildParallel, Reason);
   if FIndexingChangeRequired then
@@ -3603,9 +3769,6 @@ begin
       end
       else if ictAdded in FIndexChangesets[i] then
       begin
-        AddNextIdx := true;
-        AddCurrIdx :=  not QuickIndexingOptimizationApplies(Reason);
-
         //Newly created tag needs to be made temporary, and we create the
         //"previous" field index to take into account possible field rearrangements.
         for ff := 0 to Pred(Length(FieldDefs1)) do
@@ -3613,13 +3776,12 @@ begin
           Assert(FieldDefs1[ff].FieldIndex <= FFieldHelper.NdIndexToRawIndex(FieldDefs1[ff].FieldIndex));
           NewOffsets[ff] := FFieldHelper.NdIndexToRawIndex(FieldDefs1[ff].FieldIndex);
         end;
-        //New assert, shortly array-ized.
         TagData.InitPermanent(NewOffsets);
         for ff := 0 to Pred(Length(FieldDefs1)) do
           NewOffsets[ff] := FieldDefs1[ff].FieldIndex;
         TagData.MakePermanentTemporary(NewOffsets);
         CheckTagAgreesWithMetadata(i, TagData, tciTemporaryAgreesNextOnly, tcpNotProgrammed);
-        TagData.CommitAddIdxsToStore(FData.Store, Parallel, AddCurrIdx, AddNextIdx);
+        TagData.CommitAddIdxsToStore(FData.Store, Parallel);
         CheckTagAgreesWithMetadata(i, TagData, tciTemporaryAgreesNextOnly, tcpProgrammed);
       end;
       FTemporaryIndexLimit := Succ(i);
@@ -3632,32 +3794,7 @@ begin
         raise EMemDbInternalException.Create(S_ASYNC_INDEX_OP_FAILED);
     end;
 
-    for i := 0 to Pred(Length(FIndexChangesets)) do
-    begin
-      if ictDeleted in FIndexChangesets[i] then
-        continue; //Index already blown away.
-
-      IndexDef1 := NC.IndexDefs.Items[i] as TMemIndexDef;
-
-      if (FIndexChangesets[i] * [ictAdded
-{$IFOPT C+}
-        ,ictChangedFieldNumber
-        //Other index checking stringent enough do not need to revalidate,
-        //if only a change in field number.
-{$ENDIF}
-        ]) <> [] then
-      begin
-
-        //TODO - Not considered Parallel index validation yet, but
-        //could do it pretty easily.
-
-        //Handle index validation.
-        if IndexDef1.IndexAttrs * [iaUnique, iaNotEmpty] <> [] then
-          RevalidateEntireUserIndex(i);
-
-      end;
-    end;
-    //Index revalidation where data changes is done earlier.
+    ValidateIndexes(Reason);
   end;
 end;
 
@@ -3694,13 +3831,6 @@ begin
       CheckTagAgreesWithMetadata(i, TagData, tciTemporaryAgreesNextOnly, tcpProgrammed);
       TagData.CommitRestoreToPermanent;
       CheckTagAgreesWithMetadata(i, TagData, tciPermanentAgreesNext, tcpProgrammed);
-      //We have pre-built the next index only, and now we can build the current index.
-      if QuickIndexingOptimizationApplies(Reason) then
-      begin
-        //Pre-built next is now the current.
-        TagData.SwizzleLatestToCurrent;
-        TagData.CommitAddIdxsToStore(FData.Store, Parallel, false, true);
-      end;
     end;
   end;
   if Parallel then
@@ -4141,8 +4271,16 @@ begin
     else
     begin
       CheckStreamedInTableRowCount;
-      FData.ForEachChangedRow(CheckStreamedInRowStructure,
-        FMetadata.ABData[abLatest], FMetadata.ABData[abCurrent]);
+      if not QuickBuildOptimizationApplies(Reason) then
+      begin
+        FData.ForEachChangedRow(CheckStreamedInRowStructure,
+          FMetadata.ABData[abLatest], Pointer(false));
+      end
+      else
+      begin
+        FData.ForEachRow(CheckStreamedInRowStructure,
+          FMetadata.ABData[abLatest], Pointer(true));
+      end;
     end;
 
     //Modifications from here on in.
@@ -5345,14 +5483,28 @@ begin
   if CompareGuids(RowId, StreamRowGuid) <> 0 then
     raise EMemDBInternalException.Create(S_ROW_IDS_DISAGREE);
   ExpectTag(Stream, mstRowEnd);
-  //Assuming no delete sentinels in A/B top level copies, and every row is an add.
-  if AssignedNotSentinel(ABData[abCurrent] as TMemStreamableList)
-    or (NotAssignedOrSentinel(ABData[abNext] as TMemStreamableList)) then
-    raise EMemDbInternalException.Create(S_JOURNAL_ROW_NOT_NEW);
+  if not QuickBuildOptimizationApplies(mtrReplayFromScratch) then
+  begin
+    //Assuming no delete sentinels in A/B top level copies, and every row is an add.
+    if AssignedNotSentinel(ABData[abCurrent] as TMemStreamableList)
+      or (NotAssignedOrSentinel(ABData[abNext] as TMemStreamableList)) then
+      raise EMemDbInternalException.Create(S_JOURNAL_ROW_NOT_NEW);
 
-  CheckABStreamableListChange(
-    nil,
-    ABData[abNext] as TMemStreamableList);
+    CheckABStreamableListChange(
+      nil,
+      ABData[abNext] as TMemStreamableList);
+  end
+  else
+  begin
+    //Assuming row freshly streamed into *current* copy.
+    if NotAssignedOrSentinel(ABData[abCurrent] as TMemStreamableList)
+      or (AssignedNotSentinel(ABData[abNext] as TMemStreamableList)) then
+      raise EMemDbInternalException.Create(S_JOURNAL_ROW_NOT_NEW);
+
+      CheckABStreamableListChange(
+        ABData[abCurrent] as TMemStreamableList,
+        nil);
+  end;
 end;
 
 procedure TMemDbRow.Commit(Reason: TMemDbTransReason);

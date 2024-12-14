@@ -279,10 +279,9 @@ type
     procedure CommitRestoreToPermanent;
     procedure RollbackRestoreToPermanent;
 
-    procedure CommitAddIdxsToStore(Store: TIndexedStoreO; Async: boolean; AddCurrent, AddLatest: boolean);
+    procedure CommitAddIdxsToStore(Store: TIndexedStoreO; Async: boolean);
     procedure CommitRmIdxsFromStore(Async:boolean);
     procedure RollbackRestoreIdxsToStore(Store: TIndexedStoreO);
-    procedure SwizzleLatestToCurrent;
     procedure RollbackRmIdxsFromStore;
 
     //For internal indexes, classes shared between all instances.
@@ -311,9 +310,10 @@ type
   TOptimizations = record
     PreAndCommitParallel: TOptimizeLevel;
     IndexBuildParallel: TOptimizeLevel;
+    IndexValidateParallel: TOptimizeLevel;
     TearDownParallel: TOptimizeLevel;
     FKListsParallel: TOptimizeLevel;
-    QuickIndexFirstTransaction: boolean;
+    QuickBuildFirstTransaction: boolean;
   end;
 
 const
@@ -547,17 +547,7 @@ begin
   FInit := true;
 end;
 
-procedure TMemDBItagData.SwizzleLatestToCurrent;
-begin
-  if not (FIndexClass in [micPermanent, micTemporary]) then
-    raise EMemDBInternalException.Create(S_IDXS_NOT_USER);
-  if not IdxsSetToStore then
-    raise EMemDBInternalException.Create(S_IDXS_NOT_SET); //Overwriting prev init?
-  if not (FStoreIdxSet.AdjustIndexTag(@FLatestTagStruct, @FCurrentTagStruct) = rvOK) then
-    raise EMemDbInternalException.Create(S_OPTIMIZED_INDEX_SWIZZLE_FAILED);
-end;
-
-procedure TMemDBITagData.CommitAddIdxsToStore(Store: TIndexedStoreO; Async: boolean; AddCurrent, AddLatest: boolean);
+procedure TMemDBITagData.CommitAddIdxsToStore(Store: TIndexedStoreO; Async: boolean);
 var
   rv: TIsRetVal;
 begin
@@ -565,26 +555,16 @@ begin
     raise EMemDBInternalException.Create(S_IDXS_NOT_USER);
 
   //Deal with optimization case where not all set at once.
-  if AddCurrent and AddLatest then
-    if IdxsSetToStore then
-      raise EMemDBInternalException.Create(S_IDXS_ALREADY_SET); //Overwriting prev init?
+  if IdxsSetToStore then
+    raise EMemDBInternalException.Create(S_IDXS_ALREADY_SET); //Overwriting prev init?
 
-  if AddCurrent then
+  if Store.AddIndex(TMemDBIndexNode, @FCurrentTagStruct, Async) <> rvOK then
+    raise EMemDbInternalException.Create(S_INDEX_ADD_FAILED);
+  if Store.AddIndex(TMemDBIndexNode, @FLatestTagStruct, Async) <> rvOK then
   begin
-    if Store.AddIndex(TMemDBIndexNode, @FCurrentTagStruct, Async) <> rvOK then
-      raise EMemDbInternalException.Create(S_INDEX_ADD_FAILED);
-  end;
-  if AddLatest then
-  begin
-    if Store.AddIndex(TMemDBIndexNode, @FLatestTagStruct, Async) <> rvOK then
-    begin
-      if AddCurrent then
-      begin
-        rv := Store.DeleteIndex(@FCurrentTagStruct, false);
-        Assert(rv = rvOK);
-      end;
-      raise EMemDbInternalException.Create(S_INDEX_ADD_FAILED);
-    end;
+    rv := Store.DeleteIndex(@FCurrentTagStruct, false);
+    Assert(rv = rvOK);
+    raise EMemDbInternalException.Create(S_INDEX_ADD_FAILED);
   end;
   FStoreIdxSet := Store;
 end;
@@ -874,14 +854,14 @@ end;
 function MemDBGeneralXlateExceptions(EClass: SysUtils.ExceptClass;
                               EMsg: string): boolean;
 begin
-  if EClass = EMemDBInternalException then
-    raise EMemDBInternalException.Create(EMsg);
-  if EClass = EMemDBConsistencyException then
-    raise EMemDBConsistencyException.Create(EMsg);
-  if EClass = EMemDBAPIException then
-    raise EMemDBAPIException.Create(EMsg);
   while Assigned(EClass) do
   begin
+    if EClass = EMemDBInternalException then
+      raise EMemDBInternalException.Create(EMsg);
+    if EClass = EMemDBConsistencyException then
+      raise EMemDBConsistencyException.Create(EMsg);
+    if EClass = EMemDBAPIException then
+      raise EMemDBAPIException.Create(EMsg);
     if EClass = EMemDBException then
       raise EMemDbException.Create(EMsg);
     EClass := SysUtils.ExceptClass(EClass.ClassParent);
@@ -916,14 +896,13 @@ initialization
   // However, if you have big chunks of tables updated at a time, then
   // olInitAlltrans might be more sensible.
 
-{$IFOPT C-}
   with Optimizations do
   begin
     PreAndCommitParallel := olInitFirstTrans;
     IndexBuildParallel := olAlways;
+    IndexValidateParallel := olAlways;
     TearDownParallel := olAlways;
     FKListsParallel := olNever;
-    QuickIndexFirstTransaction := True;
+    QuickBuildFirstTransaction := True;
   end;
-{$ENDIF}
 end.

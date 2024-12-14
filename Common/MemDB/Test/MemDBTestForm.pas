@@ -353,6 +353,7 @@ var
   Data: TMemDBFieldDataRec;
 
 begin
+  FTimeStamp := Now;
   Trans := FSession.StartTransaction(amReadWrite);
   try
     DBAPI := Trans.GetAPI;
