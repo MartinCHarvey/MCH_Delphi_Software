@@ -516,9 +516,9 @@ begin
       raise EMemDBException.Create(S_DB_SESSION_NOT_FOUND);
     if Assigned(Session.FTransaction) then
       raise EMemDBException.Create(S_DB_SESSION_HAS_TRANSACTIONS);
+  finally
     FSessionList.Delete(idx);
     CheckClientsDone;
-  finally
     FSessionLock.Release;
   end;
 end;

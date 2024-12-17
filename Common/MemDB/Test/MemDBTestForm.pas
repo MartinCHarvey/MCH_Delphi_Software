@@ -23,6 +23,7 @@ type
     BigTable: TButton;
     BigTblMod: TButton;
     ChkBlobs: TButton;
+    MiniCommit: TButton;
     procedure BasicTestBtnClick(Sender: TObject);
     procedure ResetClick(Sender: TObject);
     procedure IndexTestClick(Sender: TObject);
@@ -37,6 +38,7 @@ type
     procedure BigTableClick(Sender: TObject);
     procedure BigTblModClick(Sender: TObject);
     procedure ChkBlobsClick(Sender: TObject);
+    procedure MiniCommitClick(Sender: TObject);
   private
     { Private declarations }
     FTimeStamp: TDateTime;
@@ -3063,6 +3065,317 @@ begin
           raise;
         end;
       end;
+    end;
+  end;
+end;
+
+procedure TForm1.MiniCommitClick(Sender: TObject);
+
+const
+  MAGIC_FIELD_VALUE = $1234ABCD;
+  MAGIC_FIELD_VALUE_2 = $12ABCD34;
+
+var
+  Trans: TMemDBTransaction;
+  Handle: TMemDbHandle;
+  DBAPI: TMemAPIDatabase;
+  TblMeta: TMemAPITableMetadata;
+  DbSync: TMemAPIUserTransactionControl;
+  AddLater, Pass: boolean;
+  Value: integer;
+  Bookmark: TMemDbBookMark;
+
+  procedure AddARow;
+  var
+    TblData: TMemAPITableData;
+    Data: TMemDbFieldDataRec;
+  begin
+    TblData := DBAPI.GetApiObjectFromHandle(Handle, APITableData) as TMemAPITableData;
+    try
+      TblData.Append;
+      Data.FieldType := ftInteger;
+      Data.i32Val := MAGIC_FIELD_VALUE;
+      TblData.WriteField('IntField', Data);
+      TblData.Post;
+    finally
+      TblData.Free;
+    end;
+  end;
+
+  function ReadTheRow: integer;
+  var
+    TblData: TMemAPITableData;
+    Data: TMemDbFieldDataRec;
+  begin
+    TblData := DBAPI.GetApiObjectFromHandle(Handle, APITableData) as TMemAPITableData;
+    try
+      TblData.Locate(ptFirst, '');
+      TblData.ReadField('IntField', Data);
+      Assert(Data.FieldType = ftInteger);
+      Result := Data.i32Val;
+    finally
+      TblData.Free;
+    end;
+  end;
+
+  procedure ChangeRowData;
+  var
+    TblData: TMemAPITableData;
+    Data: TMemDbFieldDataRec;
+  begin
+    TblData := DBAPI.GetApiObjectFromHandle(Handle, APITableData) as TMemAPITableData;
+    try
+      TblData.Locate(ptFirst, '');
+      TblData.ReadField('IntField', Data);
+      Assert(Data.FieldType = ftInteger);
+      Data.i32Val := MAGIC_FIELD_VALUE_2;
+      TblData.WriteField('IntField', Data);
+      TblData.Post;
+    finally
+      TblData.Free;
+    end;
+  end;
+
+  procedure CreateTheTable;
+  begin
+    Handle := DBAPI.CreateTable('Test table');
+    TblMeta := DBAPI.GetApiObjectFromHandle(Handle, APITableMetadata) as TMemAPITableMetadata;
+    try
+      TblMeta.CreateField('IntField', ftInteger);
+      //OK, now try to add data simultaneously, expect this to fail.
+    finally
+      TblMeta.Free;
+    end;
+  end;
+
+begin
+  ResetClick(Sender);
+  AddLater := false;
+  //Firstly, see if Mini-commit allows you to create table, and pop with data.
+  //No "special" exception handling or retryable exceptions yet, just whether
+  //mini-commit allows you to create a multi-transaction.
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      CreateTheTable;
+      try
+        AddARow;
+      except
+        on EMemDBException do
+        begin
+          DbSync := DBAPI.GetApiObject(APIUserTransactionControl) as TMemAPIUserTransactionControl;
+          try
+            DbSync.MiniCommit;
+          finally
+            DBSync.Free;
+          end;
+          AddLater := true;
+        end;
+      end;
+    if AddLater then
+      AddARow;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+    if AddLater then
+      LogTimeIncr('Mini-commit / multi changeset (1) OK.')
+    else
+      LogTimeIncr('Mini-commit / multi changeset (1) Failed.')
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('Mini-commit / multi changeset (1) Failed.');
+    end;
+  end;
+  //OK, now check that you can stop and restart the DB, and the journal
+  //replays over the multi-transaction OK.
+  LogTimeIncr('Journal replay over multi-changeset');
+  try
+    FSession.Free;
+    FDB.StopDB;
+    FDB.InitDB(DB_LOCATION, jtV2);
+    FSession := FDB.StartSession;
+    LogTimeIncr('Journal replay over multi-changeset OK');
+  except
+    on E: Exception do
+    begin
+      LogTimeIncr('Journal replay over multi-changeset failed.');
+      raise;
+    end;
+  end;
+  //OK, now check we can read back the magic value.
+  LogTimeIncr('Check readback.');
+  Trans := FSession.StartTransaction(amRead);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      Handle := DBAPI.OpenTableOrKey('Test table');
+      Value := ReadTheRow;
+      if Value = MAGIC_FIELD_VALUE then
+        LogTimeIncr('Readback OK')
+      else
+        LogTimeIncr('Readback Failed.');
+    finally
+      DBAPI.Free;
+      Trans.RollbackAndFree;
+    end;
+  except
+    on E: Exception do
+    begin
+      LogTimeIncr('Readback Failed.');
+      raise;
+    end;
+  end;
+
+  //OK, Now try multiple mini-commits, and mini-rollback one at a time.
+  ResetClick(Sender);
+  LogTimeIncr('Mini-commit and mini rollback...');
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      DbSync := DBAPI.GetApiObject(APIUserTransactionControl) as TMemAPIUserTransactionControl;
+      try
+        CreateTheTable;
+        DbSync.MiniCommit;
+        AddARow;
+        DbSync.MiniCommit;
+        ChangeRowData;
+        DbSync.MiniCommit;
+        //Expect latest value.
+        Value := ReadTheRow;
+        if Value = MAGIC_FIELD_VALUE_2 then
+          LogTimeIncr('Readback miniCR (1) OK')
+        else
+          LogTimeIncr('Readback miniCR (1) Failed.');
+        DBSync.MiniRollback();
+        //Expect older value.
+        Value := ReadTheRow;
+        if Value = MAGIC_FIELD_VALUE then
+          LogTimeIncr('Readback miniCR (2) OK')
+        else
+          LogTimeIncr('Readback miniCR (2) Failed.');
+        DBSync.MiniRollback();
+        //Expect no row in table.
+        try
+          Value := ReadTheRow;
+          LogTimeIncr('Readback miniCR (3) Failed')
+        except
+          on Exception do
+            LogTimeIncr('Readback miniCR (3) OK')
+        end;
+        DBSync.MiniRollback();
+        //Expect no table.
+        Handle := DBAPI.OpenTableOrKey('Test table');
+        if Assigned(Handle) then
+          LogTimeIncr('Readback miniCR (4) Failed.')
+        else
+          LogTimeIncr('Readback miniCR (4) OK.');
+      finally
+        DbSync.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    //Have rolled back so far here that this should not make any changes (check in debugger).
+    Trans.CommitAndFree;
+    LogTimeIncr('Readback miniCR OK')
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('Readback miniCR Failed');
+      raise;
+    end;
+  end;
+
+  //And now try multi-level rollback.
+  ResetClick(Sender);
+  LogTimeIncr('Multi-level rollback...');
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      DbSync := DBAPI.GetApiObject(APIUserTransactionControl) as TMemAPIUserTransactionControl;
+      try
+        CreateTheTable;
+        DbSync.MiniCommit;
+        AddARow;
+        DbSync.MiniCommit;
+        ChangeRowData;
+        DbSync.MiniCommit;
+        ChangeRowData; //So buffered, but don't mini-commit.
+      finally
+        DbSync.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.RollbackAndFree;
+    LogTimeIncr('Multi-level rollback OK')
+  except
+    on E: Exception do
+    begin
+      LogTimeIncr('Multi-level rollback failed.');
+      raise;
+    end;
+  end;
+
+  //And now bookmark.
+  ResetClick(Sender);
+  LogTimeIncr('Bookmark and rollback...');
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      DbSync := DBAPI.GetApiObject(APIUserTransactionControl) as TMemAPIUserTransactionControl;
+      try
+        CreateTheTable;
+        DbSync.MiniCommit;
+
+        AddARow;
+        Bookmark := DbSync.Bookmark;
+        ChangeRowData;
+
+        Value := ReadTheRow;
+        if Value = MAGIC_FIELD_VALUE_2 then
+          LogTimeIncr('Bookmark (1) OK')
+        else
+          LogTimeIncr('Bookmark (1) Failed.');
+
+        DbSync.MiniCommit;
+
+        Value := ReadTheRow;
+        if Value = MAGIC_FIELD_VALUE_2 then
+          LogTimeIncr('Bookmark (2) OK')
+        else
+          LogTimeIncr('Bookmark (2) Failed.');
+
+        DbSync.MiniRollbackToBookmark(Bookmark);
+
+        Value := ReadTheRow;
+        if Value = MAGIC_FIELD_VALUE then
+          LogTimeIncr('Bookmark (3) OK')
+        else
+          LogTimeIncr('Bookmark (3) Failed.');
+
+      finally
+        DbSync.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.RollbackAndFree;
+    LogTimeIncr('Rollback after bookmark OK');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('Rollback after bookmark failed.');
+      raise;
     end;
   end;
 end;

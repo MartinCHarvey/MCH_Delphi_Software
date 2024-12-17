@@ -513,6 +513,7 @@ begin
   begin
     MiniSet := TObject(T.MiniChangesets.Items[i]) as TMemDBMiniset;
     try
+      MiniSet.InverseStream.Seek(0, soBeginning);
       DB.FromJournal(MiniSet.InverseStream);
       DB.PreCommit(mtrUserOpMultiRollback);
       DB.Commit(mtrUserOpMultiRollback);
@@ -615,6 +616,7 @@ begin
       MiniCnt := Pred(T.MiniChangesets.Count);
       MiniSet := TObject(T.MiniChangesets.Items[MiniCnt]) as TMemDBMiniset;
       try
+        MiniSet.InverseStream.Seek(0, soBeginning);
         DB.FromJournal(MiniSet.InverseStream);
         DB.PreCommit(mtrUserOpMultiRollback);
         DB.Commit(mtrUserOpMultiRollback);
@@ -657,6 +659,9 @@ begin
     MiniRollback;
     Dec(MiniCount);
   end;
+  GetChangesetsInfo(MiniCount, Buffered);
+  Assert(not Buffered);
+  Assert(MiniCount = Integer(bookmark));
 end;
 
 { TMemAPIDatabase }
