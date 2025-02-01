@@ -514,11 +514,18 @@ begin
     idx := FSessionList.IndexOf(Session);
     if not(idx >= 0) then
       raise EMemDBException.Create(S_DB_SESSION_NOT_FOUND);
-    if Assigned(Session.FTransaction) then
-      raise EMemDBException.Create(S_DB_SESSION_HAS_TRANSACTIONS);
+    //Allow the session removal if valid session even if dangling transactions,
+    //However, throw back into the calling thread.
+    //This to allow a cleanup-case where things have got badly out of sync
+    //or threads blocked/hung.
+    try
+      if Assigned(Session.FTransaction) then
+        raise EMemDBException.Create(S_DB_SESSION_HAS_TRANSACTIONS);
+    finally
+      FSessionList.Delete(idx);
+      CheckClientsDone;
+    end;
   finally
-    FSessionList.Delete(idx);
-    CheckClientsDone;
     FSessionLock.Release;
   end;
 end;
@@ -750,8 +757,6 @@ end;
 
 procedure TMemDB.StopDB;
 begin
-  //Speculative attempt to checkpoint if currently in running state.
-  //If race on stop path, no checkpoint.
   FSessionLock.Acquire;
   try
     StopDBLocked;
@@ -777,6 +782,10 @@ begin
   finally
     FSessionLock.Release;
   end;
+  //TODO - There is a race here, ensuring that the checkpoint xaction
+  //is the very first xaction written to disk when initializing.
+
+  {ref BUG_MCH_1_2_2025 }
   if OK and CreateCheckpoint then
     Checkpoint;
   FJournal.SynchronizeStateChange;
@@ -902,17 +911,25 @@ begin
   finally
     FSessionLock.Release;
   end;
+
+  //TODO - There is a race here, ensuring that the checkpoint xaction
+  //is the very first xaction written to disk when initializing.
+  //TODO - Also a problem with stop/restart DB races with user xations.
+
+  //and XE 4 MRSW lock (which should not happen at all, regardless of
+  // this race). MCH Investigating.
+
+  {ref BUG_MCH_1_2_2025 }
   if result then
   begin
     FRWLock.BeginRead;
     try
-      //TODO - Consider making this temporary write cached file, not
-      //memory stream, to help mem usage.
-      //Not sure whether ca make it the right name / location for
-      //it to also be the final file.
+      //TODO - This to follow same conventions as other temp stream creation.
       TmpName := TPath.GetTempFileName();
       ChangesetStream := TMemDBTempFileStream.Create(TmpName);
       try
+        //NB. No multi-transactions in checkpoint. See journal replay
+        //function as to why.
         FDatabase.ToScratch(ChangesetStream);
       except
         on E: Exception do

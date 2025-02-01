@@ -68,9 +68,9 @@ type
     //You can, however, tie yourself in knots, so be careful!
     procedure GetChangesetsInfo(var MiniChangesets: integer; var Buffered: boolean);
     procedure MiniCommit;
-    procedure MiniRollback(RaiseIfNothing: boolean = true);
+    function MiniRollback: boolean; //Returns whether did anything.
     function Bookmark: TMemDbBookMark;
-    procedure MiniRollbackToBookmark(Bookmark: TMemDbBookmark);
+    function MiniRollbackToBookmark(Bookmark: TMemDbBookmark): boolean;
   end;
 
   TMemAPIDatabase = class(TMemAPIDBTopLevel)
@@ -316,7 +316,6 @@ const
   S_API_FIND_EDGE_FIRST_OR_LAST = 'FindEdgeByIndex requires you to specify the first or last position.';
   S_API_NO_ROW_SELECTED = 'No row selected/located for read, write, or delete';
   S_API_TOO_MANY_INDICES = 'Too many indices referring to the same field';
-  S_MINI_ROLLBACK_NOTHING_TO_DO = 'Mini-rollback nothing to do';
   S_API_MINI_COMMIT_OVER_IRREVERSIBLE = 'Cannot perform a mini-commit after a previous force delete,' +
                                         'changes are irreversible. Commit or rollback the transaction.';
   S_MINI_ROLLBACK_NOT_SEQUENTIAL = 'Bookmark provided seems not to be in the sequence of previous changesets in this transaction.';
@@ -343,6 +342,7 @@ const
   S_API_NO_FIELDS_IN_TABLE_AT_APPEND_TIME = 'Cannot append a record until you have added fields to the table.';
   S_API_NO_ROW_FOR_DELETE = 'You need to navigate to a row before you can delete it.';
   S_API_INDEX_FOR_FK_UNIQUE_ATTR = 'Foreign key: referenced index must have unique attribute set.';
+  S_FROM_SCRATCH_NOT_ALLOWED_MULTI = 'Checkpoint and first init changesets should not be in a multi-transaction';
 
 function MakeStream(StorageMode: TTempStorageMode): TStream;
 var
@@ -388,6 +388,12 @@ begin
   if not Multi then
     JournalEntry.Seek(Pos, TSeekOrigin.soBeginning);
 
+//Checkpoints and from scratch init should not be in a multi-changeset.
+{$IFOPT C+}
+  if Initial and Multi then
+    raise EMemDBException.Create(S_FROM_SCRATCH_NOT_ALLOWED_MULTI);
+{$ENDIF}
+
   repeat
     try
 {$IFOPT C+}
@@ -413,7 +419,12 @@ begin
         raise EMemDBException.Create(S_WRONG_TAG);
       Stop := Tag = mstMultiChangesetsEnd;
       if not Stop then
+      begin
         JournalEntry.Seek(Pos, TSeekOrigin.soBeginning);
+        //Even in bug case where we somehow mistakenly did a "from-scratch"
+        //inside a multi changeset, we can prob proceed.
+        Reason := mtrReplayFromJournal;
+      end;
     end
     else
       Stop := true;
@@ -586,12 +597,14 @@ begin
   end;
 end;
 
-procedure TMemAPIUserTransactionControl.MiniRollback(RaiseIfNothing: boolean);
+function TMemAPIUserTransactionControl.MiniRollback: boolean;
 var
   T: TMemDBTransaction;
   MiniSet: TMemDBMiniSet;
   MiniCnt: integer;
+
 begin
+  result := false;
   CheckReadWriteTransaction;
   T := FAssociatedTransaction as TMemDbTransaction;
   Assert(Assigned(T));
@@ -604,6 +617,7 @@ begin
       finally
         Db.PostRollbackCleanup(mtrUserOp);
       end;
+      result := true;
     end
     else if T.MiniChangesets.Count > 0 then
     begin
@@ -625,9 +639,8 @@ begin
       end;
       MiniSet.Free;
       T.MiniChangesets.Count := MiniCnt;
-    end
-    else if RaiseIfNothing then
-      raise EMemDBAPIException.Create(S_MINI_ROLLBACK_NOTHING_TO_DO);
+      result := true;
+    end;
   finally
     T.Session.FinishMiniOp(T);
   end;
@@ -644,19 +657,27 @@ begin
   result := TMemDBBookMark(MiniCount);
 end;
 
-procedure TMemAPIUserTransactionControl.MiniRollbackToBookmark(Bookmark: TMemDbBookmark);
+function TMemAPIUserTransactionControl.MiniRollbackToBookmark(Bookmark: TMemDbBookmark): boolean;
 var
   MiniCount: integer;
   Buffered: boolean;
+  rbRes: boolean;
 begin
+  result := false;
   GetChangesetsInfo(MiniCount, Buffered);
   if (Integer(Bookmark) > MiniCount) or (Integer(Bookmark) < 0) then
     raise EMemDBAPIException.Create(S_MINI_ROLLBACK_NOT_SEQUENTIAL);
   if Buffered then
-    MiniRollback;
+  begin
+    rbRes := MiniRollback;
+    Assert(rbRes);
+    result := result or rbRes;
+  end;
   while MiniCount > Bookmark do
   begin
-    MiniRollback;
+    rbRes := MiniRollback;
+    Assert(rbRes);
+    result := result or rbRes;
     Dec(MiniCount);
   end;
   GetChangesetsInfo(MiniCount, Buffered);
