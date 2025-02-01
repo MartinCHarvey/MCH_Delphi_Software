@@ -3628,6 +3628,7 @@ var
 begin
   i := integer(Ref1);
   RevalidateEntireUserIndex(i);
+  result := nil;
 end;
 
 procedure TMemDBTablePersistent.ValidateIndexes(Reason: TMemDBTransReason);
