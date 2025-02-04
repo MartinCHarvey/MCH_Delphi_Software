@@ -33,8 +33,8 @@ uses
 {$IFDEF USE_TRACKABLES}
   Trackables,
 {$ENDIF}
-  SysUtils, SyncObjs, Classes, MemDBMisc, MemDBStreamable, MemDBJournal,
-  MemDBBuffered, MemDBAPI;
+  SysUtils, Classes, MemDBMisc, MemDBStreamable, MemDBJournal,
+  MemDBBuffered, MemDBAPI, LockAbstractions;
 
 type
   TMemDB = class;
@@ -131,7 +131,7 @@ type
     // Synchronise DB state, sessions, transactions.
     FSessionLock: TCriticalSection;
     // Synchronize access to database state.
-    FRWLock: TMultiReadExclusiveWriteSynchronizer;
+    FRWLock: LockAbstractions.TMRSWLock;
     FSessionList: TList;
     FCheckpointRefs: integer; //Also used to reference number of oustanding stats calls.
     FTransactionList: TList;
@@ -222,12 +222,12 @@ end;
 
 procedure TMemDbTransaction.AddRef;
 begin
-  TInterlocked.Increment(FInterlockedRefCount);
+  LockAbstractions.InterlockedIncrement(FInterlockedRefCount);
 end;
 
 procedure TMemDbTransaction.DecRefConditionalFree;
 begin
-  if TInterlocked.Decrement(FInterlockedRefCount) > 0 then
+  if LockAbstractions.InterlockedDecrement(FInterlockedRefCount) > 0 then
     exit; //Don't destroy it yet
   Free;
 end;
@@ -438,12 +438,6 @@ begin
 {$ENDIF}
     end;
   finally
-    if Transaction.FMode = amReadWrite then
-    begin
-      FRWLock.EndWrite;
-    end
-    else
-      FRWLock.EndRead;
     FSessionLock.Acquire;
     try
       Transaction.FCommitRollbackInProgress := tiptNone;
@@ -451,6 +445,23 @@ begin
       FSessionLock.Release;
     end;
   end;
+  //Only drop the RW Lock if no exception in the commit.
+  //If rollback, then we'll hold into the RWLock,
+  //and wait for a subsequent rollback to drop it.
+
+  //If exception during rollback, we qietly swallow it,
+  //and put DB into error state.
+
+  //If DB in error state then quietly remove the transaction without committing
+  //changes. Further transactions will be errored at start time
+
+  Assert(Transaction.FMode in [amRead, amReadWrite]);
+  if Transaction.FMode = amReadWrite then
+  begin
+    FRWLock.EndWrite;
+  end
+  else
+    FRWLock.EndRead;
   if WaitJournalDone then
     Transaction.FlushFinishedEvent.WaitFor(INFINITE);
   FSessionLock.Acquire;
@@ -499,6 +510,7 @@ begin
   finally
     FSessionLock.Release;
   end;
+  Assert(Mode in [amRead, amReadWrite]);
   if Mode = amRead then
     FRWLock.BeginRead
   else
@@ -518,6 +530,7 @@ begin
     //However, throw back into the calling thread.
     //This to allow a cleanup-case where things have got badly out of sync
     //or threads blocked/hung.
+    //It's a pretty nasty error case however you do it.
     try
       if Assigned(Session.FTransaction) then
         raise EMemDBException.Create(S_DB_SESSION_HAS_TRANSACTIONS);
@@ -559,7 +572,7 @@ end;
 constructor TMemDB.Create;
 begin
   FSessionLock := TCriticalSection.Create;
-  FRWLock := TMultiReadExclusiveWriteSynchronizer.Create;
+  FRWLock := LockAbstractions.TMRSWLock.Create;
   FSessionList := TList.Create;
   FTransactionList := TList.Create;
   FInitWait := TEvent.Create;

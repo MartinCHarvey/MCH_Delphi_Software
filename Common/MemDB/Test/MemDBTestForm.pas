@@ -3193,10 +3193,6 @@ begin
   //OK, now check that you can stop and restart the DB, and the journal
   //replays over the multi-transaction OK.
 
-  {
-    Removing this test temporarily. Grep code for  BUG_MCH_1_2_2025
-    to find out why. Investigation various R/W locks and races in progress.
-
   LogTimeIncr('Journal replay over multi-changeset');
   try
     FSession.Free;
@@ -3211,7 +3207,6 @@ begin
       raise;
     end;
   end;
-  }
 
   //OK, now check we can read back the magic value.
   LogTimeIncr('Check readback.');

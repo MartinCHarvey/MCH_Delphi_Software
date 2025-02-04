@@ -632,36 +632,6 @@ end;
  * Global functions                 *
  ************************************)
 
-procedure CleanupChecking;
-var
-  TrackInfo: TStrings;
-  Idx: integer;
-  ErrStr: string;
-begin
-  { By this stage, we expect that just about everything else except the app
-    tracker has been cleaned up, and so we can check that all trackable
-    objects have been freed }
-{$IFOPT C+}
-  if Assigned(AppGlobalTracker) then
-  begin
-    if AppGlobalTracker.HasItems then
-    begin
-      ErrStr := S_LEAKED_INSTANCES;
-      AppGlobalLog.Log(SV_WARN, ErrStr);
-      TrackInfo := AppGlobalTracker.GetTrackedDetails;
-      try
-        for Idx := 0 to Pred(TrackInfo.Count) do
-          AppGlobalLog.Log(SV_WARN, TrackInfo.Strings[Idx]);
-      finally
-        TrackInfo.Free;
-      end;
-    end;
-  end
-  else
-    AppGlobalLog.Log(SV_CRIT, S_EXPECTED_TRACKER);
-{$ENDIF}
-end;
-
 procedure GLogLog(Sev: TLogSeverity; Line: string);
 begin
   AppGlobalLog.Log(Sev, Line);
@@ -721,9 +691,6 @@ initialization
 {$ENDIF}
   SyncToMainThread := TQueueThread.Create;
 finalization
-{$IFOPT C+}
-  CleanupChecking;
-{$ENDIF}
   AppGlobalLog.Free;
   AppGlobalLog := nil;
   SyncToMainThread.Free;

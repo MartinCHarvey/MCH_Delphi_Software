@@ -40,8 +40,8 @@ uses
 {$IFDEF USE_TRACKABLES}
   Trackables,
 {$ENDIF}
-  IndexedStore, MemDbStreamable, Classes, MemDBMisc, SyncObjs, Parallelizer,
-  DLList;
+  IndexedStore, MemDbStreamable, Classes, MemDBMisc, Parallelizer,
+  DLList, LockAbstractions;
 
 type
   TMemDBTransReason = (mtrUserOp,
@@ -920,7 +920,7 @@ function OptimizationApplies(const OptLevel: TOptimizeLevel;
 begin
   result := (OptLevel = olAlways) or
   ((OptLevel >= olInitFirstTrans) and (Reason = mtrReplayFromScratch)) or
-  ((OptLevel >= olInitAllTrans) and (Reason = mtrReplayFromJournal))
+  ((OptLevel >= olInitAllTrans) and (Reason = mtrReplayFromJournal));
 end;
 
 function QuickBuildOptimizationApplies(Reason: TMemDBTransReason): boolean;

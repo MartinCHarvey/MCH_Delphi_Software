@@ -18,7 +18,9 @@ uses
   BufferedFileStream in '..\..\CachedStream\BufferedFileStream.pas',
   GlobalLog in '..\..\Logging\GlobalLog.pas',
   Parallelizer in '..\..\Parallelizer\Parallelizer.pas',
-  NullStream in '..\..\NullStream\NullStream.pas';
+  NullStream in '..\..\NullStream\NullStream.pas',
+  LockAbstractions in '..\..\LockAbstractions\LockAbstractions.pas',
+  SRWLockWrapper in '..\..\SRWLockWrapper\SRWLockWrapper.pas';
 
 {$R *.res}
 

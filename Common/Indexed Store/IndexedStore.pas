@@ -355,7 +355,7 @@ type
 
 implementation
 
-uses SysUtils, Windows;
+uses SysUtils, LockAbstractions;
 //Use Windows CMPXCHG not TInterlocked, which is broken on XE4.
 
 const
@@ -450,7 +450,7 @@ begin
     Tries := SPIN_COUNT;
     while Tries > 0 do
     begin
-      if Windows.InterlockedCompareExchange(FIndexNodesLock, 1, 0) = 0 then
+      if LockAbstractions.InterlockedCompareExchange(FIndexNodesLock, 1, 0) = 0 then
         exit;
       Dec(Tries);
     end;
@@ -462,7 +462,7 @@ procedure TItemRec.UnlockIndexNodeList;
 var
   PrevLocked: integer;
 begin
-  PrevLocked := Windows.InterlockedExchange(FIndexNodesLock, 0);
+  PrevLocked := LockAbstractions.InterlockedExchange(FIndexNodesLock, 0);
   Assert(PrevLocked = 1);
 end;
 

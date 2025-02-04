@@ -39,7 +39,7 @@ IN THE SOFTWARE.
 
 interface
 
-uses DLList, SyncObjs;
+uses DLList, LockAbstractions;
 
 type
   TOwnLockDLThreadQueue = class;
