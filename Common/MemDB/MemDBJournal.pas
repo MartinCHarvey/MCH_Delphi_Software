@@ -36,7 +36,7 @@ uses
 {$IFDEF USE_TRACKABLES}
   Trackables,
 {$ENDIF}
-  Classes, DLThreadQueue, MemDBStreamable, SyncObjs, MemDBMisc;
+  Classes, DLThreadQueue, MemDBStreamable, MemDBMisc, LockAbstractions;
 
 type
   TMemDbJournal = class;
