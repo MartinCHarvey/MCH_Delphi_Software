@@ -5,6 +5,8 @@ Most recent (2024) development is in Common/MemDB: SQL query engine, and a "ligh
 
 Parsing code does not handle recent HTML as well as I had hoped. Needs changes for optional parsing of scripts where HTML indicates length, error recovery needs an overhaul.
 
+I welcome feedback! martin_c_harvey@hotmail.com
+
 # Summary of contents.
 
 Files / Folders:
