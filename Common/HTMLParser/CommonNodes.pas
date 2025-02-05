@@ -67,10 +67,13 @@ type
     FNodeType: byte;
     FStringsFixed: boolean;
   protected
-    // A little hacky, but almost all parser code is AnsiStr and AnsiChar,
-    // so we need to un-ansify unicode strings.
-    // Additionally, later need to apply escape/unescape rules for langs
-    // allowing unicode or control character escapes.
+    //Originally, this used to fix ANSI to Unicode strings.
+    //This is now done in the lexer, however, the routine is retained for
+    //nodes which have their own escape rules, and may wish to undo
+    //the escaping. Currently just JSON does this (as we use JSON data),
+    //but other implementations which do more than just
+    //parse incoming data might want to fixup strings as well.
+
     procedure FixStrings; virtual;
   public
     // These functions to only consider parsed information, not temporary

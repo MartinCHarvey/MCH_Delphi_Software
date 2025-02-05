@@ -31,7 +31,8 @@ uses
   ErrorRecovery in '..\Common\HTMLParser\ErrorRecovery.pas',
   SoftLexer in '..\Common\SoftLexer\SoftLexer.pas',
   OrdinalSets in '..\Common\OrdinalSets\OrdinalSets.pas',
-  Parallelizer in '..\Common\Parallelizer\Parallelizer.pas';
+  Parallelizer in '..\Common\Parallelizer\Parallelizer.pas',
+  LockAbstractions in '..\Common\LockAbstractions\LockAbstractions.pas';
 
 {$R *.res}
 

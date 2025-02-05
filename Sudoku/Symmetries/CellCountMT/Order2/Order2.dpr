@@ -15,7 +15,8 @@ uses
   Trackables in '..\..\..\..\Common\Tracking\Trackables.pas',
   WorkItems in '..\..\..\..\Common\WorkItems\WorkItems.pas',
   CellCountShared in '..\..\Shared\CellCountShared.pas',
-  Parallelizer in '..\..\..\..\Common\Parallelizer\Parallelizer.pas';
+  Parallelizer in '..\..\..\..\Common\Parallelizer\Parallelizer.pas',
+  LockAbstractions in '..\..\..\..\Common\LockAbstractions\LockAbstractions.pas';
 
 begin
   try

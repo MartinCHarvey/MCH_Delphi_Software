@@ -446,15 +446,8 @@ begin
     end;
   end;
   //Only drop the RW Lock if no exception in the commit.
-  //If rollback, then we'll hold into the RWLock,
+  //If commit, then we'll hold into the RWLock,
   //and wait for a subsequent rollback to drop it.
-
-  //If exception during rollback, we qietly swallow it,
-  //and put DB into error state.
-
-  //If DB in error state then quietly remove the transaction without committing
-  //changes. Further transactions will be errored at start time
-
   Assert(Transaction.FMode in [amRead, amReadWrite]);
   if Transaction.FMode = amReadWrite then
   begin
@@ -924,13 +917,8 @@ begin
   finally
     FSessionLock.Release;
   end;
-
   //TODO - There is a race here, ensuring that the checkpoint xaction
   //is the very first xaction written to disk when initializing.
-  //TODO - Also a problem with stop/restart DB races with user xations.
-
-  //and XE 4 MRSW lock (which should not happen at all, regardless of
-  // this race). MCH Investigating.
 
   {ref BUG_MCH_1_2_2025 }
   if result then

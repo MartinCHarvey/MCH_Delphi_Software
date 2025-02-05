@@ -81,8 +81,6 @@ const
   DocTypeStrs: array[THTMLDocType] of string =
     ('tdtUnknown', 'tdtHTML', 'tdtCSS', 'tdtJSON', 'tdtJScript');
 
-procedure FixAnsifiedBackToUnicode(var Ansified: string);
-
 function CheckedUTF8ToUnicode(UTF8: AnsiString): string;
 function CheckedUnicodeToUTF8(Unicode: string): AnsiString;
 
@@ -424,34 +422,15 @@ begin
   end;
 end;
 
-procedure FixAnsifiedBackToUnicode(var Ansified: string);
-var
-  i: integer;
-  Convert: boolean;
-  AnsiS: AnsiString;
-begin
-  Convert := false;
-  //Any conversion needed?
-  for i := 1 to Length(Ansified) do
-  begin
-    if (Ord(Ansified[i]) >= $80) then
-    begin
-      Convert := true;
-      break;
-    end;
-    Assert(Ord(Ansified[i]) <= $FF);
-    //Otherwise string already has unicode chars
-  end;
-  if Convert then
-  begin
-    AnsiS := AnsiString(Ansified); //Hence preceeding assertion.
-    Ansified := CheckedUTF8ToUnicode(AnsiS);
-  end;
-end;
-
 function CheckedUTF8ToUnicode(UTF8: AnsiString): string;
+var
+  TestStr: AnsiString;
 begin
   result := UTF8ToUnicodeString(UTF8);
+{$IFOPT C+}
+  TestStr := UTF8Encode(result);
+  Assert(AnsiCompareStr(UTF8, TestStr) = 0);
+{$ENDIF}
 end;
 
 function CheckedUnicodeToUTF8(Unicode: string): AnsiString;
@@ -461,11 +440,8 @@ var
 {$ENDIF}
 begin
   result := UTF8Encode(Unicode);
-  //With any luck this will not do anything to simple ansi strings...
-//And just check our conversion back is good.
 {$IFOPT C+}
-  TestStr := result;
-  CheckedUTF8ToUnicode(TestStr);
+  TestStr := UTF8ToUnicodeString(Unicode);
   Assert(CompareStr(Unicode, TestStr) = 0);
 {$ENDIF}
 end;

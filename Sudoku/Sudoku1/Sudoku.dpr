@@ -22,7 +22,8 @@ uses
   SudokuExactCover in '..\SudokuShared\SudokuExactCover.pas',
   ExactCover in '..\..\Common\ExactCover\ExactCover.pas',
   SparseMatrix in '..\..\Common\SparseMatrix\SparseMatrix.pas',
-  Parallelizer in '..\..\Common\Parallelizer\Parallelizer.pas';
+  Parallelizer in '..\..\Common\Parallelizer\Parallelizer.pas',
+  LockAbstractions in '..\..\Common\LockAbstractions\LockAbstractions.pas';
 
 {$R *.res}
 

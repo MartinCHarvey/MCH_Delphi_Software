@@ -99,8 +99,6 @@ type
     // children are parameter list followed by block.
   private
     FFuncName: string;
-  protected
-    procedure FixStrings; override;
   public
     function AsText: string; override;
     function LclEqual(Other: TCommonNode; Opts: TNodeSearchOpts)
@@ -320,8 +318,6 @@ type
   TJSIdentifier = class(TJSSimpleExpr)
   private
     FName: string;
-  protected
-    procedure FixStrings; override;
   public
     function AsText: string; override;
     function LclEqual(Other: TCommonNode; Opts: TNodeSearchOpts)
@@ -732,28 +728,15 @@ begin
   result := inherited and ((Other as TJSFunction).FFuncName = Self.FFuncName);
 end;
 
-procedure TJSFunction.FixStrings;
-begin
-  FixAnsifiedBackToUnicode(FFuncName);
-  inherited;
-end;
-
 { TJSString }
 
 procedure TJSString.FixStrings;
 begin
-  FixAnsifiedBackToUnicode(FStrData);
   UnescapeJavascriptString(FStrData);
   inherited;
 end;
 
 { TJSIdentifier }
-
-procedure TJSIdentifier.FixStrings;
-begin
-  FixAnsifiedBackToUnicode(FName);
-  inherited;
-end;
 
 { TJSExpr }
 

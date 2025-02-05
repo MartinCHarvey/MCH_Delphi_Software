@@ -40,17 +40,8 @@ interface
 uses BinaryTree, DLList, Trackables, Parallelizer;
 
 {
-  N.B. *VERY* Limited support in this unit for concurrency:
-
-  - You can add or remove (but not both) indexes in parallel.
-  - Assumption is that items are not added/removed when you're changing indexes.
-  - No other concurrency control - for that you'll need to wrap the datastructure
-    in a lock, or ask me to implement this in a cleverer manner using interlocked
-    queue/list functions.
-
-    Please turn assertions on to check for misuse of aforementioned concurrency.
-    Additionally, we handle out of memory exceptions OK, but do not expect to
-    encounter other exceptions in this unit.
+  Concurrency: Indexes can be added and removed in parallel, via the
+  "PerformAsyncActions" method. No other concurrency checking here.
 }
 
 const

@@ -6,7 +6,7 @@ unit JSONGrammar;
 {==============================================================================
 JSONGrammar
 0.0.0.0
-Date of Generation: 07/03/2020 19:18
+Date of Generation: 20/12/2024 19:00
 Comment: Parses JSON data embedded in HTML.
 Author: Martin Harvey
 Copyright: (c) Martin Harvey
@@ -1125,12 +1125,12 @@ end;  {_In}
 
 procedure TJSONGrammar._Number (out  S:String);begin
 Expect(NumberTokenSym);
-S  :=  LexString;
+S  :=  UnicodeLexString;
 end;
 
 procedure TJSONGrammar._String (out  S:String);begin
 Expect(DQuotStringSym);
-S  :=  LexString;
+S  :=  UnicodeLexString;
 S  :=  S.SubString(1,  Length(S)  -  2);
 end;
 

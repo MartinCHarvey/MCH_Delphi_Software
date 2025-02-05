@@ -158,6 +158,7 @@
         <DCCReference Include="..\Common\SoftLexer\SoftLexer.pas"/>
         <DCCReference Include="..\Common\OrdinalSets\OrdinalSets.pas"/>
         <DCCReference Include="..\Common\Parallelizer\Parallelizer.pas"/>
+        <DCCReference Include="..\Common\LockAbstractions\LockAbstractions.pas"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>

@@ -81,7 +81,7 @@ PRODUCTIONS
   UseClause DESCRIPTION "use clause"
   =
         identifier
-                (. FCurrentLocation := LexString + '.pas'; .)
+                (. FCurrentLocation := UnicodeLexString + '.pas'; .)
         {dot identifier}
         [ "in" UseLocation ]
                 (.  FLocationList.Add(FCurrentLocation); .)
@@ -90,7 +90,7 @@ PRODUCTIONS
   UseLocation DESCRIPTION "use location"
   =
         string
-                (.  FCurrentLocation := LexString;
+                (.  FCurrentLocation := UnicodeLexString;
                     FCurrentLocation := FCurrentLocation.SubString(1, Length(FCurrentLocation) - 2); .)
   .
 

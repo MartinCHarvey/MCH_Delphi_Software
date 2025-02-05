@@ -6,7 +6,7 @@ unit CSSGrammar;
 {==============================================================================
 CSSGrammar
 0.0.0.0
-Date of Generation: 07/03/2020 19:18
+Date of Generation: 20/12/2024 19:00
 Comment: CSS parser.
 Author: Martin Harvey
 Copyright: (c) Martin Harvey
@@ -239,17 +239,17 @@ end;
 {$IFDEF DEBUG_TOKENS}
 procedure TCSSGrammar.DebugLogToken(Sender : TObject; var CurrentInputSymbol : integer);
 var
-  LogStr: AnsiString;
-  LexStr: AnsiString;
+  LogStr: string;
+  LexStr: string;
   DbgLexChar: AnsiString;
 begin
-  LexStr := LexString;
+  LexStr := UnicodeLexString;
   if Length(LexStr) > 0 then
-    DbgLexChar := AnsiString(IntToStr(Byte(LexString[1])) + ' ')
+    DbgLexChar := AnsiString(IntToStr(Byte(UnicodeLexString[1])) + ' ')
   else
     DbgLexChar := '';
 
-  LogStr := AnsiString(IntToStr(CurrentInputSymbol) + ' : ' + DbgLexChar +  LexString + CHR(13) + CHR(10));
+  LogStr := IntToStr(CurrentInputSymbol) + ' : ' + DbgLexChar +  UnicodeLexString + CHR(13) + CHR(10);
   GLogLog(SV_TRACE, LogStr);
 end;
 
@@ -3658,7 +3658,7 @@ Expect(FUNCSym);
 A  :=  TCSSAtom.CreateWithTracker(ParseTracker  as  TTracker);
 A.ExprType  :=  cetAtom;
 A.AtomType  :=  atFunc;
-A.StrData  :=  LexString;
+A.StrData  :=  UnicodeLexString;
 B  :=  nil;
 
 _funcbody(B);
@@ -3674,7 +3674,7 @@ Expect(HASHSym);
 A  :=  TCSSAtom.CreateWithTracker(ParseTracker  as  TTracker);
 A.ExprType  :=  cetAtom;
 A.AtomType  :=  atHexColor;
-A.StrData  :=  LexString;
+A.StrData  :=  UnicodeLexString;
 
 while (fCurrentInputSymbol = SSym) do begin
 Get;
@@ -3687,13 +3687,13 @@ if (fCurrentInputSymbol < 16) { prevent range error } AND
                     TIMESym, FREQSym])  then begin
 A  :=  TCSSAtom.CreateWithTracker(ParseTracker  as  TTracker);
 A.ExprType  :=  cetAtom;
-A.StrData  :=  LexString;
+A.StrData  :=  UnicodeLexString;
 
 case fCurrentInputSymbol of
   LENGTHSym : begin
 Get;
 A.AtomType  :=  atLength;
-A.StrData  :=  LexString;
+A.StrData  :=  UnicodeLexString;
 
 while (fCurrentInputSymbol = SSym) do begin
 Get;
@@ -3702,7 +3702,7 @@ end;
   EMSSym : begin
 Get;
 A.AtomType  :=  atEms;
-A.StrData  :=  LexString;
+A.StrData  :=  UnicodeLexString;
 
 while (fCurrentInputSymbol = SSym) do begin
 Get;
@@ -3711,7 +3711,7 @@ end;
   EXSSym : begin
 Get;
 A.AtomType  :=  atExs;
-A.StrData  :=  LexString;
+A.StrData  :=  UnicodeLexString;
 
 while (fCurrentInputSymbol = SSym) do begin
 Get;
@@ -3720,7 +3720,7 @@ end;
   ANGLESym : begin
 Get;
 A.AtomType  :=  atAngle;
-A.StrData  :=  LexString;
+A.StrData  :=  UnicodeLexString;
 
 while (fCurrentInputSymbol = SSym) do begin
 Get;
@@ -3729,7 +3729,7 @@ end;
   TIMESym : begin
 Get;
 A.AtomType  :=  atTime;
-A.StrData  :=  LexString;
+A.StrData  :=  UnicodeLexString;
 
 while (fCurrentInputSymbol = SSym) do begin
 Get;
@@ -3738,7 +3738,7 @@ end;
   FREQSym : begin
 Get;
 A.AtomType  :=  atFreq;
-A.StrData  :=  LexString;
+A.StrData  :=  UnicodeLexString;
 
 while (fCurrentInputSymbol = SSym) do begin
 Get;
@@ -3747,7 +3747,7 @@ end;
   RESOLUTIONSym : begin
 Get;
 A.AtomType  :=  atResolution;
-A.StrData  :=  LexString;
+A.StrData  :=  UnicodeLexString;
 
 while (fCurrentInputSymbol = SSym) do begin
 Get;
@@ -3800,7 +3800,7 @@ Get;
 A  :=  TCSSAtom.CreateWithTracker(ParseTracker  as  TTracker);
 A.ExprType  :=  cetAtom;
 A.AtomType  :=  atIdent;
-A.StrData  :=  LexString;
+A.StrData  :=  UnicodeLexString;
 if (fCurrentInputSymbol = _pointSym) then begin
 Get;
 E2  :=  TCSSExpr.CreateWithTracker(ParseTracker  as  TTracker);
@@ -3900,14 +3900,14 @@ if _In(symSet[6], fCurrentInputSymbol) then begin
 Get;
 SubB  :=  TCSSFuncBody.CreateWithTracker(ParseTracker  as  TTracker);
 SubB.FuncType  :=  fbtFuncText;
-SubB.BodyData  :=  LexString;
+SubB.BodyData  :=  UnicodeLexString;
 InsertFuncBodyIntoFuncBody(B,  SubB);
 
 end else if (fCurrentInputSymbol = FUNCSym) then begin
 Get;
 SubB  :=  TCSSFuncBody.CreateWithTracker(ParseTracker  as  TTracker);
 SubB.FuncType  :=  fbtSubFunc;
-SubB.SubFuncName  :=  LexString;
+SubB.SubFuncName  :=  UnicodeLexString;
 InsertFuncBodyIntoFuncBody(B,  SubB);
 
 _funcbody(SubB2);
@@ -3940,13 +3940,13 @@ Get;
 S2  :=  TCSSStringSelector.CreateWithTracker(ParseTracker  as  TTracker);
 S2.SelectorType  :=  cstSimple;
 (S2  as  TCSSStringSelector).StringSelectorType  :=  sstIdent;
-(S2  as  TCSSStringSelector).StrData  :=  LexString;
+(S2  as  TCSSStringSelector).StrData  :=  UnicodeLexString;
 end else begin
 Get;
 S2  :=  TCSSStringSelector.CreateWithTracker(ParseTracker  as  TTracker);
 S2.SelectorType  :=  cstSimple;
 (S2  as  TCSSStringSelector).StringSelectorType  :=  sstFunc;
-(S2  as  TCSSStringSelector).StrData  :=  LexString;
+(S2  as  TCSSStringSelector).StrData  :=  UnicodeLexString;
 _funcbody(B);
 InsertFuncBodyIntoSelector(S2,B);
 Expect(_rparenSym);
@@ -3969,7 +3969,7 @@ Expect(IDENTSym);
 S2  :=  TCSSStringSelector.CreateWithTracker(ParseTracker  as  TTracker);
 S2.SelectorType  :=  cstStringSelector;
 (S2  as  TCSSStringSelector).StringSelectorType  :=  sstIdent;
-(S2  as  TCSSStringSelector).StrData  :=  LexString;
+(S2  as  TCSSStringSelector).StrData  :=  UnicodeLexString;
 if (fCurrentInputSymbol = _starSym) then begin
 Get;
 (S2  as  TCSSStringSelector).IdentStarred  :=  true;
@@ -3999,11 +3999,11 @@ S4.SelectorType  :=  cstStringSelector;
 if (fCurrentInputSymbol = IDENTSym) then begin
 Get;
 (S4  as  TCSSStringSelector).StringSelectorType  :=  sstIdent;
-(S4  as  TCSSStringSelector).StrData  :=  LexString;
+(S4  as  TCSSStringSelector).StrData  :=  UnicodeLexString;
 end else if (fCurrentInputSymbol = STRINGSym) then begin
 Get;
 (S4  as  TCSSStringSelector).StringSelectorType  :=  sstString;
-(S4  as  TCSSStringSelector).StrData  :=  LexString;
+(S4  as  TCSSStringSelector).StrData  :=  UnicodeLexString;
 end else begin SynError(52);
 end;
 while (fCurrentInputSymbol = SSym) do begin
@@ -4023,7 +4023,7 @@ Expect(IDENTSym);
 S  :=  TCSSStringSelector.CreateWithTracker(ParseTracker  as  TTracker);
 S.SelectorType  :=  cstStringSelector;
 (S  as  TCSSStringSelector).StringSelectorType  :=  sstClass;
-(S  as  TCSSStringSelector).StrData  :=  LexString;
+(S  as  TCSSStringSelector).StrData  :=  UnicodeLexString;
 end;
 
 procedure TCSSGrammar._element_name (out  S:  TCSSStringSelector);begin
@@ -4032,7 +4032,7 @@ S  :=  TCSSStringSelector.CreateWithTracker(ParseTracker  as  TTracker);
 (S  as  TCSSStringSelector).StringSelectorType  :=  sstIdent;
 if (fCurrentInputSymbol = IDENTSym) then begin
 Get;
-S.StrData  :=  LexString;
+S.StrData  :=  UnicodeLexString;
 end else if (fCurrentInputSymbol = _starSym) then begin
 Get;
 S.IdentStarred  :=  true;
@@ -4056,7 +4056,7 @@ Get;
 S  :=  TCSSStringSelector.CreateWithTracker(ParseTracker  as  TTracker);
 S.SelectorType  :=  cstStringSelector;
 (S  as  TCSSStringSelector).StringSelectorType  :=  sstHash;
-(S  as  TCSSStringSelector).StrData  :=  LexString;
+(S  as  TCSSStringSelector).StrData  :=  UnicodeLexString;
 
 end else if (fCurrentInputSymbol = _pointSym) then begin
 _class(ST);
@@ -4077,7 +4077,7 @@ Get;
 S1  :=  TCSSStringSelector.CreateWithTracker(ParseTracker  as  TTracker);
 S1.SelectorType  :=  cstStringSelector;
 (S1  as  TCSSStringSelector).StringSelectorType  :=  sstHash;
-(S1  as  TCSSStringSelector).StrData  :=  LexString;
+(S1  as  TCSSStringSelector).StrData  :=  UnicodeLexString;
 if  Assigned(S)  then
    InsertSelectorIntoSelector(S1,S);
 S  :=  S1;
@@ -4136,7 +4136,7 @@ Get;
   A  :=  TCSSAtom.CreateWithTracker(ParseTracker  as  TTracker);
   A.ExprType  :=  cetAtom;
   A.AtomType  :=  atIdent;
-  A.StrData  :=  LexString;
+  A.StrData  :=  UnicodeLexString;
   InsertValIntoDecl(Decl,  A);
 
 while (fCurrentInputSymbol = SSym) do begin
@@ -4161,7 +4161,7 @@ Expect(PERCENTAGESym);
 A  :=  TCSSAtom.CreateWithTracker(ParseTracker  as  TTracker);
 A.ExprType  :=  cetAtom;
 A.AtomType  :=  atPercentage;
-A.StrData  :=  LexString;
+A.StrData  :=  UnicodeLexString;
 
 end;
 
@@ -4170,7 +4170,7 @@ Expect(NUMBERSym);
 A  :=  TCSSAtom.CreateWithTracker(ParseTracker  as  TTracker);
 A.ExprType  :=  cetAtom;
 A.AtomType  :=  atNumber;
-A.StrData  :=  LexString;
+A.StrData  :=  UnicodeLexString;
 
 end;
 
@@ -4227,7 +4227,7 @@ Expect(IDENTSym);
 A  :=  TCSSAtom.CreateWithTracker(ParseTracker  as  TTracker);
 A.ExprType  :=  cetAtom;
 A.AtomType  :=  atPseudoPage;
-A.StrData  :=  LexString;
+A.StrData  :=  UnicodeLexString;
 while (fCurrentInputSymbol = SSym) do begin
 Get;
 end;
@@ -4352,7 +4352,7 @@ Expect(URISym);
 A  :=  TCSSAtom.CreateWithTracker(ParseTracker  as  TTracker);
 A.ExprType  :=  cetAtom;
 A.AtomType  :=  atUrl;
-A.StrData  :=  LexString;
+A.StrData  :=  UnicodeLexString;
 
 end;
 
@@ -4361,7 +4361,7 @@ Expect(STRINGSym);
 A  :=  TCSSAtom.CreateWithTracker(ParseTracker  as  TTracker);
 A.ExprType  :=  cetAtom;
 A.AtomType  :=  atString;
-A.StrData  :=  LexString;
+A.StrData  :=  UnicodeLexString;
 
 end;
 

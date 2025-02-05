@@ -94,6 +94,7 @@
         <DCCReference Include="..\StreamSysBinary.pas"/>
         <DCCReference Include="..\..\CachedStream\BufferedFileStream.pas"/>
         <DCCReference Include="..\..\Parallelizer\Parallelizer.pas"/>
+        <DCCReference Include="..\..\LockAbstractions\LockAbstractions.pas"/>
         <None Include="..\TRIVXML.ATG"/>
         <BuildConfiguration Include="Debug">
             <Key>Cfg_2</Key>

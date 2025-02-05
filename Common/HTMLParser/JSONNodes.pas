@@ -280,7 +280,6 @@ end;
 
 procedure TJSONMember.FixStrings;
 begin
-  FixAnsifiedBackToUnicode(FName);
   UnescapeJSONString(FName);
   inherited;
 end;
@@ -305,7 +304,6 @@ procedure TJSONSimpleValue.FixStrings;
 begin
   if FValType = svtString then
   begin
-    FixAnsifiedBackToUnicode(FStrData);
     UnescapeJSONString(FStrData);
     inherited;
   end;

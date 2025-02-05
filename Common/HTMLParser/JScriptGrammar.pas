@@ -6,7 +6,7 @@ unit JScriptGrammar;
 {==============================================================================
 JScriptGrammar
 0.0.0.0
-Date of Generation: 07/03/2020 19:18
+Date of Generation: 20/12/2024 19:00
 Comment: Javascript parser.
 Author: Martin Harvey
 Copyright: (c) Martin Harvey
@@ -305,19 +305,18 @@ IN THE SOFTWARE.
 {$IFDEF DEBUG_TOKENS}
 procedure TJScriptGrammar.DebugLogToken(Sender : TObject; var CurrentInputSymbol : integer);
 var
-  LogStr: AnsiString;
-  LexStr: AnsiString;
+  LogStr: string;
+  LexStr: string;
   DbgLexChar: AnsiString;
 begin
-  LexStr := LexString;
+  LexStr := UnicodeLexString;
   if Length(LexStr) > 0 then
-    DbgLexChar := AnsiString(IntToStr(Byte(LexString[1])) + ' ')
+    DbgLexChar := AnsiString(IntToStr(Byte(UnicodeLexString[1])) + ' ')
   else
     DbgLexChar := '';
 
-  LogStr := AnsiString(IntToStr(CurrentInputSymbol) + ' : ' + DbgLexChar +  LexString + CHR(13) + CHR(10));
-  Assert(false); //Reinsert logging call.
-  //GLogLog(SV_TRACE, LogStr);
+  LogStr := IntToStr(CurrentInputSymbol) + ' : ' + DbgLexChar +  UnicodeLexString + CHR(13) + CHR(10);
+  GLogLog(SV_TRACE, LogStr);
 end;
 
 {$ENDIF}
@@ -4480,27 +4479,27 @@ InsertExprTail(E,I);
 case fCurrentInputSymbol of
   returnSym : begin
 Get;
-ParseWarning(1010,  '');  I.Name  :=  LexString;
+ParseWarning(1010,  '');  I.Name  :=  UnicodeLexString;
     end;
   defaultSym : begin
 Get;
-ParseWarning(1008,  '');   I.Name  :=  LexString;
+ParseWarning(1008,  '');   I.Name  :=  UnicodeLexString;
     end;
   catchSym : begin
 Get;
-ParseWarning(1009,  '');   I.Name  :=  LexString;
+ParseWarning(1009,  '');   I.Name  :=  UnicodeLexString;
     end;
   deleteSym : begin
 Get;
-ParseWarning(1013,  '');   I.Name  :=  LexString;
+ParseWarning(1013,  '');   I.Name  :=  UnicodeLexString;
     end;
   thenSym : begin
 Get;
-ParseWarning(1014,  '');   I.Name  :=  LexString;
+ParseWarning(1014,  '');   I.Name  :=  UnicodeLexString;
     end;
   forSym : begin
 Get;
-ParseWarning(1015,  '');   I.Name  :=  LexString;
+ParseWarning(1015,  '');   I.Name  :=  UnicodeLexString;
     end;
 end;
 end else begin SynError(101);
@@ -4649,27 +4648,27 @@ InsertExprTail(F,I);
 case fCurrentInputSymbol of
   returnSym : begin
 Get;
-ParseWarning(1016,  '');  I.Name  :=  LexString;
+ParseWarning(1016,  '');  I.Name  :=  UnicodeLexString;
     end;
   defaultSym : begin
 Get;
-ParseWarning(1017,  '');   I.Name  :=  LexString;
+ParseWarning(1017,  '');   I.Name  :=  UnicodeLexString;
     end;
   catchSym : begin
 Get;
-ParseWarning(1018,  '');   I.Name  :=  LexString;
+ParseWarning(1018,  '');   I.Name  :=  UnicodeLexString;
     end;
   deleteSym : begin
 Get;
-ParseWarning(1019,  '');   I.Name  :=  LexString;
+ParseWarning(1019,  '');   I.Name  :=  UnicodeLexString;
     end;
   thenSym : begin
 Get;
-ParseWarning(1020,  '');   I.Name  :=  LexString;
+ParseWarning(1020,  '');   I.Name  :=  UnicodeLexString;
     end;
   forSym : begin
 Get;
-ParseWarning(1021,  '');   I.Name  :=  LexString;
+ParseWarning(1021,  '');   I.Name  :=  UnicodeLexString;
     end;
 end;
 end else begin SynError(103);
@@ -4682,7 +4681,7 @@ end;
 procedure TJScriptGrammar._NamedFunctionDecl (out  F:TJSFunction);begin
 F  :=  TJSFunction.CreateWithTracker(FParseTracker  as  TTracker);
 Expect(_IdentifierSym);
-F.FuncName  :=  LexString;
+F.FuncName  :=  UnicodeLexString;
 _FormalParametersAndBody(F);
 end;
 
@@ -4839,12 +4838,12 @@ procedure TJScriptGrammar._StringLiteral (out  S:  TJSString);var  SVal:string;
 begin
 if (fCurrentInputSymbol = SQuotStringSym) then begin
 Get;
-SVal  :=  LexString;  //TODO  -  check  this.
+SVal  :=  UnicodeLexString;  //TODO  -  check  this.
 SVal  :=  SVal.SubString(1,  Length(SVal)  -  2);
 
 end else if (fCurrentInputSymbol = DQuotStringSym) then begin
 Get;
-SVal  :=  LexString;  //TODO  -  check  this.
+SVal  :=  UnicodeLexString;  //TODO  -  check  this.
 SVal  :=  SVal.SubString(1,  Length(SVal)  -  2);
 
 end else begin SynError(107);
@@ -4893,7 +4892,7 @@ end;
 
 procedure TJScriptGrammar._RegularExpressionFlags (out  S:string);begin
 Expect(_IdentifierSym);
-S  :=  LexString;
+S  :=  UnicodeLexString;
 end;
 
 procedure TJScriptGrammar._RegularExpressionBody (var  Res:string);var  Sc:  TJScriptGrammarScanner;  ClassStr:  string;
@@ -4974,7 +4973,7 @@ N.ExprType  :=  etSimpleExpression;
 N.SimpleExprType  :=  setNumber;
 
 Expect(_NumberSym);
-N.StringRep  :=  LexString;
+N.StringRep  :=  UnicodeLexString;
 try
    N.IntValue  :=  StrToInt(N.StringRep);
    N.IntValid  :=  true;
@@ -5002,7 +5001,7 @@ I.ExprType  :=  etSimpleExpression;
 I.SimpleExprType  :=  setIdentifier;
 
 Expect(_IdentifierSym);
-I.Name  :=  LexString;
+I.Name  :=  UnicodeLexString;
 end;
 
 function TJScriptGrammar.GetBuildDate : TDateTime;
