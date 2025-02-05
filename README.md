@@ -3,6 +3,10 @@ GitHub repo for open sourced MCH Software.
 
 Most recent (2024) development is in Common/MemDB: SQL query engine, and a "lightweight locking" mode for parallel availability.
 
+Parsing code does not handle recent HTML as well as I had hoped. Needs changes for optional parsing of scripts where HTML indicates length, error recovery needs an overhaul.
+
+# Summary of contents.
+
 Files / Folders:
 
 - KnowComment: A Delphi client for Instagram (and eventually Twitter too, but needs a few fixes).
