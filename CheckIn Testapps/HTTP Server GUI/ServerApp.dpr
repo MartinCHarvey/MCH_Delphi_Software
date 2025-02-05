@@ -41,7 +41,9 @@ uses
   HTTPForwarder in '..\..\Common\HTTPServerDispatcher\HTTPForwarder.pas',
   HTTPMisc in '..\..\Common\HTTPServerDispatcher\HTTPMisc.pas',
   CheckInServiceCoOrdinator in '..\..\CheckIn\CheckInServiceCoOrdinator.pas',
-  Parallelizer in '..\..\Common\Parallelizer\Parallelizer.pas';
+  Parallelizer in '..\..\Common\Parallelizer\Parallelizer.pas',
+  LockAbstractions in '..\..\Common\LockAbstractions\LockAbstractions.pas',
+  NullStream in '..\..\Common\NullStream\NullStream.pas';
 
 {$R *.res}
 

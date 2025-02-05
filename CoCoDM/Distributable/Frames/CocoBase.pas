@@ -284,22 +284,25 @@ type
     constructor Create(AOwner : TComponent); override;
     destructor Destroy; override;
 
-    {$IFNDEF REMOVE_DEPRECATED}
-    procedure _StreamLine(const s : AnsiString); deprecated;
-    procedure _StreamLn(const s : AnsiString); deprecated;
-    {$ENDIF REMOVE_DEPRECATED}
-
     procedure Execute; virtual; abstract;
 
     function ErrorStr(const ErrorCode : integer; const Data : AnsiString) : AnsiString; virtual; abstract;
     procedure GetLine(var pos : Integer; var line : AnsiString;
       var eof : boolean);
     function LastName: AnsiString;
-    function LastString: AnsiString;
     function LexName : AnsiString;
-    function LexString : AnsiString;
     function LookAheadName : AnsiString;
-    function LookAheadString : AnsiString;
+
+    function LastString: AnsiString; deprecated;
+    function LexString : AnsiString; deprecated;
+    function LookAheadString : AnsiString; deprecated;
+
+    { Unicode functions for grammars assuming that the input is in UTF-8 format.
+      If it's not, it's unlikely the lexer will work in its current form }
+    function UnicodeLastString: string;
+    function UnicodeLexString : string;
+    function UnicodeLookAheadString : string;
+
     procedure StreamToListFile(s : AnsiString; const AddEndOfLine : boolean);
     procedure SemError(const errNo : integer; const Data : AnsiString);
     procedure SynError(const errNo : integer);
@@ -749,6 +752,21 @@ begin
   Result := Scanner.GetString(Scanner.NextSymbol)
 end; {LookAheadString}
 
+function TCoCoRGrammar.UnicodeLastString: string;
+begin
+  Result := UTF8ToUnicodeString(Scanner.GetString(Scanner.LastSymbol));
+end;
+
+function TCoCoRGrammar.UnicodeLexString : string;
+begin
+  Result := UTF8ToUnicodeString(Scanner.GetString(Scanner.CurrentSymbol));
+end;
+
+function TCoCoRGrammar.UnicodeLookAheadString : string;
+begin
+  Result := UTF8ToUnicodeString(Scanner.GetString(Scanner.NextSymbol));
+end;
+
 procedure TCocoRGrammar.PrintErr(line : AnsiString; ErrorCode : integer; col : integer; Data : AnsiString);
   { Print an error message }
 
@@ -781,18 +799,6 @@ begin
     Scanner.ScannerError(errNo, Scanner.CurrentSymbol, Data, etSymantic);
   errDist := 0;
 end; {SemError}
-
-{$IFNDEF REMOVE_DEPRECATED}
-procedure TCocoRGrammar._StreamLn(const s : AnsiString);
-begin
-  StreamToListFile(s, FALSE);
-end; {_StreamLn}
-
-procedure TCocoRGrammar._StreamLine(const s : AnsiString);
-begin
-  StreamToListFile(s, TRUE);
-end; {_StreamLine}
-{$ENDIF REMOVE_DEPRECATED}
 
 procedure TCocoRGrammar.StreamToListFile(s: AnsiString; const AddEndOfLine : boolean);
 begin

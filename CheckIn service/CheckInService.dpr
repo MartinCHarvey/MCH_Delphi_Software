@@ -41,7 +41,10 @@ uses
   GlobalLog in '..\Common\Logging\GlobalLog.pas',
   HTMLEscapeHelper in '..\Common\HTMLParser\HTMLEscapeHelper.pas',
   QueuedMailer in '..\Common\QueuedMailer\QueuedMailer.pas',
-  Parallelizer in '..\Common\Parallelizer\Parallelizer.pas';
+  Parallelizer in '..\Common\Parallelizer\Parallelizer.pas',
+  LockAbstractions in '..\Common\LockAbstractions\LockAbstractions.pas',
+  SRWLockWrapper in '..\Common\SRWLockWrapper\SRWLockWrapper.pas',
+  NullStream in '..\Common\NullStream\NullStream.pas';
 
 {$R *.RES}
 
