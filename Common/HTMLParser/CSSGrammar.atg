@@ -97,17 +97,17 @@ end;
 {$IFDEF DEBUG_TOKENS}
 procedure T-->Grammar<--.DebugLogToken(Sender : TObject; var CurrentInputSymbol : integer);
 var
-  LogStr: AnsiString;
-  LexStr: AnsiString;
+  LogStr: string;
+  LexStr: string;
   DbgLexChar: AnsiString;
 begin
-  LexStr := LexString;
+  LexStr := UnicodeLexString;
   if Length(LexStr) > 0 then
-    DbgLexChar := AnsiString(IntToStr(Byte(LexString[1])) + ' ')
+    DbgLexChar := AnsiString(IntToStr(Byte(UnicodeLexString[1])) + ' ')
   else
     DbgLexChar := '';
 
-  LogStr := AnsiString(IntToStr(CurrentInputSymbol) + ' : ' + DbgLexChar +  LexString + CHR(13) + CHR(10));
+  LogStr := IntToStr(CurrentInputSymbol) + ' : ' + DbgLexChar +  UnicodeLexString + CHR(13) + CHR(10);
   GLogLog(SV_TRACE, LogStr);
 end;
 
@@ -879,7 +879,7 @@ medium<out Decl: TCSSDeclaration>
                                            A := TCSSAtom.CreateWithTracker(ParseTracker as TTracker);
                                            A.ExprType := cetAtom;
                                            A.AtomType := atIdent;
-                                           A.StrData := LexString;
+                                           A.StrData := UnicodeLexString;
                                            InsertValIntoDecl(Decl, A);
                                         .)
     {S}
@@ -896,7 +896,7 @@ pseudo_page<out A: TCSSAtom>
     ":" IDENT                           (. A := TCSSAtom.CreateWithTracker(ParseTracker as TTracker);
                                            A.ExprType := cetAtom;
                                            A.AtomType := atPseudoPage;
-                                           A.StrData := LexString; .)
+                                           A.StrData := UnicodeLexString; .)
     {S}
   .
 
@@ -959,7 +959,7 @@ simple_selector<out S: TCSSSelector>
                                         (. S := TCSSStringSelector.CreateWithTracker(ParseTracker as TTracker);
                                            S.SelectorType := cstStringSelector;
                                            (S as TCSSStringSelector).StringSelectorType := sstHash;
-                                           (S as TCSSStringSelector).StrData := LexString;
+                                           (S as TCSSStringSelector).StrData := UnicodeLexString;
                                            .)
         | class<ST>                     (. S := ST; .)
         | attrib<S>
@@ -971,7 +971,7 @@ simple_selector<out S: TCSSSelector>
                                         (. S1 := TCSSStringSelector.CreateWithTracker(ParseTracker as TTracker);
                                            S1.SelectorType := cstStringSelector;
                                            (S1 as TCSSStringSelector).StringSelectorType := sstHash;
-                                           (S1 as TCSSStringSelector).StrData := LexString;
+                                           (S1 as TCSSStringSelector).StrData := UnicodeLexString;
                                            if Assigned(S) then
                                              InsertSelectorIntoSelector(S1,S);
                                            S := S1;
@@ -998,7 +998,7 @@ class<out S: TCSSStringSelector>
                                         (. S := TCSSStringSelector.CreateWithTracker(ParseTracker as TTracker);
                                            S.SelectorType := cstStringSelector;
                                            (S as TCSSStringSelector).StringSelectorType := sstClass; .)
-                                        (. (S as TCSSStringSelector).StrData := LexString; .)
+                                        (. (S as TCSSStringSelector).StrData := UnicodeLexString; .)
   .
 
 element_name<out S: TCSSStringSelector>
@@ -1007,7 +1007,7 @@ element_name<out S: TCSSStringSelector>
                                            (S as TCSSStringSelector).SelectorType := cstStringSelector;
                                            (S as TCSSStringSelector).StringSelectorType := sstIdent; .)
     (
-     IDENT                              (. S.StrData := LexString; .)
+     IDENT                              (. S.StrData := UnicodeLexString; .)
      |
      "*"                                (. S.IdentStarred := true; .)
     )
@@ -1026,7 +1026,7 @@ attrib<out S: TCSSSelector>
                                         (. S2 := TCSSStringSelector.CreateWithTracker(ParseTracker as TTracker);
                                            S2.SelectorType := cstStringSelector;
                                            (S2 as TCSSStringSelector).StringSelectorType := sstIdent;
-                                           (S2 as TCSSStringSelector).StrData := LexString; .)
+                                           (S2 as TCSSStringSelector).StrData := UnicodeLexString; .)
      [
        "*"                              (. (S2 as TCSSStringSelector).IdentStarred := true; .)
      ]
@@ -1043,10 +1043,10 @@ attrib<out S: TCSSSelector>
        (
          IDENT
                                         (.   (S4 as TCSSStringSelector).StringSelectorType := sstIdent;
-                                             (S4 as TCSSStringSelector).StrData := LexString; .)
+                                             (S4 as TCSSStringSelector).StrData := UnicodeLexString; .)
          | STRING
                                         (.   (S4 as TCSSStringSelector).StringSelectorType := sstString;
-                                             (S4 as TCSSStringSelector).StrData := LexString; .)
+                                             (S4 as TCSSStringSelector).StrData := UnicodeLexString; .)
        ) {S}
                                         (. InsertSelectorIntoSelector(S3, S2);
                                            InsertSelectorIntoSelector(S3, S4);
@@ -1069,14 +1069,14 @@ pseudo<out S: TCSSSelector>
                                         (. S2 := TCSSStringSelector.CreateWithTracker(ParseTracker as TTracker);
                                            S2.SelectorType := cstSimple;
                                            (S2 as TCSSStringSelector).StringSelectorType := sstIdent;
-                                           (S2 as TCSSStringSelector).StrData := LexString; .)
+                                           (S2 as TCSSStringSelector).StrData := UnicodeLexString; .)
       |
       (
         FUNC
                                         (. S2 := TCSSStringSelector.CreateWithTracker(ParseTracker as TTracker);
                                            S2.SelectorType := cstSimple;
                                            (S2 as TCSSStringSelector).StringSelectorType := sstFunc;
-                                           (S2 as TCSSStringSelector).StrData := LexString; .)
+                                           (S2 as TCSSStringSelector).StrData := UnicodeLexString; .)
         funcbody<B>                     (. InsertFuncBodyIntoSelector(S2,B); .)
         ")"
       )
@@ -1182,7 +1182,7 @@ bare_term_qualifiable<out E: TCSSExpr>
       IDENT                             (. A := TCSSAtom.CreateWithTracker(ParseTracker as TTracker);
                                            A.ExprType := cetAtom;
                                            A.AtomType := atIdent;
-                                           A.StrData := LexString; .)
+                                           A.StrData := UnicodeLexString; .)
       (
         "."                             (. E2 := TCSSExpr.CreateWithTracker(ParseTracker as TTracker);
                                            E2.ExprType := cetDotOperator; .)
@@ -1203,42 +1203,42 @@ bare_term<out A: TCSSAtom>
   (
                                         (. A := TCSSAtom.CreateWithTracker(ParseTracker as TTracker);
                                            A.ExprType := cetAtom;
-                                           A.StrData := LexString;
+                                           A.StrData := UnicodeLexString;
                                         .)
     (
       LENGTH
                                         (. A.AtomType := atLength;
-                                           A.StrData := LexString;
+                                           A.StrData := UnicodeLexString;
                                         .)
       {S}
     | EMS
                                         (. A.AtomType := atEms;
-                                           A.StrData := LexString;
+                                           A.StrData := UnicodeLexString;
                                         .)
       {S}
     | EXS
                                         (. A.AtomType := atExs;
-                                           A.StrData := LexString;
+                                           A.StrData := UnicodeLexString;
                                         .)
       {S}
     | ANGLE
                                         (. A.AtomType := atAngle;
-                                           A.StrData := LexString;
+                                           A.StrData := UnicodeLexString;
                                         .)
       {S}
     | TIME
                                         (. A.AtomType := atTime;
-                                           A.StrData := LexString;
+                                           A.StrData := UnicodeLexString;
                                         .)
       {S}
     | FREQ
                                         (. A.AtomType := atFreq;
-                                           A.StrData := LexString;
+                                           A.StrData := UnicodeLexString;
                                         .)
       {S}
     | RESOLUTION
                                         (. A.AtomType := atResolution;
-                                           A.StrData := LexString;
+                                           A.StrData := UnicodeLexString;
                                         .)
       {S}
     )
@@ -1261,7 +1261,7 @@ _function<out A: TCSSAtom>
     FUNC                                (. A := TCSSAtom.CreateWithTracker(ParseTracker as TTracker);
                                            A.ExprType := cetAtom;
                                            A.AtomType := atFunc;
-                                           A.StrData := LexString;
+                                           A.StrData := UnicodeLexString;
                                            B := nil;
                                         .)
     funcbody<B>                         (. InsertFuncBodyIntoAtom(A,B); .)
@@ -1277,13 +1277,13 @@ funcbody<out B: TCSSFuncBody>
     {
       ANY                               (. SubB := TCSSFuncBody.CreateWithTracker(ParseTracker as TTracker);
                                            SubB.FuncType := fbtFuncText;
-                                           SubB.BodyData := LexString;
+                                           SubB.BodyData := UnicodeLexString;
                                            InsertFuncBodyIntoFuncBody(B, SubB);
                                          .)
       |
       FUNC                              (. SubB := TCSSFuncBody.CreateWithTracker(ParseTracker as TTracker);
                                            SubB.FuncType := fbtSubFunc;
-                                           SubB.SubFuncName := LexString;
+                                           SubB.SubFuncName := UnicodeLexString;
                                            InsertFuncBodyIntoFuncBody(B, SubB);
                                          .)
       funcbody<SubB2>                   (. InsertFuncBodyIntoFuncBody(SubB, SubB2); .)
@@ -1310,7 +1310,7 @@ hexcolor<out A: TCSSAtom>
                                         (. A := TCSSAtom.CreateWithTracker(ParseTracker as TTracker);
                                            A.ExprType := cetAtom;
                                            A.AtomType := atHexColor;
-                                           A.StrData := LexString;
+                                           A.StrData := UnicodeLexString;
                                         .)
   {S}
   .
@@ -1321,7 +1321,7 @@ _STRING<out A: TCSSAtom>
                                         (. A := TCSSAtom.CreateWithTracker(ParseTracker as TTracker);
                                            A.ExprType := cetAtom;
                                            A.AtomType := atString;
-                                           A.StrData := LexString;
+                                           A.StrData := UnicodeLexString;
                                         .)
  .
 
@@ -1331,7 +1331,7 @@ _URI<out A: TCSSAtom>
                                         (. A := TCSSAtom.CreateWithTracker(ParseTracker as TTracker);
                                            A.ExprType := cetAtom;
                                            A.AtomType := atUrl;
-                                           A.StrData := LexString;
+                                           A.StrData := UnicodeLexString;
                                         .)
  .
 
@@ -1341,7 +1341,7 @@ _NUMBER<out A: TCSSAtom>
                                         (. A := TCSSAtom.CreateWithTracker(ParseTracker as TTracker);
                                            A.ExprType := cetAtom;
                                            A.AtomType := atNumber;
-                                           A.StrData := LexString;
+                                           A.StrData := UnicodeLexString;
                                         .)
  .
 
@@ -1351,7 +1351,7 @@ _PERCENTAGE<out A: TCSSAtom>
                                         (. A := TCSSAtom.CreateWithTracker(ParseTracker as TTracker);
                                            A.ExprType := cetAtom;
                                            A.AtomType := atPercentage;
-                                           A.StrData := LexString;
+                                           A.StrData := UnicodeLexString;
                                         .)
  .
 

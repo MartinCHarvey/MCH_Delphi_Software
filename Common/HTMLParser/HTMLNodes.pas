@@ -114,7 +114,6 @@ type
     FValData: string;
     FValType: THTMLValueType;
   protected
-    procedure FixStrings; override;
     procedure Tokenize;
     procedure UnTokenize;
   public
@@ -658,7 +657,6 @@ procedure THTMLBlock.FixStrings;
 begin
   if Assigned(Tag) then
     Tag.FixStrings;
-  FixAnsifiedBackToUnicode(FText);
   inherited;
 end;
 
@@ -836,13 +834,6 @@ begin
   end;
 end;
 
-procedure THTMLValuePair.FixStrings;
-begin
-  FixAnsifiedBackToUnicode(FValName);
-  FixAnsifiedBackToUnicode(FValData);
-  inherited;
-end;
-
 { THTMLValueToken }
 
 function THTMLValueToken.AsText: string;
@@ -927,7 +918,6 @@ end;
 
 procedure THTMLTag.FixStrings;
 begin
-  FixAnsifiedBackToUnicode(FName);
   IterateNodes(ExecuteNotSelf, FixNodeStrings, RecurseAlways, self, nil, nil);
   inherited;
 end;

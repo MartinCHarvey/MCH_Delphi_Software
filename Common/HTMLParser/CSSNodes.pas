@@ -110,8 +110,6 @@ type
     FStringSelectorType: TCSSStringSelectorType;
     FIdentStarred: boolean;
     FStrData: string;
-  protected
-    procedure FixStrings; override;
   public
     function AsText:string; override;
     function LclEqual(Other: TCommonNode; Opts: TNodeSearchOpts):boolean; override;
@@ -177,8 +175,6 @@ type
   private
     FAtomType: TCSSAtomType;
     FStrData: string;
-  protected
-    procedure FixStrings; override;
   public
     function AsText:string; override;
     function LclEqual(Other: TCommonNode; Opts: TNodeSearchOpts):boolean; override;
@@ -193,8 +189,6 @@ type
     FFuncType: TCSFuncBodyType;
     FBodyData: string;
     FSubFuncName: string;
-  protected
-    procedure FixStrings; override;
   public
     function AsText:string; override;
     function LclEqual(Other: TCommonNode; Opts: TNodeSearchOpts):boolean; override;
@@ -307,30 +301,9 @@ begin
   result := '<script>';
 end;
 
-{ TCSSStringSelector }
-
-procedure TCSSStringSelector.FixStrings;
-begin
-  FixAnsifiedBackToUnicode(FStrData);
-  inherited;
-end;
-
 { TCSSAtom }
 
-procedure TCSSAtom.FixStrings;
-begin
-  FixAnsifiedBackToUnicode(FStrData);
-  inherited;
-end;
-
 { TCSSFuncBody }
-
-procedure TCSSFuncBody.FixStrings;
-begin
-  FixAnsifiedBackToUnicode(FBodyData);
-  FixAnsifiedBackToUnicode(FSubFuncName);
-  inherited;
-end;
 
 { TCSSList }
 

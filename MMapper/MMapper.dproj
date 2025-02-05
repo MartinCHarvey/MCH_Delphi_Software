@@ -184,6 +184,7 @@
         <DCCReference Include="..\Common\SoftLexer\SoftLexer.pas"/>
         <DCCReference Include="..\Common\OrdinalSets\OrdinalSets.pas"/>
         <DCCReference Include="..\Common\Parallelizer\Parallelizer.pas"/>
+        <DCCReference Include="..\Common\LockAbstractions\LockAbstractions.pas"/>
         <None Include="Ideas, and TODO.txt"/>
         <None Include="..\Common\HTMLParser\HTMLGrammar.ATG"/>
         <None Include="..\Common\HTMLParser\HTMLGrammar.AGI"/>

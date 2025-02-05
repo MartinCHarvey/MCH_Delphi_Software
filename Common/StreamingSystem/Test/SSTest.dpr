@@ -18,7 +18,8 @@ uses
   DLList in '..\..\DLList\DLList.pas',
   StreamSysBinary in '..\StreamSysBinary.pas',
   BufferedFileStream in '..\..\CachedStream\BufferedFileStream.pas',
-  Parallelizer in '..\..\Parallelizer\Parallelizer.pas';
+  Parallelizer in '..\..\Parallelizer\Parallelizer.pas',
+  LockAbstractions in '..\..\LockAbstractions\LockAbstractions.pas';
 
 {$R *.RES}
 

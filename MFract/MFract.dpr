@@ -33,7 +33,8 @@ uses
   FractStreaming in '..\MFractCommon\FractStreaming.pas',
   CocoBase in '..\CoCoDM\Distributable\Frames\CocoBase.pas',
   IndexedStore in '..\Common\Indexed Store\IndexedStore.pas',
-  Parallelizer in '..\Common\Parallelizer\Parallelizer.pas';
+  Parallelizer in '..\Common\Parallelizer\Parallelizer.pas',
+  LockAbstractions in '..\Common\LockAbstractions\LockAbstractions.pas';
 
 {$R *.RES}
 

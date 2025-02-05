@@ -701,15 +701,15 @@ PRODUCTIONS
 
   NumericSequence<out S:string> DESCRIPTION "Numeric sequence"
   =
-    TokDigit                    (. S := LexString; .)
-    { TokDigit                  (. S := S + LexString; .)
+    TokDigit                    (. S := UnicodeLexString; .)
+    { TokDigit                  (. S := S + UnicodeLexString; .)
     }
   .
 
   BaseNSequence<out S: string> DESCRIPTION "Hex sequence"
   =
-    TokLetter                   (. S := LexString;     .)
-    { (TokLetter | TokDigit)    (. S := S + LexString; .)
+    TokLetter                   (. S := UnicodeLexString;     .)
+    { (TokLetter | TokDigit)    (. S := S + UnicodeLexString; .)
     }
   .
 
@@ -759,7 +759,7 @@ PRODUCTIONS
   //Just exclude ">"
     (TokOther | "&" | "<" | ";" | "/" | "!" | "?" | TokLetter | TokDigit | "#"
                 | "=" | TokWhitespace | TokQuot | TokApos | "-" | "_" | ":" )
-        (. S := LexString; .)
+        (. S := UnicodeLexString; .)
     |
     TokLinebreak
   .
@@ -769,7 +769,7 @@ PRODUCTIONS
   //Just exclude "?"
     (TokOther | "&" | "<" | ">" | ";" | "/" | "!" | TokLetter | TokDigit | "#"
                 | "=" | TokWhitespace | TokQuot | TokApos | "-" | "_" |  ":" )
-        (. S := LexString; .)
+        (. S := UnicodeLexString; .)
     |
     TokLinebreak
   .
@@ -779,7 +779,7 @@ PRODUCTIONS
   //Just exclude whitespace and ">" and "="
     (TokOther | "&" | "<" | ";" | "/" | "!" | "?" | TokLetter | TokDigit | "#"
                 | TokQuot | TokApos | "-" | "_" |  ":")
-        (. S := LexString; .)
+        (. S := UnicodeLexString; .)
     |
     (
     TokQuot
@@ -800,7 +800,7 @@ PRODUCTIONS
   IdentifierChar<out S: string> DESCRIPTION "Character in textual identifier"
   =
     ( TokLetter | TokDigit | "-" | "_" | "!" | "?" | "#" | ":" )
-                                           (. S := LexString; .)
+                                           (. S := UnicodeLexString; .)
   .
 
   HTMLQuotValueChar<out S:string> DESCRIPTION "Value character in tag=&quot;value&quot; in HTML tag"
@@ -808,9 +808,9 @@ PRODUCTIONS
   //Just exclude """
     (TokOther | "&" | "<" | ">" | ";" | "/" | "!" | "?" | TokLetter | TokDigit | "#"
                 | "=" | TokWhitespace | "-" | "_" | TokApos | ":")
-        (. S := LexString; .)
+        (. S := UnicodeLexString; .)
     |
-    TokLinebreak        (. S := LexString; .)
+    TokLinebreak        (. S := UnicodeLexString; .)
   .
 
   HTMLAposValueChar<out S:string> DESCRIPTION "Value character in tag=&quot;value&quot; in HTML tag"
@@ -818,9 +818,9 @@ PRODUCTIONS
   //Just exclude "'"
     (TokOther | "&" | "<" | ">" | ";" | "/" | "!" | "?" | TokLetter | TokDigit | "#"
                 | "=" | TokWhitespace | "-" | "_" | TokQuot | ":" )
-        (. S := LexString; .)
+        (. S := UnicodeLexString; .)
     |
-    TokLinebreak        (. S := LexString; .)
+    TokLinebreak        (. S := UnicodeLexString; .)
   .
 
   HTMLLiteralChar<out S:string> DESCRIPTION "HTML character in freeform text"
@@ -828,7 +828,7 @@ PRODUCTIONS
   //Just exclude "<"and "&"
     (TokOther | ">" | ";" | "/" | "!" | "?" | TokLetter | TokDigit | "#" | "=" | TokQuot
       | TokApos | TokWhitespace | TokLinebreak | "-" | "_" | ":" )
-        (. S := LexString; .)
+        (. S := UnicodeLexString; .)
     |
   .
 

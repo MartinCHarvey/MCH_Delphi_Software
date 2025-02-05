@@ -307,12 +307,12 @@ PRODUCTIONS
 
   Number<out S:String> DESCRIPTION "JSON literal number"
   =
-        NumberToken             (. S := LexString; .)
+        NumberToken             (. S := UnicodeLexString; .)
   .
 
   String<out S:String> DESCRIPTION "JSON quoted string value"
   =
-        DQuotString             (. S := LexString;
+        DQuotString             (. S := UnicodeLexString;
                                    S := S.SubString(1, Length(S) - 2); .)
   .
 

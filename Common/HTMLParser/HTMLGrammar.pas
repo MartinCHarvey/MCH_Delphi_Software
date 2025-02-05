@@ -6,7 +6,7 @@ unit HTMLGrammar;
 {==============================================================================
 HTMLGrammar
 0.0.0.0
-Date of Generation: 13/04/2020 20:32
+Date of Generation: 20/12/2024 19:00
 Comment: Parses generalised HTML. XML strict matching or nesting not required.
 Author: Martin Harvey
 Copyright: (c) Martin Harvey
@@ -931,7 +931,7 @@ Get;
 Get;
     end;
 end;
-S  :=  LexString;
+S  :=  UnicodeLexString;
 end else if _In(symSet[2], fCurrentInputSymbol) then begin
 end else begin SynError(21);
 end;
@@ -992,10 +992,10 @@ Get;
 Get;
     end;
 end;
-S  :=  LexString;
+S  :=  UnicodeLexString;
 end else if (fCurrentInputSymbol = TokLinebreakSym) then begin
 Get;
-S  :=  LexString;
+S  :=  UnicodeLexString;
 end else begin SynError(22);
 end;
 end;
@@ -1055,10 +1055,10 @@ Get;
 Get;
     end;
 end;
-S  :=  LexString;
+S  :=  UnicodeLexString;
 end else if (fCurrentInputSymbol = TokLinebreakSym) then begin
 Get;
-S  :=  LexString;
+S  :=  UnicodeLexString;
 end else begin SynError(23);
 end;
 end;
@@ -1118,7 +1118,7 @@ Get;
 Get;
     end;
 end;
-S  :=  LexString;
+S  :=  UnicodeLexString;
 end else if (fCurrentInputSymbol = TokLinebreakSym) then begin
 Get;
 end else begin SynError(24);
@@ -1180,7 +1180,7 @@ Get;
 Get;
     end;
 end;
-S  :=  LexString;
+S  :=  UnicodeLexString;
 end else if (fCurrentInputSymbol = TokLinebreakSym) then begin
 Get;
 end else begin SynError(25);
@@ -1216,12 +1216,12 @@ Get;
 else begin SynError(26);
     end;
 end;
-S  :=  LexString;
+S  :=  UnicodeLexString;
 end;
 
 procedure THTMLGrammar._BaseNSequence (out  S:  string);begin
 Expect(TokLetterSym);
-S  :=  LexString;
+S  :=  UnicodeLexString;
 while (fCurrentInputSymbol = TokDigitSym) OR
  (fCurrentInputSymbol = TokLetterSym) do begin
 if (fCurrentInputSymbol = TokLetterSym) then begin
@@ -1229,16 +1229,16 @@ Get;
 end else begin
 Get;
 end;
-S  :=  S  +  LexString;
+S  :=  S  +  UnicodeLexString;
 end;
 end;
 
 procedure THTMLGrammar._NumericSequence (out  S:string);begin
 Expect(TokDigitSym);
-S  :=  LexString;
+S  :=  UnicodeLexString;
 while (fCurrentInputSymbol = TokDigitSym) do begin
 Get;
-S  :=  S  +  LexString;
+S  :=  S  +  UnicodeLexString;
 end;
 end;
 
@@ -1291,7 +1291,7 @@ Get;
 Get;
     end;
 end;
-S  :=  LexString;
+S  :=  UnicodeLexString;
 end else if (fCurrentInputSymbol = TokQuotSym) then begin
 Get;
 _HTMLQuotValueText(S);

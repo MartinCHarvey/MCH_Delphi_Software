@@ -6,7 +6,7 @@ unit DelphiDpr;
 {==============================================================================
 DelphiDpr
 0.0.0.0
-Date of Generation: 08/03/2020 19:16
+Date of Generation: 20/12/2024 19:00
 Comment: Parses Delphi DPR files.
 Author: Martin Harvey
 Copyright: (c) Martin Harvey
@@ -691,13 +691,13 @@ end;  {_In}
 
 procedure TDelphiDpr._UseLocation;begin
 Expect(stringSym);
-FCurrentLocation  :=  LexString;
+FCurrentLocation  :=  UnicodeLexString;
 FCurrentLocation  :=  FCurrentLocation.SubString(1,  Length(FCurrentLocation)  -  2);
 end;
 
 procedure TDelphiDpr._UseClause;begin
 Expect(identifierSym);
-FCurrentLocation  :=  LexString  +  '.pas';
+FCurrentLocation  :=  UnicodeLexString  +  '.pas';
 while (fCurrentInputSymbol = dotSym) do begin
 Get;
 Expect(identifierSym);

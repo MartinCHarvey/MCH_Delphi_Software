@@ -91,7 +91,9 @@ uses
   TrivXML in '..\..\Common\StreamingSystem\TrivXML.PAS',
   TrivXMLDefs in '..\..\Common\StreamingSystem\TrivXMLDefs.pas',
   PrefsEditForm in 'PrefsEditForm.pas' {PrefsEditFrm},
-  Parallelizer in '..\..\Common\Parallelizer\Parallelizer.pas';
+  Parallelizer in '..\..\Common\Parallelizer\Parallelizer.pas',
+  LockAbstractions in '..\..\Common\LockAbstractions\LockAbstractions.pas',
+  NullStream in '..\..\Common\NullStream\NullStream.pas';
 
 {$R *.res}
 
