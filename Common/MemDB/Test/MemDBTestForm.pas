@@ -43,6 +43,8 @@ type
     { Private declarations }
     FTimeStamp: TDateTime;
     procedure LogTimeIncr(S: string);
+    procedure BigTblModFast;
+    procedure BigTblModSlow;
   public
     { Public declarations }
   end;
@@ -88,6 +90,20 @@ begin
     result.D4[j] := Byte(i);
 end;
 
+function ElapsedToTimeStr(D: double): string;
+var
+  MSecsElapsed: integer;
+  SecsElapsed: integer;
+begin
+  SecsElapsed := Trunc(D * (24.0 * 3600.0));
+  D := D - (SecsElapsed / (24.0 * 3600.0));
+  MSecsElapsed := Trunc(D * (24.0 * 3600.0 * 1000.0));
+  if SecsElapsed < 1 then
+    result := '('+ IntToStr(MSecsElapsed) + ' msecs)'
+  else
+    result := '('+ InttoStr(SecsElapsed) + '.' + IntToStr(MSecsElapsed) + ' secs)';
+end;
+
 procedure TForm1.LogTimeIncr(S: string);
 var
   N: TDateTime;
@@ -98,15 +114,9 @@ var
 begin
   N := Now;
   ElapsedD := N - FTimeStamp;
-  SecsElapsed := Trunc(ElapsedD * (24.0 * 3600.0));
-  ElapsedD := ElapsedD - (SecsElapsed / (24.0 * 3600.0));
-  MSecsElapsed := Trunc(ElapsedD * (24.0 * 3600.0 * 1000.0));
-  FTimeStamp := N;
-  if SecsElapsed < 1 then
-    TimeS := '('+ IntToStr(MSecsElapsed) + ' msecs)'
-  else
-    TimeS := '('+ InttoStr(SecsElapsed) + '.' + IntToStr(MSecsElapsed) + ' secs)';
+  TimeS := ElapsedToTimeStr(ElapsedD);
   ResMemo.Lines.Add(TimeS + ' ' + S);
+  FTimeStamp := N;
 end;
 
 procedure TForm1.BasicTestBtnClick(Sender: TObject);
@@ -248,66 +258,31 @@ var
   TDatAPI: TMemAPITableData;
   FKAPI: TMemAPIForeignKey;
   Data: TMemDBFieldDataRec;
+  Mini: TMemAPIUserTransactionControl;
+  Start, ElTotal: double;
 begin
   ResetClick(Sender);
-
+  Start := Now;
   Trans := FSession.StartTransaction(amReadWrite);
   try
     DBAPI := Trans.GetAPI;
+    Mini := DBAPI.GetApiObject(APIUserTransactionControl) as TMemAPIUserTransactionControl;
     try
       for TabI := 0 to Pred(BIG_NTABLES) do
       begin
-        Table := DBAPI.OpenTableOrKey('BIGTABLE_'+IntToStr(TabI));
-        if not Assigned(Table) then
-        begin
-          Table := DBAPI.CreateTable('BIGTABLE_'+InttoStr(TabI));
-          TMetAPI := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata) as TMemAPITableMetadata;
-          try
-            for FieldIndexI := 0 to Pred(BIG_NINDEXES) do
-            begin
-              TMetAPI.CreateField('FIELD_'+InttoStr(FieldIndexI), ftInteger);
-              TMetAPI.CreateIndex('INDEX_'+IntToStr(FieldIndexI), 'FIELD_'+InttoStr(FieldIndexI), [iaUnique]);
-            end;
-          finally
-            TMetAPI.Free;
+        Table := DBAPI.CreateTable('BIGTABLE_'+InttoStr(TabI));
+        TMetAPI := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata) as TMemAPITableMetadata;
+        try
+          for FieldIndexI := 0 to Pred(BIG_NINDEXES) do
+          begin
+            TMetAPI.CreateField('FIELD_'+InttoStr(FieldIndexI), ftInteger);
           end;
-        end;
-        if (TabI > 0) then
-        begin
-           FK := DBApi.OpenTableOrKey('BIGFK_'+InttoStr(TabI));
-           if not Assigned(FK) then
-           begin
-             FK := DBAPI.CreateForeignKey('BIGFK_'+InttoStr(TabI));
-             FKAPI := DBAPI.GetApiObjectFromHandle(FK, APIForeignKey) as TMemAPIForeignKey;
-             try
-               for FieldIndexI := 0 to Pred(BIG_NINDEXES) do
-               begin
-                 FKAPI.SetReferencingChild('BIGTABLE_'+IntToStr(TabI), 'INDEX_'+IntToStr(FieldIndexI));
-                 FKAPI.SetReferencedParent('BIGTABLE_'+IntToStr(TabI-1), 'INDEX_'+IntToStr(FieldIndexI));
-               end;
-             finally
-               FKAPI.Free;
-             end;
-           end;
+        finally
+          TMetAPI.Free;
         end;
       end;
-    finally
-      DBAPI.Free;
-    end;
-    Trans.CommitAndFree;
-    LogTimeIncr('Big table structure setup OK.');
-  except
-    on E: Exception do
-    begin
-      Trans.RollbackAndFree;
-      LogTimeIncr('Big table structure setup failed' + E.Message);
-      raise;
-    end;
-  end;
-  Trans := FSession.StartTransaction(amReadWrite);
-  try
-    DBAPI := Trans.GetAPI;
-    try
+      Mini.MiniCommit;
+      LogTimeIncr('Big table structure setup OK.');
       for TabI := 0 to Pred(BIG_NTABLES) do
       begin
         Table := DBAPI.OpenTableOrKey('BIGTABLE_'+IntToStr(TabI));
@@ -328,32 +303,182 @@ begin
           TDatAPI.Free;
         end;
       end;
+      Mini.MiniCommit;
+      LogTimeIncr('Big table data filled OK.');
+      for TabI := 0 to Pred(BIG_NTABLES) do
+      begin
+        Table := DBAPI.OpenTableOrKey('BIGTABLE_'+IntToStr(TabI));
+        TMetAPI := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata) as TMemAPITableMetadata;
+        try
+          for FieldIndexI := 0 to Pred(BIG_NINDEXES) do
+          begin
+            TMetAPI.CreateIndex('INDEX_'+IntToStr(FieldIndexI), 'FIELD_'+InttoStr(FieldIndexI), [iaUnique]);
+          end;
+        finally
+          TMetAPI.Free;
+        end;
+      end;
+      Mini.MiniCommit;
+      LogTimeIncr('Big table indexes added OK.');
+      for TabI := 0 to Pred(BIG_NTABLES) do
+      begin
+        if (TabI > 0) then
+        begin
+          FK := DBAPI.CreateForeignKey('BIGFK_'+InttoStr(TabI));
+          FKAPI := DBAPI.GetApiObjectFromHandle(FK, APIForeignKey) as TMemAPIForeignKey;
+          try
+            for FieldIndexI := 0 to Pred(BIG_NINDEXES) do
+            begin
+              FKAPI.SetReferencingChild('BIGTABLE_'+IntToStr(TabI), 'INDEX_'+IntToStr(FieldIndexI));
+              FKAPI.SetReferencedParent('BIGTABLE_'+IntToStr(TabI-1), 'INDEX_'+IntToStr(FieldIndexI));
+            end;
+          finally
+              FKAPI.Free;
+          end;
+        end;
+      end;
     finally
       DBAPI.Free;
+      Mini.Free;
     end;
     Trans.CommitAndFree;
-    LogTimeIncr('Big table data filled OK.');
+    LogTimeIncr('Big table FKeys added OK.');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      LogTimeIncr('Big tables data fill failed' + E.Message);
+      LogTimeIncr('Big tables setup / fill / foreign keys failed' + E.Message);
       raise;
     end;
   end;
+  ElTotal := Now - Start;
+  LogTimeIncr('Total time: ' + ElapsedToTimeStr(ElTotal));
 end;
 
-procedure TForm1.BigTblModClick(Sender: TObject);
+procedure TForm1.BigTblModFast;
 var
   Trans: TMemDbTransaction;
   DBAPI: TMemAPIDatabase;
   FieldIndexI: integer;
   TabI: integer;
-  Table: TMemDbHandle;
+  Table, FK: TMemDbHandle;
   TDatAPI: TMemAPITableData;
   Found: boolean;
   Data: TMemDBFieldDataRec;
+  Mini: TMemAPIUserTransactionControl;
+  TMetAPI: TMemAPITableMetadata;
+  FKAPI: TMemAPIForeignKey;
+begin
+  FTimeStamp := Now;
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    Mini := DBAPI.GetApiObject(APIUserTransactionControl) as TMemAPIUserTransactionControl;
+    try
+      for TabI := 0 to Pred(BIG_NTABLES) do
+      begin
+        if (TabI > 0) then
+          DBAPI.DeleteTableOrKey('BIGFK_'+InttoStr(TabI));
+      end;
+      Mini.MiniCommit;
+      LogTimeIncr('Big table dropped FKs OK.');
+      for TabI := 0 to Pred(BIG_NTABLES) do
+      begin
+        Table := DBAPI.OpenTableOrKey('BIGTABLE_'+IntToStr(TabI));
+        TMetAPI := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata) as TMemAPITableMetadata;
+        try
+          for FieldIndexI := 0 to Pred(BIG_NINDEXES) do
+            TMetAPI.DeleteIndex('INDEX_'+IntToStr(FieldIndexI));
+        finally
+          TMetAPI.Free;
+        end;
+      end;
+      Mini.MiniCommit;
+      LogTimeIncr('Big table dropped indices OK.');
+      for TabI := 0 to Pred(BIG_NTABLES) do
+      begin
+        //TODO - Yeah, could do per table locking based on API objects,
+        //if row locking turned out to be too scary.
+        Table := DBAPI.OpenTableOrKey('BIGTABLE_'+IntToStr(TabI));
+        TDatAPI := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+        try
+          Found:= TDatAPI.Locate(ptFirst, '');
+          while Found do
+          begin
+            for FieldIndexI := 0 to Pred(BIG_NINDEXES) do
+            begin
+              TDatAPI.ReadField('FIELD_'+InttoStr(FieldIndexI), Data);
+              Assert(Data.FieldType = ftInteger);
+              Data.i32Val := Data.i32Val * 2;
+              TDatAPI.WriteField('FIELD_'+InttoStr(FieldIndexI), Data);
+            end;
+            TDatAPI.Post;
+            Found:= TDatAPI.Locate(ptNext, '');
+          end;
+        finally
+          TDatAPI.Free;
+        end;
+      end;
+      Mini.MiniCommit;
+      LogTimeIncr('Big table data modded OK.');
+      for TabI := 0 to Pred(BIG_NTABLES) do
+      begin
+        Table := DBAPI.OpenTableOrKey('BIGTABLE_'+IntToStr(TabI));
+        TMetAPI := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata) as TMemAPITableMetadata;
+        try
+          for FieldIndexI := 0 to Pred(BIG_NINDEXES) do
+          begin
+            TMetAPI.CreateIndex('INDEX_'+IntToStr(FieldIndexI), 'FIELD_'+InttoStr(FieldIndexI), [iaUnique]);
+          end;
+        finally
+          TMetAPI.Free;
+        end;
+      end;
+      Mini.MiniCommit;
+      LogTimeIncr('Big table indexes added OK.');
+      for TabI := 0 to Pred(BIG_NTABLES) do
+      begin
+        if (TabI > 0) then
+        begin
+          FK := DBAPI.CreateForeignKey('BIGFK_'+InttoStr(TabI));
+          FKAPI := DBAPI.GetApiObjectFromHandle(FK, APIForeignKey) as TMemAPIForeignKey;
+          try
+            for FieldIndexI := 0 to Pred(BIG_NINDEXES) do
+            begin
+              FKAPI.SetReferencingChild('BIGTABLE_'+IntToStr(TabI), 'INDEX_'+IntToStr(FieldIndexI));
+              FKAPI.SetReferencedParent('BIGTABLE_'+IntToStr(TabI-1), 'INDEX_'+IntToStr(FieldIndexI));
+            end;
+          finally
+              FKAPI.Free;
+          end;
+        end;
+      end;
+    finally
+      DBAPI.Free;
+      Mini.Free;
+    end;
+    Trans.CommitAndFree;
+    LogTimeIncr('Big table FKeys added OK.');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('Big table data mod failed' + E.Message);
+      raise;
+    end;
+  end;
+end;
 
+procedure TForm1.BigTblModSlow;
+var
+  Trans: TMemDBTransaction;
+  DBAPI: TMemAPIDatabase;
+  Table: TMemDBHandle;
+  TabI: integer;
+  TDatAPI: TMemAPITableData;
+  Found: boolean;
+  FieldIndexI: integer;
+  Data: TMemDBFieldDataRec;
 begin
   FTimeStamp := Now;
   Trans := FSession.StartTransaction(amReadWrite);
@@ -362,6 +487,8 @@ begin
     try
       for TabI := 0 to Pred(BIG_NTABLES) do
       begin
+        //TODO - Yeah, could do per table locking based on API objects,
+        //if row locking turned out to be too scary.
         Table := DBAPI.OpenTableOrKey('BIGTABLE_'+IntToStr(TabI));
         TDatAPI := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
         try
@@ -395,6 +522,25 @@ begin
       raise;
     end;
   end;
+end;
+
+procedure TForm1.BigTblModClick(Sender: TObject);
+var
+  Start, N, ElFast, ElSlow: double;
+begin
+  FTimeStamp := Now;
+  LogTimeIncr('This will take a moment (comparing different methods)...');
+  Application.ProcessMessages;
+  Start := Now;
+  BigTblModFast;
+  N := Now;
+  LogTimeIncr('...');
+  ElFast := N - Start;
+  Start := N;
+  BigTblModSlow;
+  ElSlow := Now - Start;
+  LogTimeIncr('Total time (fast): ' + ElapsedToTimeStr(ElFast));
+  LogTimeIncr('Total time (slow): ' + ElapsedToTimeStr(ElSlow));
 end;
 
 procedure TForm1.CheckpointBtnClick(Sender: TObject);
