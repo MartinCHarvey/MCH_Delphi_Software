@@ -53,7 +53,11 @@ procedure ExecParallel(Handlers: TParallelHandlers;
 implementation
 
 uses
-  Classes, Windows;
+  Classes
+{$IFDEF USE_WINDOWS_LOCKS}
+  , Windows
+{$ENDIF}
+  ;
 
 const
   S_UNEXPECTED_WAIT_RET = 'Unexpected return from parallel wait: ';
@@ -102,8 +106,10 @@ procedure ExecParallel(Handlers: TParallelHandlers;
 var
   L, BatchL, BatchOfs, i: integer;
   Threads: TThreadArray;
+{$IFDEF USE_WINDOWS_LOCKS}
   WaitHandles: THandleArray;
   WaitRet: DWORD;
+{$ENDIF}
   ExceptHandled: boolean;
   PExcChain: PExceptionHandlerChain;
 begin
@@ -113,14 +119,18 @@ begin
   Assert((Length(Refs2) = L) or (Length(Refs2) = 0));
   SetLength(Excepts, L);
   SetLength(Rets, L);
+{$IFDEF USE_WINDOWS_LOCKS}
   SetLength(WaitHandles, L);
+{$ENDIF}
   SetLength(Threads, L);
   try
     for i := 0 to Pred(L) do
     begin
       Threads[i] := TParallelHandlerThread.Create(true);
       Threads[i].FreeOnTerminate := false;
+{$IFDEF USE_WINDOWS_LOCKS}
       WaitHandles[i] := Threads[i].Handle;
+{$ENDIF}
       with Threads[i] do
       begin
         if Length(Refs1) > 0 then
@@ -131,6 +141,7 @@ begin
         Start;
       end;
     end;
+{$IFDEF USE_WINDOWS_LOCKS}
     BatchOfs := 0;
     while BatchOfs < L do
     begin
@@ -143,6 +154,10 @@ begin
         raise EParallelException.Create(S_UNEXPECTED_WAIT_RET + IntToStr(WaitRet));
       Inc(BatchOfs, BatchL);
     end;
+{$ELSE}
+    for i := 0 to Pred(L) do
+      Threads[i].WaitFor;
+{$ENDIF}
     for i := 0 to Pred(L) do
     begin
       if Threads[i].FRaised then

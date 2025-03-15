@@ -3398,10 +3398,25 @@ var
   TagData: TMemDBITagData;
   RV: TIsRetVal;
   Parallel: boolean;
+
+  function ParallelHelper: boolean;
+  var
+    i, pc: integer;
+  begin
+    result := OptimizationApplies(Optimizations.IndexBuildParallel, Reason);
+    pc := 0;
+    for i := 0 to Pred(Length(FIndexChangesets)) do
+    begin
+      if ictDeleted in FIndexChangesets[i] then
+        Inc(pc);
+    end;
+    result := result and (pc > 1);
+  end;
+
 begin
-  Parallel := OptimizationApplies(Optimizations.IndexBuildParallel, Reason);
   if FIndexingChangeRequired then
   begin
+    Parallel := ParallelHelper;
     for i := 0 to Pred(Length(FIndexChangesets)) do
     begin
       if ictDeleted in FIndexChangesets[i] then
@@ -3537,6 +3552,7 @@ var
   i: integer;
   TagData: TMemDBITagData;
 begin
+  //N.B No parallel optimization in the rollback case, could do later.
   for i := 0 to Pred(Length(FIndexChangesets)) do
   begin
     if ictDeleted in FIndexChangesets[i] then
@@ -3634,19 +3650,17 @@ end;
 procedure TMemDBTablePersistent.ValidateIndexes(Reason: TMemDBTransReason);
 var
   CC, NC: TMemTableMetadataItem;
-  i, j: integer;
+  i, j, CntParallel: integer;
   IndexDef1: TMemIndexDef;
   ValidateParallel: boolean;
-  CntParallel: integer;
   Refs1, Refs2, Rets: TPHRefs;
   Handlers: TParallelHandlers;
   Excepts: TPHExcepts;
-  Finished: boolean;
 
-  function CheckHelper: boolean;
+  function IndexNeedsValidate(idx:integer; Def: TMemIndexDef): boolean;
   begin
     result := false;
-    if (FIndexChangesets[i] * [ictAdded
+    if (FIndexChangesets[idx] * [ictAdded
 {$IFOPT C+}
       ,ictChangedFieldNumber
       //Other index checking stringent enough do not need to revalidate,
@@ -3654,46 +3668,49 @@ var
 {$ENDIF}
       ]) <> [] then
     begin
-
       //Handle index validation.
-      if IndexDef1.IndexAttrs * [iaUnique, iaNotEmpty] <> [] then
+      if Def.IndexAttrs * [iaUnique, iaNotEmpty] <> [] then
         result := true;
     end;
+  end;
+
+  function ParallelHelper: boolean;
+  var
+    Def: TMemIndexDef;
+    i: integer;
+  begin
+    result := OptimizationApplies(Optimizations.IndexValidateParallel, Reason);
+    CntParallel := 0;
+    for i := 0 to Pred(Length(FIndexChangesets)) do
+    begin
+      if ictDeleted in FIndexChangesets[i] then
+        continue;
+      Def := NC.IndexDefs.Items[i] as TMemIndexDef;
+      if IndexNeedsValidate(i, def) then
+        Inc(CntParallel);
+    end;
+    result :=result and (CntParallel > 1);
   end;
 
 begin
   Assert(FIndexingChangeRequired);
   GetCurrNxtMetaCopies(CC,NC);
-  ValidateParallel := OptimizationApplies(Optimizations.IndexValidateParallel, Reason);
-  CntParallel := 0;
-  Finished := false;
-  while not Finished do
+  ValidateParallel := ParallelHelper;
+
+  if not ValidateParallel then
   begin
     for i := 0 to Pred(Length(FIndexChangesets)) do
     begin
       if ictDeleted in FIndexChangesets[i] then
         continue;
       IndexDef1 := NC.IndexDefs.Items[i] as TMemIndexDef;
-      if CheckHelper then
+      if IndexNeedsValidate(i, IndexDef1) then
       begin
-        if ValidateParallel then
-          Inc(CntParallel)
-        else
-          RevalidateEntireUserIndex(i);
+        RevalidateEntireUserIndex(i);
       end;
     end;
-    if ValidateParallel then
-    begin
-      if CntParallel <= 1 then
-        ValidateParallel := false //Finished := false;
-      else
-        Finished := true;
-    end
-    else
-      Finished := true;
-  end;
-
-  if ValidateParallel then
+  end
+  else
   begin
     SetLength(Refs1, CntParallel);
     SetLength(Handlers, CntParallel);
@@ -3706,7 +3723,7 @@ begin
       if ictDeleted in FIndexChangesets[i] then
         continue;
       IndexDef1 := NC.IndexDefs.Items[i] as TMemIndexDef;
-      if CheckHelper then
+      if IndexNeedsValidate(i, IndexDef1) then
       begin
         Refs1[j] := Pointer(i);
         Handlers[j] := ValidateIndexesParallelHandler;
@@ -3730,10 +3747,26 @@ var
   ff: integer;
   RV: TIsRetVal;
   Parallel: boolean;
+
+  function ParallelHelper: boolean;
+  var
+    i: integer;
+    pc: integer;
+  begin
+    result := OptimizationApplies(Optimizations.IndexBuildParallel, Reason);
+    pc := 0;
+    for i := 0 to Pred(Length(FIndexChangesets)) do
+    begin
+      if ictAdded in FIndexChangesets[i] then
+        Inc(pc);
+    end;
+    result := result and (pc > 1);
+  end;
+
 begin
-  Parallel := OptimizationApplies(Optimizations.IndexBuildParallel, Reason);
   if FIndexingChangeRequired then
   begin
+    Parallel := ParallelHelper;
     GetCurrNxtMetaCopies(CC,NC);
     FTemporaryIndexLimit := 0;
 
@@ -3804,11 +3837,9 @@ var
   i: integer;
   Limit: integer;
   TagData: TMemDBITagData;
-  Parallel: boolean;
   RV: TIsRetVal;
 
 begin
-  Parallel := OptimizationApplies(Optimizations.IndexBuildParallel, Reason);
   //Adjust temporary indices back to permanent ones.
   //Temporary index tags are such that commit removal and addition should have
   //gone OK.
@@ -3834,13 +3865,6 @@ begin
       CheckTagAgreesWithMetadata(i, TagData, tciPermanentAgreesNext, tcpProgrammed);
     end;
   end;
-  if Parallel then
-  begin
-    RV := FData.Store.PerformAsyncActions(@MemDBXlateExceptions);
-    if RV <> rvOK then
-      raise EMemDbInternalException.Create(S_ASYNC_INDEX_OP_FAILED);
-  end;
-
 end;
 
 procedure TMemDBTablePersistent.RollbackRestoreIndicesToPermanent;
@@ -6363,18 +6387,10 @@ begin
   FInterfaced := TMemDBAPIInterfacedObject.Create;
   FInterfaced.FAPIObjectRequest := HandleInterfacedObjRequest;
   FInterfaced.FParent := self;
-{$IFDEF PRE_COMMIT_PARALLEL}
-  FPoolRec := GCommonPool.RegisterClient(Self, HandlePoolNormalCompletion, HandlePoolCancelledCompletion);
-  FPoolEvent := TEvent.Create(nil, true, false, '');
-{$ENDIF}
 end;
 
 destructor TMemDBDatabasePersistent.Destroy;
 begin
-{$IFDEF PRE_COMMIT_PARALLEL}
-  GCommonPool.DeRegisterClient(FPoolRec);
-  FPoolEvent.Free;
-{$ENDIF}
   FInterfaced.Free;
   FUserObjs.Free;
   inherited;

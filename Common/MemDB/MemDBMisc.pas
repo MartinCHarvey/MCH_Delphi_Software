@@ -30,16 +30,9 @@ IN THE SOFTWARE.
 
 interface
 
-{$IFOPT C+}
-{$DEFINE USE_TRACKABLES_LOCAL_MEMDBMISC}
-{$ENDIF}
-{$IFDEF USE_TRACKABLES}
-{$DEFINE USE_TRACKABLES_LOCAL_MEMDBMISC}
-{$ENDIF}
-
 uses
   SysUtils, Classes, BufferedFileStream, IndexedStore
-{$IFDEF USE_TRACKABLES_LOCAL_MEMDBMISC}
+{$IFDEF USE_TRACKABLES}
   , Trackables
 {$ENDIF}
   , Parallelizer
@@ -148,7 +141,7 @@ type
   TInternalIndexClassStrings = array[TInternalIndexClass] of string;
   TSubIndexClassStrings = array[TSubIndexClass] of string;
 
-{$IFOPT C+}
+{$IFDEF USE_TRACKABLES}
   TMemDBMiniSet = class(TTrackable)
 {$ELSE}
   TMemDBMiniSet = class
@@ -164,7 +157,7 @@ type
   TMemDBTempFileStream = class(TWriteCachedFileStream)
   private
     FFileName: string;
-{$IFOPT C+}
+{$IFDEF USE_TRACKABLES}
     FProxy: TTrackable;
 {$ENDIF}
   public
@@ -645,7 +638,7 @@ constructor TMemDBTempFileStream.Create(const FileName: string);
 begin
   FFileName := FileName;
   inherited Create(FileName, FILE_CACHE_SIZE);
-{$IFOPT C+}
+{$IFDEF USE_TRACKABLES}
   FProxy := TTrackable.Create;
 {$ENDIF}
 end;
@@ -656,9 +649,9 @@ var
 begin
   Tmp := FFileName;
   try
-  {$IFOPT C+}
+{$IFDEF USE_TRACKABLES}
     FProxy.Free;
-  {$ENDIF}
+{$ENDIF}
     inherited;
   finally
     if Length(Tmp) > 0 then
