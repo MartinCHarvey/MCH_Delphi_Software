@@ -1016,16 +1016,18 @@ begin
       iasAsyncAdding: begin
         //Check for failed ret, or out of memory.
         if (TIsRetVal(Rets[AsyncIdx]) <> rvOK) or (Excepts[AsyncIdx] = EOutOfMemory) then
-          self.AddIndexCleanupTail(Index);
+          self.AddIndexCleanupTail(Index)
+        else
+          Index.AsyncState := iasNone;
       end;
       iasAsyncDeleting: begin
         Assert(TIsRetVal(Rets[AsyncIdx]) = rvOK);
+        //Index.AsyncState := iasNone;
         self.DeleteIndexTail(Index);
       end;
     else
       Assert(false);
     end;
-    Index.AsyncState := iasNone;
   end;
   for AsyncIdx := 0 to Pred(AsyncCount) do
   begin
