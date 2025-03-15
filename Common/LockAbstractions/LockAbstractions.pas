@@ -26,8 +26,6 @@ IN THE SOFTWARE.
 
 interface
 
-{$UNDEF USE_WINDOWS_LOCKS}
-
 {$IFDEF USE_WINDOWS_LOCKS}
 uses Windows, SRWLockWrapper, SyncObjs;
 {$ELSE}
