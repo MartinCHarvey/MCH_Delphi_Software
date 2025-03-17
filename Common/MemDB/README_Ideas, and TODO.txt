@@ -1,8 +1,15 @@
 
 MemDB: TODO and notes.
 
-TODO - Mini-Commit / Commit / Rollback / Delete.
-  - Much more testing for mini-commit / mini-rollback.
+TODO - More optimizations.
+
+- Indexes. Don't blow away at the start. Have a delete pending state,
+  and blow them away at the beginning of the commit (not the precommit).
+  Delete pending -> Always looks at current.
+
+- Threading opts.
+  - Decide when to use threads based on # of tables actually changed.
+  - Think a bit harder about foreign key case.
 
 TODO - Composite ops to allow us to do SQL ALTER etc etc ..
 
