@@ -4695,7 +4695,7 @@ begin
           //In from scratch, no delete sentinels.
           //Handle rows not fields, no need for field offset.
           RV := PStruct.OutList.AddItem(Row, IRecAdd);
-          Assert(RV in [rvOk]); //TODO - Handle failure. Why Dup key?
+          Assert(RV in [rvOk]);
         end;
       end;
     end;
@@ -4724,7 +4724,7 @@ begin
           if AddToList then
           begin
             RV := PStruct.OutList.AddItem(Row, IRecAdd);
-            Assert(RV in [rvOk]); //TODO - Handle failure. Why Dup key?
+            Assert(RV in [rvOk]);
           end;
         end
         else //Do not expect unchanged rows here.
