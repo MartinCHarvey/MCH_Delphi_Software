@@ -113,19 +113,6 @@ type
                        var IndexedFields: TMDBFieldNames;
                        var IndexAttrs: TMDBIndexAttrs): boolean;
     function GetIndexNames: TStringList;
-
-    //DO NOT ALLOW:
-    //Changing objects once they are created.
-    //Easier to add-dup, remove-old, rename.
-    //Will create composite API to do this, such that we can do multiple
-    //changes / renames / whatever with multi-changesets inside a user transaction.
-
-    //That way we do not have to check multiple crazy change on change of
-    //multiple types of items in the same xaction. Eventually one's sanity runs out.
-
-    //Better to Dup state, and be sure it's correct rather than open the door
-    //to subtle nasty bugs dependent on whether things happen in the same xaxtion
-    //or not.
   end;
 
   //TODO - Can remove TMemAPIBufState, got there with a cursor
@@ -197,7 +184,6 @@ type
   end;
 
   //TMemAPIForeignKeyComposite?
-
   ///////////////////////////////////////////////////////////////////
 
 
