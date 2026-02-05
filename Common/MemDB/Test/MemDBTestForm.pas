@@ -23,7 +23,6 @@ type
     BigTable: TButton;
     BigTblMod: TButton;
     ChkBlobs: TButton;
-    MiniCommit: TButton;
     procedure BasicTestBtnClick(Sender: TObject);
     procedure ResetClick(Sender: TObject);
     procedure IndexTestClick(Sender: TObject);
@@ -38,13 +37,14 @@ type
     procedure BigTableClick(Sender: TObject);
     procedure BigTblModClick(Sender: TObject);
     procedure ChkBlobsClick(Sender: TObject);
-    procedure MiniCommitClick(Sender: TObject);
   private
     { Private declarations }
     FTimeStamp: TDateTime;
     procedure LogTimeIncr(S: string);
     procedure BigTblModFast;
     procedure BigTblModSlow;
+    procedure FKTestBase(Sender: TObject);
+    procedure FKTestSameTable(Sender: TObject);
   public
     { Public declarations }
   end;
@@ -107,8 +107,6 @@ end;
 procedure TForm1.LogTimeIncr(S: string);
 var
   N: TDateTime;
-  MSecsElapsed: integer;
-  SecsElapsed: integer;
   ElapsedD: double;
   TimeS: string;
 begin
@@ -258,7 +256,6 @@ var
   TDatAPI: TMemAPITableData;
   FKAPI: TMemAPIForeignKey;
   Data: TMemDBFieldDataRec;
-  Mini: TMemAPIUserTransactionControl;
   Start, ElTotal: double;
 begin
   ResetClick(Sender);
@@ -266,7 +263,6 @@ begin
   Trans := FSession.StartTransaction(amReadWrite);
   try
     DBAPI := Trans.GetAPI;
-    Mini := DBAPI.GetApiObject(APIUserTransactionControl) as TMemAPIUserTransactionControl;
     try
       for TabI := 0 to Pred(BIG_NTABLES) do
       begin
@@ -281,8 +277,23 @@ begin
           TMetAPI.Free;
         end;
       end;
-      Mini.MiniCommit;
-      LogTimeIncr('Big table structure setup OK.');
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('Big tables setup failed' + E.Message);
+      raise;
+    end;
+  end;
+  LogTimeIncr('Big table structure setup OK.');
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
       for TabI := 0 to Pred(BIG_NTABLES) do
       begin
         Table := DBAPI.OpenTableOrKey('BIGTABLE_'+IntToStr(TabI));
@@ -303,8 +314,23 @@ begin
           TDatAPI.Free;
         end;
       end;
-      Mini.MiniCommit;
-      LogTimeIncr('Big table data filled OK.');
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('Big tables fill failed' + E.Message);
+      raise;
+    end;
+  end;
+  LogTimeIncr('Big tables filled OK.');
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
       for TabI := 0 to Pred(BIG_NTABLES) do
       begin
         Table := DBAPI.OpenTableOrKey('BIGTABLE_'+IntToStr(TabI));
@@ -318,8 +344,23 @@ begin
           TMetAPI.Free;
         end;
       end;
-      Mini.MiniCommit;
-      LogTimeIncr('Big table indexes added OK.');
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('Big tables indexing failed' + E.Message);
+      raise;
+    end;
+  end;
+  LogTimeIncr('Big table indexes added OK.');
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
       for TabI := 0 to Pred(BIG_NTABLES) do
       begin
         if (TabI > 0) then
@@ -339,18 +380,17 @@ begin
       end;
     finally
       DBAPI.Free;
-      Mini.Free;
     end;
     Trans.CommitAndFree;
-    LogTimeIncr('Big table FKeys added OK.');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      LogTimeIncr('Big tables setup / fill / foreign keys failed' + E.Message);
+      LogTimeIncr('Big tables foreign keys failed' + E.Message);
       raise;
     end;
   end;
+  LogTimeIncr('Big table FKeys added OK.');
   ElTotal := Now - Start;
   LogTimeIncr('Total time: ' + ElapsedToTimeStr(ElTotal));
 end;
@@ -365,7 +405,6 @@ var
   TDatAPI: TMemAPITableData;
   Found: boolean;
   Data: TMemDBFieldDataRec;
-  Mini: TMemAPIUserTransactionControl;
   TMetAPI: TMemAPITableMetadata;
   FKAPI: TMemAPIForeignKey;
 begin
@@ -373,15 +412,29 @@ begin
   Trans := FSession.StartTransaction(amReadWrite);
   try
     DBAPI := Trans.GetAPI;
-    Mini := DBAPI.GetApiObject(APIUserTransactionControl) as TMemAPIUserTransactionControl;
     try
       for TabI := 0 to Pred(BIG_NTABLES) do
       begin
         if (TabI > 0) then
           DBAPI.DeleteTableOrKey('BIGFK_'+InttoStr(TabI));
       end;
-      Mini.MiniCommit;
-      LogTimeIncr('Big table dropped FKs OK.');
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('Big table drop FKs failed' + E.Message);
+      raise;
+    end;
+  end;
+  LogTimeIncr('Big table dropped FKs OK.');
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
       for TabI := 0 to Pred(BIG_NTABLES) do
       begin
         Table := DBAPI.OpenTableOrKey('BIGTABLE_'+IntToStr(TabI));
@@ -393,8 +446,23 @@ begin
           TMetAPI.Free;
         end;
       end;
-      Mini.MiniCommit;
-      LogTimeIncr('Big table dropped indices OK.');
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('Big table drop indices failed' + E.Message);
+      raise;
+    end;
+  end;
+  LogTimeIncr('Big table dropped indices OK.');
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
       for TabI := 0 to Pred(BIG_NTABLES) do
       begin
         //TODO - Yeah, could do per table locking based on API objects,
@@ -419,8 +487,23 @@ begin
           TDatAPI.Free;
         end;
       end;
-      Mini.MiniCommit;
-      LogTimeIncr('Big table data modded OK.');
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('Big table mod data failed' + E.Message);
+      raise;
+    end;
+  end;
+  LogTimeIncr('Big table data modded OK.');
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
       for TabI := 0 to Pred(BIG_NTABLES) do
       begin
         Table := DBAPI.OpenTableOrKey('BIGTABLE_'+IntToStr(TabI));
@@ -434,8 +517,23 @@ begin
           TMetAPI.Free;
         end;
       end;
-      Mini.MiniCommit;
-      LogTimeIncr('Big table indexes added OK.');
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('Big table index add failed' + E.Message);
+      raise;
+    end;
+  end;
+  LogTimeIncr('Big table indexes added OK.');
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
       for TabI := 0 to Pred(BIG_NTABLES) do
       begin
         if (TabI > 0) then
@@ -455,18 +553,17 @@ begin
       end;
     finally
       DBAPI.Free;
-      Mini.Free;
     end;
     Trans.CommitAndFree;
-    LogTimeIncr('Big table FKeys added OK.');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      LogTimeIncr('Big table data mod failed' + E.Message);
+      LogTimeIncr('Big table FKeys add failed' + E.Message);
       raise;
     end;
   end;
+  LogTimeIncr('Big table FKeys added OK.');
 end;
 
 procedure TForm1.BigTblModSlow;
@@ -1003,6 +1100,211 @@ begin
 end;
 
 procedure TForm1.FKTestClick(Sender: TObject);
+begin
+  FKTestBase(Sender);
+  FKTestSameTable(Sender);
+end;
+
+procedure TForm1.FKTestSameTable(Sender: TObject);
+
+  procedure SetBaseTableStructure();
+  var
+    Trans: TMemDbTransaction;
+    DBAPI: TMemAPIDatabase;
+    Tbl: TMemDBHandle;
+    TableMeta: TMemAPITableMetadata;
+  begin
+    Trans := FSession.StartTransaction(amReadWrite);
+    try
+      DBAPI := Trans.GetAPI;
+      try
+        Tbl := DBAPI.OpenTableOrKey('FKTestTableMaster');
+        if not Assigned(Tbl) then
+        begin
+          Tbl := DBAPI.CreateTable('FKTestTableMaster');
+          TableMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
+          try
+            TableMeta.CreateField('MasterKey', ftInteger);
+            TableMeta.CreateIndex('MasterKeyIdx', 'MasterKey', [iaUnique, iaNotEmpty]);
+            TableMeta.CreateField('KeyReferrer', ftInteger);
+            TableMeta.CreateIndex('KeyReferrerIdx', 'KeyReferrer', [iaNotEmpty]);
+          finally
+            TableMeta.Free;
+          end;
+        end;
+      finally
+        DBAPI.Free;
+      end;
+      Trans.CommitAndFree;
+    except
+      on E: Exception do
+      begin
+        Trans.RollbackAndFree;
+        LogTimeIncr('Foreign key (same table) test setup failed.');
+        raise;
+      end;
+    end;
+  end;
+
+  procedure SetBaseRowSet;
+  var
+    i: integer;
+    Data: TMemDbFieldDataRec;
+    Trans: TMemDBTransaction;
+    DBAPI: TMemAPIDatabase;
+    Tbl: TMemDbHandle;
+    TableData: TMemAPITableData;
+  begin
+    //Delete all existing rows, but keep table intact and present.
+    Trans := FSession.StartTransaction(amReadWrite, amLazyWrite, ilDirtyRead);
+    try
+      DBAPI := Trans.GetAPI;
+      try
+        Tbl := DBAPI.OpenTableOrKey('FKTestTableMaster');
+        TableData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+        try
+          Data.FieldType := ftInteger;
+          for i := 1 to LIMIT do
+          begin
+            TableData.Append;
+            Data.i32Val := i;
+            TableData.WriteField('MasterKey', Data);
+            Data.i32Val := Succ(LIMIT - i);
+            TableData.WriteField('KeyReferrer', Data);
+            TableData.Post;
+          end;
+        finally
+          TableData.Free;
+        end;
+      finally
+        DBAPI.Free;
+      end;
+      Trans.CommitAndFree;
+      LogTimeIncr('FK test (same table) set base row set OK.');
+    except
+      on E:Exception do
+      begin
+        Trans.RollbackAndFree;
+        LogTimeIncr('FK test (same table) set base row set Failed.');
+        raise;
+      end;
+    end;
+  end;
+
+  procedure AddFKSameTable();
+  var
+    Trans: TMemDbTransaction;
+    DBAPI: TMemAPIDatabase;
+    FK: TMemDbHandle;
+    FKey: TMemAPIForeignKey;
+
+  begin
+    Trans := FSession.StartTransaction(amReadWrite);
+    try
+      DBAPI := Trans.GetAPI;
+      try
+        FK := DBAPI.CreateForeignKey('ForeignKey1');
+        FKey := DBAPI.GetApiObjectFromHandle(FK, APIForeignKey) as TMemAPIForeignKey;
+        try
+          FKey.SetReferencingChild('FKTestTableMaster', 'KeyReferrerIdx');
+          FKey.SetReferencedParent('FKTestTableMaster','MasterKeyIdx');
+        finally
+          FKey.Free;
+        end;
+      finally
+        DBAPI.Free;
+      end;
+      Trans.CommitAndFree;
+      LogTimeIncr('FK Test same table, add foreign key relationship OK.');
+    except
+      on E: Exception do
+      begin
+        Trans.RollbackAndFree;
+        LogTimeIncr('FK Test same table, add foreign key relationship failed.');
+        raise;
+      end;
+    end;
+  end;
+
+  procedure BreakFKSameTable();
+  //Break in two ways - once by limit + 1 in master,
+  //Once by limit + 1 in referrer.
+  var
+    RowSel: integer;
+    Pass, BreakReferred: boolean;
+    Trans: TMemDbTransaction;
+    DBAPI: TMemAPIDatabase;
+    Tbl: TMemDbHandle;
+    TblData: TMemApiTableData;
+    Data: TMemDbFieldDataRec;
+    FieldToChange: string;
+    IndexToChange: string;
+  begin
+    RowSel := Succ(Random(Pred(LIMIT))); //1 to Limit.
+    for BreakReferred := Low(BreakReferred) to High(BreakReferred) do
+    begin
+      Pass := false;
+      Trans := FSession.StartTransaction(amReadWrite);
+      try
+        DBAPI := Trans.GetAPI;
+        try
+          Tbl := DBAPI.OpenTableOrKey('FKTestTableMaster');
+          TblData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+          try
+            Data.FieldType := ftInteger;
+            Data.i32Val := RowSel;
+            if BreakReferred then
+            begin
+              FieldToChange := 'KeyReferrer';
+              IndexToChange := 'KeyReferrerIdx';
+            end
+            else
+            begin
+              FieldToChange := 'MasterKey';
+              IndexToChange := 'MasterKeyIdx';
+            end;
+
+            if not TblData.FindByIndex(IndexToChange, Data) then
+              raise Exception.Create('Expected to find field: '
+                + FieldToChange + ' with value: ' +IntToStr(RowSel));
+            Data.i32Val := Succ(LIMIT);
+            TblData.WriteField(FieldToChange, Data);
+            TblData.Post;
+          finally
+            TblData.Free;
+          end;
+        finally
+          DBAPI.Free;
+        end;
+        Pass := true;
+        Trans.CommitAndFree;
+      except
+        on E: Exception do
+        begin
+          Trans.RollbackAndFree;
+          if Pass then
+          begin
+            LogTimeIncr('FK same table, foreign key violation OK.');
+          end
+          else
+          begin
+            LogTimeIncr('FK same table, foreign key violation failed.');
+            raise;
+          end;
+        end;
+      end;
+    end;
+  end;
+
+begin
+  ResetClick(Sender);
+  SetBaseTableStructure();
+  SetBaseRowSet();
+  AddFKSameTable();
+  BreakFKSameTable();
+end;
+
+procedure TForm1.FKTestBase(Sender: TObject);
 var
   Trans: TMemDBTRansaction;
   DBAPI: TMemAPIDatabase;
@@ -3215,319 +3517,6 @@ begin
   end;
 end;
 
-procedure TForm1.MiniCommitClick(Sender: TObject);
-
-const
-  MAGIC_FIELD_VALUE = $1234ABCD;
-  MAGIC_FIELD_VALUE_2 = $12ABCD34;
-
-var
-  Trans: TMemDBTransaction;
-  Handle: TMemDbHandle;
-  DBAPI: TMemAPIDatabase;
-  TblMeta: TMemAPITableMetadata;
-  DbSync: TMemAPIUserTransactionControl;
-  AddLater: boolean;
-  Value: integer;
-  Bookmark: TMemDbBookMark;
-
-  procedure AddARow;
-  var
-    TblData: TMemAPITableData;
-    Data: TMemDbFieldDataRec;
-  begin
-    TblData := DBAPI.GetApiObjectFromHandle(Handle, APITableData) as TMemAPITableData;
-    try
-      TblData.Append;
-      Data.FieldType := ftInteger;
-      Data.i32Val := MAGIC_FIELD_VALUE;
-      TblData.WriteField('IntField', Data);
-      TblData.Post;
-    finally
-      TblData.Free;
-    end;
-  end;
-
-  function ReadTheRow: integer;
-  var
-    TblData: TMemAPITableData;
-    Data: TMemDbFieldDataRec;
-  begin
-    TblData := DBAPI.GetApiObjectFromHandle(Handle, APITableData) as TMemAPITableData;
-    try
-      TblData.Locate(ptFirst, '');
-      TblData.ReadField('IntField', Data);
-      Assert(Data.FieldType = ftInteger);
-      Result := Data.i32Val;
-    finally
-      TblData.Free;
-    end;
-  end;
-
-  procedure ChangeRowData;
-  var
-    TblData: TMemAPITableData;
-    Data: TMemDbFieldDataRec;
-  begin
-    TblData := DBAPI.GetApiObjectFromHandle(Handle, APITableData) as TMemAPITableData;
-    try
-      TblData.Locate(ptFirst, '');
-      TblData.ReadField('IntField', Data);
-      Assert(Data.FieldType = ftInteger);
-      Data.i32Val := MAGIC_FIELD_VALUE_2;
-      TblData.WriteField('IntField', Data);
-      TblData.Post;
-    finally
-      TblData.Free;
-    end;
-  end;
-
-  procedure CreateTheTable;
-  begin
-    Handle := DBAPI.CreateTable('Test table');
-    TblMeta := DBAPI.GetApiObjectFromHandle(Handle, APITableMetadata) as TMemAPITableMetadata;
-    try
-      TblMeta.CreateField('IntField', ftInteger);
-      //OK, now try to add data simultaneously, expect this to fail.
-    finally
-      TblMeta.Free;
-    end;
-  end;
-
-begin
-  ResetClick(Sender);
-  AddLater := false;
-  //Firstly, see if Mini-commit allows you to create table, and pop with data.
-  //No "special" exception handling or retryable exceptions yet, just whether
-  //mini-commit allows you to create a multi-transaction.
-  Trans := FSession.StartTransaction(amReadWrite);
-  try
-    DBAPI := Trans.GetAPI;
-    try
-      CreateTheTable;
-      try
-        AddARow;
-      except
-        on EMemDBException do
-        begin
-          DbSync := DBAPI.GetApiObject(APIUserTransactionControl) as TMemAPIUserTransactionControl;
-          try
-            DbSync.MiniCommit;
-          finally
-            DBSync.Free;
-          end;
-          AddLater := true;
-        end;
-      end;
-    if AddLater then
-      AddARow;
-    finally
-      DBAPI.Free;
-    end;
-    Trans.CommitAndFree;
-    if AddLater then
-      LogTimeIncr('Mini-commit / multi changeset (1) OK.')
-    else
-      LogTimeIncr('Mini-commit / multi changeset (1) Failed.')
-  except
-    on E: Exception do
-    begin
-      Trans.RollbackAndFree;
-      LogTimeIncr('Mini-commit / multi changeset (1) Failed.');
-    end;
-  end;
-  //OK, now check that you can stop and restart the DB, and the journal
-  //replays over the multi-transaction OK.
-
-  LogTimeIncr('Journal replay over multi-changeset');
-  try
-    FSession.Free;
-    FDB.StopDB;
-    FDB.InitDB(DB_LOCATION, jtV2);
-    FSession := FDB.StartSession;
-    LogTimeIncr('Journal replay over multi-changeset OK');
-  except
-    on E: Exception do
-    begin
-      LogTimeIncr('Journal replay over multi-changeset failed.');
-      raise;
-    end;
-  end;
-
-  //OK, now check we can read back the magic value.
-  LogTimeIncr('Check readback.');
-  Trans := FSession.StartTransaction(amRead);
-  try
-    DBAPI := Trans.GetAPI;
-    try
-      Handle := DBAPI.OpenTableOrKey('Test table');
-      Value := ReadTheRow;
-      if Value = MAGIC_FIELD_VALUE then
-        LogTimeIncr('Readback OK')
-      else
-        LogTimeIncr('Readback Failed.');
-    finally
-      DBAPI.Free;
-      Trans.RollbackAndFree;
-    end;
-  except
-    on E: Exception do
-    begin
-      LogTimeIncr('Readback Failed.');
-      raise;
-    end;
-  end;
-
-  //OK, Now try multiple mini-commits, and mini-rollback one at a time.
-  ResetClick(Sender);
-  LogTimeIncr('Mini-commit and mini rollback...');
-  Trans := FSession.StartTransaction(amReadWrite);
-  try
-    DBAPI := Trans.GetAPI;
-    try
-      DbSync := DBAPI.GetApiObject(APIUserTransactionControl) as TMemAPIUserTransactionControl;
-      try
-        CreateTheTable;
-        DbSync.MiniCommit;
-        AddARow;
-        DbSync.MiniCommit;
-        ChangeRowData;
-        DbSync.MiniCommit;
-        //Expect latest value.
-        Value := ReadTheRow;
-        if Value = MAGIC_FIELD_VALUE_2 then
-          LogTimeIncr('Readback miniCR (1) OK')
-        else
-          LogTimeIncr('Readback miniCR (1) Failed.');
-        DBSync.MiniRollback();
-        //Expect older value.
-        Value := ReadTheRow;
-        if Value = MAGIC_FIELD_VALUE then
-          LogTimeIncr('Readback miniCR (2) OK')
-        else
-          LogTimeIncr('Readback miniCR (2) Failed.');
-        DBSync.MiniRollback();
-        //Expect no row in table.
-        try
-          Value := ReadTheRow;
-          LogTimeIncr('Readback miniCR (3) Failed')
-        except
-          on Exception do
-            LogTimeIncr('Readback miniCR (3) OK')
-        end;
-        DBSync.MiniRollback();
-        //Expect no table.
-        Handle := DBAPI.OpenTableOrKey('Test table');
-        if Assigned(Handle) then
-          LogTimeIncr('Readback miniCR (4) Failed.')
-        else
-          LogTimeIncr('Readback miniCR (4) OK.');
-      finally
-        DbSync.Free;
-      end;
-    finally
-      DBAPI.Free;
-    end;
-    //Have rolled back so far here that this should not make any changes (check in debugger).
-    Trans.CommitAndFree;
-    LogTimeIncr('Readback miniCR OK')
-  except
-    on E: Exception do
-    begin
-      Trans.RollbackAndFree;
-      LogTimeIncr('Readback miniCR Failed');
-      raise;
-    end;
-  end;
-
-  //And now try multi-level rollback.
-  ResetClick(Sender);
-  LogTimeIncr('Multi-level rollback...');
-  Trans := FSession.StartTransaction(amReadWrite);
-  try
-    DBAPI := Trans.GetAPI;
-    try
-      DbSync := DBAPI.GetApiObject(APIUserTransactionControl) as TMemAPIUserTransactionControl;
-      try
-        CreateTheTable;
-        DbSync.MiniCommit;
-        AddARow;
-        DbSync.MiniCommit;
-        ChangeRowData;
-        DbSync.MiniCommit;
-        ChangeRowData; //So buffered, but don't mini-commit.
-      finally
-        DbSync.Free;
-      end;
-    finally
-      DBAPI.Free;
-    end;
-    Trans.RollbackAndFree;
-    LogTimeIncr('Multi-level rollback OK')
-  except
-    on E: Exception do
-    begin
-      LogTimeIncr('Multi-level rollback failed.');
-      raise;
-    end;
-  end;
-
-  //And now bookmark.
-  ResetClick(Sender);
-  LogTimeIncr('Bookmark and rollback...');
-  Trans := FSession.StartTransaction(amReadWrite);
-  try
-    DBAPI := Trans.GetAPI;
-    try
-      DbSync := DBAPI.GetApiObject(APIUserTransactionControl) as TMemAPIUserTransactionControl;
-      try
-        CreateTheTable;
-        DbSync.MiniCommit;
-
-        AddARow;
-        Bookmark := DbSync.Bookmark;
-        ChangeRowData;
-
-        Value := ReadTheRow;
-        if Value = MAGIC_FIELD_VALUE_2 then
-          LogTimeIncr('Bookmark (1) OK')
-        else
-          LogTimeIncr('Bookmark (1) Failed.');
-
-        DbSync.MiniCommit;
-
-        Value := ReadTheRow;
-        if Value = MAGIC_FIELD_VALUE_2 then
-          LogTimeIncr('Bookmark (2) OK')
-        else
-          LogTimeIncr('Bookmark (2) Failed.');
-
-        DbSync.MiniRollbackToBookmark(Bookmark);
-
-        Value := ReadTheRow;
-        if Value = MAGIC_FIELD_VALUE then
-          LogTimeIncr('Bookmark (3) OK')
-        else
-          LogTimeIncr('Bookmark (3) Failed.');
-
-      finally
-        DbSync.Free;
-      end;
-    finally
-      DBAPI.Free;
-    end;
-    Trans.RollbackAndFree;
-    LogTimeIncr('Rollback after bookmark OK');
-  except
-    on E: Exception do
-    begin
-      Trans.RollbackAndFree;
-      LogTimeIncr('Rollback after bookmark failed.');
-      raise;
-    end;
-  end;
-end;
-
 procedure TForm1.ResetClick(Sender: TObject);
 var
   Trans: TMemDBTransaction;
@@ -3615,6 +3604,7 @@ begin
 end;
 
 initialization
+  Randomize;
   LIMIT_CUBEROOT := Trunc(Math.Power(LIMIT, (1/3)));
   if LIMIT_CUBEROOT < 2 then
     LIMIT_CUBEROOT := 2;

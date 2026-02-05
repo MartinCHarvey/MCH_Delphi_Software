@@ -129,10 +129,7 @@ type
                  APIDatabase,
                  APITableMetadata,
                  APITableData,
-                 APIForeignKey,
-                 APIUserTransactionControl,
-                 APIDatabaseComposite,
-                 APITableComposite);
+                 APIForeignKey);
 
   TMDBIsoStrings = array[TMDBIsolationLevel] of string;
   TMDBABStrings = array[TABSelection] of string;
@@ -140,19 +137,6 @@ type
   TMainIndexClassStrings = array[TMainIndexClass] of string;
   TInternalIndexClassStrings = array[TInternalIndexClass] of string;
   TSubIndexClassStrings = array[TSubIndexClass] of string;
-
-{$IFDEF USE_TRACKABLES}
-  TMemDBMiniSet = class(TTrackable)
-{$ELSE}
-  TMemDBMiniSet = class
-{$ENDIF}
-  private
-    FFwdStream, FInverseStream: TStream;
-  public
-    destructor Destroy; override;
-    property FwdStream: TStream read FFwdStream write FFwdStream;
-    property InverseStream: TStream read FInverseStream write FInverseStream;
-  end;
 
   TMemDBTempFileStream = class(TWriteCachedFileStream)
   private
@@ -621,15 +605,6 @@ begin
     raise EMemDBInternalException.Create(S_INTERNAL_INDEX_HAS_STORE_LINK);
   if Store.AddIndex(TMemDBIndexNode, @FCurrentTagStruct, false) <> rvOK then
     raise EMemDBInternalException.Create(S_INDEX_ADD_FAILED);
-end;
-
-{ TMemDBMiniSet }
-
-destructor TMemDbMiniSet.Destroy;
-begin
-  FFwdStream.Free;
-  FInverseStream.Free;
-  inherited;
 end;
 
 { TMemDBTempFileStream }
