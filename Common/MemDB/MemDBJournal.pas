@@ -835,17 +835,13 @@ var
   FlushOK: boolean;
   ErrMsg: string;
 
-  procedure CopyTransactionStreamsToOutput;
+  procedure CopyTransactionStreamToOutput;
   var
-    i: integer;
     S: TStream;
   begin
-    for i := 0 to Pred(Transaction.FinalStreams.Count) do
-    begin
-      S := TObject(Transaction.FinalStreams[i]) as TStream;
-      S.Seek(0, TSeekOrigin.soBeginning);
-      OutputStream.CopyFrom(S, S.Size);
-    end;
+    S := Transaction.Changeset;
+    S.Seek(0, TSeekOrigin.soBeginning);
+    OutputStream.CopyFrom(S, S.Size);
   end;
 
 begin
@@ -859,7 +855,7 @@ begin
         Transaction := TMemDbTransaction(Transactions[idx]);
         Assert(Transaction.Mode = amReadWrite);
         DoFlush := DoFlush or (Transaction.Sync = amFlushBuffers);
-        CopyTransactionStreamsToOutput;
+        CopyTransactionStreamToOutput;
       end;
       if DoFlush then
       begin

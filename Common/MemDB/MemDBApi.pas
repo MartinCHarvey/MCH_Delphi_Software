@@ -40,7 +40,6 @@ type
   TMemDBDatabase = class;
   TMemDBTable = class;
   TMemDBForeignKey = class;
-  TMemDbBookMark = type integer;
 
   //API objects.
   //These hold per-transaction state for users as well
@@ -58,19 +57,8 @@ type
   public
     //Really don't call any of these functions if you're an end user.
     procedure JournalReplayCycleV3(JournalEntry: TStream; Initial: boolean);
-    procedure UserCommitCycleV3;
+    function UserCommitCycleV3: TStream;
     procedure UserRollbackCycleV3;
-  end;
-
-  TMemAPIUserTransactionControl = class(TMemAPIDbTopLevel)
-  public
-    //But calling these as a user inside a transaction is OK.
-    //You can, however, tie yourself in knots, so be careful!
-    procedure GetChangesetsInfo(var MiniChangesets: integer; var Buffered: boolean);
-    procedure MiniCommit;
-    function MiniRollback: boolean; //Returns whether did anything.
-    function Bookmark: TMemDbBookMark;
-    function MiniRollbackToBookmark(Bookmark: TMemDbBookmark): boolean;
   end;
 
   TMemAPIDatabase = class(TMemAPIDBTopLevel)
@@ -79,12 +67,8 @@ type
     function OpenTableOrKey(Name: string): TMemDBHandle;
     function CreateForeignKey(Name: string): TMemDBHandle;
     procedure RenameTableOrKey(OldName, NewName: string);
-    procedure DeleteTableOrKey(Name: string; Force: boolean = true);
+    procedure DeleteTableOrKey(Name: string);
     function GetEntityNames: TStringList;
-  end;
-
-  TMemAPIDatabaseComposite = class(TMemAPIDBTopLevel)
-    procedure ReversibleDeleteTable(Name: string);
   end;
 
   TMemAPITable = class(TMemDBAPI)
@@ -114,13 +98,6 @@ type
                        var IndexAttrs: TMDBIndexAttrs): boolean;
     function GetIndexNames: TStringList;
   end;
-
-  //TODO - Can remove TMemAPIBufState, got there with a cursor
-  //and an added variable.
-  TMemAPIBufState = (bsUnknown,
-                     bsLocated,
-                     bsRead,
-                     bsModified);
 
   TMemAPITableData = class(TMemAPITable)
   private
@@ -163,10 +140,6 @@ type
     function RowSelected: boolean;
   end;
 
-  TMemAPITableComposite = class (TMemAPITable)
-    procedure ReversibleClearRows;
-  end;
-
   //Foreign key operations.
   TMemAPIForeignKey = class(TMemDBAPI)
   protected
@@ -183,10 +156,6 @@ type
                                   var IndexName: string);
   end;
 
-  //TMemAPIForeignKeyComposite?
-  ///////////////////////////////////////////////////////////////////
-
-
   //Extensions to double buffered persistent objects to perform
   //API operations. These perform consistency checking on the operations,
   //and do not maintain an per-transaction state.
@@ -196,7 +165,7 @@ type
     function API_OpenTableOrKey(Iso: TMDBIsolationLevel; Name: string): TMemDBHandle;
     function API_CreateForeignKey(Name: string): TMemDBHandle;
     procedure API_RenameTableOrKey(Iso: TMDBIsolationLevel; OldName, NewName: string);
-    function API_DeleteTableOrKey(Iso: TMDBIsolationLevel; Name: string; DryRun: boolean = false): boolean;
+    procedure API_DeleteTableOrKey(Iso: TMDBIsolationLevel; Name: string);
     function API_GetEntityNames(Iso: TMDBIsolationLevel): TStringList;
     function HandleInterfacedObjRequest(Transaction: TObject; ID: TMemDBAPIId): TMemDBAPI;override;
   end;
@@ -302,10 +271,6 @@ const
   S_API_FIND_EDGE_FIRST_OR_LAST = 'FindEdgeByIndex requires you to specify the first or last position.';
   S_API_NO_ROW_SELECTED = 'No row selected/located for read, write, or delete';
   S_API_TOO_MANY_INDICES = 'Too many indices referring to the same field';
-  S_API_MINI_COMMIT_OVER_IRREVERSIBLE = 'Cannot perform a mini-commit after a previous force delete,' +
-                                        'changes are irreversible. Commit or rollback the transaction.';
-  S_MINI_ROLLBACK_NOT_SEQUENTIAL = 'Bookmark provided seems not to be in the sequence of previous changesets in this transaction.';
-
   S_API_ENTITY_NAME_CONFLICT =
     'Something already exists with that name. Perhaps commit previous renames / deletions?';
   S_API_ENTITY_NAME_NOT_FOUND = 'Couldn''t find anything with that name.';
@@ -368,9 +333,11 @@ begin
 
   Pos := JournalEntry.Position;
   Tag := RdTag(JournalEntry);
-  if not (Tag in [mstDBStart, mstMultiChangesetsStart]) then
+  if not (Tag in [mstDBStart, DEPRECATED_mstMultiChangesetsStart]) then
     raise EMemDBException.Create(S_WRONG_TAG);
-  Multi := Tag = mstMultiChangesetsStart;
+
+  //TODO - Remove Multi support eventually.
+  Multi := Tag = DEPRECATED_mstMultiChangesetsStart;
   if not Multi then
     JournalEntry.Seek(Pos, TSeekOrigin.soBeginning);
 
@@ -394,6 +361,8 @@ begin
     finally
       DB.PostCommitCleanup(Reason);
     end;
+
+    //TODO - Remove Multi support eventually.
     if Multi then
     begin
       //We want to be able to replay entire multi-changeset
@@ -401,9 +370,9 @@ begin
       //stream should bomb out on a failed read.
       Pos := JournalEntry.Position;
       Tag := RdTag(JournalEntry);
-      if not (Tag in [mstDBStart, mstMultiChangesetsEnd]) then
+      if not (Tag in [mstDBStart, DEPRECATED_mstMultiChangesetsEnd]) then
         raise EMemDBException.Create(S_WRONG_TAG);
-      Stop := Tag = mstMultiChangesetsEnd;
+      Stop := Tag = DEPRECATED_mstMultiChangesetsEnd;
       if not Stop then
       begin
         JournalEntry.Seek(Pos, TSeekOrigin.soBeginning);
@@ -417,258 +386,39 @@ begin
   until Stop;
 end;
 
-procedure TMemAPIDatabaseInternal.UserCommitCycleV3;
+function TMemAPIDatabaseInternal.UserCommitCycleV3: TStream;
 var
-  PreMarker, PostMarker: TStream;
-  FinalPair, MiniSet: TMemDBMiniSet;
   T: TMemDBTransaction;
-  MiniCnt: integer;
-  SrcIdx, DstIdx: integer;
 begin
   T := FAssociatedTransaction as TMemDBTransaction;
   Assert(Assigned(T));
-  PreMarker := nil;
-  PostMarker := nil;
-  FinalPair := nil;
-  MiniCnt := T.MiniChangesets.Count;
+  Assert(not Assigned(T.Changeset));
+  result := MakeStream(T.Session.TempStorageMode);
   try
-    FinalPair := TMemDBMiniSet.Create;
-    FinalPair.FwdStream := MakeStream(T.Session.TempStorageMode);
-{$IFOPT C+}
-    FinalPair.InverseStream := MakeStream(T.Session.TempStorageMode);
-{$ELSE}
-    FinalPair.InverseStream := TNullStream.Create;
-{$ENDIF}
-
-    PreMarker := TMemoryStream.Create;
-    PostMarker := TMemoryStream.Create;
-    WrTag(PreMarker,  mstMultiChangesetsStart);
-    WrTag(PostMarker, mstMultiChangesetsEnd);
-
-    Assert(Assigned(T.MiniChangesets));
-    Assert(Assigned(T.FinalStreams));
-    Assert(T.FinalStreams.Count = 0);
-
-    T.FinalStreams.Count := T.MiniChangesets.Count + 3;
     try
       DB.PreCommit(mtrUserOp);
-      DB.ToJournal(FinalPair.FwdStream, FinalPair.InverseStream);
-{$IFOPT C+}
-        FinalPair.FwdStream.Seek(0, TSeekOrigin.soBeginning);
-        FinalPair.InverseStream.Seek(0, TSeekOrigin.soBeginning);
-        DB.AssertStreamsInverse(FinalPair.FwdStream, FinalPair.InverseStream);
-{$ENDIF}
+      DB.ToJournal(result);
       DB.Commit(mtrUserOp);
     finally
       DB.PostCommitCleanup(mtrUserOp);
     end;
-    T.MiniChangesets.Add(FinalPair);
   except
-    on E: Exception do
+    on Exception do
     begin
-      FinalPair.Free;
-      PreMarker.Free;
-      PostMarker.Free;
-      T.MiniChangesets.Count := MiniCnt;
-      T.FinalStreams.Count := 0;
+      result.Free;
       raise;
     end;
   end;
-  //This just a little list rearrangement, no mem alloc,
-  //so expect no exception.
-  T.FinalStreams.Items[0] := PreMarker;
-  DstIdx := 1;
-  for SrcIdx := 0 to Pred(T.MiniChangesets.Count) do
-  begin
-    MiniSet := TObject(T.MiniChangesets.Items[SrcIdx]) as TMemDBMiniSet;
-    T.FinalStreams.Items[DstIdx] := MiniSet.FwdStream;
-    MiniSet.FwdStream := nil;
-    Inc(DstIdx);
-  end;
-  T.FinalStreams.Items[DstIdx] := PostMarker;
-  Inc(DstIdx);
-  Assert(DstIdx = T.FinalStreams.Count);
 end;
 
-
 procedure TMemAPIDatabaseInternal.UserRollbackCycleV3;
-var
-  T: TMemDBTransaction;
-  i: integer;
-  MiniSet: TMemDBMiniSet;
 begin
-  T := FAssociatedTransaction as TMemDBTransaction;
-  Assert(Assigned(T));
+  Assert(Assigned(FAssociatedTransaction));
   try
     DB.Rollback(mtrUserOp);
   finally
     DB.PostRollbackCleanup(mtrUserOp);
   end;
-  //Exceptions here handled by DB state -> error.
-  //Going back by going forward...
-  for i := Pred(T.MiniChangesets.Count) downto 0 do
-  begin
-    MiniSet := TObject(T.MiniChangesets.Items[i]) as TMemDBMiniset;
-    try
-      MiniSet.InverseStream.Seek(0, soBeginning);
-      DB.FromJournal(MiniSet.InverseStream);
-      DB.PreCommit(mtrUserOpMultiRollback);
-      DB.Commit(mtrUserOpMultiRollback);
-    finally
-      DB.PostCommitCleanup(mtrUserOpMultiRollback);
-    end;
-  end;
-end;
-
-{ TMemAPIUserTransactionControl }
-
-procedure TMemAPIUserTransactionControl.GetChangesetsInfo(var MiniChangesets: integer; var Buffered: boolean);
-var
-  T: TMemDBTransaction;
-begin
-  T := FAssociatedTransaction as TMemDBTransaction;
-  Assert(Assigned(T));
-  T.Session.StartMiniOp(T);
-  try
-    MiniChangesets := T.MiniChangesets.Count;
-    Buffered := DB.AnyChangesAtAll;
-  finally
-    T.Session.FinishMiniOp(T);
-  end;
-end;
-
-procedure TMemAPIUserTransactionControl.MiniCommit;
-var
-  T: TMemDBTransaction;
-  MiniPair: TMemDBMiniSet;
-  ChgCnt: integer;
-begin
-  CheckReadWriteTransaction;
-  T := FAssociatedTransaction as TMemDBTransaction;
-  if T.BufChangesOneWay then
-    raise EMemDBAPIException.Create(S_API_MINI_COMMIT_OVER_IRREVERSIBLE);
-
-  T.Session.StartMiniOp(T);
-  try
-    MiniPair := nil;
-    ChgCnt := T.MiniChangesets.Count;
-    try
-      MiniPair := TMemDBMiniSet.Create;
-      MiniPair.FwdStream := MakeStream(T.Session.TempStorageMode);
-      MiniPair.InverseStream := MakeStream(T.Session.TempStorageMode);
-      T.MiniChangesets.Count := T.MiniChangesets.Count + 1;
-      try
-        DB.PreCommit(mtrUserOp);
-        DB.ToJournal(MiniPair.FwdStream, MiniPair.InverseStream);
-{$IFOPT C+}
-        MiniPair.FwdStream.Seek(0, TSeekOrigin.soBeginning);
-        MiniPair.InverseStream.Seek(0, TSeekOrigin.soBeginning);
-        DB.AssertStreamsInverse(MiniPair.FwdStream, MiniPair.InverseStream);
-{$ENDIF}
-        DB.Commit(mtrUserOp);
-      finally
-        DB.PostCommitCleanup(mtrUserOp);
-      end;
-      T.MiniChangesets[Pred(T.MiniChangesets.Count)] := MiniPair;
-    except
-      on E: Exception do
-      begin
-        MiniPair.Free;
-        T.MiniChangesets.Count := ChgCnt;
-        raise;
-      end;
-    end;
-  finally
-    T.Session.FinishMiniOp(T);
-  end;
-end;
-
-function TMemAPIUserTransactionControl.MiniRollback: boolean;
-var
-  T: TMemDBTransaction;
-  MiniSet: TMemDBMiniSet;
-  MiniCnt: integer;
-
-begin
-  result := false;
-  CheckReadWriteTransaction;
-  T := FAssociatedTransaction as TMemDbTransaction;
-  Assert(Assigned(T));
-  T.Session.StartMiniOp(T);
-  try
-    if DB.AnyChangesAtAll then
-    begin
-      try
-        DB.Rollback(mtrUserOp);
-      finally
-        Db.PostRollbackCleanup(mtrUserOp);
-      end;
-      result := true;
-    end
-    else if T.MiniChangesets.Count > 0 then
-    begin
-      //Back by going forwards.
-      //However, in this case, don't put DB in error state if rollback
-      //fails, (although arguably we should). It *might* still be possible
-      //to commit xaction, and if a "higher level" rollback fails, we can
-      //"properly" error things there.
-      //Just don't discard state until rollback is done.
-      MiniCnt := Pred(T.MiniChangesets.Count);
-      MiniSet := TObject(T.MiniChangesets.Items[MiniCnt]) as TMemDBMiniset;
-      try
-        MiniSet.InverseStream.Seek(0, soBeginning);
-        DB.FromJournal(MiniSet.InverseStream);
-        DB.PreCommit(mtrUserOpMultiRollback);
-        DB.Commit(mtrUserOpMultiRollback);
-      finally
-        DB.PostCommitCleanup(mtrUserOpMultiRollback);
-      end;
-      MiniSet.Free;
-      T.MiniChangesets.Count := MiniCnt;
-      result := true;
-    end;
-  finally
-    T.Session.FinishMiniOp(T);
-  end;
-end;
-
-function TMemAPIUserTransactionControl.Bookmark: TMemDbBookMark;
-var
-  MiniCount: integer;
-  Buffered: boolean;
-begin
-  MiniCommit;
-  GetChangesetsInfo(MiniCount, Buffered);
-  Assert(not Buffered);
-  result := TMemDBBookMark(MiniCount);
-end;
-
-function TMemAPIUserTransactionControl.MiniRollbackToBookmark(Bookmark: TMemDbBookmark): boolean;
-var
-  MiniCount: integer;
-  Buffered: boolean;
-  rbRes: boolean;
-begin
-  result := false;
-  GetChangesetsInfo(MiniCount, Buffered);
-  if (Integer(Bookmark) > MiniCount) or (Integer(Bookmark) < 0) then
-    raise EMemDBAPIException.Create(S_MINI_ROLLBACK_NOT_SEQUENTIAL);
-  if Buffered then
-  begin
-    rbRes := MiniRollback;
-    Assert(rbRes);
-    result := result or rbRes;
-  end;
-  while MiniCount > Bookmark do
-  begin
-    rbRes := MiniRollback;
-    Assert(rbRes);
-    result := result or rbRes;
-    Dec(MiniCount);
-  end;
-  GetChangesetsInfo(MiniCount, Buffered);
-  Assert(not Buffered);
-  Assert(MiniCount = Integer(bookmark));
 end;
 
 { TMemAPIDatabase }
@@ -696,71 +446,15 @@ begin
   DB.API_RenameTableOrKey(Isolation, OldName, NewName);
 end;
 
-procedure TMemAPIDatabase.DeleteTableOrKey(Name: string; Force: boolean);
-var
-  NoReverse: boolean;
-  CompAPI: TMemAPIDatabaseComposite;
-  T: TMemDbTransaction;
-  AB: TABSelection;
-  Entity: TMemDBEntity;
-  tmpIdx: integer;
+procedure TMemAPIDatabase.DeleteTableOrKey(Name: string);
 begin
   CheckReadWriteTransaction;
-  NoReverse := false;
-  AB := IsoToAB(Isolation);
-  //Exists.
-  Entity := DB.EntitiesByName(AB, Name, tmpIdx);
-  if not Assigned(Entity) then
-    raise EMemDbAPIException.Create(S_API_ENTITY_NAME_NOT_FOUND);
-
-  if Force or (not (Entity is TMemDBTablePersistent)) then
-    NoReverse := DB.API_DeleteTableOrKey(Isolation, Name)
-  else
-  begin
-    CompAPI := self.GetApiObject(APIDatabaseComposite) as TMemAPIDatabaseComposite;
-    try
-      CompAPI.ReversibleDeleteTable(Name);
-    finally
-      CompAPI.Free;
-    end;
-  end;
-
-  if NoReverse then
-  begin
-    T := FAssociatedTransaction as TMemDBTransaction;
-    T.BufChangesOneWay := true;
-  end;
+  DB.API_DeleteTableOrKey(Isolation, Name);
 end;
 
 function TMemAPIDatabase.GetEntityNames: TStringList;
 begin
   result := DB.API_GetEntityNames(Isolation);
-end;
-
-{ TMemAPIDatabaseComposite }
-
-procedure TMemAPIDatabaseComposite.ReversibleDeleteTable(Name: string);
-var
-  Handle: TMemDBHandle;
-  NoReverse: boolean;
-  TblComp: TMemAPITableComposite;
-begin
-  //Re-get object handles after mini-commit, they might have been deleted.
-  Handle := DB.API_OpenTableOrKey(Isolation, Name);
-  TblComp := GetApiObjectFromHandle(Handle, APITableComposite) as TMemAPITableComposite;
-  try
-    if TblComp.Table.Deleted then
-      exit; //Metadata indicates this table will be going away at next (mini) commit.
-
-    //Do a dry-run check (better than committing A/B to bookmark and then rolling
-    // back to that bookmark).
-    DB.API_DeleteTableOrKey(Isolation, Name, true);
-    TblComp.ReversibleClearRows;
-  finally
-    TblComp.Free;
-  end;
-  NoReverse := DB.API_DeleteTableOrKey(Isolation, Name);
-  Assert(not NoReverse);
 end;
 
 { TMemAPITable }
@@ -1071,64 +765,6 @@ begin
   result := Assigned(FCursor);
 end;
 
-{ TMemAPITableComposite }
-
-procedure TMemAPITableComposite.ReversibleClearRows;
-var
-  Trans: TMemDBTransaction;
-  DBAPI: TMemAPIDatabase;
-  UTC: TMemAPIUserTransactionControl;
-  TblData: TMemAPITableData;
-  DeletedStuff, OK: boolean;
-begin
-  Trans := self.FAssociatedTransaction as TMemDbTransaction;
-  DBAPI := Trans.GetAPI;
-  try
-    UTC := DBAPI.GetApiObject(APIUserTransactionControl) as TMemAPIUserTransactionControl;
-    try
-      Assert(not Table.Deleted);
-      //Can mini-commit without the table going away.
-      if Table.AnyChangesAtAll then
-        UTC.MiniCommit;
-      //State of table rows is all fresh.
-      TblData := GetAPIObject(APITableData) as TMemAPITableData;
-      DeletedStuff := false;
-      try
-        case Isolation of
-          ilDirtyRead:
-          begin
-            OK := TblData.Locate(ptFirst, '');
-            while(OK) do
-            begin
-              TblData.Delete;
-              DeletedStuff := true;
-              OK := TblData.Locate(ptFirst, '');
-            end;
-          end;
-          ilCommittedRead:
-          begin
-            OK := TblData.Locate(ptFirst, '');
-            while(OK) do
-            begin
-              TblData.Delete;
-              DeletedStuff := true;
-              OK := TblData.Locate(ptNext, '');
-            end;
-          end;
-        end;
-      finally
-        TblData.Free;
-      end;
-      if DeletedStuff then
-        UTC.MiniCommit;
-    finally
-      UTC.Free;
-    end;
-  finally
-    DBAPI.Free;
-  end;
-end;
-
 { TMemAPIForeignKey }
 
 function TMemAPIForeignKey.GetInterfacedObject: TMemDBForeignKey;
@@ -1237,8 +873,7 @@ begin
 end;
 
 //This delete is pretty much a force delete.
-//Returns whether op is noninvertible.
-function TMemDBDatabase.API_DeleteTableOrKey(Iso: TMDBIsolationLevel; Name: string; DryRun: boolean): boolean;
+procedure TMemDBDatabase.API_DeleteTableOrKey(Iso: TMDBIsolationLevel; Name: string);
 var
   TmpIdx: integer;
   Entity: TMemDBEntity;
@@ -1251,17 +886,8 @@ begin
     raise EMemDbAPIException.Create(S_API_ENTITY_NAME_NOT_FOUND);
   //Referenced by anything else?
   if Entity is TMemDbTablePersistent then
-  begin
-    //Referenced, bomb out.
     CheckAPITableDelete(Iso, Name);
-    //Does the table actually have any data in it?
-    result := (Entity as TMemDbTablePersistent).HasTableData;
-    //If so, this op is noninvertible.
-  end
-  else
-    result := false;
-  if not DryRun then
-    Entity.Delete;
+  Entity.Delete;
 end;
 
 function TMemDBDatabase.API_GetEntityNames(Iso: TMDBIsolationLevel): TStringList;
@@ -1291,8 +917,6 @@ begin
     begin
       case ID of
         APIDatabase: result := TMemAPIDatabase.Create;
-        APIUserTransactionControl: result := TMemAPIUserTransactionControl.Create;
-        APIDatabaseComposite: result := TMemAPIDatabaseComposite.Create;
       end;
     end;
   end;
@@ -1608,7 +1232,6 @@ begin
       case ID of
         APITableMetadata: result := TMemAPITableMetadata.Create;
         APITableData: result := TMemAPITableData.Create;
-        APITableComposite: result := TMemAPITableComposite.Create;
       end;
     end;
   end;

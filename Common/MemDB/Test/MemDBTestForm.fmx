@@ -137,13 +137,4 @@ object Form1: TForm1
     Width = 80.000000000000000000
     OnClick = ChkBlobsClick
   end
-  object MiniCommit: TButton
-    Height = 22.000000000000000000
-    Position.X = 96.000000000000000000
-    Position.Y = 72.000000000000000000
-    TabOrder = 14
-    Text = 'Mini Commit'
-    Width = 80.000000000000000000
-    OnClick = MiniCommitClick
-  end
 end

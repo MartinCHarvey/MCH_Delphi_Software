@@ -40,7 +40,7 @@ type
   TMemDB = class;
   TMemDBSession = class;
 
-  TInProgressType = (tiptNone, tiptCommitRollback, tiptMiniOp);
+  TInProgressType = (tiptNone, tiptCommitRollback);
 
 {$IFDEF USE_TRACKABLES}
   TMemDBTransaction = class(TTrackable)
@@ -56,11 +56,7 @@ type
     FSync: TMDBSyncMode;
     FIsolation: TMDBIsolationLevel;
     //Changeset states.
-    FMiniChangesets: TList;
-    FFinalStreams: TList;
-    //If A/B changes made by this transaction do not have an inverse.
-    FBufChangesOneWay: boolean;
-    //Local synchronization.
+    FChangeset: TStream;
     FCommitRollbackInProgress: TInProgressType;
     FCommitedOrRolledBack: boolean;
     FFlushFinishedEvent: TEvent;
@@ -81,11 +77,7 @@ type
     property Isolation: TMDBIsolationLevel read FIsolation;
     property FlushFinishedEvent: TEvent read FFlushFinishedEvent;
     property ParentSession: TMemDBSession read FSession;
-    //List of MiniSets, each miniset has fwd and inverse stream.
-    property MiniChangesets: TList read FMiniChangesets;
-    //List of streams, 1st and last are tokens, rest are changesets
-    property FinalStreams: TList read FFinalStreams;
-    property BufChangesOneWay: boolean read FBufChangesOneWay write FBufChangesOneWay;
+    property Changeset: TStream read FChangeset;
     property Session: TMemDBSession read FSession;
   end;
 
@@ -112,10 +104,6 @@ type
     function StartTransaction(Mode: TMDBAccessMode;
                               Sync: TMDBSyncMode = amLazyWrite;
                               Iso: TMDBIsolationLevel = ilDirtyRead): TMemDBTransaction;
-
-    procedure StartMiniOp(Transaction: TMemDBTransaction);
-    procedure FinishMiniOp(Transaction: TMemDBTransaction);
-
     destructor Destroy; override;
     property ParentDB: TMemDB read FDB;
     property TempStorageMode:TTempStorageMode read
@@ -144,9 +132,6 @@ type
     FLastError: string;
     FOnUIStateChange: TNotifyEvent;
   protected
-    procedure StartMiniOp(Transaction: TMemDBTransaction);
-    procedure FinishMiniOp(Transaction: TMemDBTransaction);
-
     procedure RemoveSession(Session: TMemDBSession);
     procedure RemoveTransaction(Transaction: TMemDBTransaction; Commit: boolean);
 
@@ -197,9 +182,7 @@ const
   S_ERRORPHASE_ERROR = 'Can''t start transaction, error state: ';
   S_BADPHASE_ERROR = 'Can''t start transaction, DB not running or closing.';
   S_REINIT_DIFF_LOCATION = 'Database loaded at different location, unload first.';
-  S_MULTI_ROLLBACK_FAILED = 'Multi-changeset rollback failed, state uncertain: ';
-  S_MINIOP_TRANSACTION_FINISHED = 'Mini-commit/rollback: cannot. Transaction already committed or rolled back';
-  S_MINIOP_CONCURRENT = 'Mini-commit/rollback: cannot. Other mini (or full size) commit/rollbacks in progress';
+  S_UNEXPECTED_ROLLBACK_FAILED = 'Unexpected rollback failed, state uncertain: ';
 
   { TMemDBTransaction }
 
@@ -235,31 +218,14 @@ end;
 constructor TMemDBTransaction.Create;
 begin
   inherited;
-  FMiniChangesets := TList.Create;
-  FFinalStreams := TList.Create;
   AddRef;
 end;
 
 destructor TMemDBTransaction.Destroy;
-var
-  i: integer;
-  O: Tobject;
 begin
   if not FCommitedOrRolledBack then
     raise EMemDBAPIException.Create(S_COMMIT_OR_ROLLBACK_BEFORE_FREE);
-  //Generally will do nothing if previous commit or rollback was successful
-  for i := 0 to Pred(FMiniChangesets.Count) do
-  begin
-    O := FMiniChangesets.Items[i];
-    O.Free;
-  end;
-  FMiniChangesets.Free;
-  for i := 0 to Pred(FFinalStreams.Count) do
-  begin
-    O := FFinalStreams.Items[i];
-    O.Free;
-  end;
-  FFinalStreams.Free;
+  FChangeset.Free;
   inherited;
 end;
 
@@ -285,17 +251,6 @@ begin
   result := FDB.StartTransaction(Mode, Sync, Iso, self);
 end;
 
-procedure TMemDBSession.StartMiniOp(Transaction: TMemDBTransaction);
-begin
-  FDB.StartMiniOp(Transaction);
-end;
-
-procedure TMemDBSession.FinishMiniOp(Transaction: TMemDBTransaction);
-begin
-  FDB.FinishMiniOp(Transaction);
-end;
-
-
 destructor TMemDBSession.Destroy;
 begin
   FDB.RemoveSession(self);
@@ -303,32 +258,6 @@ begin
 end;
 
 { TMemDB }
-
-procedure TMemDB.StartMiniOp(Transaction: TMemDBTransaction);
-begin
-  FSessionLock.Acquire;
-  try
-    if Transaction.FCommitedOrRolledBack then
-      raise EMemDBException.Create(S_MINIOP_TRANSACTION_FINISHED);
-    if (Transaction.FCommitRollbackInProgress <> tiptNone) then
-      raise EMemDBException.Create(S_MINIOP_CONCURRENT);
-    Transaction.FCommitRollbackInProgress := tiptMiniOp;
-  finally
-    FSessionLock.Release;
-  end;
-end;
-
-procedure TMemDB.FinishMiniOp(Transaction: TMemDBTransaction);
-begin
-  FSessionLock.Acquire;
-  try
-    Assert(not Transaction.FCommitedOrRolledBack);
-    Assert(Transaction.FCommitRollbackInProgress = tiptMiniOp);
-    Transaction.FCommitRollbackInProgress := tiptNone;
-  finally
-    FSessionLock.Release;
-  end;
-end;
 
 function TMemDB.CheckClientsDone: boolean;
 begin
@@ -343,6 +272,7 @@ var
   WaitJournalDone: boolean;
   API: TMemAPIDatabaseInternal;
   AsyncError: boolean;
+  CommitStream: TStream;
 begin
   WaitJournalDone := false;
   AsyncError := false; //Placate compiler.
@@ -383,10 +313,12 @@ begin
 
             //This may raise exceptions if pre-commit checks fail.
             //Arranges streams in transaction for final journalling;
-            API.UserCommitCycleV3;
+            CommitStream := API.UserCommitCycleV3;
 
-            //Exceptions after here less likely.
+            //Exceptions after here less likely / not expected.
             Transaction.AddRef;
+            Assert(not Assigned(Transaction.Changeset));
+            Transaction.FChangeset := CommitStream;
             //And only set up the wait if no prior exception.
             WaitJournalDone := (Transaction.FMode = amReadWrite) and Commit and
               (Transaction.FSync = amFlushBuffers);
@@ -401,9 +333,8 @@ begin
           else
           begin
             try
-              //This may raise exceptions if things go horribly wrong.
-              //Unlike mini-rollbacks, we really require that this
-              //full rollback works.
+              //Since everything is multi-buffered, barring out of memory
+              //exceptions we do not expect this to fail.
               API.UserRollbackCycleV3;
             except
               on E: Exception do
@@ -414,7 +345,7 @@ begin
                   if FPhase = mdbRunning then
                   begin
                     FPhase := mdbError;
-                    FLastError := S_MULTI_ROLLBACK_FAILED + E.Message;
+                    FLastError := S_UNEXPECTED_ROLLBACK_FAILED + E.Message;
                   end;
                 finally
                   FSessionLock.Release;
