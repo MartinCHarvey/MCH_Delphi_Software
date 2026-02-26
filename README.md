@@ -33,6 +33,9 @@ Files / Folders:
     - Graph method has errors, but included for interest.
     - Fastest is "CellCountMT", still being optimised.
 
+- NQueens: Solves the N queens problem.
+  - Another, perhaps simpler, example of the Exact cover algorithm.
+
 - MFract.
   - A simple fractal generator (Mandelbrot / Julia). Install MCHComponents bpl first.
 
