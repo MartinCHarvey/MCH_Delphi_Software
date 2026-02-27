@@ -749,6 +749,9 @@ begin
   CheckReadWriteTransaction;
   if not Assigned(FCursor) then
     raise EMemDBAPIException.Create(S_API_NO_ROW_SELECTED);
+  //TODO - Find some way of storing which Idx (or lack of) we
+  //are iterating on and increment cursor with respect to that,
+  //making delete behaviour more intuitive?
   NextCursor := Table.API_DataLocate(FIsolation, FCursor, ptNext, '');
   Table.API_DataRowDelete(FIsolation, FCursor);
   if Isolation < TMDBIsolationLevel.ilCommittedRead  then
