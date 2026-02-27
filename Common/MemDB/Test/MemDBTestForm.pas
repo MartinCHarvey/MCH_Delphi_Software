@@ -22,7 +22,8 @@ type
     MFFKeyTest: TButton;
     BigTable: TButton;
     BigTblMod: TButton;
-    ChkBlobs: TButton;
+    TstBlobs: TButton;
+    MultiTrans: TButton;
     procedure BasicTestBtnClick(Sender: TObject);
     procedure ResetClick(Sender: TObject);
     procedure IndexTestClick(Sender: TObject);
@@ -36,7 +37,8 @@ type
     procedure FormCreate(Sender: TObject);
     procedure BigTableClick(Sender: TObject);
     procedure BigTblModClick(Sender: TObject);
-    procedure ChkBlobsClick(Sender: TObject);
+    procedure TstBlobsClick(Sender: TObject);
+    procedure MultiTransClick(Sender: TObject);
   private
     { Private declarations }
     FTimeStamp: TDateTime;
@@ -45,6 +47,7 @@ type
     procedure BigTblModSlow;
     procedure FKTestBase(Sender: TObject);
     procedure FKTestSameTable(Sender: TObject);
+    procedure MultiRRTrans(Sender: TObject);
   public
     { Public declarations }
   end;
@@ -61,7 +64,7 @@ implementation
 {$R *.fmx}
 
 uses
-  IOUtils, MemDBMisc, MemDBAPI, Math, MemDbBuffered;
+  IOUtils, MemDBMisc, MemDBAPI, Math, MemDbBuffered, SyncObjs;
 
 const
   LIMIT = 1000;
@@ -70,6 +73,7 @@ const
   BIG_NTABLES = 5;
   BIG_NINDEXES = 5;
   BLOB_SIZE = 1024;
+  THREADS_CONCURRENT = 64;
 
 type
   EMemDBTestException = class(EMemDBException);
@@ -653,7 +657,7 @@ begin
   end;
 end;
 
-procedure TForm1.ChkBlobsClick(Sender: TObject);
+procedure TForm1.TstBlobsClick(Sender: TObject);
 var
   Trans: TMemDBTransaction;
   DBAPI: TMemAPIDatabase;
@@ -1097,6 +1101,123 @@ begin
   finally
     Trans.CommitAndFree;
   end;
+
+  //Delete all the rows, and append new data for a slightly different
+  //test. Test more thorough navigation through deleted rows.
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      Table := DBAPI.OpenTableOrKey('Test table');
+      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+      try
+        TableData.Locate(ptFirst);
+        while TableData.RowSelected do
+          TableData.Delete;
+        //Now populate with all the integers.
+        Data.FieldType := ftInteger;
+        for i := 1 to LIMIT do
+        begin
+          Data.i32Val := i;
+          TableData.Append;
+          TableData.WriteField('Int', Data);
+          TableData.Post;
+        end;
+      finally
+        TableData.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+    LogTimeIncr('Edge test OK (4)');
+  except
+    on E:Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('Edge test failed (4)');
+      raise;
+    end;
+  end;
+
+  //Now just check that we can delete 2 rows out of 3, and still iterate
+  //through on an index, and also the null index (row order) OK.
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      Table := DBAPI.OpenTableOrKey('Test table');
+      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+      try
+        //Now cheekily use the fact that the rows are in order to delete two
+        //rows out of every three.
+        //We happen to know that the number-ishness of things should stay
+        //in order, but that's an implementation detail which DB users will not
+        //rely on in general.
+        i := 1;
+        TableData.Locate(ptFirst);
+        while TableData.RowSelected do
+        begin
+          if (i mod 3) = 1 then
+            TableData.Locate(ptNext)
+          else
+            TableData.Delete; //Locates ptNext as well.
+          Inc(i);
+        end;
+        //OK, and with two thirds of the rows deleted, now test
+        //5a Locate (by null) function.
+        //Row order preserved is impl detail here.
+        i := -2;
+        TableData.Locate(ptFirst);
+        while TableData.RowSelected do
+        begin
+          TableData.ReadField('Int', Data);
+          Assert(Data.FieldType = ftInteger);
+          Assert(Data.i32Val = i + 3);
+          i := Data.i32Val;
+          TableData.Locate(ptNext);
+        end;
+        //5b Locate (by index) function.
+        //Things should definitely be in order.
+        Assert(Data.FieldType = ftInteger);
+        Data.i32Val := 1; //Lowest still in table.
+        i := -2;
+        OK := TableData.Locate(ptFirst, 'IntIdx');
+        Assert(OK);
+        while OK do
+        begin
+          TableData.ReadField('Int', Data);
+          Assert(Data.i32Val = i+ 3);
+          i := Data.i32Val;
+          OK := TableData.Locate(ptNext, 'IntIdx');
+        end;
+
+        //5c Edge (by index) function, just check OK with value in table,
+        //not in table etc.
+        Data.i32Val := 1;
+        OK := TableData.FindEdgeByIndex(ptFirst, 'IntIdx', Data);
+        Assert(OK);
+        OK := TableData.FindEdgeByIndex(ptLast, 'IntIdx', Data);
+        Assert(OK);
+        Data.i32Val := 5;
+        OK := TableData.FindEdgeByIndex(ptFirst, 'IntIdx', Data);
+        Assert(not OK);
+        OK := TableData.FindEdgeByIndex(ptLast, 'IntIdx', Data);
+        Assert(not OK);
+      finally
+        TableData.Free;
+      end;
+    finally
+      Trans.RollbackAndFree;
+    end;
+    LogTimeIncr('Edge test OK (5)');
+  except
+    on E: Exception do
+    begin
+      LogTimeIncr('Edge test failed (5).');
+      raise;
+    end;
+  end;
 end;
 
 procedure TForm1.FKTestClick(Sender: TObject);
@@ -1240,7 +1361,7 @@ procedure TForm1.FKTestSameTable(Sender: TObject);
     FieldToChange: string;
     IndexToChange: string;
   begin
-    RowSel := Succ(Random(Pred(LIMIT))); //1 to Limit.
+    RowSel := Succ(Random(LIMIT)); //1 to Limit.
     for BreakReferred := Low(BreakReferred) to High(BreakReferred) do
     begin
       Pass := false;
@@ -3515,6 +3636,179 @@ begin
       end;
     end;
   end;
+end;
+
+type
+  TRRThread = class(TThread)
+    WaitHandle: TEvent;
+    procedure Execute; override;
+  end;
+
+procedure TRRThread.Execute;
+var
+  i: integer;
+  j: integer;
+  T: TMemDBTransaction;
+  DBAPI: TMemAPIDatabase;
+  TblData:TMemAPITableData;
+  DataRec: TMemDbFieldDataRec;
+begin
+  WaitHandle.WaitFor(INFINITE);
+  for i := 1 to LIMIT do
+  begin
+    T := FSession.StartTransaction(amRead);
+    try
+      DBAPI := T.GetAPI;
+      try
+        TblData := DBAPI.GetApiObjectFromHandle(
+          DBAPI.OpenTableOrKey('Test table'), APITableData) as TMemAPITableData;
+        try
+          DataRec.FieldType := ftInteger;
+          j := Succ(Random(LIMIT));
+          DataRec.i32Val := j;
+          TblData.FindByIndex('IntField1Idx', DataRec);
+          TblData.ReadField('IntField1', DataRec);
+          Assert(DataRec.i32Val = j);
+          TblData.ReadField('IntField2', DataRec);
+          Assert(DataRec.i32Val + j = Succ(LIMIT));
+          TblData.ReadField('StringField1', DataRec);
+          Assert(DataRec.sVal = IntToStr(j));
+          TblData.ReadField('StringField2', DataRec);
+          Assert(DataRec.sVal = IntToStr(Succ(LIMIT - j)));
+        finally
+          TblData.Free;
+        end;
+      finally
+        DBAPI.Free;
+      end;
+    finally
+      T.RollbackAndFree;
+    end;
+  end;
+end;
+
+//Basic check to ensure that can start multi read transactions
+//in parallel, that cursors don't interfere, that references
+//get cleared down correctly etc.
+procedure TForm1.MultiRRTrans(Sender: TObject);
+
+  procedure BlastRR;
+  var
+    Evt: TEvent;
+    Threads: array [0..THREADS_CONCURRENT] of TRRThread;
+    i: integer;
+  begin
+    Evt := TEvent.Create(nil, true, false, '');
+    try
+      for i := 0 to THREADS_CONCURRENT do
+      begin
+        Threads[i] := TRRThread.Create(true);
+        Threads[i].WaitHandle := Evt;
+        Threads[i].Resume;
+      end;
+      Evt.SetEvent;
+      for i := 0 to THREADS_CONCURRENT do
+        with Threads[i] do
+        begin
+          WaitFor;
+          Free;
+        end;
+    finally
+      Evt.Free;
+    end;
+    LogTimeIncr('Multi RR test run OK');
+  end;
+
+  procedure SetupRR;
+  var
+    T: TMemDBTransaction;
+    Tbl: TMemDBHandle;
+    DBAPI: TMemAPIDatabase;
+    TblMeta: TMemAPITableMetadata;
+    TblData: TMemAPITableData;
+    i: integer;
+    DataRec: TMemDbFieldDataRec;
+  begin
+    ResetClick(Sender);
+    T := FSession.StartTransaction(amReadWrite);
+    try
+      DBAPI := T.GetAPI;
+      try
+        Tbl := DBAPI.CreateTable('Test table');
+        TblMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
+        try
+          TblMeta.CreateField('IntField1', ftInteger);
+          TblMeta.CreateField('StringField1', ftUnicodeString);
+          TblMeta.CreateIndex('IntField1Idx', 'IntField1', []);
+          TblMeta.CreateIndex('StringField1Idx', 'StringField1', []);
+          TblMeta.CreateField('IntField2', ftInteger);
+          TblMeta.CreateField('StringField2', ftUnicodeString);
+          TblMeta.CreateIndex('IntField2Idx', 'IntField2', []);
+          TblMeta.CreateIndex('StringField2Idx', 'StringField2', []);
+        finally
+          TblMeta.Free;
+        end;
+      finally
+        DBAPI.Free;
+      end;
+      T.CommitAndFree;
+    except
+      on E: Exception do
+      begin
+        T.RollbackAndFree;
+        LogTimeIncr('Multi RR test failed (1): ' + E.Message);
+        raise;
+      end;
+    end;
+    T := FSession.StartTransaction(amReadWrite);
+    try
+      DBAPI := T.GetAPI;
+      try
+        Tbl := DBAPI.OpenTableOrKey('Test table');
+        TblData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+        try
+          for i := 1 to LIMIT do
+          begin
+            TblData.Append;
+            DataRec.FieldType := ftInteger;
+            DataRec.i32Val := i;
+            TblData.WriteField('IntField1', DataRec);
+            DataRec.i32Val := Succ(LIMIT - i);
+            TblData.WriteField('IntField2', DataRec);
+            DataRec.FieldType := ftUnicodeString;
+            DataRec.sVal := IntToStr(i);
+            TblData.WriteField('StringField1', DataRec);
+            DataRec.sVal := IntToStr(Succ(LIMIT-i));
+            TblData.WriteField('StringField2', DataRec);
+            TblData.Post
+          end;
+        finally
+          TblData.Free;
+        end;
+      finally
+        DBAPI.Free;
+      end;
+      T.CommitAndFree;
+    except
+      on E: Exception do
+      begin
+        T.RollbackAndFree;
+        LogTimeIncr('Multi RR test failed (2): ' + E.Message);
+        raise;
+      end;
+    end;
+    LogTimeIncr('Multi RR test setup OK');
+  end;
+
+begin
+  SetupRR;
+  BlastRR;
+  //TODO - More RW transactions / modes etc when they arrive.
+end;
+
+procedure TForm1.MultiTransClick(Sender: TObject);
+begin
+  MultiRRTrans(Sender);
 end;
 
 procedure TForm1.ResetClick(Sender: TObject);

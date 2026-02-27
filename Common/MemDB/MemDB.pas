@@ -95,7 +95,7 @@ type
 {$ENDIF}
   private
     FDB: TMemDB;
-    FTransaction: TMemDBTransaction;
+    FSessionTransactions: TList;
     FTempStorageMode: TTempStorageMode;
   protected
     function GetTempStorageMode: TTempStorageMode;
@@ -104,6 +104,7 @@ type
     function StartTransaction(Mode: TMDBAccessMode;
                               Sync: TMDBSyncMode = amLazyWrite;
                               Iso: TMDBIsolationLevel = ilDirtyRead): TMemDBTransaction;
+    constructor Create;
     destructor Destroy; override;
     property ParentDB: TMemDB read FDB;
     property TempStorageMode:TTempStorageMode read
@@ -251,9 +252,17 @@ begin
   result := FDB.StartTransaction(Mode, Sync, Iso, self);
 end;
 
+constructor TMemDBSession.Create;
+begin
+  inherited;
+  FSessionTransactions := TList.Create;
+end;
+
 destructor TMemDBSession.Destroy;
 begin
   FDB.RemoveSession(self);
+  Assert(FSessionTransactions.Count = 0);
+  FSessionTransactions.Free;
   inherited;
 end;
 
@@ -390,10 +399,12 @@ begin
     Transaction.FlushFinishedEvent.WaitFor(INFINITE);
   FSessionLock.Acquire;
   try
-    Assert(Transaction.FSession.FTransaction = Transaction);
+    idx := Transaction.FSession.FSessionTransactions.IndexOf(Transaction);
+    Assert(idx >= 0);
     Transaction.FCommitedOrRolledBack := true;
-    Transaction.FSession.FTransaction := nil;
+    Transaction.FSession.FSessionTransactions.Delete(idx);
     idx := FTransactionList.IndexOf(Transaction);
+    Assert(idx >= 0);
     FTransactionList.Delete(idx);
   finally
     FSessionLock.Release;
@@ -411,8 +422,6 @@ begin
   result := nil;
   FSessionLock.Acquire;
   try
-    if Assigned(Session.FTransaction) then
-      raise EMemDBException.Create(S_DB_SESSION_HAS_TRANSACTIONS);
     idx := FSessionList.IndexOf(Session);
     if idx < 0 then
       raise EMemDBException.Create(S_DB_SESSION_NOT_FOUND);
@@ -429,7 +438,7 @@ begin
     result.FMode := Mode;
     result.FSync := Sync;
     result.FIsolation := Iso;
-    Session.FTransaction := result;
+    Session.FSessionTransactions.Add(result);
     FTransactionList.Add(result);
   finally
     FSessionLock.Release;
@@ -456,7 +465,7 @@ begin
     //or threads blocked/hung.
     //It's a pretty nasty error case however you do it.
     try
-      if Assigned(Session.FTransaction) then
+      if Session.FSessionTransactions.Count > 0 then
         raise EMemDBException.Create(S_DB_SESSION_HAS_TRANSACTIONS);
     finally
       FSessionList.Delete(idx);

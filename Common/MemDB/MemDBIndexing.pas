@@ -56,11 +56,13 @@ type
     property FieldSearchVals: TMemDbFieldDataRecs read FFieldSearchVals write FFieldSearchVals;
   end;
 
+  //FK change-list indexing.
   TMemDBRowLookasideIndexNode = class(TDuplicateValIndexNode)
   protected
     function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer; override;
   end;
 
+  //FK change-list indexing.
   TMemDBRowLookasideSearchVal = class(TMemDBRowLookasideIndexNode)
   private
     FFieldSearchVals: TMemDbFieldDataRecs;
