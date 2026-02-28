@@ -20,7 +20,8 @@ uses
   Parallelizer in '..\..\Parallelizer\Parallelizer.pas',
   NullStream in '..\..\NullStream\NullStream.pas',
   LockAbstractions in '..\..\LockAbstractions\LockAbstractions.pas',
-  SRWLockWrapper in '..\..\SRWLockWrapper\SRWLockWrapper.pas';
+  SRWLockWrapper in '..\..\SRWLockWrapper\SRWLockWrapper.pas',
+  TinyLock in '..\..\LockAbstractions\TinyLock.pas';
 
 {$R *.res}
 

@@ -37,15 +37,12 @@ interface
 //Not in this unit unless changes made, thanks. Slows stuff down.
 {$ENDIF}
 
-uses BinaryTree, DLList, Trackables, Parallelizer;
+uses BinaryTree, DLList, Trackables, Parallelizer, TinyLock;
 
 {
   Concurrency: Indexes can be added and removed in parallel, via the
   "PerformAsyncActions" method. No other concurrency checking here.
 }
-
-const
-  SPIN_COUNT = 200;
 
 type
   TISRetVal = (rvOK,
@@ -136,18 +133,12 @@ type
   TItemRec = class
 {$ENDIF}
   private
-    FIndexNodesLock: integer;
+    FIndexNodesLock: TTinyLock;
     FIndexNodes: TDLEntry;
     FItem: TObject;
     FSiblingListEntryRec: TDLEntry;
     procedure SetItem(NewItem: TObject);
     function GetIndexLinkByRoot(RootIdx: TSIndex; UseLocks: boolean): TIndexNodeLink;
-  protected
-    //I need a really lightweight lock here - one of these is created for
-    //every single DB row. Additionally, we expect the chances of conflict to be
-    //low, and gets lower as dataset gets larger.
-    procedure LockIndexNodeList; inline; //like that makes any difference with lock prefix...
-    procedure UnlockIndexNodeList; inline;
   public
     constructor Create;
     property Item: TObject read FItem write SetItem;
@@ -432,30 +423,6 @@ begin
   DLItemInitList(@FIndexNodes);
 end;
 
-procedure TItemRec.LockIndexNodeList;
-var
-  Tries: integer;
-begin
-  while True do
-  begin
-    Tries := SPIN_COUNT;
-    while Tries > 0 do
-    begin
-      if LockAbstractions.InterlockedCompareExchange(FIndexNodesLock, 1, 0) = 0 then
-        exit;
-      Dec(Tries);
-    end;
-    Sleep(0); //Yield.
-  end;
-end;
-
-procedure TItemRec.UnlockIndexNodeList;
-var
-  PrevLocked: integer;
-begin
-  PrevLocked := LockAbstractions.InterlockedExchange(FIndexNodesLock, 0);
-  Assert(PrevLocked = 1);
-end;
 
 //Lock in caller. Thank heavens this function does not worry
 //about the order of the nodes in the list.
@@ -482,9 +449,9 @@ end;
 procedure TItemRec.SetItem(NewItem: TObject);
 begin
 {$IFOPT C+}
-  LockIndexNodeList;
+  AcquireTinyLock(FIndexNodesLock);
   Assert(DLList.DlItemIsEmpty(@FIndexNodes), S_ITEMREC_ITEM_CHANGED_WHILST_INDEXED);
-  UnlockIndexNodeList;
+  ReleaseTinyLock(FIndexNodesLock);
 {$ENDIF}
   FItem := NewItem;
 end;
@@ -664,11 +631,11 @@ begin
   begin
     result := rvOK;
     if UseLocks then
-      Item.LockIndexNodeList;
+      AcquireTinyLock(Item.FIndexNodesLock);
     Assert(not Assigned(Item.GetIndexLinkByRoot(Index, UseLocks)), S_ITEM_ALREADY_INDEXED);
     DLListInsertTail(@Item.FIndexNodes, @IndexLink.SiblingListEntryIdx);
     if UseLocks then
-      Item.UnlockIndexNodeList;
+      ReleaseTinyLock(Item.FIndexNodesLock);
   end
   else
   begin
@@ -691,12 +658,13 @@ begin
     exit;
   end;
   if UseLocks then
-    Item.LockIndexNodeList;
+    AcquireTinyLock(Item.FIndexNodesLock);
+
   Link := Item.GetIndexLinkByRoot(Index, UseLocks);
   if not Assigned(Link) then
   begin
     if UseLocks then
-      Item.UnlockIndexNodeList;
+      ReleaseTinyLock(Item.FIndexNodesLock);
 
     Assert(false, S_DEL_INDEXNODE_NO_LINK);
     result := rvInternalError;
@@ -704,7 +672,7 @@ begin
   end;
   DLListRemoveObj(@Link.SiblingListEntryIdx);
   if UseLocks then
-    Item.UnlockIndexNodeList;
+    ReleaseTinyLock(Item.FIndexNodesLock);
 
   INode := Link.IndexNode;
   if Index.Root.Remove(INode) then
@@ -735,12 +703,13 @@ begin
   while Assigned(CurItem) do
   begin
     if UseLocks then
-      CurItem.LockIndexNodeList;
+      AcquireTinyLock(CurItem.FIndexNodesLock);
+
     Link := CurItem.GetIndexLinkByRoot(Index, UseLocks);
     Assert(Assigned(Link), S_DEL_INDEX_INTERNAL_UNINDEXED_ITEM);
     DLListRemoveObj(@Link.SiblingListEntryIdx);
     if UseLocks then
-      CurItem.UnlockIndexNodeList;
+      ReleaseTinyLock(CurItem.FIndexNodesLock);
 
     Link.Free;
 {$IFOPT C+}

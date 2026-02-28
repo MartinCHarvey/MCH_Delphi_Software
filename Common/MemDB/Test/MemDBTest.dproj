@@ -6,7 +6,7 @@
         <MainSource>MemDBTest.dpr</MainSource>
         <Base>True</Base>
         <Config Condition="'$(Config)'==''">Release</Config>
-        <Platform Condition="'$(Platform)'==''">Win32</Platform>
+        <Platform Condition="'$(Platform)'==''">Win64</Platform>
         <TargetedPlatforms>3</TargetedPlatforms>
         <AppType>Application</AppType>
     </PropertyGroup>
@@ -165,6 +165,7 @@
         <DCCReference Include="..\..\NullStream\NullStream.pas"/>
         <DCCReference Include="..\..\LockAbstractions\LockAbstractions.pas"/>
         <DCCReference Include="..\..\SRWLockWrapper\SRWLockWrapper.pas"/>
+        <DCCReference Include="..\..\LockAbstractions\TinyLock.pas"/>
         <None Include="Performance figures.txt"/>
         <None Include="..\README_Conditionals.txt"/>
         <None Include="..\README_Ideas, and TODO.txt"/>
