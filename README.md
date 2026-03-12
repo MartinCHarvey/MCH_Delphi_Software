@@ -6,7 +6,7 @@ Most recent (2026) development is in Common/MemDB: SQL query engine, and a "ligh
 - Current GitHub code is write-serialised.
 - Work is in progress on more write-parallel.
 - I may eventually get to the point where it's commit-lock free, but there's lots of clever magic to do that.
-- Don't expect full QSL support immediately.
+- Don't expect full SQL support immediately.
 
 martin_c_harvey@hotmail.com
 
