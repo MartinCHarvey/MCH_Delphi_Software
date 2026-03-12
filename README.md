@@ -1,15 +1,14 @@
 # MCH_Delphi_Software
 GitHub repo for open sourced MCH Software.
 
-Most recent (2024) development is in Common/MemDB: SQL query engine, and a "lightweight locking" mode for parallel availability (multi-write transactions in progress).
+Most recent (2026) development is in Common/MemDB: SQL query engine, and a "lightweight locking" mode for parallel availability (multi-write transactions in progress).
 
-Query: Which is most important to you?
-  - Transaction latency (helped by overlapping write transactions).
-  - Functionality richness (SQL Query engine).
+- Current GitHub code is write-serialised.
+- Work is in progress on more write-parallel.
+- I may eventually get to the point where it's commit-lock free, but there's lots of clever magic to do that.
+- Don't expect full QSL support immediately.
 
-Parsing code does not handle recent HTML as well as I had hoped. Needs changes for optional parsing of scripts where HTML indicates length, error recovery needs an overhaul.
-
-I welcome feedback! martin_c_harvey@hotmail.com
+martin_c_harvey@hotmail.com
 
 # Summary of contents.
 
