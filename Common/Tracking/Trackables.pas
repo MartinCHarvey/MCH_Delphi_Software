@@ -78,11 +78,6 @@ type
     function GetExtraInfoText: string; dynamic;
     procedure TrackerDeregister(Tracker: TTracker);
   public
-{$IFOPT C+}
-    class function NewInstance: TObject {$IFDEF AUTOREFCOUNT} unsafe {$ENDIF}; override;
-    procedure FreeInstance; override;
-{$ENDIF}
-
     constructor Create;
     constructor CreateWithTracker(Tracker: TTracker);
     destructor Destroy; override;
@@ -152,10 +147,6 @@ type
     function Compare(Other: TBinTreeItem; AllowKeyDedupe: boolean): integer; override;
     procedure CopyFrom(Source: TBinTreeItem); override;
   end;
-
-{$IFOPT C+}
-var MemMgr: TMemoryManager;
-{$ENDIF}
 
 (************************************
  * TTracker                         *
@@ -325,41 +316,6 @@ end;
  * TTrackable                        *
  ************************************)
 
-{$IFOPT C+}
-function _LGetMem(Size: NativeInt): Pointer;
-begin
-  if Size <= 0 then
-    Exit(nil);
-  Result := MemMgr.GetMem(Size);
-  if Result = nil then
-    Error(reOutOfMemory);
-end;
-
-function _LFreeMem(P: Pointer): Integer;
-begin
-  if P = nil then
-    Exit(0);
-  Result := MemMgr.FreeMem(P);
-  if Result <> 0 then
-    Error(reInvalidPtr);
-end;
-
-class function TTrackable.NewInstance: TObject;
-begin
-  Result := InitInstance(_LGetMem(InstanceSize));
-{$IFDEF AUTOREFCOUNT}
-  Result.FRefCount := 1;
-{$ENDIF}
-end;
-
-procedure TTrackable.FreeInstance;
-begin
-  CleanupInstance;
-  FillChar(Pointer(self)^, InstanceSize, $CD);
-  _LFreeMem(Pointer(Self));
-end;
-{$ENDIF}
-
 constructor TTrackable.Create;
 begin
   inherited;
@@ -465,16 +421,12 @@ end;
  * TTrackItem                       *
  ************************************)
 
-//Turn off overflow checking for pointer compare stuff.
-{$OVERFLOWCHECKS OFF}
-{$HINTS OFF}
-
 function TTrackItem.Compare(Other: TBinTreeItem; AllowKeyDedupe: boolean): integer;
 var
   OwnInt, OtherInt: Cardinal;
   Own64, Other64: UInt64;
 begin
-  if sizeof(Pointer) = sizeof(integer) then
+  if sizeof(Pointer) = sizeof(Cardinal) then
   begin
     OwnInt := Cardinal(FItem);
     OtherInt := Cardinal(TTrackItem(Other).FItem);
@@ -485,7 +437,7 @@ begin
     else
       result := 0;
   end
-  else if sizeof(Pointer) = sizeof(int64) then
+  else if sizeof(Pointer) = sizeof(Uint64) then
   begin
     Own64 := UInt64(FItem);
     Other64 := UInt64(TTRackItem(Other).FItem);
@@ -515,7 +467,6 @@ var
 
 initialization
 {$IFOPT C+}
-  GetMemoryManager(MemMgr);
   AppGlobalTracker := TTracker.Create;
 {$ENDIF}
 finalization
