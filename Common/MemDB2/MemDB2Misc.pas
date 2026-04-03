@@ -83,7 +83,8 @@ type
 
   TMDBChangeType = (mctNone, mctAdd, mctChange, mctDelete);
 
-  TMemAPIPosition = (ptFirst, ptLast, ptNext, ptPrevious);
+  //TODO - Proper checking for new invalid value.
+  TMemAPIPosition = (ptFirst, ptLast, ptNext, ptPrevious, ptInvalid);
 
   TABSelType = (abCurrent, abNext, abLatest);
 
@@ -103,19 +104,7 @@ type
     class operator NotEqual(const Left, Right: TBufSelector): Boolean;
   end;
 
-  TSubIndexSelType = (sicCurrent, sicLatest);
-  TIndexSelector = record
-    TId: TTransactionId;
-    SelType: TSubIndexSelType;
-  end;
-
-  TMainIndexClass = (micPermanent, micTemporary, micInternal);
-  TInternalIndexClass = (iicRowId); //By-Pointer indexes now gone.
   TTempStorageMode = (tsmMemory, tsmDisk);
-
-  TTagCheckIndexState = (tciPermanentAgreesCurrent, tciPermanentAgreesNext,
-                         tciTemporaryAgreesBoth, tciTemporaryAgreesNextOnly);
-  TTagCheckProgrammedState = (tcpNotProgrammed, tcpProgrammed, tcpDontCare);
 
   //The actual data records for cells.
   TMemDbFieldDataRec = record
@@ -141,11 +130,6 @@ type
     PtrFirst: PFieldOffset;
     Count: integer;
   end;
-  //Field offsets used for two slightly different things: Standard ND field offsets
-  //and also a list of field absolute indexes. They're close enough the same now.
-
-  //TODO - May need some more funcs to handle Next/Latest buf select,
-  //and selectors. See how we go.
 
   function DataRecsSame(const S, O: TMemDBFieldDataRec): boolean;
   function CopyFieldNames(const S: TMDBFieldNames): TMDBFieldNames;
@@ -153,7 +137,6 @@ type
   function CopyDataRecs(const A:TMemDbFieldDataRecs): TMemDbFieldDataRecs;
 
   function CopyFieldOffsets(A: TFieldOffsets): TFieldOffsets;
-  procedure SyncFastOffsets(const Offsets: TFieldOffsets; var Fast: TFieldOffsetsFast);
 
   function DBAccessModeToLockReason(Am: TMDBAccessMode): TRWWLockReason;
 
@@ -173,9 +156,6 @@ type
   TMDBIsoStrings = array[TMDBIsolationLevel] of string;
   TMDBABSelTypeStrings = array[TABSelType] of string;
   TMemAPIPositionStrings = array[TMemAPIPosition] of string;
-  TMainIndexClassStrings = array[TMainIndexClass] of string;
-  TInternalIndexClassStrings = array[TInternalIndexClass] of string;
-  TSubIndexSelTypeStrings = array[TSubIndexSelType] of string;
 
   TMemDBTempFileStream = class(TWriteCachedFileStream)
   private
@@ -213,21 +193,10 @@ type
   //TODO - Possibly "to-string" or other serialization.
   end;
 
-  TMemDBITagData = class;
 
-  TITagStruct = record
-    TagData: TMemDBITagData;
-    SubIndexSelType: TSubIndexSelType; //Need two structs for each index, current
-                                   //and most recent.
-  end;
-  PITagStruct = ^TITagStruct;
+{$IFDEF MEMDB2_TEMP_REMOVE}
+    //TODO - Old TMemDBITagData
 
-{$IFDEF USE_TRACKABLES}
-  TMemDBITagData = class(TTrackable)
-{$ELSE}
-  TMemDBITagData = class
-{$ENDIF}
-  private
     //Do not put tag structs at the start of the class,
     //so we can check that we're not erroneously using them instead of
     //PITagStructs to indexed store calls.
@@ -290,6 +259,9 @@ type
     property ExtraFieldOffsets: TFieldOffsets read GetExtraFieldOffsets;
   end;
 
+{$ENDIF}
+
+
   //TODO - Optimizations are DB local.
 
 const
@@ -303,14 +275,9 @@ const
                                            ftBlob];
   MDBIsoStrings: TMDBIsoStrings = ('ilReadComitted', 'ilReadRepeatable', 'ilSerialisable');
   MDBABStrings: TMDBABSelTypeStrings = ('abCurrent', 'abNext', 'abLatest');
+  //TODO - check all cases where this is passed around. (New value).
   MemAPIPositionStrings:TMemAPIPositionStrings
-    = ('ptFirst', 'ptLast', 'ptNext', 'ptPrevious');
-  MainIndexClassStrings: TMainIndexClassStrings
-    = ('micPermanent', 'micTemporary', 'micInternal');
-  SubIndexSelTypeStrings: TSubIndexSelTypeStrings
-    = ('sicCurrent', 'sicLatest');
-  InternalIndexClassStrings: TInternalIndexClassStrings
-   = ('iicRowId');
+    = ('ptFirst', 'ptLast', 'ptNext', 'ptPrevious', 'ptInvalid');
 
 var
   AllIndexAttrs: TMDBIndexAttrs;
@@ -412,271 +379,6 @@ end;
 class operator TBufSelector.NotEqual(const Left, Right: TBufSelector): Boolean;
 begin
   result := (Left.Tid <> Right.Tid) or (Left.SelType <> Right.SelType);
-end;
-
-{  TMemDBITagData }
-
-{$IFDEF USE_TRACKABLES}
-
-function TMemDbITagData.GetExtraInfoText: string;
-var
-  r1, r2,r3, r4: string;
-  i: integer;
-begin
-  r1 := inherited;
-  r3 := '(';
-  for i  := 0 to Pred(Length(FDefaultFieldOffsets)) do
-    r3 := r3 + IntToStr(FDefaultFieldOffsets[i]) + ', ';
-  r3 := r3 + ')';
-  r4 := '(';
-  for i  := 0 to Pred(Length(FExtraFieldOffsets)) do
-    r4 := r4 + IntToStr(FExtraFieldOffsets[i]) + ', ';
-  r4 := r4 + ')';
-
-  r2 := MainIndexClassStrings[FIndexClass] + ' ' +
-        InternalIndexClassStrings[FInternalIndexClass] + ' ' +
-        r3 + ' ' +
-        r4 + ' ' +
-        BoolToStr(FInit, true) + ' ' +
-        BoolToStr(Assigned(FStoreIdxSet), true);
-  result := r1 + r2;
-end;
-{$ENDIF}
-
-
-function TMemDbITagData.GetIdxsSetToStore: boolean;
-begin
-  result := Assigned(FStoreIdxSet);
-end;
-
-function TMemDbITagData.GetInternalIndexClass: TInternalIndexClass;
-begin
-  if FIndexClass <> micInternal then
-    raise EMemDBInternalException.Create(S_INDEXTAG_DATA_NOT_VALID);
-  result := FInternalIndexClass;
-end;
-
-function TMemDbITagData.GetDefaultFieldOffsets: TFieldOffsets;
-begin
-  if not (FIndexClass in [micPermanent, micTemporary]) then
-    raise EMemDBInternalException.Create(S_INDEXTAG_DATA_NOT_VALID);
-  result := FDefaultFieldOffsets;
-end;
-
-function TMemDbITagData.GetExtraFieldOffsets: TFieldOffsets;
-begin
-  if FIndexClass <> micTemporary then
-    raise EMemDBInternalException.Create(S_INDEXTAG_DATA_NOT_VALID);
-  result := FExtraFieldOffsets;
-end;
-
-function TMemDBITagData.GetTagStructBySubClass(SubClass: TSubIndexSelType): PITagStruct;
-begin
-  case SubClass of
-    sicCurrent: result := @FCurrentTagStruct;
-    sicLatest: result := @FLatestTagStruct;
-  else
-    Assert(false);
-    result := nil;
-  end;
-end;
-
-constructor TMemDbITagData.Create;
-begin
-  inherited;
-{$IFDEF MEMDB2_TEMP_REMOVE}
-  with FCurrentTagStruct do
-  begin
-    TagData := self;
-    SubIndexClass := sicCurrent;
-  end;
-  with FLatestTagStruct do
-  begin
-    TagData := self;
-    SubIndexClass := sicLatest;
-  end;
-{$ENDIF}
-  begin
-    Assert(false); //TODO - This needs to be binned, reworked or otherwise changed.
-  end;
-end;
-
-destructor TMemDBITagData.Destroy;
-begin
-  if IdxsSetToStore then
-    raise EMemDBInternalException.Create(S_TAG_FREED_IDX_SET);
-  SetLength(FDefaultFieldOffsets, 0);
-  SetLength(FExtraFieldOffsets, 0);
-  SyncFastOffsets(FDefaultFieldOffsets, FDefaultFastOffsets);
-  SyncFastOffsets(FExtraFieldOffsets, FExtraFastOffsets);
-  inherited;
-end;
-
-procedure SyncFastOffsets(const Offsets: TFieldOffsets; var Fast: TFieldOffsetsFast);
-var
-  i: integer;
-  PtrSome: PFieldOffset;
-begin
-  Assert(Assigned(Fast.PtrFirst) = (Fast.Count <> 0));
-  if Assigned(Fast.PtrFirst) then
-    FreeMem(Fast.PtrFirst);
-  Fast.Count := Length(Offsets);
-  if Fast.Count > 0 then
-  begin
-    GetMem(Fast.PtrFirst, Fast.Count * sizeof(TFieldOffset));
-    PtrSome := Fast.PtrFirst;
-    for i := 0 to Pred(Fast.Count) do
-    begin
-      PtrSome^ := Offsets[i];
-      Inc(PtrSome);
-    end;
-  end
-  else
-    Fast.PtrFirst := nil;
-end;
-
-procedure TMemDbITagData.GetDefaultFieldOffsetsFast(var OfsFast: TFieldOffsetsFast);
-begin
-  OfsFast := FDefaultFastOffsets;
-end;
-
-procedure TMemDbITagData.GetExtraFieldOffsetsFast(var OfsFast: TFieldOffsetsFast);
-begin
-  OfsFast := FExtraFastOffsets;
-end;
-
-
-procedure TMemDbITagData.InitPermanent(DefaultFieldOffsets: TFieldOffsets);
-begin
- if FInit then
-   raise EMemDBInternalException.Create(S_IDXTAG_BAD_INIT); //Overwriting prev init?
-  FIndexClass := micPermanent;
-  FDefaultFieldOffsets := CopyFieldOffsets(DefaultFieldOffsets);
-  FInit := true;
-  SyncFastOffsets(FDefaultFieldOffsets, FDefaultFastOffsets);
-end;
-
-procedure TMemDbITagData.MakePermanentTemporary(NewOffsets: TFieldOffsets);
-begin
-  if (not FInit) or (FIndexClass <> micPermanent) then
-    raise EMemDbInternalException.Create(S_IDXTAG_NOT_PERMANENT);
-  FIndexClass := micTemporary;
-  FExtraFieldOffsets := FDefaultFieldOffsets;
-  FDefaultFieldOffsets := CopyFieldOffsets(NewOffsets);
-  SyncFastOffsets(FDefaultFieldOffsets, FDefaultFastOffsets);
-  SyncFastOffsets(FExtraFieldOffsets, FExtraFastOffsets);
-end;
-
-procedure TMemDBITagData.CommitRestoreToPermanent;
-begin
-  if (not FInit) or (FIndexClass <> micTemporary) then
-    raise EMemDBInternalException.Create(S_IDXTAG_NOT_TEMPORARY);
-  //Default field offset unchanged as new offset.
-  SetLength(FExtraFieldOffsets, 0);
-  FIndexClass := micPermanent;
-  SyncFastOffsets(FExtraFieldOffsets, FExtraFastOffsets);
-end;
-
-procedure TMemDBITagData.RollbackRestoreToPermanent;
-begin
-  Assert((FInit) and (FIndexClass = micTemporary));
-  FDefaultFieldOffsets := CopyFieldOffsets(FExtraFieldOffsets); //Rollback default changes.
-  SetLength(FExtraFieldOffsets, 0);
-  FIndexClass := micPermanent;
-  SyncFastOffsets(FDefaultFieldOffsets, FDefaultFastOffsets);
-  SyncFastOffsets(FExtraFieldOffsets, FExtraFastOffsets);
-end;
-
-procedure TMemDBITagData.InitInternal(InternalClass: TInternalIndexClass);
-begin
-  if FInit then
-    raise EMemDBInternalException.Create(S_IDXTAG_BAD_INIT); //Overwriting prev init?
-  FIndexClass := micInternal;
-  FInternalIndexClass := InternalClass;
-  FInit := true;
-end;
-
-procedure TMemDBITagData.CommitAddIdxsToStore(Store: TIndexedStoreO);
-var
-  rv: TIsRetVal;
-begin
-  if not (FIndexClass in [micPermanent, micTemporary]) then
-    raise EMemDBInternalException.Create(S_IDXS_NOT_USER);
-
-  //Deal with optimization case where not all set at once.
-  if IdxsSetToStore then
-    raise EMemDBInternalException.Create(S_IDXS_ALREADY_SET); //Overwriting prev init?
-
-  if Store.AddIndex(TMemDBIndexNode, @FCurrentTagStruct, false) <> rvOK then
-    raise EMemDbInternalException.Create(S_INDEX_ADD_FAILED);
-  if Store.AddIndex(TMemDBIndexNode, @FLatestTagStruct, false) <> rvOK then
-  begin
-    rv := Store.DeleteIndex(@FCurrentTagStruct, false);
-    Assert(rv = rvOK);
-    raise EMemDbInternalException.Create(S_INDEX_ADD_FAILED);
-  end;
-  FStoreIdxSet := Store;
-end;
-
-procedure TMemDBITagData.CommitRmIdxsFromStore;
-var
-  rv: TIsRetVal;
-begin
-  if not (FIndexClass in [micPermanent, micTemporary]) then
-    raise EMemDBInternalException.Create(S_IDXS_NOT_USER);
-  if not IdxsSetToStore then
-    raise EMemDBInternalException.Create(S_IDXS_NOT_SET); //Overwriting prev init?
-  if (FStoreIdxSet.DeleteIndex(@FCurrentTagStruct, false) <> rvOK) then
-    raise EMemDbInternalException.Create(S_INDEX_DELETE_FAILED);
-  if FStoreIdxSet.DeleteIndex(@FLatestTagStruct, false) <> rvOK then
-  begin
-    rv := FStoreIdxSet.AddIndex(TMemDBIndexNode, @FCurrentTagStruct, false);
-    Assert(rv = rvOK);
-    raise EMemDbInternalException.Create(S_INDEX_DELETE_FAILED);
-  end;
-  FStoreIdxSet := nil;
-end;
-
-procedure TMemDBITagData.RollbackRestoreIdxsToStore(Store: TIndexedStoreO);
-var
-  rv: TIsRetVal;
-begin
-  Assert(FIndexClass in [micPermanent, micTemporary]);
-  Assert(not Assigned(FStoreIdxSet) or (FStoreIdxSet = Store));
-  rv := Store.AddIndex(TMemDBIndexNode, @FCurrentTagStruct, false);
-  Assert(rv = rvOK);
-  if (FIndexClass <> micInternal) then
-  begin
-    rv := Store.AddIndex(TMemDBIndexNode, @FLatestTagStruct, false);
-    Assert(rv = rvOK);
-  end;
-  FStoreIdxSet := Store;
-end;
-
-procedure TMemDBITagData.RollbackRmIdxsFromStore;
-var
-  rv: TIsRetVal;
-begin
-  Assert(FIndexClass in [micPermanent, micTemporary]);
-  Assert(IdxsSetToStore);
-  //Don't deal with optimization here, we'll just muddle thru as best we can
-  //In any release build, the failure to RM index not created will be
-  //silent and harmless.
-  rv := FStoreIdxSet.DeleteIndex(@FCurrentTagStruct, false);
-  Assert(rv = rvOK);
-  rv := FStoreIdxSet.DeleteIndex(@FLatestTagStruct, false);
-  Assert(rv = rvOK);
-  FStoreIdxSet := nil;
-end;
-
-procedure TMemDBITagData.AddInternalIndexToStore(Store:TIndexedStoreO);
-begin
-  if FIndexClass <> micInternal then
-    raise EMemDBInternalException.Create(S_IDXS_NOT_INTERNAL);
-  if IdxsSetToStore then
-    raise EMemDBInternalException.Create(S_INTERNAL_INDEX_HAS_STORE_LINK);
-  if Store.AddIndex(TMemDBIndexNode, @FCurrentTagStruct, false) <> rvOK then
-    raise EMemDBInternalException.Create(S_INDEX_ADD_FAILED);
 end;
 
 { TMemDBTempFileStream }

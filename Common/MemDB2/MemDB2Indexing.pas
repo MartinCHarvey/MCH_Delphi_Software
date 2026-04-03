@@ -33,10 +33,33 @@ uses
 {$IFDEF USE_TRACKABLES}
   Trackables,
 {$ENDIF}
-  IndexedStore, MemDB2Misc;
+  IndexedStore, MemDB2Misc, MemDB2Streamable;
 
 type
-  TIndexNumber = type integer;
+  TIndexFamily = type integer;
+
+  TMemDBIndex = class //TODO - Of CowTree ancestor;
+  private
+    //TODO - Buf selection, offsets etc.
+    FFieldOffsets: TFieldOffsets;
+    FBufSel: TABSelType;
+  public
+    function Clone: TMemDbIndex; //TODO - Override;
+
+    property FieldOffsets: TFieldOffsets read FFieldOffsets;
+    property BufSel: TABSelType read FBufSel;
+  end;
+
+  TMemDBIndexLeaf = class //TODO - Of CowTree ancestor;
+  private
+    FOriginalIndex: TMemDBIndex;
+    Pinned: TMemDBStreamable;
+    PinSel: TABSelType;
+  public
+  end;
+
+{$IFDEF MEMDB2_TEMP_REMOVE}
+type
 
   TMemDBIndexNode = class(TDuplicateValIndexNode)
   protected
@@ -72,6 +95,8 @@ type
     property FieldSearchVals: TMemDbFieldDataRecs read FFieldSearchVals write FFieldSearchVals;
   end;
 
+{$ENDIF}
+
 {$IFOPT C+}
 function CompareFields(const OwnRec: TMemDbFieldDataRec; const OtherRec: TMemDbFieldDataRec): integer;
 {$ELSE}
@@ -89,7 +114,7 @@ uses
 {$ELSE}
   Classes,
 {$ENDIF}
-  MemDB2Buffered, SysUtils, MemDb2Streamable;
+  MemDB2Buffered, SysUtils;
 
 { Misc functions }
 
@@ -178,6 +203,15 @@ begin
   end;
 end;
 
+{ TMemDBIndex }
+
+function TMemDbIndex.Clone: TMemDbIndex;
+begin
+   //TODO - Override;
+end;
+
+{ TMemDbIndexLeaf }
+
 { TMemDbIndexNode }
 
 { Two separate cases:
@@ -222,8 +256,8 @@ end;
 var
   GoodTagsRead: integer = 0;
 
-function TMemDBIndexNode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 {$IFDEF MEMDB2_TEMP_REMOVE}
+function TMemDBIndexNode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 var
   PTag: PITagStruct;
   TagData: TMemDBITagData;
@@ -409,14 +443,11 @@ begin
   end;
 end;
 {$ENDIF}
-begin
-  Assert(false); //TODO - This needs to be binned, reworked or otherwise changed.
-end;
 
 { TMemDBIndexNodeSearchVal }
 
-function TMemDBIndexNodeSearchVal.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 {$IFDEF MEMDB2_TEMP_REMOVE}
+function TMemDBIndexNodeSearchVal.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 //OwnItem ptr always NIL, use built in field. Own field always exists.
 //Otherwise, as function above.
 var
@@ -554,14 +585,11 @@ begin
   end;
 end;
 {$ENDIF}
-begin
-  Assert(false); //TODO - This needs to be binned, reworked or otherwise changed.
-end;
 
 { TMemDBRowLookasideIndexNode}
 
-function TMemDBRowLookasideIndexNode.CompareItems(OwnItem: TObject; OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 {$IFDEF MEMDB2_TEMP_REMOVE}
+function TMemDBRowLookasideIndexNode.CompareItems(OwnItem: TObject; OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 var
   Tag: PMemDBMetaTags;
   OwnFieldList, OtherFieldList: TMemStreamableList;
@@ -644,14 +672,11 @@ begin
   end;
 end;
 {$ENDIF}
-begin
-  Assert(false); //TODO - This needs to be binned, reworked or otherwise changed.
-end;
 
 { TMemDBRowLookasideSearchVal }
 
-function TMemDBRowLookasideSearchVal.CompareItems(OwnItem: TObject; OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 {$IFDEF MEMDB2_TEMP_REMOVE}
+function TMemDBRowLookasideSearchVal.CompareItems(OwnItem: TObject; OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 var
   Tag: PMemDBMetaTags;
   OtherFieldList: TMemStreamableList;
@@ -711,8 +736,5 @@ begin
   end;
 end;
 {$ENDIF}
-begin
-  Assert(false); //TODO - This needs to be binned, reworked or otherwise changed.
-end;
 
 end.
