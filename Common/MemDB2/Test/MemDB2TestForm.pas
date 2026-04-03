@@ -132,7 +132,8 @@ var
   FieldIncrement: integer;
   DataI64: Int64;
   NavOK: boolean;
-  i,j: integer;
+  i,j,k: integer;
+  LF, LN: TMemApiPosition;
 begin
   ResetClick(Sender);
   Trans := FSession.StartTransaction(amReadWrite);
@@ -155,11 +156,6 @@ begin
         finally
           TableMeta.Free;
         end;
-{$IFNDEF MEMDB2_TEMP_REMOVE}
-        LogTimeIncr('Table create OK');
-{$ENDIF}
-
-{$IFDEF MEMDB2_TEMP_REMOVE}
         DBAPI.Free;
         Trans.CommitAndFree;
         LogTimeIncr('Table create OK');
@@ -167,7 +163,7 @@ begin
         Trans := FSession.StartTransaction(amReadWrite, amLazyWrite, ilDirtyRead);
         DBAPI := Trans.GetAPI;
         Assert(Assigned(DBAPI));
-        TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+        TableData := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
         try
           for i := 1 to LIMIT do
           begin
@@ -193,19 +189,31 @@ begin
           end;
 
           // 3) Test row navigation by indernal index and field modification.
+          k := 0;
           for DirectionUp := High(boolean) downto Low(boolean) do
           begin
             if DirectionUp then
-              FieldIncrement := 1
+            begin
+              FieldIncrement := 1;
+              LF := ptFirst;
+              LN := ptNext;
+              i := 0;
+            end
             else
+            begin
               FieldIncrement := -1;
+              LF := ptLast;
+              LN := ptPrevious;
+              i := LIMIT;
+            end;
 
-            i := 0;
-            NavOK := TableData.Locate(ptFirst, '');
+            NavOK := TableData.Locate(LF, '');
             while NavOK do
             begin
-              Inc(i);
+              if DirectionUp then
+                Inc(i);
               TableData.ReadField('Int', Data);
+              Assert(Data.i32Val = i + k);
               Data.i32Val := Data.i32Val + FieldIncrement;
               TableData.WriteField('Int', Data);
 
@@ -213,38 +221,99 @@ begin
               //Do the arithmetic signed, and no don't range check the
               //type conversion or sign extension.
               DataI64 := Int64(Data.u64Val);
+              Assert(DataI64 = Int64(i) + Int64(k));
               DataI64 := DataI64 + FieldIncrement;
               Data.u64Val := UInt64(DataI64);
               TableData.WriteField('U64', Data);
 
               TableData.ReadField('String', Data);
               j := StrToInt(Data.sVal);
+              Assert(j = i + k);
               Data.sVal := IntToStr(j + FieldIncrement);
               TableData.WriteField('String', Data);
 
               TableData.ReadField('Double', Data);
+              Assert(Trunc(Data.dVal) = i + k);
               Data.dVal := Data.dVal + FieldIncrement;
               TableData.WriteField('Double', Data);
 
               TableData.ReadField('Guid', Data);
               j := Integer(Data.gVal.D1);
+              Assert(j = i + k);
               Inc(j, FieldIncrement);
               Data.gVal := TestGuidFromInt(j);
+              TableData.WriteField('Guid', Data);
               TableData.Post;
-              NavOK := TableData.Locate(ptNext, '');
+              NavOK := TableData.Locate(LN, '');
+              if not DirectionUp then
+                Dec(i);
             end;
-            Assert(i = LIMIT);
+            Inc(k, FieldIncrement);
+            if DirectionUp then
+              Assert(i = LIMIT)
+            else
+              Assert(i = 0);
           end;
+
+          //OK, now delete alternate rows, and check cursor nav as expected.
+          //Check Autoincrement.
+          NavOK := TableData.Locate(ptFirst, '');
+          i := 0;
+          while NavOK do
+          begin
+            Inc(i);
+            if (i mod 2) = 0 then
+            begin
+              TableData.Delete(true);
+              NavOK := TableData.RowSelected;
+            end
+            else
+              NavOK := TableData.Locate(ptNext, '');
+          end;
+
+          NavOK := TableData.Locate(ptFirst, '');
+          i := 1;
+          while NavOK do
+          begin
+            TableData.ReadField('Int', Data);
+            Assert(Data.i32Val = i);
+            NavOK := TableData.Locate(ptNext, '');
+            Inc(i, 2);
+          end;
+
         finally
           TableData.Free;
         end;
-{$ENDIF}
       end;
     finally
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-    LogTimeIncr('Table add data OK');
+    LogTimeIncr('Table add/delete/navigate OK');
+
+    //OK, now check rows as expected in separate transaction.
+    Trans := FSession.StartTransaction(amRead);
+    DBAPI := Trans.GetAPI;
+    try
+      TableData := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
+      try
+        NavOK := TableData.Locate(ptFirst, '');
+        i := 1;
+        while NavOK do
+        begin
+          TableData.ReadField('Int', Data);
+          Assert(Data.i32Val = i);
+          NavOK := TableData.Locate(ptNext, '');
+          Inc(i, 2);
+        end;
+      finally
+        TableData.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+    LogTimeIncr('Table recheck rows OK');
   except
     on E: Exception do
     begin

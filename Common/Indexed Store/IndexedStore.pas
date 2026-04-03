@@ -112,10 +112,10 @@ type
 {$ENDIF}
   private
     FSiblingListEntryIdx: TDLEntry;
-    FIndexNode: TIndexNode;
     FItemRec: TItemRec;
     FTSIndex: TSIndex;
   protected
+    FIndexNode: TIndexNode;
     procedure IndexCopiedFrom(Dest, Source: TIndexNode);
     property SiblingListEntryIdx: TDLEntry read FSiblingListEntryIdx write FSiblingListEntryIdx;
     property IndexNode: TIndexNode read FIndexNode write FIndexNode;
@@ -138,6 +138,7 @@ type
     FItem: TObject;
     FSiblingListEntryRec: TDLEntry;
     procedure SetItem(NewItem: TObject);
+  protected
     function GetIndexLinkByRoot(RootIdx: TSIndex; UseLocks: boolean): TIndexNodeLink;
   public
     constructor Create;

@@ -37,7 +37,7 @@ uses
 {$IFDEF USE_TRACKABLES}
   Trackables,
 {$ENDIF}
-  MemDb2Misc, MemDb2Indexing, Classes;
+  MemDb2Misc, Classes, Reffed;
 
 type
   //DB Reffed: Multi-buffered classes,
@@ -45,82 +45,58 @@ type
 
   //Streamables now subclasses of this.
 
-{$IFDEF USE_TRACKABLES}
-  TMemDBReffed = class(TTrackable)
-{$ELSE}
-  TMemDBReffed = class
-{$ENDIF}
-  private
-    //TODO - If refs always modified under a double buffered lock,
-    //could use non-interlocked.
-    FRef: integer;
-  public
-    constructor Create; virtual;
 
-    procedure Assign(Source: TMemDBReffed); virtual;
-    procedure DeepAssign(Source: TMemDBReffed); virtual;
-    function Same(Other: TMemDBReffed):boolean; virtual;
-    procedure CommitPack; virtual;
-
-    class function Clone(Source: TMemDBReffed):TMemDBReffed;
-    class function DeepClone(Source: TMemDBReffed):TMemDBReffed;
-
-    function AddRef: TMemDBReffed;
-    function Release: boolean;
-    procedure Free;
-  end;
-
-  TMemDBReffedClass = class of TMemDBReffed;
-
-  TMemDBReffedList = class(TMemDBReffed)
+  TMemDBReffedList = class(TReffed)
   private
     FList: TList;
   protected
     function GetCount: integer;
 {$IFOPT C+}
-    function GetItem(Idx: integer): TMemDBReffed;
-    procedure SetItem(Idx: integer; Item: TMemDBReffed);
+    function GetItem(Idx: integer): TReffed;
+    procedure SetItem(Idx: integer; Item: TReffed);
 {$ELSE}
-    function GetItem(Idx: integer): TMemDBReffed; inline;
-    procedure SetItem(Idx: integer; Item: TMemDBReffed); inline;
+    function GetItem(Idx: integer): TReffed; inline;
+    procedure SetItem(Idx: integer; Item: TReffed); inline;
 {$ENDIF}
   public
-    constructor Create; override;
+    constructor Create;
     destructor Destroy; override;
-    procedure Assign(Source: TMemDBReffed); override;
-    procedure DeepAssign(Source: TMemDBReffed); override;
-
-    function Same(Other: TMemDBReffed):boolean; override;
-    procedure CommitPack; override;
     procedure ReleaseAndClear;
     //No delete sentinels in these lists - just allowing for
     //dbl buffered, atomic, ref counted switchover between two sets of stuff.
-    function AddNoRef(Item: TMemDBReffed): integer;
+    function AddNoRef(Item: TReffed): integer;
     procedure Clear;
     procedure Pack;
     property Count: Integer read GetCount;
-    property Items[idx:integer]: TMemDbReffed read GetItem write SetItem; default;
+    property Items[idx:integer]: TReffed read GetItem write SetItem; default;
   end;
 
-  TMemDBReffedProxy = class(TMemDBReffed)
+  TMemDBReffedProxy = class(TReffed)
   private
     FProxy: TObject;
   public
-    procedure Assign(Source: TMemDBReffed); override;
-    procedure DeepAssign(Source: TMemDBReffed); override;
-
     destructor Destroy; override;
     property Proxy: TObject read FProxy write FProxy;
   end;
 
-  TMemDBStreamable = class(TMemDBReffed)
+  TMemDBStreamable = class(TReffed)
   public
-    constructor Create; override;
+    constructor Create; virtual;
+
+    procedure Assign(Source: TMemDBStreamable); virtual;
+    procedure DeepAssign(Source: TMemDBStreamable); virtual;
+    function Same(Other: TMemDBStreamable):boolean; virtual;
+    procedure CommitPack; virtual;
+
+    class function Clone(Source: TMemDBStreamable):TMemDBStreamable;
+    class function DeepClone(Source: TMemDBStreamable):TMemDBStreamable;
 
     procedure ToStream(Stream: TStream); virtual; abstract;
     procedure FromStream(Stream: TStream); virtual; abstract;
     procedure CheckSameAsStream(Stream: TStream); virtual; abstract;
   end;
+
+  TMemDbStreamableClass = class of TMemDBStreamable;
 
   TMemStreamableList = class(TMemDBStreamable)
   private
@@ -138,9 +114,9 @@ type
   public
     constructor Create; override;
     destructor Destroy; override;
-    procedure Assign(Source: TMemDBReffed); override;
-    procedure DeepAssign(Source: TMemDBReffed); override;
-    function Same(Other: TMemDBReffed):boolean; override;
+    procedure Assign(Source: TMemDBStreamable); override;
+    procedure DeepAssign(Source: TMemDBStreamable); override;
+    function Same(Other: TMemDBStreamable):boolean; override;
     procedure CommitPack; override;
     procedure ReleaseAndClear;
 
@@ -173,9 +149,9 @@ type
     FFieldName: string;
     FFieldIndex: TFieldOffset;
   public
-    procedure Assign(Source: TMemDbReffed); override;
-    procedure DeepAssign(Source: TMemDbReffed); override;
-    function Same(Other: TMemDbReffed):boolean; override;
+    procedure Assign(Source: TMemDBStreamable); override;
+    procedure DeepAssign(Source: TMemDBStreamable); override;
+    function Same(Other: TMemDBStreamable):boolean; override;
     procedure ToStream(Stream: TStream); override;
     procedure FromStream(Stream: TStream); override;
     procedure CheckSameAsStream(Stream: TStream); override;
@@ -189,15 +165,15 @@ type
   TMemFieldData = class(TMemDBStreamable)
   protected
     procedure RecFromStream(Stream: TStream; var Rec: TMemDbFieldDataRec);
-    procedure AssignCommon(Source: TMemDBReffed);
+    procedure AssignCommon(Source: TMemDBStreamable);
   public
     FDataRec: TMemDbFieldDataRec;
     constructor Create; override;
     destructor Destroy; override;
 
-    procedure Assign(Source: TMemDbReffed); override;
-    procedure DeepAssign(Source: TMemDbReffed); override;
-    function Same(Other: TMemDbReffed):boolean; override;
+    procedure Assign(Source: TMemDBStreamable); override;
+    procedure DeepAssign(Source: TMemDBStreamable); override;
+    function Same(Other: TMemDBStreamable):boolean; override;
     procedure ToStream(Stream: TStream); override;
     procedure FromStream(Stream: TStream); override;
     procedure CheckSameAsStream(Stream: TStream); override;
@@ -214,9 +190,9 @@ type
     function GetFieldNameCount: integer;
     procedure SetFieldNameCount(i: integer);
   public
-    procedure Assign(Source: TMemDbReffed); override;
-    procedure DeepAssign(Source: TMemDbReffed); override;
-    function Same(Other: TMemDbReffed):boolean; override;
+    procedure Assign(Source: TMemDBStreamable); override;
+    procedure DeepAssign(Source: TMemDBStreamable); override;
+    function Same(Other: TMemDBStreamable):boolean; override;
     procedure ToStream(Stream: TStream); override;
     procedure FromStream(Stream: TStream); override;
     procedure CheckSameAsStream(Stream: TStream); override;
@@ -231,9 +207,9 @@ type
   private
     FEntityName: string;
   public
-    procedure Assign(Source: TMemDbReffed); override;
-    procedure DeepAssign(Source: TMemDBReffed); override;
-    function Same(Other: TMemDbReffed):boolean; override;
+    procedure Assign(Source: TMemDBStreamable); override;
+    procedure DeepAssign(Source: TMemDBStreamable); override;
+    function Same(Other: TMemDBStreamable):boolean; override;
     procedure ToStream(Stream: TStream); override;
     procedure FromStream(Stream: TStream); override;
     procedure CheckSameAsStream(Stream: TStream); override;
@@ -245,13 +221,13 @@ type
     FFieldDefs: TMemStreamableList;
     FIndexDefs: TMemStreamableList;
   public
-    procedure Assign(Source: TMemDbReffed); override;
-    procedure DeepAssign(Source: TMemDbReffed); override;
+    procedure Assign(Source: TMemDBStreamable); override;
+    procedure DeepAssign(Source: TMemDBStreamable); override;
+    function Same(Other: TMemDBStreamable):boolean; override;
     procedure CommitPack; override;
 
     constructor Create; override;
     destructor Destroy; override;
-    function Same(Other: TMemDbReffed):boolean; override;
     procedure ToStream(Stream: TStream); override;
     procedure FromStream(Stream: TStream); override;
     procedure CheckSameAsStream(Stream: TStream); override;
@@ -266,9 +242,9 @@ type
     FTableReferred: string;
     FIndexReferred: string;
   public
-    procedure Assign(Source: TMemDbReffed); override;
-    procedure DeepAssign(Source: TMemDbReffed); override;
-    function Same(Other: TMemDbReffed):boolean; override;
+    procedure Assign(Source: TMemDBStreamable); override;
+    procedure DeepAssign(Source: TMemDBStreamable); override;
+    function Same(Other: TMemDBStreamable):boolean; override;
     procedure ToStream(Stream: TStream); override;
     procedure FromStream(Stream: TStream); override;
     procedure CheckSameAsStream(Stream: TStream); override;
@@ -368,101 +344,13 @@ const
   S_MEM_DB_FIELD_TYPE = 'FieldType';
   S_MEM_DB_FIELD_VAL = 'FieldVal';
   S_MEM_DB_FIELD_LEN = 'FieldLen';
-  S_DBL_BUFFERED_EQUALITY_CHECK = 'Comparing two complicated items.' +
-    ' A bug, or comparing journal entries? Perhaps you wanted to compare the' +
-    ' A buffer with the B buffer, or do other pre-commit checks?';
-  S_BLOB_SIZES_INCONSISTENT = 'For MemDB, blob sizes must be exactly right.';
-  S_BLOB_TOO_LARGE = 'Cannot allocate a blob > 2GB.';
   S_MEM_DB_UNSTREAM_OOR = 'Unstream value: out of range for this type. Corrupted stream?';
   S_STREAMABLE_LIST_LOOKAHEAD_FAILED = 'Streamable list lookahead failed, tag: ';
-  S_INDEX_DEF_LOOKAHEAD_FAILED = 'Index def lookahead failed, tag: ';
+  S_ASSIGN_UNSUPP_IN_PROXY = 'Reffed proxies do not support assignment.';
+  S_NO_PACKING_SENTINELS = 'Sentinels cannot be packed.';
+  S_FIELD_TYPE_NOT_STREAMABLE = 'Field type not streamable.';
+  S_ASSIGN_UNSUPP_IN_META = 'Metadata does not support shallow assignment';
 
-{ TMemDBReffed }
-
-constructor TMemDBReffed.Create;
-begin
-  inherited;
-  FRef := 1;
-end;
-
-function TMemDBReffed.AddRef: TMemDbReffed;
-begin
-  if Assigned(Self) then
-    InterlockedIncrement(FRef);
-  result := Self;
-end;
-
-function TMemDBReffed.Release: boolean;
-begin
-  result := false;
-  if Assigned(self) then
-  begin
-    if InterlockedDecrement(FRef) = 0 then
-    begin
-      result := true;
-      inherited Free;
-    end;
-  end;
-end;
-
-procedure TMemDBReffed.Free;
-begin
-  Assert(false);
-  Assert(FRef = 1);
-  Release;
-end;
-
-procedure TMemDBReffed.Assign(Source: TMemDBReffed);
-begin
-  //Nothing. Make assign and deep assign totally separate.
-end;
-
-procedure TMemDBReffed.DeepAssign(Source: TMemDBReffed);
-begin
-  //Nothing. Make assign and deep assign totally separate.
-end;
-
-procedure TMemDbReffed.CommitPack;
-begin
-  //Nothing, override for container classes.
-end;
-
-function TMemDBReffed.Same(Other: TMemDBReffed):boolean;
-begin
-  result := Assigned(Other) = Assigned(Self);
-  if Assigned(Other) and Assigned(Self) then
-    result := (Other is Self.ClassType) and (Self is Other.ClassType);
-end;
-
-class function TMemDBReffed.Clone(Source: TMemDBReffed):TMemDBReffed;
-var
-  SrcClass: TMemDBReffedClass;
-begin
-  if not Assigned(Source) then
-    result := nil
-  else
-  begin
-    Assert(Source.ClassType.InheritsFrom(TMemDBStreamable));
-    SrcClass := TMemDBReffedClass(Source.ClassType);
-    result := SrcClass.Create;
-    result.Assign(Source);
-  end;
-end;
-
-class function TMemDBReffed.DeepClone(Source: TMemDBReffed):TMemDBReffed;
-var
-  SrcClass: TMemDBReffedClass;
-begin
-  if not Assigned(Source) then
-    result := nil
-  else
-  begin
-    Assert(Source.ClassType.InheritsFrom(TMemDBStreamable));
-    SrcClass := TMemDBReffedClass(Source.ClassType);
-    result := SrcClass.Create;
-    result.DeepAssign(Source);
-  end;
-end;
 
 { TMemDBReffedList }
 
@@ -484,17 +372,17 @@ begin
   result := FList.Count;
 end;
 
-function TMemDBReffedList.GetItem(Idx: integer): TMemDBReffed;
+function TMemDBReffedList.GetItem(Idx: integer): TReffed;
 begin
   result := FList.Items[idx];
 end;
 
-procedure TMemDBReffedList.SetItem(Idx: integer; Item: TMemDBReffed);
+procedure TMemDBReffedList.SetItem(Idx: integer; Item: TReffed);
 begin
   FList.Items[idx] := Item;
 end;
 
-function TMemDBReffedList.AddNoRef(Item: TMemDBReffed): integer;
+function TMemDBReffedList.AddNoRef(Item: TReffed): integer;
 begin
   result := FList.Add(Item);
 end;
@@ -509,74 +397,6 @@ begin
   FList.Pack;
 end;
 
-procedure TMemDBReffedList.Assign(Source: TMemDBReffed);
-var
-  i: integer;
-  S: TMemDBReffedList;
-begin
-  inherited;
-  ReleaseAndClear;
-  S := Source as TMemDBReffedList;
-  for i := 0 to Pred(S.Count) do
-    AddNoRef(S.Items[i].AddRef as TMemDbReffed);
-end;
-
-procedure TMemDBReffedList.DeepAssign(Source: TMemDBReffed);
-var
-  i: integer;
-  S: TMemDBReffedList;
-begin
-  inherited;
-  ReleaseAndClear;
-  S := Source as TMemDBReffedList;
-  for i := 0 to Pred(S.Count) do
-    AddNoRef(DeepClone(S.Items[i]) as TMemDBReffed);
-end;
-
-procedure TMemDbReffedList.CommitPack;
-var
-  i: integer;
-begin
-  inherited;
-  for i := 0 to Pred(Count) do
-  begin
-    if Assigned(Items[i]) then
-    begin
-      if Items[i] is TMemDeleteSentinel then
-      begin
-        Items[i].Release;
-        Items[i] := nil;
-      end
-      else
-        Items[i].CommitPack;
-    end;
-    Pack;
-  end;
-end;
-
-function TMemDBReffedList.Same(Other: TMemDBReffed):boolean;
-var
- O: TMemDBReffedList;
- I: integer;
-begin
-  result := inherited;
-  if Result then
-  begin
-    O := Other as TMemDBReffedList;
-    result := (O.Count = Count);
-    if result then
-    begin
-      I := 0;
-      while (I < Count) and result do
-      begin
-        result :=
-          (Items[I] as TMemDBStreamable).Same(O.Items[I] as TMemDBStreamable);
-        Inc(I);
-      end;
-    end;
-  end;
-end;
-
 procedure TMemDBReffedList.ReleaseAndClear;
 var
   i: integer;
@@ -586,22 +406,12 @@ begin
   Clear;
 end;
 
-
 { TMemDbReffedProxy }
 
 //Generally the proxies will be used to allow atomic /
 //protected access to sets of things via pinned lists,
 //so we don't expect direct assignment, only referencing
 //via lists.
-procedure TMemDbReffedProxy.Assign(Source: TMemDBReffed);
-begin
-  Assert(false);
-end;
-
-procedure TMemDbReffedProxy.DeepAssign(Source: TMemDBReffed);
-begin
-  Assert(false);
-end;
 
 destructor TMemDbReffedProxy.Destroy;
 begin
@@ -628,10 +438,63 @@ end;
 
 procedure TMemDeleteSentinel.CommitPack;
 begin
-  Assert(false);
+  raise EMemDBInternalException.Create(S_NO_PACKING_SENTINELS);
 end;
 
 { TMemDBStreamable }
+
+procedure TMemDBStreamable.Assign(Source: TMemDBStreamable);
+begin
+  //Nothing. Make assign and deep assign totally separate.
+end;
+
+procedure TMemDBStreamable.DeepAssign(Source: TMemDBStreamable);
+begin
+  //Nothing. Make assign and deep assign totally separate.
+end;
+
+procedure TMemDBStreamable.CommitPack;
+begin
+  //Nothing, override for container classes.
+end;
+
+function TMemDBStreamable.Same(Other: TMemDBStreamable):boolean;
+begin
+  result := Assigned(Other) = Assigned(Self);
+  if Assigned(Other) and Assigned(Self) then
+    result := (Other is Self.ClassType) and (Self is Other.ClassType);
+end;
+
+class function TMemDBStreamable.Clone(Source: TMemDBStreamable):TMemDBStreamable;
+var
+  SrcClass: TMemDBStreamableClass;
+begin
+  if not Assigned(Source) then
+    result := nil
+  else
+  begin
+    Assert(Source.ClassType.InheritsFrom(TMemDBStreamable));
+    SrcClass := TMemDBStreamableClass(Source.ClassType);
+    result := SrcClass.Create;
+    result.Assign(Source);
+  end;
+end;
+
+class function TMemDBStreamable.DeepClone(Source: TMemDBStreamable):TMemDBStreamable;
+var
+  SrcClass: TMemDBStreamableClass;
+begin
+  if not Assigned(Source) then
+    result := nil
+  else
+  begin
+    Assert(Source.ClassType.InheritsFrom(TMemDBStreamable));
+    SrcClass := TMemDBStreamableClass(Source.ClassType);
+    result := SrcClass.Create;
+    result.DeepAssign(Source);
+  end;
+end;
+
 
 constructor TMemDBStreamable.Create;
 begin
@@ -748,7 +611,7 @@ begin
   ExpectTag(Stream, mstStreamableListEnd);
 end;
 
-procedure TMemStreamableList.Assign(Source: TMemDBReffed);
+procedure TMemStreamableList.Assign(Source: TMemDBStreamable);
 var
   i: integer;
   S: TMemStreamableList;
@@ -757,10 +620,10 @@ begin
   ReleaseAndClear;
   S := Source as TMemStreamableList;
   for i := 0 to Pred(S.Count) do
-    AddNoRef(S.Items[i].AddRef as TMemDbStreamable);
+    AddNoRef(S.Items[i].AddRef as TMemDBStreamable);
 end;
 
-procedure TMemStreamableList.DeepAssign(Source: TMemDBReffed);
+procedure TMemStreamableList.DeepAssign(Source: TMemDBStreamable);
 var
   i: integer;
   S: TMemStreamableList;
@@ -793,7 +656,7 @@ begin
   Pack;
 end;
 
-function TMemStreamableList.Same(Other: TMemDBReffed):boolean;
+function TMemStreamableList.Same(Other: TMemDBStreamable):boolean;
 var
  O: TMemStreamableList;
  I: integer;
@@ -867,7 +730,7 @@ begin
   ExpectTag(Stream, mstFieldDefEnd);
 end;
 
-procedure TMemFieldDef.Assign(Source: TMemDBReffed);
+procedure TMemFieldDef.Assign(Source: TMemDBStreamable);
 var
   S: TMemFieldDef;
 begin
@@ -878,7 +741,7 @@ begin
   FFieldIndex := S.FFieldIndex;
 end;
 
-procedure TMemFieldDef.DeepAssign(Source: TMemDBReffed);
+procedure TMemFieldDef.DeepAssign(Source: TMemDBStreamable);
 var
   S: TMemFieldDef;
 begin
@@ -889,7 +752,7 @@ begin
   FFieldIndex := S.FFieldIndex;
 end;
 
-function TMemFieldDef.Same(Other: TMemDBReffed): boolean;
+function TMemFieldDef.Same(Other: TMemDBStreamable): boolean;
 var
   O: TMemFieldDef;
 begin
@@ -985,7 +848,7 @@ begin
   ExpectTag(Stream, mstIndexDefEnd);
 end;
 
-procedure TMemIndexDef.Assign(Source: TMemDBReffed);
+procedure TMemIndexDef.Assign(Source: TMemDBStreamable);
 var
   S: TMemIndexDef;
 begin
@@ -996,7 +859,7 @@ begin
   FIndexAttrs := S.FIndexAttrs;
 end;
 
-procedure TMemIndexDef.DeepAssign(Source: TMemDBReffed);
+procedure TMemIndexDef.DeepAssign(Source: TMemDBStreamable);
 var
   S: TMemIndexDef;
 begin
@@ -1007,7 +870,7 @@ begin
   FIndexAttrs := S.FIndexAttrs;
 end;
 
-function TMemIndexDef.Same(Other: TMemDBReffed): boolean;
+function TMemIndexDef.Same(Other: TMemDBStreamable): boolean;
 var
   O: TMemIndexDef;
 begin
@@ -1042,7 +905,7 @@ begin
     end;
     ftGuid: Stream.Write(FDataRec.gVal, sizeof(FDataRec.gVal));
   else
-    Assert(false);
+    raise EMemDBInternalException.Create(S_FIELD_TYPE_NOT_STREAMABLE);
   end;
   WrTag(Stream, mstFieldDataEnd);
 end;
@@ -1102,7 +965,7 @@ begin
     raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
 end;
 
-procedure TMemFieldData.AssignCommon(Source: TMemDBReffed);
+procedure TMemFieldData.AssignCommon(Source: TMemDBStreamable);
 var
   S: TMemFieldData;
 begin
@@ -1142,13 +1005,13 @@ begin
     FDataRec := S.FDataRec;
 end;
 
-procedure TMemFieldData.Assign(Source: TMemDBReffed);
+procedure TMemFieldData.Assign(Source: TMemDBStreamable);
 begin
   inherited;
   AssignCommon(Source);
 end;
 
-procedure TMemFieldData.DeepAssign(Source: TMemDbReffed);
+procedure TMemFieldData.DeepAssign(Source: TMemDBStreamable);
 begin
   inherited;
   AssignCommon(Source);
@@ -1168,7 +1031,7 @@ begin
 end;
 
 
-function TMemFieldData.Same(Other: TMemDBReffed): boolean;
+function TMemFieldData.Same(Other: TMemDBStreamable): boolean;
 var
   O: TMemFieldData;
 begin
@@ -1182,7 +1045,7 @@ end;
 
 { TMemEntityMetadataItem }
 
-procedure TMemEntityMetadataItem.Assign(Source: TMemDBReffed);
+procedure TMemEntityMetadataItem.Assign(Source: TMemDBStreamable);
 var
   S: TMemEntityMetadataItem;
 begin
@@ -1191,7 +1054,7 @@ begin
   FEntityName := S.FEntityName;
 end;
 
-procedure TMemEntityMetadataItem.DeepAssign(Source: TMemDBReffed);
+procedure TMemEntityMetadataItem.DeepAssign(Source: TMemDBStreamable);
 var
   S: TMemEntityMetadataItem;
 begin
@@ -1200,7 +1063,7 @@ begin
   FEntityName := S.FEntityName;
 end;
 
-function TMemEntityMetadataItem.Same(Other: TMemDBReffed):boolean;
+function TMemEntityMetadataItem.Same(Other: TMemDBStreamable):boolean;
 var
   O: TMemEntityMetadataItem;
 begin
@@ -1239,16 +1102,16 @@ end;
 
 { TMemTableMetadataItem }
 
-procedure TMemTableMetadataItem.Assign(Source: TMemDBReffed);
+procedure TMemTableMetadataItem.Assign(Source: TMemDBStreamable);
 begin
-  Assert(false);
+  raise EMemDBInternalException.Create(S_ASSIGN_UNSUPP_IN_META);
   //not clear where / at what point we need to make the assignment,
   //and where we ref as opposed to cloning.
   //Shallow ref of lists? Shallow ref of list items??
   inherited;
 end;
 
-procedure TMemTableMetadataItem.DeepAssign(Source: TMemDBReffed);
+procedure TMemTableMetadataItem.DeepAssign(Source: TMemDBStreamable);
 var
   S: TMemTableMetadataItem;
 begin
@@ -1267,7 +1130,7 @@ begin
   FIndexDefs.CommitPack;
 end;
 
-function TMemTableMetadataItem.Same(Other: TMemDBReffed):boolean;
+function TMemTableMetadataItem.Same(Other: TMemDBStreamable):boolean;
 var
   O: TMemTableMetadataItem;
 begin
@@ -1322,7 +1185,7 @@ end;
 
 { TMemForeignKeyMetadataItem }
 
-procedure TMemForeignKeyMetadataItem.Assign(Source: TMemDBReffed);
+procedure TMemForeignKeyMetadataItem.Assign(Source: TMemDBStreamable);
 var
   S: TMemForeignKeyMetadataItem;
 begin
@@ -1334,7 +1197,7 @@ begin
   FIndexReferred := S.FIndexReferred;
 end;
 
-procedure TMemForeignKeyMetadataItem.DeepAssign(Source: TMemDBReffed);
+procedure TMemForeignKeyMetadataItem.DeepAssign(Source: TMemDBStreamable);
 var
   S: TMemForeignKeyMetadataItem;
 begin
@@ -1346,7 +1209,7 @@ begin
   FIndexReferred := S.FIndexReferred;
 end;
 
-function TMemForeignKeyMetadataItem.Same(Other: TMemDBReffed):boolean;
+function TMemForeignKeyMetadataItem.Same(Other: TMemDBStreamable):boolean;
 var
   O: TMemForeignKeyMetadataItem;
 begin

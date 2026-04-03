@@ -46,9 +46,9 @@ type
     //TBinTree delcared in same unit, so can change these fields, but make
     //private so no other code can frobnicate them.
     left, right: TBinTreeItem;
-    bal: - 1..1;
     procedure FreeSubTree;
   protected
+    bal: - 1..1;
     function Compare(Other: TBinTreeItem;
                      AllowKeyDedupe: boolean): integer; virtual; abstract; // data
    // a < self :-1  a=self :0  a > self :+1
@@ -67,8 +67,8 @@ type
   TBinTree = class
   private
     root: TBinTreeItem;
-    h: boolean; //Wish I could give this a more useful name!
-    found: boolean;
+    h: boolean; //Height- unbalanced
+    found: boolean; //Found in insert or delete operation.
     procedure DelHelper(var r: TBinTreeItem; var q: TBinTreeItem);
     procedure Delete(item: TBinTreeItem; var p: TBinTreeItem);
     procedure SearchAndInsert(item: TBinTreeItem; var p: TBinTreeItem);

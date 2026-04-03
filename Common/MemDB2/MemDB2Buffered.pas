@@ -31,6 +31,7 @@ IN THE SOFTWARE.
 
 // TODO - When all is up and working, look at possibly
 // out of memory exception paths, and how to make them better.
+// Just go thru all the cases by class type and alloc position.
 
 interface
 
@@ -43,7 +44,7 @@ uses
   Trackables,
 {$ENDIF}
   IndexedStore, MemDB2Streamable, Classes, MemDB2Misc,
-  DLList, LockAbstractions, TinyLock, MemDB2BufBase;
+  DLList, LockAbstractions, TinyLock, MemDB2BufBase, MemDB2Indexing;
 
 type
   TMemDBAPIInterfacedObject = class;
@@ -231,16 +232,28 @@ type
   private
     FRowID: TGUID;
     FTable: TMemDBTablePersistent;
+    //TODO - Not even convinced we need Row proxy, remove it?
+    //I think DCP handlers are enough (no external references
+    //outside transaction, all handled by pins).
+    //Depends what query engine stuff might do - probably refs
+    //data items itself.
     FProxy: TMemDBRowProxy;
+    FMasterRec: TItemRec;
   protected
     procedure DCPHandle(const Update: TReferenceUpdate); override;
     procedure CPTidHandle(const Update: TTidUpdate); override;
   public
     constructor Create;
     procedure Init(Table: TMemDBTablePersistent; const Guid:TGuid);
+
     //This function checks formats enough so algorithms don't die, but
     //is not the final concurrency check (which is done via Tid comparison).
+
+    //TODO - One day, a list of format changes so we can fix-up on the fly?
     function CheckFormatAgainstMeta(const Tid: TTransactionId; AB: TAbSelType; MD: TMemTableMetadataItem; PinReason: TPinReason): boolean;
+    class function StaticCheckFormatAgainstMeta(Data: TMemDBStreamable; MD: TMemTableMetadataItem): boolean;
+    function CheckFormatAgainstMetaDefs(const Tid: TTransactionId; AB: TAbSelType; MetaFieldDefs: TMemStreamableList; PinReason: TPinReason): boolean;
+    class function StaticCheckFormatAgainstMetaDefs(Data: TMemDBStreamable; MetaFieldDefs: TMemStreamableList): boolean;
 
     procedure ToJournal(const Tid: TTransactionId; Stream: TStream);override;
     procedure ToScratch(const PseudoTid:TTransactionId; Stream: TStream);override;
@@ -271,13 +284,13 @@ type
   private
     //A/B buffer holds TMemTableMetadataItem
     procedure CheckABListChanges(const Tid: TTransactionId);
-  public
-    procedure PreCommit(const Tid: TTransactionId; Reason: TMemDbTransReason); override;
-
+  protected
+    //TODO - Recheck callers of these have TidLocal or use META_ functions.
     function FieldsByNames(const AB: TBufSelector; const Names: TMDBFieldNames; var AbsIdxs: TFieldOffsets; Reason: TPinReason): TMemFieldDefs;
     function FieldByName(const AB: TBufSelector; const Name: string; var AbsIndex: integer; Reason: TPinReason): TMemFieldDef;
     function IndexByName(const AB: TBufSelector; const Name: string; var AbsIndex: integer; Reason: TPinReason): TMemIndexDef;
-
+  public
+    procedure PreCommit(const Tid: TTransactionId; Reason: TMemDbTransReason); override;
     procedure Init(const Tid: TTransactionId; Parent: TObject; Name:string; DSName: boolean); override;
   end;
 
@@ -321,6 +334,8 @@ type
     procedure HandleAddRefForAPI(Sender: TObject);
     procedure HandleReleaseForAPI(Sender: TObject);
     procedure MetadataDCPHandle(Sender: TObject; const Update:TReferenceUpdate);
+
+    property Metadata: TMemDBEntityMetadata read FMetadata;    
   public
     constructor Create;
     destructor Destroy; override;
@@ -329,12 +344,18 @@ type
     //function AnyChangesAtAll: boolean; override;
 {$ENDIF} // MEMDB2_TEMP_REMOVE
 
+    function META_PinCurrent(const Tid: TTransactionId; Reason: TPinReason): TMemDBStreamable; virtual;
+    function META_GetNext(const Tid: TTransactionId): TMemDBStreamable; virtual;
+    function META_GetPinLatest(const Tid: TTransactionId;
+                            var BufSelected: TAbSelType; Reason: TPinReason): TMemDBStreamable; virtual;
+    procedure META_RequestChange(const Tid: TTransactionId); virtual;
+    procedure META_Delete(const Tid: TTransactionId); virtual;
+
     procedure PreCommit(const TId: TTransactionId; Reason: TMemDBTransReason); override;
     procedure Commit(const TId: TTransactionId; Reason: TMemDbTransReason); override;
     procedure Rollback(const TId: TTransactionId; Reason: TMemDbTransReason); override;
     procedure Init(const Tid: TTransactionId; Parent: TObject; Name:string; DSName: boolean);
 
-    property Metadata: TMemDBEntityMetadata read FMetadata;
     property ParentDB: TMemDBDatabasePersistent read FParentDB;
     property Proxy: TMemDBEntityProxy read FProxy;
     property Interfaced: TMemDBAPIInterfacedObject read FInterfaced;
@@ -372,15 +393,6 @@ type
     Lists: TMemDBFKMetaLists;
   end;
   PMemDBFKMeta = ^TMemDBFKMeta;
-
-  TIndexChangeType = (ictAdded,
-                      ictDeleted,
-                      ictChangedFieldNumber);
-
-  TIndexChangeSet = set of TIndexChangeType;
-  TIndexChangeArray = array of TIndexChangeSet;
-
-  TMemDblBufListHelper = class;
 
   TMemDBForeignKeyPersistent = class(TMemDBEntity)
 {$IFDEF MEMDB2_TEMP_REMOVE}
@@ -430,19 +442,46 @@ type
   TFieldChangeSet = set of TFieldChangeType;
   TFieldChangeArray = array of TFieldChangeSet;
 
-  //Could have had refcounted tags off metadata,
-  //but this is more in keeping with with having the table internals properly
-  //internal.
+  TIndexChangeType = (ictAdded,
+                      ictDeleted,
+                      ictChangedFieldNumber);
 
-  //When data not modified, TagArray correspons to current copy of indices.
-  //When modified, TagArray correspnds to index changeset indexing, i.e,
-  //between modify and commit, added indexes at higher IdxIdx, and
-  //delete sentinels for intermediately deleted indices.
+  TIndexChangeSet = set of TIndexChangeType;
+  TIndexChangeArray = array of TIndexChangeSet;
+
+  TMemDblBufListHelper = class;
+
+  TIndexRootArray = array of TMemDBIndex;
 
   TCommitChangeMade = ( ccmAddedNewTagStructs,
                         ccmDeleteUnusedIndices,
                         ccmIndexesToTemporary);
   TCommitChangesMade = set of TCommitChangeMade;
+
+  TTidLocal = class;
+
+{$IFDEF USE_TRACKABLES}
+  TMemDBCursor = class(TTrackable)
+{$ELSE}
+  TMemDBCursor = class
+{$ENDIF}
+  private
+    FRow: TMemDBRow;
+    FPinTid: TTransactionId;
+    //Some fields so we can do something sensible on deletion.
+    FIterIndex: TMemDBIndex;
+    FIterInc: TMemAPIPosition;
+    FTidLocal: TTidLocal;
+  protected
+  public
+    procedure SetRowPin(const Tid: TTransactionId; NewRow: TMemDBRow);
+    destructor Destroy; override;
+    property Row: TMemDBRow read FRow;
+    property IterIndex: TMemDBIndex read FIterIndex;
+    property IterInc: TMemAPIPosition read FIterInc;
+    property TidLocal: TTidLocal read FTidLocal;
+  end;
+
 
 {$IFDEF USE_TRACKABLES}
   TTidLocal = class(TTrackable)
@@ -469,6 +508,8 @@ type
     FEmptyList: TMemStreamableList;
     FIndexChangesets: TIndexChangeArray;
     FFieldChangesets: TFieldChangeArray;
+    FIndexInit: boolean;
+    FLocalIndexCopies: TIndexRootArray;
 
     //TODO - Need store here, or can get away with DLList?
     //But then each MemDBRow needs a list of lists, which is a pain.
@@ -483,7 +524,7 @@ type
     procedure CheckPartialIndexes;
     procedure RowLocalPreCommit(Reason: TMemDbTransReason);
 
-    procedure UpdateListHelpers(PinReason: TPinReason);
+    procedure UpdateHelpersAndIndices(PinReason: TPinReason);
     procedure DimensionChangesets(PinReason: TPinReason);
     procedure ReGenChangesets(PinReason: TPinReason);
 
@@ -500,7 +541,9 @@ type
 
     procedure PreCommit(Reason: TMemDBTransReason);
     procedure Commit(Reason: TMemDBTransReason);
+    procedure MetaIndexCommit(Reason: TMemDBTransReason);
     procedure Rollback(Reason: TMemDBTransReason);
+    procedure MetaIndexRollback(Reason: TMemDBTransReason);
 
     procedure RowCPTidHandle(Sender: TObject; const Update: TTidUpdate);
   public
@@ -508,6 +551,24 @@ type
     destructor Destroy; override;
 
     procedure UpdateLayout(PinReason: TPinReason);
+
+    function GetUserIndexRoot(var Idx: TMemIndexDef; IdxName: string): TMemDBIndex;
+    
+    //TODO - Ensure user can GetPinLatest for Tid without being
+    //out of date with Index.
+    function UserMoveToRowByIndexRoot(IRoot: TMemDbIndex;
+                                      Cursor: TMemDBCursor;
+                                      Pos: TMemAPIPosition): TMemDBCursor;
+
+    //TODO - Ensure user can GetPinLatest for Tid without being
+    //out of date with Index.
+    function UserFindRowByIndexRoot(IndexDef: TMemIndexDef;
+                                    FieldDefs: TMemFieldDefs;
+                                    IRoot: TMemDbIndex;
+                                    const DataRecs: TMemDbFieldDataRecs): TMemDbCursor;
+
+    procedure UserDeleteRow(Cursor: TMemDbCursor);
+    procedure UserWriteRowData(var Cursor:TMemDbCursor; FieldList: TMemStreamableList);
 
     property DataChanged: boolean read FDataChanged;
     property LayoutChangeRequired: boolean read FLayoutChangeRequired;
@@ -540,6 +601,7 @@ type
   PRowAdditionLock = ^TRowAdditionLock;
 {$ENDIF}
 
+
   TMemDBTablePersistent = class(TMemDBEntity)
   private
     //TODO - Determine and check some locking order.
@@ -556,7 +618,9 @@ type
     FTidLocalLock: TCriticalSection;
     FTidLocalStructures: TDLEntry;
 
-    //TODO - Global(Current) indices.
+    FMetaIndexLock: TCriticalSection;
+    FMasterIndexes: TIndexRootArray;
+
 {$IFDEF MEMDB2_TEMP_REMOVE}
     //TODO - Just get rid of all this.
 
@@ -597,8 +661,11 @@ type
     procedure HandleReleaseForData(Sender: TObject);
 
     function GetTidLocal(const Tid: TTransactionId): TTidLocal;
-    function GetMakeTidLocal(const Tid: TTransactionId): TTidLocal;
-    function GetMakeTidForLayout(const Tid: TTransactionId; PinReason: TPinReason): TTidLocal;
+    //This is not entirely race free: Insertion into the initial list
+    //is race free, but no guarantee fully init until initialising call
+    //has returned. However. Assumption is that calls for a certain
+    //Tid are in the same thread.
+    function GetMakeTidLocal(const Tid: TTransactionId; PinReason: TPinReason): TTidLocal;
 
     function GetMakeListHelpers(const Tid: TTransactionId;
                                 var FieldHelper: TMemDblBufListHelper;
@@ -636,7 +703,7 @@ type
 
     //Actions at change or commit check time.
     procedure HandleHelperChangeRequest(Sender: TObject);
-    procedure UpdateListHelpers;
+    procedure UpdateHelpersAndIndices;
     procedure DimensionChangesets;
     procedure ReGenChangesets;
     //Actions made in commit / rollback.
@@ -677,6 +744,18 @@ type
     function AnyChanges(const Tid:TTransactionId): boolean; override; //TODO - Check OK: Not atomic, meant for debug checking.
     function AnyChangesForTid(const Tid: TTransactionId): boolean; override; //TODO - Check OK: Only atomic from the thread processing that Tid.
 
+    //TODO - Cache metadata for current access for API to reduce lock contention.
+    function META_PinCurrent(const Tid: TTransactionId; Reason: TPinReason): TMemDBStreamable; override;
+    function META_GetPinLatest(const Tid: TTransactionId;
+                            var BufSelected: TAbSelType; Reason: TPinReason): TMemDBStreamable; override;
+    procedure META_RequestChange(const Tid: TTransactionId); override;
+    procedure META_Delete(const Tid: TTransactionId); override;
+                            
+    function META_FieldsByNames(const AB: TBufSelector; const Names: TMDBFieldNames; var AbsIdxs: TFieldOffsets): TMemFieldDefs;
+    function META_FieldByName(const AB: TBufSelector; const Name: string; var AbsIndex: integer): TMemFieldDef;
+    function META_IndexByName(const AB: TBufSelector; const Name: string; var AbsIndex: integer): TMemIndexDef;
+
+    function GetUserTidLocalIndexRoot(const Tid: TTransactionId; var TidLocal: TTidLocal; var Idx: TMemIndexDef; IdxName: string): TMemDBIndex;
   end;
 
   TMemDBEntityChangeType = (
@@ -690,7 +769,7 @@ type
   protected
     FSiblings:TDLEntry;
   public
-    constructor Create; override;
+    constructor Create;
   end;
 
   TMemDBDatabasePersistent = class(TMemDBJournalCreator)
@@ -820,12 +899,10 @@ function IndexByNameInt(MetadataCopy: TMemTableMetadataItem; const Name:string; 
 function BuildMultiDataRecs(FieldList: TMemStreamableList;
                             const AbsFieldOffsets: TFieldOffsets): TMemDbFieldDataRecs;
 
-function SameLayoutFieldsSame(A,B: TMemStreamableList; FieldOffsets: TFieldOffsets;
-                              AssertSameFormat: boolean = true): boolean;
+function SameLayoutFieldsSame(A,B: TMemStreamableList; FieldOffsets: TFieldOffsets): boolean;
 
 function DiffLayoutFieldsSame(A: TMemStreamableList; AOffsets: TFieldOffsets;
-                              B: TMemStreamableList; BOffsets: TFieldOffsets;
-                              AssertSameFormat: boolean = true): boolean;
+                              B: TMemStreamableList; BOffsets: TFieldOffsets): boolean;
 
 function AllFieldsZero(FieldList: TMemStreamableList;
                             const AbsFieldOffsets: TFieldOffsets): boolean;
@@ -834,6 +911,8 @@ const
   S_TABLE_DATA_CHANGED = 'Cannot change table field layout when uncommitted data changes.';
   S_FIELD_LAYOUT_CHANGED = 'Cannot change table data when uncommited field layout changes.';
   S_QUICK_LIST_DUPLICATE_INSERTION = 'Quick lookaside lists: Duplicate insertion.';
+  //Now indexes are CoW Tid local, a small amount of API code finds its way here.
+  S_API_INDEX_NAME_NOT_FOUND = 'Index name not found.';
 
 implementation
 
@@ -841,7 +920,7 @@ uses
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
   GlobalLog,
 {$ENDIF}
-  MemDB2Indexing, SysUtils, MemDB2Api, MemDB2, NullStream;
+  SysUtils, MemDB2, NullStream, MemDB2Api;
 
 const
   S_REPLAY_CHECK_FAILED = 'Journal replay: pre or postcondition checks failed: ';
@@ -939,6 +1018,8 @@ const
   S_FIELD_LIST_BAD_FOR_COLLATION = 'Collating data for index: Field list bad.';
   S_ZERO_LENGTH_FIELD_LIST_COLLATING = 'Collating data for index: Field list empty.';
   S_EMPTY_FIELD_DATA_IN_INDEX_COLLATION = 'Collating data for index: Field data empty';
+  S_FIELDS_DIFFERENT_FORMAT_IN_INDEX_COLLATION_1 = 'Collating data for index: Fields different format (1).';
+  S_FIELDS_DIFFERENT_FORMAT_IN_INDEX_COLLATION_2 = 'Collating data for index: Fields different format (2).';
   S_FIELD_LIST_BAD_FOR_COMPARISON = 'Bad field list object comparing sets of fields.';
   S_ZERO_LENGTH_FIELD_LIST_COMPARING = 'Comparing sets of fields, given a zero length field list.';
   S_DIFF_LENGTH_FIELD_LIST_COMPARING = 'Comparing sets of fields, given different length field lists.';
@@ -973,6 +1054,7 @@ const
   S_TABLE_ADJUST_CONCURRENCY_CONFLICT = 'Concurrency conflict adjusting table format.';
   S_TABLE_ADJUST_FAILED_1 = 'Internal error adjusting table structure (1).';
   S_TABLE_ADJUST_FAILED_2 = 'Internal error adjusting table structure (2).';
+  S_MOVE_ROW_NOT_VALID_POSITION = 'User move of row must specify a valid position/direction.';
 
 { Misc Functions }
 
@@ -1029,8 +1111,7 @@ begin
   end;
 end;
 
-function SameLayoutFieldsSame(A,B: TMemStreamableList; FieldOffsets: TFieldOffsets;
-                              AssertSameFormat: boolean = true): boolean;
+function SameLayoutFieldsSame(A,B: TMemStreamableList; FieldOffsets: TFieldOffsets): boolean;
 var
   L,i: integer;
   OA, OB: TMemDBStreamable;
@@ -1052,8 +1133,8 @@ begin
       raise EMemDbInternalException.Create(S_EMPTY_FIELD_DATA_IN_INDEX_COLLATION);
     FA := OA as TMemFieldData;
     FB := OB as TMemFieldData;
-    Assert((FA.FDataRec.FieldType = FB.FDataRec.FieldType)
-      or not AssertSameFormat);
+    if not (FA.FDataRec.FieldType = FB.FDataRec.FieldType) then
+      raise EMemDbInternalException.Create(S_FIELDS_DIFFERENT_FORMAT_IN_INDEX_COLLATION_1);
     if not DataRecsSame(FA.FDataRec, FB.FDataRec) then
     begin
       result := false;
@@ -1063,8 +1144,7 @@ begin
 end;
 
 function DiffLayoutFieldsSame(A: TMemStreamableList; AOffsets: TFieldOffsets;
-                              B: TMemStreamableList; BOffsets: TFieldOffsets;
-                              AssertSameFormat: boolean = true):boolean;
+                              B: TMemStreamableList; BOffsets: TFieldOffsets):boolean;
 var
   LA,LB,i: integer;
   OA, OB: TMemDBStreamable;
@@ -1089,8 +1169,8 @@ begin
       raise EMemDbInternalException.Create(S_EMPTY_FIELD_DATA_IN_INDEX_COLLATION);
     FA := OA as TMemFieldData;
     FB := OB as TMemFieldData;
-    Assert((FA.FDataRec.FieldType = FB.FDataRec.FieldType)
-      or not AssertSameFormat);
+    if not (FA.FDataRec.FieldType = FB.FDataRec.FieldType) then
+      raise EMemDbInternalException.Create(S_FIELDS_DIFFERENT_FORMAT_IN_INDEX_COLLATION_2);
     if not DataRecsSame(FA.FDataRec, FB.FDataRec) then
     begin
       result := false;
@@ -1209,6 +1289,26 @@ begin
   end;
   if DoRelease then
     DoReleaseForApi;
+end;
+
+{ TMemDBCursor }
+
+procedure TMemDBCursor.SetRowPin(const Tid: TTransactionId; NewRow: TMemDBRow);
+begin
+  //This after initial pin from surrounding code.
+  if (NewRow <> FRow) then
+  begin
+    if Assigned(FRow) then
+      FRow.UnPinCursor(FPinTid);
+    FPinTid := Tid;
+    FRow := NewRow;
+  end;
+end;
+
+destructor TMemDbCursor.Destroy;
+begin
+  SetRowPin(TTransactionId.Empty, nil);
+  inherited;
 end;
 
 { TMemDBIndexedList }
@@ -1708,227 +1808,6 @@ begin
   //by a new "get next" call.
 end;
 
-function TMemDBTableList.MoveToRowByIndexTag(Iso: TMDBIsolationLevel; TagStruct: PITagStruct;
-                             Cursor: TItemRec;
-                             Pos: TMemAPIPosition): TItemRec;
-var
-  RV: TIsRetVal;
-  AB: TABSelection;
-  Row: TMemDBRow;
-begin
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-  if Assigned(Cursor) then
-  begin
-    GLogLog(SV_INFO, 'MoveToRowByIndexTag, with starting row ' +
-      MDBIsoStrings[Iso] + ' ' + MemAPIPositionStrings[Pos] +
-      ' TagStruct: ' + IntToStr(NativeInt(TagStruct)));
-  end
-  else
-  begin
-    GLogLog(SV_INFO, 'MoveToRowByIndexTag, no starting row ' +
-      MDBIsoStrings[Iso] + ' ' + MemAPIPositionStrings[Pos] +
-      ' TagStruct: ' + IntToStr(NativeInt(TagStruct)));
-  end;
-{$ENDIF}
-  RV := rvInternalError;
-  case Pos of
-    ptFirst:
-    begin
-      if Assigned(TagStruct) then
-        RV := FStore.FirstByIndex(TagStruct, result)
-      else
-      begin
-         result := FStore.GetAnItem;
-         if Assigned(result) then
-           RV := rvOK
-         else
-           RV := rvNotFound;
-      end;
-    end;
-    ptLast:
-    begin
-      if Assigned(TagStruct) then
-        RV := FStore.LastByIndex(TagStruct, result)
-      else
-      begin
-         result := FStore.GetLastItem;
-         if Assigned(result) then
-           RV := rvOK
-         else
-           RV := rvNotFound;
-      end;
-    end;
-    ptNext, ptPrevious:
-    begin
-      if not Assigned(Cursor) then
-        raise EMemDBAPIException.Create(S_API_NEXT_PREV_REQUIRES_CURRENT_ROW);
-      result := Cursor;
-      if Assigned(TagStruct) then
-      begin
-        if Pos = ptNext then
-          RV := FStore.NextByIndex(TagStruct, result)
-        else
-          RV := FStore.PreviousByIndex(TagStruct, result);
-  {$IFDEF DEBUG_DATABASE_NAVIGATE}
-          if RV = rvOK then
-            GLogLog(SV_INFO, 'MoveToRowByIndexTag, move by 1 from previous cursor OK.')
-          else
-            GLogLog(SV_INFO, 'MoveToRowByIndexTag, move by 1 from previous cursor failed');
-  {$ENDIF}
-      end
-      else
-      begin
-        if Pos = ptNext then
-          RV := FStore.GetAnotherItem(result)
-        else
-          RV := FStore.GetPreviousItem(result);
-      end;
-    end;
-  else
-    Assert(false);
-  end;
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-  if RV = rvOK then
-    GLogLog(SV_INFO, 'MoveToRowByIndexTag, move to row OK.')
-  else
-    GLogLog(SV_INFO, 'MoveToRowByIndexTag, move to row failed');
-{$ENDIF}
-  Assert(Assigned(result) = (rv = RVOK));
-  if not (RV in [rvOK, rvNotFound]) then
-  begin
-    if RV = rvTagNotFound then
-      raise EMemDBAPIException.Create(S_INDEX_NOT_YET_CREATED)
-    else
-      raise EMemDBInternalException.Create(S_API_NEXT_PREV_INTERNAL_ERROR);
-  end;
-
-  AB := IsoToAB(Iso);
-  //Now, just because we have specified a current or most recent index
-  //class does not mean that the current / next AB buffer will be valid,
-  //it's just that they end up at the top (or maybe bottom) of the index...
-  if Assigned(result) then
-  begin
-{$IFOPT C+}
-    row := result.Item as TMemDBROw;
-{$ELSE}
-    row := TMemDbRow(result.Item);
-{$ENDIF}
-  end
-  else
-    row := nil;
-
-  while Assigned(row) and NotAssignedOrSentinel(row.ABData[AB]) do
-  begin
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-    GLogLog(SV_INFO, 'MoveToRowByIndexTag, row is sentinel, skip ' + MDBABStrings[AB]);
-{$ENDIF}
-    case Pos of
-      ptFirst, ptNext:
-      begin
-        if Assigned(TagStruct) then
-          RV := FStore.NextByIndex(TagStruct, result)
-        else
-          RV := FStore.GetAnotherItem(result);
-      end;
-      ptLast, ptPrevious:
-      begin
-        if Assigned(TagStruct) then
-          RV := FStore.PreviousByIndex(TagStruct, result)
-        else
-          RV := FStore.GetPreviousItem(result);
-      end;
-    else
-      Assert(false);
-    end;
-    Assert(Assigned(result) = (rv = RVOK));
-    if RV = RVOK then
-    begin
-{$IFOPT C+}
-      row := result.Item as TMemDBROw;
-{$ELSE}
-      row := TMemDbRow(result.Item);
-{$ENDIF}
-    end
-    else
-      row := nil;
-    if not (RV in [rvOK, rvNotFound]) then
-      raise EMemDBInternalException.Create(S_API_NEXT_PREV_INTERNAL_ERROR);
-  end;
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-  if Assigned(result) then
-    GLogLog(SV_INFO, 'MoveToRowByIndexTag, final result found.')
-  else
-    GLogLog(SV_INFO, 'MoveToRowByIndexTag, final result failed.');
-{$ENDIF}
-end;
-
-function TMemDBTableList.FindRowByIndexTag(Iso: TMDBIsolationLevel;
-                                           IndexDef: TMemIndexDef;
-                                           FieldDefs: TMemFieldDefs;
-                                           ITagStruct: PITagStruct;
-                                           const DataRecs: TMemDbFieldDataRecs): TItemRec;
-var
-  RV: TIsRetVal;
-  SearchVal: TMemDBIndexNodeSearchVal;
-  ABSel: TABSelection;
-  i: integer;
-begin
-  if not Assigned(ITagStruct) then
-    raise EMemDbInternalException.Create(S_API_SEARCH_NO_INDEX_SPECIFIED);
-  if (Length(FieldDefs) <> Length(DataRecs)) or (Length(DataRecs) = 0) then
-    raise EMemDbInternalException.Create(S_API_SEARCH_BAD_FIELD_COUNT);
-    //Internal, should have been spotted before now.
-  for i := 0 to Pred(Length(FieldDefs)) do
-  begin
-    if not (FieldDefs[i].FieldType in IndexableFieldTypes) then
-      raise EMemDBInternalException.Create(S_INDEX_BAD_FIELD_TYPE);
-    if DataRecs[i].FieldType <> FieldDefs[i].FieldType then
-      raise EMemDBAPIException.Create(S_API_SEARCH_VAL_BAD_TYPE);
-  end;
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-    GLogLog(SV_INFO, 'FindRowByIndexTag ' +
-      MDBIsoStrings[Iso] + ' Tag: ' + IntToStr(NativeInt(ITagStruct)));
-    for i := 0 to Pred(Length(DataRecs)) do
-    begin
-      if DataRecs[i].FieldType = ftUnicodeString then
-      begin
-        GLogLog(SV_INFO, 'FindRowByIndexTag SearchVal[' + InttoStr(i)+ ']: ' + DataRecs[i].sVal);
-      end;
-    end;
-{$ENDIF}
-  SearchVal := TMemDBIndexNodeSearchVal.Create;
-  try
-    SearchVal.FieldSearchVals := CopyDataRecs(DataRecs);
-    RV := Store.FindByIndex(ITagStruct, SearchVal, result);
-    if not (RV in [rvOK, rvNotFound]) then
-    begin
-      if RV = rvTagNotFound then
-        raise EMemDBAPIException.Create(S_INDEX_NOT_YET_CREATED)
-      else
-        raise EMemDBInternalException.Create(S_API_SEARCH_INTERNAL);
-    end;
-  finally
-    SearchVal.Free;
-  end;
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-  if RV = rvOK then
-    GLogLog(SV_INFO, 'FindRowByIndexTag OK')
-  else
-    GLogLog(SV_INFO, 'FindRowByIndexTag failed');
-{$ENDIF}
-  Assert((RV = rvOk) = Assigned(result));
-  if RV = rvOK then
-  begin
-    ABSel := IsoToAB(Iso);
-    //We are searching on current metadata, and either current or latest
-    //index. Do some quick checking of AB result based on isolation level.
-    //We passed in some fields, so we should definitely have some result
-    //fields in the required AB buffer.
-    if NotAssignedOrSentinel((result.Item as TMemDBRow).ABData[ABSel]) then
-      raise EMemDbInternalException.Create(S_API_SEARCH_INTERNAL);
-  end
-end;
-
 procedure TMemDBTableList.ReadRowData(Row: TMemDBRow; Iso: TMDBIsolationLevel;
                       Fields: TMemStreamableList);
 var
@@ -1944,67 +1823,6 @@ begin
   Fields.DeepAssign(RowFields);
 end;
 
-procedure TMemDBTableList.WriteRowData(var Cursor: TItemRec; Iso: TMDBIsolationLevel;
-                      Fields: TMemStreamableList);
-var
-  Appending: boolean;
-  CreateNext: boolean;
-  IRet: TISRetVal;
-  LPos: PDLEntry;
-  Row: TMemDBRow;
-  QLPos, QLHead: PDLEntry;
-begin
-  //If Row not assigned, then appending else modifying existing.
-  Appending := not Assigned(Cursor);
-  if Appending then
-  begin
-    Row := TMemDBRow.Create;
-    Row.Init(nil, '');
-  end
-  else
-  begin
-    if not Assigned(Cursor.Item) then
-      raise EMemDbInternalException.Create(S_CURSOR_HAS_NO_ROW_AT_MODIFY);
-{$IFOPT C+}
-    Row := Cursor.Item as TMemDBRow;
-{$ELSE}
-    Row := TMemDBRow(Cursor.Item);
-{$ENDIF}
-  end;
-
-  CreateNext := not Assigned(Row.ABData[abNext]);
-  if not CreateNext then
-  begin
-    //Already deleted.
-    if Row.ABData[abNext] is TMemDeleteSentinel then
-      raise EMemDBInternalException.Create(S_API_UNDELETING_ROW_AT_POST_TIME);
-    //Modified after we read it.
-    if Iso <> ilDirtyRead then
-      raise EMemDBAPIException.Create(S_API_POST_COMMITTED_OVERWRITE);
-  end;
-  if not Appending then
-  begin
-    IRet := Store.RemoveItemInPlace(Cursor, LPos);
-    if IRet <> rvOK then
-      raise EMemDBInternalException.Create(S_API_POST_INTERNAL);
-    Row.FStoreBackRec := nil;
-    RmRowQuickLists(Row, QLPos, QLHead);
-  end
-  else
-  begin
-    LPos := nil;
-    QLPos := nil;
-    QLHead := nil;
-  end;
-  if CreateNext then
-    Row.ABData[abNext] := TMemStreamableList.Create;
-  Row.ABData[abNext].DeepAssign(Fields);
-  IRet := Store.AddItemInPlace(Row, LPos, Cursor);
-  if IRet <> rvOK then
-    raise EMemDBInternalException.Create(S_API_POST_INTERNAL);
-  Row.FStoreBackRec := Cursor;
-  AddRowQuickLists(Row, QLPos, QLHead);
-end;
 
 procedure TMemDBTableList.DeleteRow(var Cursor: TItemRec; Iso: TMDBIsolationLevel);
 var
@@ -2142,25 +1960,52 @@ begin
   FMetadata.Init(Tid, self, Name, DSName);
 end;
 
+function TMemDBEntity.META_PinCurrent(const Tid: TTransactionId; Reason: TPinReason): TMemDBStreamable;
+begin
+  result := FMetadata.PinCurrent(Tid, Reason);
+end;
+
+function TMemDBEntity.META_GetNext(const Tid: TTransactionId): TMemDBStreamable;
+begin
+  result := FMetadata.GetNext(Tid);
+end;
+
+function TMemDBEntity.META_GetPinLatest(const Tid: TTransactionId;
+                        var BufSelected: TAbSelType; Reason: TPinReason): TMemDBStreamable;
+begin
+  result := FMetadata.GetPinLatest(Tid, BufSelected, Reason);
+end;
+
+procedure TMemDBEntity.META_RequestChange(const Tid: TTransactionId);
+begin
+  FMetadata.RequestChange(Tid, ilReadRepeatable);
+end;
+
+procedure TMemDbEntity.META_Delete(const Tid: TTransactionId);
+begin
+  FMetadata.Delete(Tid, ilReadRepeatable);
+end;
+
 { TTidLocal }
 
 procedure TTidLocal.HandleHelperChangeRequest(Sender: TObject);
 begin
-  FParentTable.FMetadata.RequestChange(FTid);
-  UpdateListHelpers(pinEvolve);
+  FParentTable.FMetadata.RequestChange(FTid, ilReadRepeatable);
+  UpdateHelpersAndIndices(pinEvolve);
 end;
 
 procedure TTidLocal.UpdateLayout(PinReason: TPinReason);
 begin
-  UpdateListHelpers(PinReason);
+  UpdateHelpersAndIndices(PinReason);
   DimensionChangesets(PinReason);
   ReGenChangesets(PinReason);
 end;
 
-procedure TTidLocal.UpdateListHelpers(PinReason: TPinReason);
+procedure TTidLocal.UpdateHelpersAndIndices(PinReason: TPinReason);
 var
   CC, NC: TMemTableMetadataItem;
   M: TMemDbStreamable;
+  i: integer;
 begin
   if not Assigned(FIndexHelper) then
   begin
@@ -2175,7 +2020,23 @@ begin
   if not Assigned(FEmptyList) then
     FEmptyList := TMemStreamableList.Create;
 
-  M := FParentTable.FMetadata.PinCurrent(FTid, PinReason) as TMemDBStreamable;
+  //First metadata pin for a Txion has to be atomic with index clone.
+  if not FIndexInit then
+  begin
+    FIndexInit := true;
+    FParentTable.FMetaIndexLock.Acquire;
+    try
+      M := FParentTable.FMetadata.PinCurrent(FTid, PinReason);
+      SetLength(FLocalIndexCopies, Length(FParentTable.FMasterIndexes));
+      for i := 0 to Pred(Length(FParentTable.FMasterIndexes)) do
+        FLocalIndexCopies[i] := FParentTable.FMasterIndexes[i].Clone;
+    finally
+      FParentTable.FMetaIndexLock.Release;
+    end;
+  end
+  else
+    M := FParentTable.FMetadata.PinCurrent(FTid, PinReason);
+
   if AssignedNotSentinel(M) then
   begin
     CC := M as TMemTableMetadataItem;
@@ -2187,7 +2048,7 @@ begin
     FFieldHelper.List[abCurrent] := FEmptyList;
     FIndexHelper.List[abCurrent] := FEmptyList;
   end;
-  M := FParentTable.FMetadata.GetNext(FTid) as TMemDBStreamable;
+  M := FParentTable.FMetadata.GetNext(FTid);
   if AssignedNotSentinel(M) then
   begin
     NC := M as TMemTableMetadataItem;
@@ -2207,8 +2068,8 @@ var
   CC, NC: TMemDbStreamable;
   Added, Changed, Deleted, Null: boolean;
 begin
-  CC := FParentTable.FMetadata.PinCurrent(FTid, PinReason) as TMemDBStreamable;
-  NC := FParentTable.FMetadata.GetNext(FTid) as TMemDBstreamable;
+  CC := FParentTable.FMetadata.PinCurrent(FTid, PinReason);
+  NC := FParentTable.FMetadata.GetNext(FTid);
   FParentTable.ChangeFlagsFromPinned(CC, NC, Added, Changed, Deleted, Null);
 
   if Null then
@@ -2336,11 +2197,14 @@ begin
   //Check expected length of changeset arrays.
   if NCFieldCount = 0 then
   begin
-    if Length(FFieldChangesets) <> CCFieldCount then
+    //Deleted or no change.
+    if not ((Length(FFieldChangesets) = CCFieldCount)
+      or (Length(FFieldChangesets) = 0)) then
       raise EMemDbInternalException.Create(S_INTERNAL_REGEN_CHANGESETS_3);
   end
   else
   begin
+    //Added or changed.
     if Length(FFieldChangesets) <> NCFieldCount then
       raise EMemDbInternalException.Create(S_INTERNAL_REGEN_CHANGESETS_4);
   end;
@@ -2385,11 +2249,14 @@ begin
   //Check expected length of changeset arrays.
   if NCIndexCount = 0 then
   begin
-    if Length(FIndexChangesets) <> CCIndexCount then
+    //Deleted or no change.
+    if not ((Length(FIndexChangesets) = CCIndexCount)
+      or (Length(FIndexChangesets) = 0)) then
       raise EMemDbInternalException.Create(S_INTERNAL_REGEN_CHANGESETS_5);
   end
   else
   begin
+    //Added or changed.
     if Length(FIndexChangesets) <> NCIndexCount then
       raise EMemDbInternalException.Create(S_INTERNAL_REGEN_CHANGESETS_6);
   end;
@@ -2583,7 +2450,7 @@ var
   NxtFieldDef, CurFieldDef: TMemFieldDef;
 
 begin
-  RNxt := FParentTable.FMetadata.GetNext(FTid) as TMemDbStreamable;
+  RNxt := FParentTable.FMetadata.GetNext(FTid);
   Assert(Assigned(RNxt));
   Delete := (RNxt is TMemDeleteSentinel);
   if not Delete then
@@ -2609,7 +2476,7 @@ begin
     begin
       Row := IRec.Item as TMemDBRow;
       if Delete then
-        Row.Delete(FTid)
+        Row.Delete(FTid, ilReadRepeatable)
       else
       begin
         //No guarantee other format changes aren't going on at the same time.
@@ -2620,7 +2487,7 @@ begin
         if not Row.CheckFormatAgainstMeta(FTid, abCurrent, CC, pinEvolve) then
           raise EMemDBConcurrencyException.Create(S_TABLE_ADJUST_CONCURRENCY_CONFLICT);
 
-        Row.RequestChange(FTid);
+        Row.RequestChange(FTid, ilReadRepeatable);
         RowFields := Row.GetNext(FTid) as TMemStreamableList;
 
         Assert(Assigned(NC));
@@ -2731,27 +2598,20 @@ end;
 procedure TTidLocal.ToJournal(Stream: TStream);
 var
   IRec: TItemRec;
-  WrittenStart: boolean;
   Row: TMemDBRow;
 begin
-  WrittenStart := false;
+  WrTag(Stream, mstIndexedListStart);
   IRec := FCPRows.GetAnItem;
   while Assigned(IRec) do
   begin
     Row := IRec.Item as TMemDBRow;
     if Row.AnyChangesForTid(self.FTid) then //Some Items are pinned not changed.
     begin
-      if not WrittenStart then
-      begin
-        WrTag(Stream, mstIndexedListStart);
-        WrittenStart := true;
-      end;
       Row.ToJournal(self.FTid, Stream);
     end;
     FCPRows.GetAnotherItem(IRec);
   end;
-  if WrittenStart then
-    WrTag(Stream, mstIndexedListEnd);
+  WrTag(Stream, mstIndexedListEnd);
 end;
 
 procedure TTidLocal.ToScratch(Stream: TStream);
@@ -2760,14 +2620,17 @@ var
   Row: TMemDBRow;
 begin
   WrTag(Stream, mstIndexedListStart);
-  //TODO - Maybe do this in a way which doesn't lock the master list permanently?
+  //TODO - Maybe do this in a way which doesn't lock the master list?
+  //Checkpoints to tend to be pretty rapid ...
   FParentTable.FMasterRowLock.Acquire;
   try
     IRec := FParentTable.FMasterRowList.GetAnItem;
     while Assigned(IRec) do
     begin
       Row := IRec.Item as TMemDBRow;
-      Row.ToScratch(self.FTid, Stream);
+      if AssignedNotSentinel(Row.PinCurrent(FTid, pinEvolve)
+          as TMemDbStreamable) then
+        Row.ToScratch(self.FTid, Stream);
       FParentTable.FMasterRowList.GetAnotherItem(IRec);
     end;
   finally
@@ -2846,8 +2709,10 @@ begin
   while Assigned(Row) do
   begin
     Row.FromJournal(FTid, Stream);
+    Row.FProxy.Release;
     Row := LookaheadHelper(Stream, false);
   end;
+  ExpectTag(Stream, mstIndexedListEnd);
 end;
 
 procedure TTidLocal.FromScratch(Stream: TStream);
@@ -2861,6 +2726,7 @@ begin
     //Row DCP handler, Row CPTid handler handle reffing, and
     //all insertion except master list.
     Row.FromScratch(FTid, Stream);
+    Row.FProxy.Release;
     Row := LookaheadHelper(Stream, true);
   end;
   ExpectTag(Stream, mstIndexedListEnd);
@@ -2906,7 +2772,7 @@ var
   RowCur, RowNext: TMemDBStreamable;
   Added, Changed, Deleted, Null:boolean;
 begin
-  LM := FParentTable.Metadata.GetPinLatest(FTid, BufSel, pinFinalCheck) as TMemDbStreamable;
+  LM := FParentTable.Metadata.GetPinLatest(FTid, BufSel, pinFinalCheck);
   FieldsNull := NotAssignedOrSentinel(LM);
   if not FieldsNull then
   begin
@@ -2925,8 +2791,8 @@ begin
     while Assigned(IRec) do
     begin
       Row := IRec.Item as TMemDBRow;
-      RowCur := Row.PinCurrent(FTid, pinFinalCheck) as TMemDbStreamable;
-      RowNext := Row.GetNext(FTid) as TMemDbStreamable;
+      RowCur := Row.PinCurrent(FTid, pinFinalCheck);
+      RowNext := Row.GetNext(FTid);
       Row.ChangeFlagsFromPinned(RowCur, RowNext,
         Added, Changed, Deleted, Null);
       //Hmm. Can some of the rows be Null, not deleted?
@@ -2947,17 +2813,12 @@ var
   Row: TMemDBRow;
   MRMeta: TMemTableMetadataItem;
   Streamable: TMemDbStreamable;
-  RowFields: TMemStreamableList;
-  MetaFields: TMemStreamableList;
   bufSel: TABSelType;
-  i: integer;
-  RowField: TMemFieldData;
-  MetaFieldDef: TMemFieldDef;
 
 begin
   //Noticeably since this involves all local (or pinned) structures,
   //this does not need to be protected by commit lock.
-  Streamable := FParentTable.FMetadata.GetPinLatest(FTid, bufSel, pinFinalCheck) as TMemDbStreamable;
+  Streamable := FParentTable.FMetadata.GetPinLatest(FTid, bufSel, pinFinalCheck);
   if not Assigned(Streamable) then
     raise EMemDBInternalException.Create(S_INTERNAL_CHECKING_STRUCTURE);
   if (Streamable is TMemDeleteSentinel) then
@@ -2966,13 +2827,12 @@ begin
   MRMeta := Streamable as TMemTableMetadataItem;
   Assert(Assigned(MrMeta.FieldDefs));
   Assert(MrMeta.FieldDefs is TMemStreamableList);
-  MetaFields := MrMeta.FieldDefs as TMemStreamableList;
 
   IRec := FCPRows.GetAnItem;
   while Assigned(IRec) do
   begin
     Row := IRec.Item as TMemDBRow;
-    Streamable := Row.GetPinLatest(FTid, bufSel, pinFinalCheck) as TMemDbstreamable;
+    Streamable := Row.GetPinLatest(FTid, bufSel, pinFinalCheck);
     //Can have null rows? Not if you managed to pin it. If CPTid,
     //then you managed to pin or create next, and that shouldn't be undone until
     //commit / rollback, so should be assigned.
@@ -3019,6 +2879,7 @@ var
   Added, Changed, Deleted, Null: boolean;
 begin
   Prohibit := FParentTable.ProhibitRowAdd(FTid);
+  //No locking, this is TidLocal.
   IRec := FCPRows.GetAnItem;
   while Assigned(IRec) do
   begin
@@ -3026,13 +2887,13 @@ begin
     Row.PreCommit(FTid, Reason);
     if Prohibit then
     begin
-      Cur := Row.PinCurrent(FTid, pinFinalCheck) as TMemDbStreamable;
-      Nxt := Row.GetNext(FTid) as TMemDBStreamable;
+      Cur := Row.PinCurrent(FTid, pinFinalCheck);
+      Nxt := Row.GetNext(FTid);
       Row.ChangeFlagsFromPinned(Cur, Nxt, Added, Changed, Deleted, Null);
       if Added then
         raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ROW_ADD);
     end;
-    IRec := FCPRows.GetAnItem;
+    FCPRows.GetAnotherItem(IRec);
   end;
 end;
 
@@ -3076,6 +2937,11 @@ begin
   FLayoutChangeRequired := false;
 end;
 
+procedure TTidLocal.MetaIndexCommit(Reason: TMemDbTransReason);
+begin
+  //TODO - Write this.
+end;
+
 procedure TTidLocal.Rollback(Reason: TMemDbTransReason);
 var
   Row, LastRow: TMemDBRow;
@@ -3095,6 +2961,453 @@ begin
   FDataChanged := false;
   FLayoutChangeRequired := false;
 end;
+
+procedure TTidLocal.MetaIndexRollback(Reason: TMemDbTransReason);
+begin
+  //TODO - Write this.
+end;
+
+function TTidLocal.GetUserIndexRoot(var Idx: TMemIndexDef; IdxName: string): TMemDBIndex;
+var
+  Cur: TBufSelector;
+  AbsIndex: integer;
+  Def: TMemIndexDef;
+begin
+  Cur := MakeCurrentBufSelector(FTid);
+  //Indexes are consistent with pinned current metadata.
+  Def := (FParentTable.Metadata as TMemDBTableMetadata).IndexByName(Cur, IdxName, AbsIndex, pinEvolve);
+  if not Assigned(Def) then
+    raise EMemDBAPIException.Create(S_API_INDEX_NAME_NOT_FOUND);
+  Assert(AbsIndex >= 0);
+  Assert(AbsIndex < Length(FLocalIndexCopies));
+  result := FLocalIndexCopies[AbsIndex];  
+end;
+
+(*
+function TMemDBTableList.MoveToRowByIndexTag(Iso: TMDBIsolationLevel; TagStruct: PITagStruct;
+                             Cursor: TItemRec;
+                             Pos: TMemAPIPosition): TItemRec;
+var
+  RV: TIsRetVal;
+  AB: TABSelection;
+  Row: TMemDBRow;
+begin
+{$IFDEF DEBUG_DATABASE_NAVIGATE}
+  if Assigned(Cursor) then
+  begin
+    GLogLog(SV_INFO, 'MoveToRowByIndexTag, with starting row ' +
+      MDBIsoStrings[Iso] + ' ' + MemAPIPositionStrings[Pos] +
+      ' TagStruct: ' + IntToStr(NativeInt(TagStruct)));
+  end
+  else
+  begin
+    GLogLog(SV_INFO, 'MoveToRowByIndexTag, no starting row ' +
+      MDBIsoStrings[Iso] + ' ' + MemAPIPositionStrings[Pos] +
+      ' TagStruct: ' + IntToStr(NativeInt(TagStruct)));
+  end;
+{$ENDIF}
+  RV := rvInternalError;
+  case Pos of
+    ptFirst:
+    begin
+      if Assigned(TagStruct) then
+        RV := FStore.FirstByIndex(TagStruct, result)
+      else
+      begin
+         result := FStore.GetAnItem;
+         if Assigned(result) then
+           RV := rvOK
+         else
+           RV := rvNotFound;
+      end;
+    end;
+    ptLast:
+    begin
+      if Assigned(TagStruct) then
+        RV := FStore.LastByIndex(TagStruct, result)
+      else
+      begin
+         result := FStore.GetLastItem;
+         if Assigned(result) then
+           RV := rvOK
+         else
+           RV := rvNotFound;
+      end;
+    end;
+    ptNext, ptPrevious:
+    begin
+      if not Assigned(Cursor) then
+        raise EMemDBAPIException.Create(S_API_NEXT_PREV_REQUIRES_CURRENT_ROW);
+      result := Cursor;
+      if Assigned(TagStruct) then
+      begin
+        if Pos = ptNext then
+          RV := FStore.NextByIndex(TagStruct, result)
+        else
+          RV := FStore.PreviousByIndex(TagStruct, result);
+  {$IFDEF DEBUG_DATABASE_NAVIGATE}
+          if RV = rvOK then
+            GLogLog(SV_INFO, 'MoveToRowByIndexTag, move by 1 from previous cursor OK.')
+          else
+            GLogLog(SV_INFO, 'MoveToRowByIndexTag, move by 1 from previous cursor failed');
+  {$ENDIF}
+      end
+      else
+      begin
+        if Pos = ptNext then
+          RV := FStore.GetAnotherItem(result)
+        else
+          RV := FStore.GetPreviousItem(result);
+      end;
+    end;
+  else
+    Assert(false);
+  end;
+{$IFDEF DEBUG_DATABASE_NAVIGATE}
+  if RV = rvOK then
+    GLogLog(SV_INFO, 'MoveToRowByIndexTag, move to row OK.')
+  else
+    GLogLog(SV_INFO, 'MoveToRowByIndexTag, move to row failed');
+{$ENDIF}
+  Assert(Assigned(result) = (rv = RVOK));
+  if not (RV in [rvOK, rvNotFound]) then
+  begin
+    if RV = rvTagNotFound then
+      raise EMemDBAPIException.Create(S_INDEX_NOT_YET_CREATED)
+    else
+      raise EMemDBInternalException.Create(S_API_NEXT_PREV_INTERNAL_ERROR);
+  end;
+
+  AB := IsoToAB(Iso);
+  //Now, just because we have specified a current or most recent index
+  //class does not mean that the current / next AB buffer will be valid,
+  //it's just that they end up at the top (or maybe bottom) of the index...
+  if Assigned(result) then
+  begin
+{$IFOPT C+}
+    row := result.Item as TMemDBROw;
+{$ELSE}
+    row := TMemDbRow(result.Item);
+{$ENDIF}
+  end
+  else
+    row := nil;
+
+  while Assigned(row) and NotAssignedOrSentinel(row.ABData[AB]) do
+  begin
+{$IFDEF DEBUG_DATABASE_NAVIGATE}
+    GLogLog(SV_INFO, 'MoveToRowByIndexTag, row is sentinel, skip ' + MDBABStrings[AB]);
+{$ENDIF}
+    case Pos of
+      ptFirst, ptNext:
+      begin
+        if Assigned(TagStruct) then
+          RV := FStore.NextByIndex(TagStruct, result)
+        else
+          RV := FStore.GetAnotherItem(result);
+      end;
+      ptLast, ptPrevious:
+      begin
+        if Assigned(TagStruct) then
+          RV := FStore.PreviousByIndex(TagStruct, result)
+        else
+          RV := FStore.GetPreviousItem(result);
+      end;
+    else
+      Assert(false);
+    end;
+    Assert(Assigned(result) = (rv = RVOK));
+    if RV = RVOK then
+    begin
+{$IFOPT C+}
+      row := result.Item as TMemDBROw;
+{$ELSE}
+      row := TMemDbRow(result.Item);
+{$ENDIF}
+    end
+    else
+      row := nil;
+    if not (RV in [rvOK, rvNotFound]) then
+      raise EMemDBInternalException.Create(S_API_NEXT_PREV_INTERNAL_ERROR);
+  end;
+{$IFDEF DEBUG_DATABASE_NAVIGATE}
+  if Assigned(result) then
+    GLogLog(SV_INFO, 'MoveToRowByIndexTag, final result found.')
+  else
+    GLogLog(SV_INFO, 'MoveToRowByIndexTag, final result failed.');
+{$ENDIF}
+end;
+*)
+
+
+//TODO - Ensure user can GetPinLatest for Tid without being
+//out of date with Index.
+function TTidLocal.UserMoveToRowByIndexRoot(IRoot: TMemDbIndex;
+                                  Cursor: TMemDBCursor;
+                                  Pos: TMemAPIPosition): TMemDbCursor;
+var
+  Row: TMemDBRow;
+  IRec: TItemRec;
+  RetryPos: TMemApiPosition;
+  Retry: boolean;
+begin
+  case Pos of
+    ptFirst: RetryPos := ptNext;
+    ptLast: RetryPos := ptPrevious;
+    ptNext, ptPrevious: RetryPos := Pos;
+  else
+    raise EMemDBInternalException.Create(S_MOVE_ROW_NOT_VALID_POSITION);
+  end;
+  if not Assigned(IRoot) then
+  begin
+    //TODO - Not do all traversal / skipping of NULL under index lock?
+    //It's not expensive until someone deletes the table / all the rows...
+    FParentTable.FMasterRowLock.Acquire;
+    try
+      case Pos of
+        ptFirst: begin
+          IRec := FParentTable.FMasterRowList.GetAnItem;
+        end;
+        ptLast: begin
+          IRec := FParentTable.FMasterRowList.GetLastItem;
+        end;
+        ptNext: begin
+          if not (Assigned(Cursor) and Assigned(Cursor.Row)) then
+            raise EMemDBAPIException.Create(S_API_NEXT_PREV_REQUIRES_CURRENT_ROW);
+          IRec := Cursor.Row.FMasterRec;
+          FParentTable.FMasterRowList.GetAnotherItem(IRec);
+        end;
+        ptPrevious: begin
+          if not (Assigned(Cursor) and Assigned(Cursor.Row)) then
+            raise EMemDBAPIException.Create(S_API_NEXT_PREV_REQUIRES_CURRENT_ROW);
+          IRec := Cursor.Row.FMasterRec;
+          FParentTable.FMasterRowList.GetPreviousItem(IRec);
+        end;
+      end;
+      //If the IRec is NULL, then we really are done searching.
+      Retry := Assigned(IRec);
+      while Retry do
+      begin
+        Row := IRec.Item as TMemDBRow;
+        Retry := not Row.PinForCursor(FTid);
+        if Retry then
+        begin
+          //OK, no luck with that one, try next along the line.
+          case RetryPos of
+            ptNext: FParentTable.FMasterRowList.GetAnotherItem(IRec);
+            ptPrevious: FParentTable.FMasterRowList.GetPreviousItem(IRec);
+          else
+            Assert(false);
+          end;
+          Retry := Assigned(IRec);
+        end;
+      end;
+    finally
+      FParentTable.FMasterRowLock.Release;
+    end;
+  end
+  else
+  begin
+    raise EMemDBInternalException.Create(S_API_NOT_IMPLEMENTED);
+  end;
+  //Decision point as to whether search above has succeeded
+  //is Assigned(IRec);
+  if Assigned(IRec) then
+  begin
+    Row := IRec.Item as TMemDBRow;
+    //New row just been pinned. Always allocate new cursor.
+    result := TMemDbCursor.Create;
+    result.SetRowPin(FTid, Row); //Unpins old row.
+    result.FIterIndex := IRoot;
+    result.FIterInc := RetryPos;
+    result.FTidLocal := self;
+  end
+  else
+    result := nil;
+end;
+
+(*
+function TMemDBTableList.FindRowByIndexTag(Iso: TMDBIsolationLevel;
+                                           IndexDef: TMemIndexDef;
+                                           FieldDefs: TMemFieldDefs;
+                                           ITagStruct: PITagStruct;
+                                           const DataRecs: TMemDbFieldDataRecs): TItemRec;
+var
+  RV: TIsRetVal;
+  SearchVal: TMemDBIndexNodeSearchVal;
+  ABSel: TABSelection;
+  i: integer;
+begin
+  if not Assigned(ITagStruct) then
+    raise EMemDbInternalException.Create(S_API_SEARCH_NO_INDEX_SPECIFIED);
+  if (Length(FieldDefs) <> Length(DataRecs)) or (Length(DataRecs) = 0) then
+    raise EMemDbInternalException.Create(S_API_SEARCH_BAD_FIELD_COUNT);
+    //Internal, should have been spotted before now.
+  for i := 0 to Pred(Length(FieldDefs)) do
+  begin
+    if not (FieldDefs[i].FieldType in IndexableFieldTypes) then
+      raise EMemDBInternalException.Create(S_INDEX_BAD_FIELD_TYPE);
+    if DataRecs[i].FieldType <> FieldDefs[i].FieldType then
+      raise EMemDBAPIException.Create(S_API_SEARCH_VAL_BAD_TYPE);
+  end;
+{$IFDEF DEBUG_DATABASE_NAVIGATE}
+    GLogLog(SV_INFO, 'FindRowByIndexTag ' +
+      MDBIsoStrings[Iso] + ' Tag: ' + IntToStr(NativeInt(ITagStruct)));
+    for i := 0 to Pred(Length(DataRecs)) do
+    begin
+      if DataRecs[i].FieldType = ftUnicodeString then
+      begin
+        GLogLog(SV_INFO, 'FindRowByIndexTag SearchVal[' + InttoStr(i)+ ']: ' + DataRecs[i].sVal);
+      end;
+    end;
+{$ENDIF}
+  SearchVal := TMemDBIndexNodeSearchVal.Create;
+  try
+    SearchVal.FieldSearchVals := CopyDataRecs(DataRecs);
+    RV := Store.FindByIndex(ITagStruct, SearchVal, result);
+    if not (RV in [rvOK, rvNotFound]) then
+    begin
+      if RV = rvTagNotFound then
+        raise EMemDBAPIException.Create(S_INDEX_NOT_YET_CREATED)
+      else
+        raise EMemDBInternalException.Create(S_API_SEARCH_INTERNAL);
+    end;
+  finally
+    SearchVal.Free;
+  end;
+{$IFDEF DEBUG_DATABASE_NAVIGATE}
+  if RV = rvOK then
+    GLogLog(SV_INFO, 'FindRowByIndexTag OK')
+  else
+    GLogLog(SV_INFO, 'FindRowByIndexTag failed');
+{$ENDIF}
+  Assert((RV = rvOk) = Assigned(result));
+  if RV = rvOK then
+  begin
+    ABSel := IsoToAB(Iso);
+    //We are searching on current metadata, and either current or latest
+    //index. Do some quick checking of AB result based on isolation level.
+    //We passed in some fields, so we should definitely have some result
+    //fields in the required AB buffer.
+    if NotAssignedOrSentinel((result.Item as TMemDBRow).ABData[ABSel]) then
+      raise EMemDbInternalException.Create(S_API_SEARCH_INTERNAL);
+  end
+end;
+*)
+
+//TODO - Ensure user can GetPinLatest for Tid without being
+//out of date with Index.
+function TTidLocal.UserFindRowByIndexRoot(IndexDef: TMemIndexDef;
+                                FieldDefs: TMemFieldDefs;
+                                IRoot: TMemDbIndex;
+                                const DataRecs: TMemDbFieldDataRecs): TMemDbCursor;
+begin
+  if not Assigned(IRoot) then
+    raise EMemDbInternalException.Create(S_API_SEARCH_NO_INDEX_SPECIFIED);
+
+  raise EMemDBInternalException.Create(S_API_NOT_IMPLEMENTED);
+end;
+
+procedure TTidLocal.UserDeleteRow(Cursor: TMemDbCursor);
+var
+  Row: TMemDbRow;
+begin
+  if not Assigned(Cursor) then
+    raise EMemDbInternalException.Create(S_CURSOR_NOT_ASSIGNED_AT_DELETE);
+  Row := Cursor.Row;
+  //If next assigned, row delete will overwrite OK.
+  //No new sorts of conflicts to deal with here.
+  Row.Delete(FTid);
+  //TODO Local index update.
+end;
+
+procedure TTidLocal.UserWriteRowData(var Cursor:TMemDbCursor; FieldList: TMemStreamableList);
+var
+  Appending: boolean;
+  Row: TMemDBRow;
+  Next: TMemDBStreamable;
+  NewData: TMemStreamableList;
+  Guid: TGuid;
+  CurMeta: TMemTableMetadataItem;
+  PinOK: boolean;
+begin
+  Appending := not Assigned(Cursor);
+  Assert(Assigned(FieldList));
+  //I am in TidLocal, so atomic Meta/Index pin has already happened.
+  CurMeta := FParentTable.META_PinCurrent(FTid, pinEvolve) as TMemTableMetadataItem;
+  TMemDBRow.StaticCheckFormatAgainstMeta(FieldList, CurMeta);
+
+  if Appending then
+  begin
+    CreateGUID(Guid);
+    Row := TMemDBRow.Create;
+    Row.Init(FParentTable, Guid);
+    NewData := TMemStreamableList.Create;
+    NewData.DeepAssign(FieldList);
+    Row.DirectSetNext(FTid, NewData);
+    Row.FProxy.Release;
+
+    Cursor := TMemDBCursor.Create;
+    Cursor.SetRowPin(FTid, Row);
+    Cursor.FIterIndex := nil;
+    Cursor.FIterInc := ptInvalid;
+    Cursor.FTidLocal := self;
+    PinOK := Row.PinForCursor(FTid);
+    Assert(PinOK);
+  end
+  else
+  begin
+    Row := Cursor.Row; //Already Pinned.
+    if not Assigned(Row) then
+      raise EMemDbInternalException.Create(S_CURSOR_HAS_NO_ROW_AT_MODIFY);
+
+    //RequestChange will barf if it tries to undelete.
+    //Caught nicely in isolation >= RepeatableRead.
+    //Caught less nicely in isolation CommittedRead
+    Row.RequestChange(FTid);
+    Next := Row.GetNext(FTid);
+    Next.DeepAssign(FieldList);
+  end;
+  //Format checking happens here.
+  //TODO - Local index update.
+end;
+
+(*
+
+  CreateNext := not Assigned(Row.ABData[abNext]);
+  if not CreateNext then
+  begin
+    //Already deleted.
+    if Row.ABData[abNext] is TMemDeleteSentinel then
+      raise EMemDBInternalException.Create(S_API_UNDELETING_ROW_AT_POST_TIME);
+    //Modified after we read it.
+    if Iso <> ilDirtyRead then
+      raise EMemDBAPIException.Create(S_API_POST_COMMITTED_OVERWRITE);
+  end;
+  if not Appending then
+  begin
+    IRet := Store.RemoveItemInPlace(Cursor, LPos);
+    if IRet <> rvOK then
+      raise EMemDBInternalException.Create(S_API_POST_INTERNAL);
+    Row.FStoreBackRec := nil;
+    RmRowQuickLists(Row, QLPos, QLHead);
+  end
+  else
+  begin
+    LPos := nil;
+    QLPos := nil;
+    QLHead := nil;
+  end;
+  if CreateNext then
+    Row.ABData[abNext] := TMemStreamableList.Create;
+  Row.ABData[abNext].DeepAssign(Fields);
+  IRet := Store.AddItemInPlace(Row, LPos, Cursor);
+  if IRet <> rvOK then
+    raise EMemDBInternalException.Create(S_API_POST_INTERNAL);
+  Row.FStoreBackRec := Cursor;
+  AddRowQuickLists(Row, QLPos, QLHead);
+end;
+*)
 
 { TRowIndexNode }
 
@@ -3190,7 +3503,7 @@ begin
 {$ELSE}
   New(Result);
 {$ENDIF}
-  DLItemInitObj(result, @result.FSiblings);
+  DLItemInitObj(TObject(result), @result.FSiblings);
 end;
 
 procedure TMemDBTablePersistent.DisposeRowAddLock(Lock: PRowAdditionLock);
@@ -3215,6 +3528,7 @@ begin
     raise EMemDBInternalException.Create(S_INTERNAL_INDEXING_ERROR);
 
   FTidLocalLock := TCriticalSection.Create;
+  FMetaIndexLock := TCriticalSection.Create;
   DLItemInitList(@FTidLocalStructures);
   DlItemInitList(@FAdditionLocks);
   FMetadata := TMemDbTableMetadata.Create;
@@ -3239,6 +3553,7 @@ begin
   FMasterRowList.Free;
   FMasterRowLock.Free;
   FTidLocalLock.Free;
+  FMetaIndexLock.Free;
   FMetadata.Free;
 
 {$IFDEF MEMDB2_TEMP_REMOVE}
@@ -3270,7 +3585,7 @@ begin
   result := result or FData.AnyChangesAtAll;
 end;
 
-procedure TMemDBTablePersistent.UpdateListHelpers;
+procedure TMemDBTablePersistent.UpdateHelpersAndIndices;
 var
   CC, NC: TMemTableMetadataItem;
 begin
@@ -3301,7 +3616,7 @@ end;
 procedure TMemDBTablePersistent.HandleHelperChangeRequest(Sender: TObject);
 begin
   FMetadata.RequestChange;
-  UpdateListHelpers;
+  UpdateHelpersAndIndices;
 end;
 
 {$ENDIF}
@@ -3312,10 +3627,8 @@ var
   Res: TItemRec;
   RV: TIsRetVal;
   Item: TMemDBRow;
-  SearchVal: TRowSearchVal;
 begin
-  RefChange := false; //Placate compiler warning.
-
+  RefChange := false;
   Assert(Assigned(Sender) and (Sender is TMemDBRow));
   Item := Sender as TMemDBRow;
   if Update.Pre <> Update.Post then
@@ -3331,6 +3644,7 @@ begin
         if RV <> rvOK then
           raise EMemDbInternalException.Create(S_JOURNAL_REPLAY_DUP_INST_ID);
           //TODO - Get some ideas of all the diverse ways this might percolate out.
+        Item.FMasterRec := Res;
       finally
         FMasterRowLock.Release;
       end;
@@ -3339,28 +3653,19 @@ begin
     end
     else
     begin
-      SearchVal := TRowSearchVal.Create;
+      FMasterRowLock.Acquire;
       try
-        FMasterRowLock.Acquire;
-        try
-          SearchVal.FGuid := Item.RowId;
-
-          RV := FMasterRowList.FindByIndex(Pointer(1), SearchVal, Res);
-          if RV <> rvOK then
-            raise EMemDbInternalException.Create(S_INTERNAL_INDEXING_ERROR);
-            //TODO - Get some ideas of all the diverse ways this might percolate out.
-          Assert(Res.Item = Item);
-          RV := FMasterRowList.RemoveItem(Res);
-          Assert(RV = rvOK);
-          RefChange := FMasterRowList.Count = 0;
-        finally
-          FMasterRowLock.Release;
-        end;
+        RV := FMasterRowList.RemoveItem(Item.FMasterRec);
+        if RV <> rvOK then
+          raise EMemDbInternalException.Create(S_INTERNAL_INDEXING_ERROR);
+          //TODO - Get some ideas of all the diverse ways this might percolate out.
+        Item.FMasterRec := nil;
+        RefChange := FMasterRowList.Count = 0;
       finally
-        SearchVal.Free;
+        FMasterRowLock.Release;
       end;
       Item.FProxy.Release;
-
+      
       if RefChange then
         HandleReleaseForData(self);
       //No data, changes, or pins, not ref counted.
@@ -3376,7 +3681,7 @@ begin
   if Update.Ref.Pre <> Update.Ref.Post then
   begin
     if Update.Ref.Post then
-      TidLocal := GetMakeTidLocal(Update.Tid)
+      TidLocal := GetMakeTidLocal(Update.Tid, pinEvolve)
     else
     begin
       TidLocal := GetTidLocal(Update.Tid);
@@ -3417,21 +3722,21 @@ end;
 procedure TMemDBTablePersistent.ToJournal(const Tid: TTransactionId; Stream: TStream);
 var
   TidLocal: TTidLocal;
-  Meta: TMemDBReffed;
-  MetaChange, DataChange, LayoutChange: boolean;
+  Meta: TMemDBStreamable;
+  MetaChange, DataChange: boolean;
   tmpSelected: TABSelType;
 begin
-  MetaChange := Assigned(FMetadata.GetNext(Tid));
-  TidLocal := GetTidLocal(Tid);
-  DataChange := Assigned(TidLocal) and TidLocal.DataChanged;
+  TidLocal := GetMakeTidLocal(Tid, pinEvolve);
+  TidLocal.UpdateLayout(pinEvolve);
+  //TODO - Do I absolutely need to update layout here or not?
+  //I don't think so if always updated on field change.
+  MetaChange := Assigned(META_GetNext(Tid));
 
-  TidLocal := GetMakeTidForLayout(Tid, pinEvolve);
-  LayoutChange := Assigned(TidLocal) and TidLocal.LayoutChangeRequired;
-
-  if DataChange and LayoutChange then
+  if TidLocal.DataChanged and TidLocal.LayoutChangeRequired then
     raise EMemDBInternalException.Create(S_DATA_AND_LAYOUT_CHANGE_TO_JOURNAL);
 
-  if LayoutChange then
+  DataChange := TidLocal.DataChanged;
+  if TidLocal.LayoutChangeRequired then
     TidLocal.AdjustTableStructureForMetadata;
 
   if MetaChange or DataChange then
@@ -3442,12 +3747,11 @@ begin
     else
     begin
       WrTag(Stream, mstTableUnchangedName);
-      Meta := FMetadata.GetPinLatest(Tid, tmpSelected, pinEvolve);
+      Meta := META_GetPinLatest(Tid, tmpSelected, pinEvolve);
       WrStreamString(Stream, (Meta as TMemEntityMetadataItem).EntityName);
     end;
     if DataChange then
     begin
-      Assert(Assigned(TidLocal));
       TidLocal.ToJournal(Stream);
     end;
     WrTag(Stream, mstTableEnd);
@@ -3458,12 +3762,15 @@ procedure TMemDBTablePersistent.ToScratch(const PseudoTid: TTransactionId; Strea
 var
   TidLocal:TTidLocal;
 begin
-  //Need a local struct to handle the fact we'll have pins (generally speaking).
-  TidLocal := GetMakeTidLocal(PseudoTid);
+  TidLocal := GetMakeTidLocal(PseudoTid, pinEvolve);
+  TidLocal.UpdateLayout(pinEvolve);
+  //TODO - Do I absolutely need to update layout here or not?
+  //I don't think so if always updated on field change.
+
   //In Entity list if CPTids, however does not guarantee has data.
   //Stream only if current metdata indicates not NULL.
   // TODO - Do this for foreign keys too.
-  if Assigned(FMetadata.PinCurrent(PseudoTid, pinEvolve)) then
+  if Assigned(META_PinCurrent(PseudoTid, pinEvolve)) then
   begin
     WrTag(Stream, mstTableStart);
     FMetadata.ToScratch(PseudoTid, Stream);
@@ -3499,45 +3806,38 @@ var
   TblName: string;
   TidLocal: TTidLocal;
   Cur: TMemTableMetadataItem;
-  LayoutChange: boolean;
 begin
-  TidLocal := nil; //Placate compiler warning.
-
-  //Assumption is that we're here, lookahead already having been performed.
   ExpectTag(Stream, mstTableStart);
   //Unfortunately, we don't have an up to date view of whether
   //layout change is required at this point, so just have
   //to unstream data anyway.
 
+  TidLocal := GetMakeTidLocal(PseudoTid, pinEvolve);
   LookaheadHelper(Stream, MetadataInStream, DataInStream);
   if MetadataInStream then
   begin
     FMetadata.FromJournal(PseudoTid, Stream);
-    TidLocal := GetMakeTidForLayout(PseudoTid, pinEvolve);
-    LayoutChange := Assigned(TidLocal) and TidLocal.LayoutChangeRequired;
+    TidLocal.UpdateLayout(pinEvolve);
   end
   else
   begin
     ExpectTag(Stream, mstTableUnchangedName);
     TblName := RdStreamString(Stream);
-    Cur := FMetadata.PinCurrent(PseudoTid, PinEvolve) as TMemTableMetadataItem;
+    Cur := META_PinCurrent(PseudoTid, PinEvolve) as TMemTableMetadataItem;
     if CompareStr(TblName, Cur.EntityName) <> 0 then
       raise EMemDBInternalException.Create(S_JOURNAL_REPLAY_NAMES_INCONSISTENT);
-    LayoutChange := false;
   end;
   LookaheadHelper(Stream, MetadataInStream, DataInStream);
 
-  if DataInStream and LayoutChange then
+  if DataInStream and TidLocal.LayoutChangeRequired then
     raise EMemDbException.Create(S_JOURNAL_DATA_WITH_LAYOUT_CHANGE);
 
   if DataInStream then
-  begin
-    TidLocal := GetMakeTidLocal(PseudoTid);
     TidLocal.FromJournal(Stream);
-  end;
+
   ExpectTag(Stream, mstTableEnd);
 
-  if LayoutChange then
+  if TidLocal.LayoutChangeRequired then
     TidLocal.AdjustTableStructureForMetadata;
 end;
 
@@ -3548,7 +3848,7 @@ begin
   FMasterRowLock.Acquire;
   try
     if FMetadata.AnyChangesForTid(PseudoTid)
-       or Assigned(FMetadata.PinCurrent(PseudoTid, pinEvolve))
+       or Assigned(META_PinCurrent(PseudoTid, pinEvolve))
        or (FMasterRowList.Count > 0) then
       raise EMemDBInternalException.Create(S_FROM_SCRATCH_REQUIRES_EMPTY_OBJ);
   finally
@@ -3556,7 +3856,7 @@ begin
   end;
   ExpectTag(Stream, mstTableStart);
   FMetadata.FromScratch(PseudoTid, Stream);
-  TidLocal := GetMakeTidLocal(PseudoTid);
+  TidLocal := GetMakeTidLocal(PseudoTid, pinEvolve);
   TidLocal.FromScratch(Stream);
   ExpectTag(Stream, mstTableEnd);
 end;
@@ -3568,8 +3868,8 @@ var
   TidLocal: TTidLocal;
 begin
   FMetadata.PreCommit(Tid, Reason);
-  Cur := FMetadata.PinCurrent(Tid, pinFinalCheck) as TMemDBStreamable;
-  Next := FMetadata.GetNext(Tid) as TMemDbStreamable;
+  Cur := META_PinCurrent(Tid, pinFinalCheck);
+  Next := META_GetNext(Tid);
   ChangeFlagsFromPinned(Cur, Next, Added, Changed, Deleted, Null);
   if Null then
     exit; //Deleted case, still check all the rows have been deleted.
@@ -3580,8 +3880,8 @@ begin
   //which will have created a TidLocal if necessary.
   //All the other row checking can be done there.
   TidLocal := GetTidLocal(Tid);
-  if Assigned(TidLocal) then
-    TidLocal.PreCommit(Reason);
+  Assert(Assigned(TidLocal));
+  TidLocal.PreCommit(Reason);
 end;
 
 {
@@ -3605,7 +3905,7 @@ begin
   FCommitChangesMade := [];
   FDataChangeRequired := false;
   FIndexingChangeRequired := false;
-  UpdateListHelpers;
+  UpdateHelpersAndIndices;
 
   //TODO - Prune empty TidLocals, and warn. (Do more thorough analysis of CPT for pins later).
 end;
@@ -3622,12 +3922,19 @@ begin
   //lock acquisitions.
   TidLocal := GetTidLocal(Tid);
   if Assigned(TidLocal) then
-  begin
     TidLocal.Commit(Reason);
-    TidLocal.Free;
+
+  FMetaIndexLock.Acquire;
+  try
+    if Assigned(TidLocal) then
+      TidLocal.MetaIndexCommit(Reason);
+    inherited;
+  finally
+    FMetaIndexLock.Release;
   end;
+  TidLocal.Free;
+
   FindRmRowAdditionLock(Tid);
-  inherited;
 end;
 
 procedure TMemDBTablePersistent.Rollback(const TId: TTransactionId; Reason: TMemDbTransReason);
@@ -3642,12 +3949,19 @@ begin
   //lock acquisitions.
   TidLocal := GetTidLocal(Tid);
   if Assigned(TidLocal) then
-  begin
     TidLocal.Rollback(Reason);
-    TidLocal.Free;
+
+  FMetaIndexLock.Acquire;
+  try
+    if Assigned(TidLocal) then
+      TidLocal.MetaIndexRollback(Reason);
+    inherited;
+  finally
+    FMetaIndexLock.Release;
   end;
+  TidLocal.Free;
+
   FindRmRowAdditionLock(Tid);
-  inherited; //Metadata
 end;
 
 {$IFDEF MEMDB2_TEMP_REMOVE}
@@ -3738,7 +4052,9 @@ begin
   end;
 end;
 
-function TMemDBTablePersistent.GetMakeTidLocal(const Tid: TTransactionId): TTidLocal;
+function TMemDBTablePersistent.GetMakeTidLocal(const Tid: TTransactionId; PinReason: TPinReason): TTidLocal;
+var
+  ToCreate: boolean;
 begin
   FTidLocalLock.Acquire;
   try
@@ -3749,7 +4065,8 @@ begin
         break;
       result := result.FTidLocalLinks.FLink.Owner as TTidLocal;
     end;
-    if not Assigned(result) then
+    ToCreate := not Assigned(Result);
+    if ToCreate then
     begin
       result := TTidLocal.Create;
       //Recursive lock acquire, but not a problem.
@@ -3758,26 +4075,20 @@ begin
   finally
     FTidLocalLock.Release;
   end;
-end;
-
-function TMemDBTablePersistent.GetMakeTidForLayout(const Tid: TTransactionId; PinReason: TPinReason): TTidLocal;
-
-begin
-  result := GetMakeTidLocal(Tid);
-  result.UpdateLayout(PinReason);
+  if ToCreate then
+    result.UpdateLayout(PinReason);
 end;
 
 function TMemDBTablePersistent.GetMakeListHelpers(const Tid: TTransactionId;
                                                    var FieldHelper: TMemDblBufListHelper;
                                                    var IndexHelper: TMemDblBufListHelper): TTidLocal;
 begin
-  //This for client code field/index manipulation.
-  //client code *not* to free list helpers.
-  result := GetMakeTidForLayout(Tid, pinEvolve);
+  result := GetMakeTidLocal(Tid, pinEvolve);
   FieldHelper := result.FFieldHelper;
   IndexHelper := result.FIndexHelper;
 end;
 
+//TODO - Move this into TTidLocal?
 procedure TMemDBTablePersistent.GetCurrNxtMetaCopiesEx(const Tid: TTransactionId;
                                            var CC, NC: TMemTableMetadataItem;
                                            var CCFieldCount, CCIndexCount,
@@ -3786,8 +4097,9 @@ procedure TMemDBTablePersistent.GetCurrNxtMetaCopiesEx(const Tid: TTransactionId
 var
   Current, Next: TMemDBStreamable;
 begin
-  Current := FMetadata.PinCurrent(Tid, PinReason) as TMemDBStreamable;
-  Next := FMetadata.GetNext(Tid) as TMemDBStreamable;
+  Assert(Assigned(GetTidLocal(Tid)));
+  Current := FMetadata.PinCurrent(Tid, PinReason);
+  Next := FMetadata.GetNext(Tid);
   CC := nil;
   NC := nil;
   CCFieldCount := 0;
@@ -3819,6 +4131,58 @@ begin
   GetCurrNxtMetaCopiesEx(Tid, CC,NC, CCFieldCount, NCFieldCount, CCIndexCount, NCIndexCount, PinReason);
 end;
 
+function TMemDbTablePersistent.META_PinCurrent(const Tid: TTransactionId; Reason: TPinReason): TMemDBStreamable;
+begin
+  GetMakeTidLocal(Tid, Reason);
+  result := inherited;
+end;
+
+function TMemDbTablePersistent.META_GetPinLatest(const Tid: TTransactionId;
+                        var BufSelected: TAbSelType; Reason: TPinReason): TMemDBStreamable;
+begin
+  GetMakeTidLocal(Tid, Reason);
+  result := inherited;
+end;
+
+procedure TMemDbTablePersistent.META_RequestChange(const Tid: TTransactionId);
+begin
+  GetMakeTidLocal(Tid, pinEvolve);
+  inherited;
+end;
+
+procedure TMemDbTablePersistent.META_Delete(const Tid: TTransactionId);
+begin
+  GetMakeTidLocal(Tid, pinEvolve);
+  inherited;
+end;
+
+function TMemDbTablePersistent.META_FieldsByNames(const AB: TBufSelector; const Names: TMDBFieldNames; var AbsIdxs: TFieldOffsets): TMemFieldDefs;
+begin
+  if AB.SelType <> TAbSelType.abNext then
+    GetMakeTidLocal(AB.TId, pinEvolve);
+  result := (Metadata as TMemDbTableMetadata).FieldsByNames(AB, Names, AbsIdxs, pinEvolve);
+end;
+
+function TMemDbTablePersistent.META_FieldByName(const AB: TBufSelector; const Name: string; var AbsIndex: integer): TMemFieldDef;
+begin
+  if AB.SelType <> TAbSelType.abNext then
+    GetMakeTidLocal(AB.TId, pinEvolve);
+  result := (Metadata as TMemDBTableMetadata).FieldByName(AB, Name, AbsIndex, pinEvolve);
+end;
+
+function TMemDbTablePersistent.META_IndexByName(const AB: TBufSelector; const Name: string; var AbsIndex: integer): TMemIndexDef;
+begin
+  if AB.SelType <> TAbSelType.abNext then
+    GetMakeTidLocal(AB.TId, pinEvolve);
+  result := (Metadata as TMemDbTableMetadata).IndexByName(AB, Name, AbsIndex, pinEvolve);
+end;
+
+function TMemDbTablePersistent.GetUserTidLocalIndexRoot(const Tid: TTransactionId; var TidLocal: TTidLocal; var Idx: TMemIndexDef; IdxName: string): TMemDBIndex;
+begin
+  TidLocal := GetMakeTidLocal(Tid, pinEvolve);
+  result := TidLocal.GetUserIndexRoot(Idx, IdxName);
+end;
+
 {$IFDEF MEMDB2_TEMP_REMOVE}
 
 procedure TMemDBTablePersistent.CheckTagAgreesWithMetadata(IdxIdx: integer;
@@ -3838,7 +4202,7 @@ var
 {$ENDIF}
 begin
 {$IFOPT C+}
-  //UpdateListHelpers - already done at all points where metadata undergoes
+  //UpdateHelpersAndIndices - already done at all points where metadata undergoes
   //major rearrangement.
   GetCurrNxtMetaCopiesEx(CC, NC, CCFieldCount, CCIndexCount, NCFieldCount, NCIndexCount);
   //Check tag exists and is where we expect.
@@ -3988,7 +4352,7 @@ var
   CCFieldCount, CCINdexCount, NCFieldCount, NCIndexCount: integer;
   AbsIndexes1, AbsIndexes2: TFieldOffsets;
 begin
-  UpdateListHelpers;
+  UpdateHelpersAndIndices;
   GetCurrNxtMetaCopiesEx(CC, NC, CCFieldCount, CCIndexCount, NCFieldCount, NCIndexCount);
   DimensionChangesets;
   NDIndex := 0;
@@ -5805,21 +6169,35 @@ end;
 
 function TMemDBRow.CheckFormatAgainstMeta(const Tid: TTransactionId; AB: TAbSelType; MD: TMemTableMetadataItem; PinReason: TPinReason): boolean;
 var
-  Data, Def: TMemDBStreamable;
+  MetaFieldDefs: TMemStreamableList;
+begin
+  if NotAssignedOrSentinel(MD) then
+    MetaFieldDefs := nil
+  else
+    MetaFieldDefs := MD.FieldDefs;
+  result := CheckFormatAgainstMetaDefs(Tid, AB, MetaFieldDefs, PinReason);
+end;
+
+class function TMemDBRow.StaticCheckFormatAgainstMeta(Data: TMemDBStreamable; MD: TMemTableMetadataItem): boolean;
+var
+  MetaFieldDefs: TMemStreamableList;
+begin
+  if NotAssignedOrSentinel(MD) then
+    MetaFieldDefs := nil
+  else
+    MetaFieldDefs := MD.FieldDefs;
+  result := StaticCheckFormatAgainstMetaDefs(Data, MetaFieldDefs);
+end;
+
+class function TMemDBRow.StaticCheckFormatAgainstMetaDefs(Data: TMemDBStreamable; MetaFieldDefs: TMemStreamableList): boolean;
+var
+  Def: TMemDBStreamable;
   DataFields: TMemStreamableList;
   DataCount,DefCount, i: integer;
-  BufSel: TABSelType;
-
   DataField: TMemFieldData;
   FieldDef: TMemFieldDef;
 begin
-  case AB of
-    abCurrent: Data := PinCurrent(Tid, PinReason) as TMemDBStreamable;
-    abNext: Data := GetNext(Tid) as TMemDBStreamable;
-    abLatest: Data := GetPinLatest(Tid, bufSel, PinReason) as TMemDBStreamable;
-  else
-    Assert(false);
-  end;
+  DataFields := nil;
   if NotAssignedorSentinel(Data) then
     DataCount := 0
   else
@@ -5827,10 +6205,10 @@ begin
     DataFields := Data as TMemStreamableList;
     DataCount := DataFields.Count;
   end;
-  if NotAssignedOrSentinel(MD) then
+  if NotAssignedOrSentinel(MetaFieldDefs) then
     DefCount := 0
   else
-    DefCount := MD.FieldDefs.Count;
+    DefCount := MetaFieldDefs.Count;
   //Expect delete sentinel ordering etc to be the same between the two
   //sets if they exist, so gross counts and sentinel placement should be the same.
   if DataCount <> DefCount then
@@ -5841,7 +6219,7 @@ begin
   for i := 0 to Pred(DataCount) do
   begin
     Data := DataFields.Items[i];
-    Def := MD.FieldDefs.Items[i];
+    Def := MetaFieldDefs.Items[i];
     Assert(Assigned(Data));
     Assert(Assigned(Def));
     //Expect possible sentinels, but not NULL.
@@ -5864,13 +6242,29 @@ begin
   result := true;
 end;
 
+function TMemDBRow.CheckFormatAgainstMetaDefs(const Tid: TTransactionId; AB: TAbSelType; MetaFieldDefs: TMemStreamableList; PinReason: TPinReason): boolean;
+var
+  Data: TMemDBStreamable;
+  bufSel: TAbSelType;
+begin
+  Data := nil;
+  case AB of
+    abCurrent: Data := PinCurrent(Tid, PinReason);
+    abNext: Data := GetNext(Tid);
+    abLatest: Data := GetPinLatest(Tid, bufSel, PinReason);
+  else
+    Assert(false);
+  end;
+  result := StaticCheckFormatAgainstMetaDefs(Data, MetaFieldDefs);
+end;
+
 procedure TMemDBRow.ToJournal(const Tid: TTransactionId; Stream: TStream);
 var
   Current, Next: TMemDbStreamable;
   Added, Changed, Deleted, Null: boolean;
 begin
-  Current := PinCurrent(Tid, pinEvolve) as TMemDbStreamable;
-  Next := GetNext(Tid) as TMemDbStreamable;
+  Current := PinCurrent(Tid, pinEvolve);
+  Next := GetNext(Tid);
   ChangeFlagsFromPinned(Current, Next, Added, Changed, Deleted, Null);
   if Added or Changed or Deleted then
   begin
@@ -5891,7 +6285,6 @@ end;
 
 procedure TMemDBRow.FromJournal(const PseudoTid: TTransactionId; Stream: TStream);
 var
-  StreamRowId: string;
   StreamRowGuid: TGUID;
   CheckItemCurrent, CheckItemNext: TMemStreamableList;
   Cur, Nxt: TMemDbStreamable;
@@ -5902,20 +6295,21 @@ begin
     raise EMemDBInternalException.Create(S_ROW_IDS_DISAGREE);
   inherited;
   ExpectTag(Stream, mstRowEnd);
-  Cur := PinCurrent(PseudoTid, pinEvolve) as TMemDbStreamable;
-  Nxt := GetNext(PseudoTid) as TMemDbStreamable;
+  Cur := PinCurrent(PseudoTid, pinEvolve);
+  Nxt := GetNext(PseudoTid);
   if AssignedNotSentinel(Cur) then
     CheckItemCurrent := Cur as TMemStreamableList
   else
     CheckItemCurrent := nil;
   if AssignedNotSentinel(Nxt) then
-    CheckItemNext := Nxt as TMemStreamableList;
+    CheckItemNext := Nxt as TMemStreamableList
+  else
+    CheckItemNext := nil;
   CheckABStreamableListChange(CheckItemCurrent, CheckItemNext);
 end;
 
 procedure TMemDBRow.FromScratch(const PseudoTid: TTransactionId; Stream: TStream);
 var
-  StreamRowId: string;
   StreamRowGUID: TGUID;
   Cur, Nxt: TMemDBStreamable;
 begin
@@ -5926,8 +6320,8 @@ begin
   inherited;
   ExpectTag(Stream, mstRowEnd);
   //Assuming no delete sentinels in A/B top level copies, and every row is an add.
-  Cur := PinCurrent(PseudoTid, pinEvolve) as TMemDbStreamable;
-  Nxt := GetNext(PseudoTid) as TMemDBStreamable;
+  Cur := PinCurrent(PseudoTid, pinEvolve);
+  Nxt := GetNext(PseudoTid);
   if AssignedNotSentinel(Cur)
     or (NotAssignedOrSentinel(Nxt)) then
     raise EMemDbInternalException.Create(S_JOURNAL_ROW_NOT_NEW);
@@ -5971,8 +6365,8 @@ var
   Cur, Nxt: TMemTableMetadataItem;
   CurF, NextF, CurI, NextI: TMemStreamableList;
 begin
-  C := PinCurrent(Tid, pinFinalCheck) as TMemDbStreamable;
-  N := GetNext(Tid) as TMemDBStreamable;
+  C := PinCurrent(Tid, pinFinalCheck);
+  N := GetNext(Tid);
   if AssignedNotSentinel(C) then
     Cur := C as TMemTableMetadataItem
   else
@@ -6085,9 +6479,9 @@ var
 begin
   MC := nil;
   case AB.SelType of
-    abCurrent: MC := self.PinCurrent(AB.TId, Reason) as TMemDBStreamable;
-    abNext: MC := self.GetNext(AB.TId) as TMemDBStreamable;
-    abLatest: MC := self.GetPinLatest(AB.TId, bufSel, Reason) as TMemDBStreamable;
+    abCurrent: MC := self.PinCurrent(AB.TId, Reason);
+    abNext: MC := self.GetNext(AB.TId);
+    abLatest: MC := self.GetPinLatest(AB.TId, bufSel, Reason);
   else
     Assert(false);
   end;
@@ -6107,9 +6501,9 @@ var
 begin
   MC := nil;
   case AB.SelType of
-    abCurrent: MC := self.PinCurrent(AB.TId, Reason) as TMemDBStreamable;
-    abNext: MC := self.GetNext(AB.TId) as TMemDBStreamable;
-    abLatest: MC := self.GetPinLatest(AB.TId, bufSel, Reason) as TMemDBStreamable;
+    abCurrent: MC := self.PinCurrent(AB.TId, Reason);
+    abNext: MC := self.GetNext(AB.TId);
+    abLatest: MC := self.GetPinLatest(AB.TId, bufSel, Reason);
   else
     Assert(false);
   end;
@@ -6126,9 +6520,9 @@ var
 begin
   MC := nil;
   case AB.SelType of
-    abCurrent: MC := self.PinCurrent(AB.TId, Reason) as TMemDBStreamable;
-    abNext: MC := self.GetNext(AB.TId) as TMemDBStreamable;
-    abLatest: MC := self.GetPinLatest(AB.TId, bufSel, Reason) as TMemDBStreamable;
+    abCurrent: MC := self.PinCurrent(AB.TId, Reason);
+    abNext: MC := self.GetNext(AB.TId);
+    abLatest: MC := self.GetPinLatest(AB.TId, bufSel, Reason);
   else
     Assert(false);
   end;
@@ -6266,8 +6660,8 @@ begin
     begin
       ProxI := EntityList[i] as TMemDBEntityProxy;
       ObjI := ProxI.Proxy as TMemDbEntity;
-      ICur := ObjI.Metadata.PinCurrent(Tid, pinFinalCheck) as TMemDBStreamable;
-      INxt := ObjI.Metadata.GetNext(Tid) as TMemDbStreamable;
+      ICur := ObjI.META_PinCurrent(Tid, pinFinalCheck);
+      INxt := ObjI.META_GetNext(Tid);
       ChangeFlagsFromPinned(ICur, INxt, IAdded, IChanged, IDeleted, INull);
       if not (INull or IDeleted) then
       begin
@@ -6275,13 +6669,13 @@ begin
         begin
           ProxJ := EntityList[j] as TMemDBEntityProxy;
           ObjJ := ProxJ.Proxy as TMemDBEntity;
-          JCur := ObjJ.Metadata.PinCurrent(Tid, pinFinalCheck) as TMemDBStreamable;
-          JNxt := ObjJ.Metadata.GetNext(Tid) as TMemDBStreamable;
+          JCur := ObjJ.META_PinCurrent(Tid, pinFinalCheck);
+          JNxt := ObjJ.META_GetNext(Tid);
           ChangeFlagsFromPinned(JCur, JNxt, JAdded, JChanged, JDeleted, JNull);
           if not (JNull or JDeleted) then
           begin
-            ILat := ObjI.Metadata.GetPinLatest(Tid, SelType, pinFinalCheck) as TMemEntityMetadataItem;
-            JLat := ObjJ.Metadata.GetPinLatest(Tid, SelType, pinFinalCheck) as TMemEntityMetadataItem;
+            ILat := ObjI.META_GetPinLatest(Tid, SelType, pinFinalCheck) as TMemEntityMetadataItem;
+            JLat := ObjJ.META_GetPinLatest(Tid, SelType, pinFinalCheck) as TMemEntityMetadataItem;
             if ILat.EntityName = JLat.EntityName then
               raise EMemDBConsistencyException.Create(S_COMMMIT_CONSISTENCY_OBJS);
           end;
@@ -6466,7 +6860,7 @@ begin
         end;
 
         if ChangeType = mectNewTable then
-          DBU := TMemDbTable.Create
+          DBU := TMemDBTable.Create
         else
           DBU := TMemDBForeignKey.Create;
 
@@ -6486,7 +6880,7 @@ begin
         if Assigned(DBU) then
         begin
           DBU.FromJournal(PseudoTid, Stream);
-          DBUMeta := DBU.Metadata.GetNext(PseudoTid) as TMemDbStreamable;
+          DBUMeta := DBU.Metadata.GetNext(PseudoTid);
           Assert(Assigned(DBUMeta) = (ChangeType = mectChangedDeletedEntity));
           DBU.FProxy.Release;
         end
@@ -6670,7 +7064,6 @@ var
   Entity: TMemDBEntity;
   List: TMemDbReffedList;
   SelType: TABSelType;
-  EntMeta: TMemDbEntityMetadata;
   EntMetaS: TMemDBStreamable;
   EntMetaItem: TMemEntityMetadataItem;
 begin
@@ -6683,11 +7076,10 @@ begin
       Proxy := List.Items[i] as TMemDbEntityProxy;
       Assert(Assigned(Proxy.Proxy) and (Proxy.Proxy is TMemDbEntity));
       Entity := Proxy.Proxy as TMemDbEntity;
-      EntMeta := Entity.Metadata;
       case AB.SelType of
-        abCurrent: EntMetaS := EntMeta.PinCurrent(AB.Tid, PinReason) as TMemDbStreamable;
-        abNext: EntMetaS := EntMeta.GetNext(AB.Tid) as TMemDbStreamable;
-        abLatest: EntMetaS := EntMeta.GetPinLatest(AB.Tid, SelType, PinReason) as TMemDbStreamable;
+        abCurrent: EntMetaS := Entity.META_PinCurrent(AB.Tid, PinReason);
+        abNext: EntMetaS := Entity.META_GetNext(AB.Tid);
+        abLatest: EntMetaS := Entity.META_GetPinLatest(AB.Tid, SelType, PinReason);
       else
         Assert(false);
         EntMetaS := nil;
@@ -6735,6 +7127,10 @@ begin
 
   //So all we have to do now is delete the metadata copies, do a commit,
   //and refs should return to zero.
+
+  //TODO TODO - This is the slow path delete. just to check everything
+  // clears down nicely. Make a fast path,
+  //where we assume no concurrency issues, dec all ref counts until zero.
   NullStream := TNullStream.Create;
   try
     for FKs := True downto False do

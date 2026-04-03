@@ -42,6 +42,21 @@ type
                        mtrReplayFromScratch,
                        mtrReplayFromJournal);
 
+{
+   Isolation / serialization
+
+   Done:
+   1. Minimum isolation levels for Metadata / Implied row changes.
+     Now done.  => ReadCommitted. RMW race free.
+     Addition lock for table restructure.
+
+   TODO - Serializable.
+   2. Serializable isolation:
+      - Need row addition lock from start of Txion:
+        To prevent phantoms & keep index traversal consistent.
+      - Need all meta/index pinning to happen atomically at Txion start.
+}
+
   //Object which can write changes between current and next version to journal.
 {$IFDEF USE_TRACKABLES}
   TMemDBJournalCreator = class(TTrackable)
@@ -92,9 +107,14 @@ type
     //TODO - Check whether still need this after all is said and done.
     //TODO - Nullness here is binary-tid-local, not same as
     //multibuf nullness, which indicates empty and nothing pinned.
-    procedure Delete(const TId: TTransactionId); virtual; abstract;
-    procedure RequestChange(const Tid: TTransactionId); virtual; abstract;
-    procedure RequestReffedChange(const Tid: TTransactionId); virtual; abstract;
+    procedure Delete(const TId: TTransactionId;
+      MinIso: TMDBIsolationLevel = Low(TMDBIsolationLevel)); virtual; abstract;
+    procedure RequestChange(const Tid: TTransactionId;
+      MinIso: TMDBIsolationLevel = Low(TMDBIsolationLevel)); virtual; abstract;
+    procedure RequestReffedChange(const Tid: TTransactionId;
+      MinIso: TMDBIsolationLevel = Low(TMDBIsolationLevel)); virtual; abstract;
+    procedure DirectSetNext(const Tid: TTransactionID; Data: TMemDbStreamable;
+      MinIso: TMDBIsolationLevel = Low(TMDBIsolationLevel)); virtual; abstract;
   end;
 
   //OK, let's think about what referencing information we need, when
@@ -147,6 +167,9 @@ type
   PTidReference = TTidReference;
 {$ENDIF}
 
+  //TODO - DCPHandle don't call down where it's not necessary.
+  //       CPTid handling always required.
+
   //Assumed all these except the final handler and destructor under lock.
   TMemDBReferenceReporter = class(TMemDbChangeable)
   private
@@ -195,7 +218,7 @@ type
 {$ENDIF}
     Link: TDLEntry;
     Sel: TBufSelector;
-    Item: TMemDbReffed;
+    Item: TMemDBStreamable;
     ParentTid: TTransactionId;
   end;
 {$IFOPT C+}
@@ -210,7 +233,7 @@ type
   TMemDbPinnedItem = record
 {$ENDIF}
     Link: TDLEntry;
-    Item: TMemDBReffed;
+    Item: TMemDBStreamable;
     PinnedCurrentTid: TTransactionId;
     PinnedBy: TTransactionId;
     FinalCheck: boolean;
@@ -244,9 +267,9 @@ type
     procedure UnlockSelf; virtual; abstract;
 
     //Current, Next (Tid 1), Next (Tid 2) ...
-    function FindCurMultiItem: PMemDBMultiItem;
-    function FindNxtMultiItem(const TId: TTransactionId): PMemDBMultiItem;
-    function FindPin(const TId: TTransactionId): PMemDbPinnedItem;
+    function FindCurMultiItem: PMemDBMultiItem; inline;
+    function FindNxtMultiItem(const TId: TTransactionId): PMemDBMultiItem; inline;
+    function FindPin(const TId: TTransactionId): PMemDbPinnedItem; inline;
     //First multi-item should always be current,
     //and always exists (item ptr may be null).
     //Other multi-items are pre-transaction, and item ptr should never be NULL.
@@ -260,7 +283,7 @@ type
                               Cur, Next: TMemDBStreamable);
     procedure ToScratchPinnedMB(Stream: TStream; Cur: TMemDBStreamable);
 
-    procedure RequestChangeInternal(const Tid: TTransactionId; DupType: TBufCloneType);
+    procedure RequestChangeInternal(const Tid: TTransactionId; DupType: TBufCloneType; MinIso: TMDBIsolationLevel);
   public
     //Determining changes for Tid's is easy to do for composite objects,
     //if you don't mind accruing pins along the way (internal structure).
@@ -272,9 +295,14 @@ type
     function AnyChanges(const Tid: TTransactionId): boolean; override;
 
 
-    procedure Delete(const TId: TTransactionId); override;
-    procedure RequestChange(const Tid: TTransactionId); override;
-    procedure RequestReffedChange(const Tid: TTransactionId); override;
+    procedure Delete(const TId: TTransactionId;
+      MinIso: TMDBIsolationLevel = Low(TMDBIsolationLevel)); override;
+    procedure RequestChange(const Tid: TTransactionId;
+      MinIso: TMDBIsolationLevel = Low(TMDBIsolationLevel)); override;
+    procedure RequestReffedChange(const Tid: TTransactionId;
+      MinIso: TMDBIsolationLevel = Low(TMDBIsolationLevel)); override;
+    procedure DirectSetNext(const Tid: TTransactionID; Data: TMemDbStreamable;
+      MinIso: TMDBIsolationLevel = Low(TMDBIsolationLevel)); override;
 
     constructor Create;
     destructor Destroy; override;
@@ -293,25 +321,23 @@ type
     procedure Commit(const Tid: TTransactionId; Reason: TMemDbTransReason); override;
     procedure Rollback(const Tid: TTransactionId; Reason: TMemDbTransReason); override;
 
-    //For situations where you need to create an setup initial current copy.
-    //i.e. CreateTable, CreateForeignKey, InsertRow etc.
+    //Navigated to via row list.
+    function PinForCursor(const Tid: TTransactionId): boolean;
+    procedure UnPinCursor(const Tid: TTransactionId);
 
-    //TODO - Can these return TMemDBStreamable instead of TMemDBReffed?
+    //TODO - PinCursorFromIndex
+
+    //TODO - Can these return TMemDBStreamable instead of TMemDBStreamable?
     //can get rid of a lot of "as" conversions.
-
-    function PinCurrent(const Tid: TTransactionId; Reason: TPinReason): TMemDbReffed;
-    //Generally, no un-pin.  Once pinned you expect it to stay the same until commit
-    //rollback, at which point the pins will be cleared.
+    function PinCurrent(const Tid: TTransactionId; Reason: TPinReason): TMemDBStreamable;
+    //Generally, no un-pin for data. Commit/Rollback will clear.
 
     //Pins/Refs checked/ cleared at Txion time.
-    function GetNext(const Tid: TTransactionId): TMemDbReffed;
-    //No pin of next, you can Ref it.
-
-    //For use only a very init/from scratch cases.
-    procedure DirectSetNext(const Tid: TTransactionID; Data: TMemDbStreamable);
+    function GetNext(const Tid: TTransactionId): TMemDBStreamable;
+    //No pin of next, but you can Ref it.
 
     function GetPinLatest(const Tid: TTransactionId;
-                            var BufSelected: TAbSelType; Reason: TPinReason): TMemDbReffed;
+                            var BufSelected: TAbSelType; Reason: TPinReason): TMemDBStreamable;
   end;
 
   TMemDBMultiBufferedTiny = class(TMemDbMultiBuffered)
@@ -341,7 +367,7 @@ uses
 const
   S_CHANGESET_BAD_LISTS = 'Changeset has lists of items that are not consistent';
   S_DBL_BUF_LOOKAHEAD_FAILED = 'Double buffered lookahead failed, tag: ';
-  S_REQUESTED_CHANGE_OF_DELETE_SENTINEL = 'Requested change but item is marked for deletion';
+  S_REQUESTED_CHANGE_OF_DELETE_SENTINEL = 'Changing a deleted row would undelete it, not allowed.';
   S_REQUESTED_CHANGE_OF_NULL_CURRENT = 'Requested change but item is null';
   S_DIRECT_SET_OVER_PREVIOUS = 'Direct set function used, but would overwrite pre-exusting data.';
   S_MODIFIED_NO_PRECOMMIT = 'Error. Pre-commit check not performed on concurrent data.';
@@ -356,6 +382,7 @@ const
   S_MODIFIED_CONCURRENT_ABORT_RAW = 'Aborted. Concurrency conflict (read-after-write). Retry?';
   S_PIN_EVOLVE_TOO_LATE_1 = 'Cannot pin for change at this time (already final-checking). (Case 1)';
   S_PIN_EVOLVE_TOO_LATE_2 = 'Cannot pin for change at this time (already final-checking). (Case 2)';
+  S_MODIFIED_CONCURRENT_WOULD_UNDELETE = 'Aborted. Non-repeatable reads should not allow you to undelete.';
 
 { Misc }
 
@@ -700,13 +727,15 @@ begin
   end;
 end;
 
-procedure TMemDBMultiBuffered.Delete(const Tid: TTransactionId);
+procedure TMemDBMultiBuffered.Delete(const Tid: TTransactionId; MinIso: TMDBIsolationLevel);
 var
   Cur, Nxt: PMemDbMultiItem;
   CurPin: PMemDbPinnedItem;
   RefUp: TReferenceUpdate;
   TidUp: TTidUpdate;
+  Iso: TMDBIsolationLevel;
 begin
+  if Tid.Iso > MinIso then Iso := Tid.Iso else Iso := MinIso;
   LockSelf;
   try
     DCPPre(RefUp);
@@ -717,8 +746,10 @@ begin
     CurPin := FindPin(Tid);
     if Assigned(CurPin) then
     begin
-      if Cur.Sel.TId <> CurPin.PinnedCurrentTid then
-        raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ABORT_WAR_2);
+      //Less stringent checking (repeatable read), where we read, modify, write
+      if Iso >= ilReadRepeatable then
+        if Cur.Sel.TId <> CurPin.PinnedCurrentTid then
+          raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ABORT_WAR_2);
     end;
 
     Nxt := FindNxtMultiItem(Tid);
@@ -732,8 +763,8 @@ begin
       DLListInsertTail(@FMultiItems, @Nxt.Link);
     end;
 
-    //Yes allow next buffer overwrites (I wrote stuff, then changed my mind),
-    //but don't change the original parent Tid (someone else changed stuff in meantime).
+    //Yes allow next buffer overwrites if it deleted stuff.
+    //But don't change the original parent Tid (someone else changed stuff in meantime).
     //transaction ID
     Nxt.Item.Release;
     Nxt.Item := TMemDeleteSentinel.Create;
@@ -750,13 +781,15 @@ end;
 //TODO - This atomically works when updating
 //Need to check the Row append case where there is no initial data.
 
-procedure TMemDBMultiBuffered.RequestChangeInternal(const Tid: TTransactionId; DupType: TBufCloneType);
+procedure TMemDBMultiBuffered.RequestChangeInternal(const Tid: TTransactionId; DupType: TBufCloneType; MinIso: TMDBIsolationLevel);
 var
   Cur, Nxt: PMemDbMultiItem;
   CurPin: PMemDbPinnedItem;
   RefUp: TReferenceUpdate;
   TidUp: TTidUpdate;
+  Iso: TMDBIsolationLevel;
 begin
+  if Tid.Iso > MinIso then Iso := Tid.Iso else Iso := MinIso;
   LockSelf;
   try
     DCPPre(RefUp);
@@ -768,21 +801,29 @@ begin
 
     if Assigned(CurPin) then
     begin
-      if Cur.Sel.TId <> CurPin.PinnedCurrentTid then
-        raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ABORT_WAR_3);
+      //Less stringent checking (repeatable read), where we read, modify, write
+      //Except see undelete case below.
+      if Iso >= ilReadRepeatable then
+        if Cur.Sel.TId <> CurPin.PinnedCurrentTid then
+          raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ABORT_WAR_3);
     end;
 
     Nxt := FindNxtMultiItem(Tid);
     //Do all exception raising before allocating or making changes.
     if Assigned(Nxt) then
     begin
+      Assert(Assigned(Nxt.Item));
       if Nxt.Item is TMemDeleteSentinel then
         raise EMemDBException.Create(S_REQUESTED_CHANGE_OF_DELETE_SENTINEL);
     end
     else
     begin
+      //We can reasonably get here in some concurrency cases.
+      //(Non-repeatable reads).
+      //Because of the uniqueness of identifiers (guids), we're not allowed
+      //to arbitrarily undelete stuff.
       if not Assigned(Cur.Item) then
-        raise EMemDBException.Create(S_REQUESTED_CHANGE_OF_NULL_CURRENT)
+        raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_WOULD_UNDELETE)
       else
         Assert(not (Cur.Item is TMemDeleteSentinel));
     end;
@@ -799,9 +840,9 @@ begin
     if not Assigned(Nxt.Item) then
     begin
       case DupType of
-        bctDeepClone: Nxt.Item := TMemDbReffed.DeepClone(Cur.Item);
-        bctClone: Nxt.Item := TMemDbReffed.Clone(Cur.Item);
-        bctRef: Nxt.Item := Cur.Item.AddRef;
+        bctDeepClone: Nxt.Item := TMemDBStreamable.DeepClone(Cur.Item);
+        bctClone: Nxt.Item := TMemDBStreamable.Clone(Cur.Item);
+        bctRef: Nxt.Item := Cur.Item.AddRef as TMemDBStreamable;
       else
         Assert(false);
       end;
@@ -815,24 +856,25 @@ begin
   DCPHandle(RefUp);
 end;
 
-procedure TMemDBMultiBuffered.RequestChange(const Tid: TTransactionId);
+procedure TMemDBMultiBuffered.RequestChange(const Tid: TTransactionId;  MinIso: TMDBIsolationLevel);
 begin
-  RequestChangeInternal(Tid, bctDeepClone);
+  RequestChangeInternal(Tid, bctDeepClone, MinIso);
 end;
 
-procedure TMemDbMultiBuffered.RequestReffedChange(const Tid: TTransactionId);
+procedure TMemDbMultiBuffered.RequestReffedChange(const Tid: TTransactionId;  MinIso: TMDBIsolationLevel);
 begin
-  RequestChangeInternal(Tid, bctClone);
+  RequestChangeInternal(Tid, bctClone, MinIso);
 end;
 
-procedure TMemDBMultiBuffered.DirectSetNext(const Tid: TTransactionID; Data: TMemDbStreamable);
+procedure TMemDBMultiBuffered.DirectSetNext(const Tid: TTransactionID; Data: TMemDbStreamable;  MinIso: TMDBIsolationLevel);
 var
   Cur, Nxt: PMemDbMultiItem;
   CurPin: PMemDbPinnedItem;
   RefUp: TReferenceUpdate;
   TidUp: TTidUpdate;
-
+  Iso: TMDBIsolationLevel;
 begin
+  if Tid.Iso > MinIso then Iso := Tid.Iso else Iso := MinIso;
   LockSelf;
   try
     DCPPre(RefUp);
@@ -844,8 +886,10 @@ begin
     CurPin := FindPin(Tid);
     if Assigned(CurPin) then
     begin
-      if Cur.Sel.TId <> CurPin.PinnedCurrentTid then
-        raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ABORT_WAR_4);
+      //Less stringent checking (repeatable read), where we read, modify, write
+      if Iso >= ilReadRepeatable then
+        if Cur.Sel.TId <> CurPin.PinnedCurrentTid then
+          raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ABORT_WAR_4);
     end;
 
     Nxt := FindNxtMultiItem(Tid);
@@ -886,12 +930,13 @@ begin
     Nxt := FindNxtMultiItem(Tid);
     Pin := FindPin(Tid);
     Assert(Assigned(Cur));
-    //Check any pinned current same as current current (Write after read).
-    //TODO - Relax this to Nxt has same parent as pinned??
     if Assigned(Pin) then
     begin
-      if Pin.PinnedCurrentTid <> Cur.Sel.TId then
-        raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ABORT_WAR);
+      //More stringent checking (serialisable), where we read,
+      //but do not modify the value (Used algorithmically later...)
+      if Tid.Iso >= ilSerialisable then
+        if Pin.PinnedCurrentTid <> Cur.Sel.TId then
+          raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ABORT_WAR);
     end;
     if Assigned(Nxt) then
     begin
@@ -925,12 +970,13 @@ begin
     Nxt := FindNxtMultiItem(Tid);
     Pin := FindPin(Tid);
     Assert(Assigned(Cur));
-    //Check any pinned current same as current current (Write after read).
-    //TODO - Relax this to Nxt has same parent as pinned??
     if Assigned(Pin) then
     begin
-      if Pin.PinnedCurrentTid <> Cur.Sel.TId then
-      raise EMemDBInternalException.Create(S_MODIFIED_NO_PRECOMMIT);
+      //More stringent checking (serialisable), where we read,
+      //but do not modify the value (Used algorithmically later...)
+      if Tid.Iso >= ilSerialisable then
+        if Pin.PinnedCurrentTid <> Cur.Sel.TId then
+          raise EMemDBInternalException.Create(S_MODIFIED_NO_PRECOMMIT);
     end;
     if Assigned(Nxt) then
     begin
@@ -1026,7 +1072,20 @@ begin
   DCPHandle(RefUp);
 end;
 
-function TMemDBMultiBuffered.PinCurrent(const Tid: TTransactionId; Reason: TPinReason): TMemDbReffed;
+function TMemDBMultiBuffered.PinForCursor(const Tid: TTransactionId): boolean;
+var
+  selType: TABSelType;
+begin
+  //Don't pin on deleted rows.
+  result := AssignedNotSentinel(GetPinLatest(Tid, selType, pinEvolve));
+end;
+
+procedure TMemDBMultiBuffered.UnPinCursor(const Tid: TTransactionId);
+begin
+  //NOP.
+end;
+
+function TMemDBMultiBuffered.PinCurrent(const Tid: TTransactionId; Reason: TPinReason): TMemDBStreamable;
 var
   Cur, Nxt: PMemDBMultiItem;
   Pin: PMemDBPinnedItem;
@@ -1060,15 +1119,17 @@ begin
       if Assigned(Nxt) then
       begin
         //In unlikely case where we have requested modify, and then pin current later.
-        if Nxt.ParentTid <> Cur.Sel.Tid then
-          raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ABORT_RAW);
+        //Less stringent checking (repeatable read), where we read, modify, write
+        if Tid.Iso >= ilReadRepeatable then
+          if Nxt.ParentTid <> Cur.Sel.Tid then
+            raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ABORT_RAW);
       end;
 
       if Assigned(Cur.Item) then
       begin
         //New pin.
         Pin := NewPinned;
-        Pin.Item := Cur.Item.AddRef;
+        Pin.Item := Cur.Item.AddRef as TMemDBStreamable;
         DLItemInitObj(TObject(Pin), @Pin.Link);
         Pin.PinnedCurrentTid := Cur.Sel.TId;
         Pin.PinnedBy := Tid;
@@ -1086,7 +1147,7 @@ begin
   DCPHandle(RefUp);
 end;
 
-function TMemDbMultiBuffered.GetNext(const Tid: TTransactionId): TMemDbReffed;
+function TMemDbMultiBuffered.GetNext(const Tid: TTransactionId): TMemDBStreamable;
 var
   Nxt: PMemDbMultiItem;
 begin
@@ -1106,7 +1167,7 @@ begin
 end;
 
 function TMemDBMultiBuffered.GetPinLatest(const Tid: TTransactionId;
-                        var BufSelected: TAbSelType; Reason: TPinReason): TMemDBReffed;
+                        var BufSelected: TAbSelType; Reason: TPinReason): TMemDBStreamable;
 var
   Cur, Nxt: PMemDBMultiItem;
   Pin: PMemDbPinnedItem;
@@ -1150,7 +1211,7 @@ begin
         begin
           //New pin.
           Pin := NewPinned;
-          Pin.Item := Cur.Item.AddRef;
+          Pin.Item := Cur.Item.AddRef as TMemDBStreamable;
           Pin.FinalCheck := (Reason = pinFinalCheck);
           DLItemInitObj(TObject(Pin), @Pin.Link);
           Pin.PinnedCurrentTid := Cur.Sel.TId;
@@ -1222,8 +1283,8 @@ var
   Current, Next: TMemDbStreamable;
 begin
   inherited;
-  Current := PinCurrent(Tid, pinEvolve) as TMemDbStreamable;
-  Next := GetNext(Tid) as TMemDbStreamable;
+  Current := PinCurrent(Tid, pinEvolve);
+  Next := GetNext(Tid);
   ToJournalPinnedMB(Tid, Stream, Current, Next);
 end;
 
@@ -1266,21 +1327,18 @@ procedure TMemDBMultiBuffered.ToScratch(const PseudoTid: TTransactionId; Stream:
 var
   Current: TMemDbStreamable;
 begin
-  inherited; //Check this doesn't write any tags if NULL.
-  Current := PinCurrent(PseudoTid, pinEvolve) as TMemDbStreamable;
+  inherited;
+  Current := PinCurrent(PseudoTid, pinEvolve);
   ToScratchPinnedMB(Stream, Current);
 end;
 
 procedure TMemDbMultiBuffered.ToScratchPinnedMB(Stream: TStream; Cur: TMemDBStreamable);
 begin
-  if AssignedNotSentinel(Cur) then
-  begin
-    WrTag(Stream, mstDblBufferedStart);
-    WrStreamChangeType(Stream, mctAdd);
-    Cur.ToStream(Stream);
-    WrTag(Stream, mstDblBufferedEnd);
-  end;
-  //Else a NULL item, which we won't stream.
+  Assert(AssignedNotSentinel(Cur));
+  WrTag(Stream, mstDblBufferedStart);
+  WrStreamChangeType(Stream, mctAdd);
+  Cur.ToStream(Stream);
+  WrTag(Stream, mstDblBufferedEnd);
 end;
 
 //With the "From" functions, we can be sure re-play is single threaded,
@@ -1296,7 +1354,7 @@ begin
   if AnyChanges(PseudoTid) then
     raise EMemDbInternalException.Create(S_JOURNAL_REPLAY_DUP_INST);
 
-  Cur := PinCurrent(PseudoTid, pinEvolve) as TMemDBStreamable;
+  Cur := PinCurrent(PseudoTid, pinEvolve);
   ExpectTag(Stream, mstDblBufferedStart);
   ChangeType := RdStreamChangeType(Stream);
   case ChangeType of
@@ -1305,7 +1363,7 @@ begin
       if Assigned(Cur) then
         raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
       LookaheadHelper(PseudoTid, Stream);
-      Next := GetNext(PseudoTid) as TMemDBstreamable;
+      Next := GetNext(PseudoTid);
       Next.FromStream(Stream);
     end;
     mctChange, mctDelete:
@@ -1316,7 +1374,7 @@ begin
       if ChangeType = mctChange then
       begin
         LookaheadHelper(PseudoTid, Stream);
-        Next := GetNext(PseudoTid) as TMemDbStreamable;
+        Next := GetNext(PseudoTid);
         Next.FromStream(Stream);
       end
       else //mctDelete
@@ -1337,7 +1395,7 @@ begin
   if AnyChanges(PseudoTid) then
     raise EMemDbInternalException.Create(S_JOURNAL_REPLAY_DUP_INST);
 
-  Cur := PinCurrent(PseudoTid, pinEvolve)as TMemDbStreamable;
+  Cur := PinCurrent(PseudoTid, pinEvolve);
   if AssignedNotSentinel(Cur) then
     raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
 
@@ -1348,7 +1406,7 @@ begin
     begin
       //Expect transaction reason is always mtrReplayFromScratch
       LookaheadHelper(PseudoTid, Stream);
-      Next := GetNext(PseudoTid) as TMemDbStreamable;
+      Next := GetNext(PseudoTid);
       Next.FromStream(Stream);
     end;
   else

@@ -131,9 +131,9 @@ const
   S_ASKED_TO_TRACK_NIL =
     'Memory tracker was asked to track a nil pointer.';
   S_TRACKER_TREE_ADD_FAILED =
-    'Memory tracker couldn''t add a reference to a memory block. Duplicate?';
+    'Memory tracker couldn''t add a reference to a memory block. Duplicate add?';
   S_TRACKER_TREE_REMOVE_FAILED =
-    'Memory tracker couldn''t remove a reference to a memory block. Lost?';
+    'Memory tracker couldn''t remove a reference to a memory block. Double free?';
   S_POINTERS_ODD_SIZE =
     'Can''t convert pointers to ordinal. What platform is this?';
   MAGIC1 = $CAFEBABE;

@@ -34,7 +34,7 @@ uses
   Trackables,
 {$ENDIF}
   SysUtils, Classes, MemDB2Misc, MemDB2Streamable, MemDB2Journal,
-  MemDB2Buffered, MemDB2API, LockAbstractions, RWWLock, MemDB2BufBase;
+  MemDB2Buffered, MemDB2API, LockAbstractions, RWWLock, MemDB2BufBase, Reffed;
 
 type
   TMemDB = class;
@@ -42,7 +42,7 @@ type
 
   TInProgressType = (tiptNone, tiptCommitRollback);
 
-  TMemDBTransaction = class(TMemDbReffed)
+  TMemDBTransaction = class(TReffed)
   private
     //Links to datastructures.
     FDB: TMemDB;
@@ -50,9 +50,6 @@ type
     //Local mode fields.
     FMode: TMDBAccessMode;
     FSync: TMDBSyncMode;
-    //TODO - Need selector at this level, or gets generated
-    //more in MemDBBuffered?
-    FReadBufSelector: TBufSelector;
     FTid: TTransactionId;
     //Changeset states.
     FChangeset: TStream;
@@ -72,7 +69,7 @@ type
     procedure DeregisterCreatedApi(Api: TMemDBApi);
     procedure CheckNoDanglingTransactionRefs(CanRaise: boolean);
 
-    constructor Create; override;
+    constructor Create;
     destructor Destroy; override;
 
     function GetAPI: TMemAPIDatabase;
@@ -81,7 +78,6 @@ type
     property Sync: TMDBSyncMode read FSync;
     //TODO - Need selector at this level, or gets generated
     //more in MemDBBuffered?
-    property ReadBufSelector: TBufSelector read FReadBufSelector;
     property Tid: TTransactionId read FTid;
     property FlushFinishedEvent: TEvent read FFlushFinishedEvent;
     property ParentSession: TMemDBSession read FSession;
@@ -431,13 +427,10 @@ begin
                   FSessionLock.Release;
                 end;
                 //We will swallow the exception having put the DB into the error
-                //state so that we can release locks and free the transaction,
-                //and the user does not need to handle rollbacks raising
-                //exceptions (which should never really happen anyway).
+                //state so that we can release locks and free the transaction.
 
-                //Unfortunately an exception in rollback is likely to leave things
-                //pinned. TODO - Consider whether we should handle this case,
-                //or consider DB irrevocably stuffed.
+                //Unfortunately an exception in rollback is likely to leave things pinned.
+                //TODO - Fast deletion path to clear pins and destroy OK.
               end;
             end;
           end;
@@ -448,10 +441,17 @@ begin
     end
     else
     begin
-{$IFOPT C+}
       if FDatabase.AnyChangesForTid(Transaction.Tid) then
         raise EMemDBInternalException.Create(S_READONLY_HAS_CHANGED_DATA);
-{$ENDIF}
+
+      //Rollback cycle to clear the pins.
+      API := FDatabase.Interfaced.GetAPIObject(Transaction, APIInternalCommitRollback)
+        as TMemAPIDatabaseInternal;
+      try
+        API.UserRollbackCycleV3;
+      finally
+        API.Free;
+      end;
     end;
   finally
     FSessionLock.Acquire;
@@ -510,7 +510,6 @@ begin
     result.FMode := Mode;
     result.FSync := Sync;
     result.FTid := TTransactionId.NewTransactionID(Iso);
-    result.FReadBufSelector := MakeLatestBufSelector(result.FTid);
     Session.FSessionTransactions.Add(result);
     FTransactionList.Add(result);
   finally
@@ -602,6 +601,7 @@ end;
 
 destructor TMemDB.Destroy;
 begin
+  //TODO - Stopping DB when in phase error, and can't clear everything down.
   StopDB;
   Assert(FPhase in [mdbNull, mdbClosed, mdbError]);
   Assert(FSessionList.Count = 0);

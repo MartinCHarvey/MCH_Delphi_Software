@@ -103,12 +103,10 @@ type
 
   TMemAPITableData = class(TMemAPITable)
   private
-  {$IFDEF MEMDB2_TEMP_REMOVE}
-    FCursor: TItemRec;
+    FCursor: TMemDBCursor;
     FAdding: boolean;
     FFieldList: TMemStreamableList;
     FFieldListDirty: boolean;
-
   protected
     procedure DiscardInternal;
   public
@@ -123,10 +121,8 @@ type
     function FindByMultiFieldIndex(IdxName: string;
                           const DataRecs: TMemDbFieldDataRecs): boolean;
 
-    //FindEdgeByIndex is a little hack to find the first / last
-    //of a set of records with a certain field value.
-    //It should allow us to iterate through a subset of records,
-    //even though we don't yet have full query fuctionality
+    //FindEdgeByIndex lets you find first/last entries with a given value.
+    // With GetNext / GetPrevious
     //(i.e. "SELECT * FROM WHERE 'key_field' = ).
 
     function FindEdgeByIndex(Pos: TMemAPIPosition; IdxName: string;
@@ -140,10 +136,12 @@ type
                          const Data: TMemDbFieldDataRec);
     procedure Post;
     procedure Discard;
-    procedure Delete;
-    //TODO - Per-row pinning in Write-Shared.
+
+    //Row deletion.
+    //Optionally autoincrements on the most recent index/container you
+    //were iterating through.
+    procedure Delete(AutoInc: boolean = false);
     function RowSelected: boolean;
-{$ENDIF}
   end;
 
   //Foreign key operations.
@@ -164,6 +162,9 @@ type
 {$ENDIF}
   end;
 
+  //TODO TODO - Make sure no metadata pinning here
+  //unless tidLocal initialized.
+
   //Extensions to double buffered persistent objects to perform
   //API operations. These perform consistency checking on the operations,
   //and do not maintain an per-transaction state.
@@ -179,12 +180,16 @@ type
   end;
 
   TMemDBTable = class(TMemDbTablePersistent)
-{$IFDEF MEMDB2_TEMP_REMOVE}
   protected
-    function GetFieldDefList: TMemStreamableList;
-    function IndexNameToIndexAndTag(Iso: TMDBIsolationLevel;  var Idx:TMemIndexDef; Name: string): PITagStruct;
-    procedure IndexDefToFieldDefs(IndexDef: TMemIndexDef; var FieldDefs: TMemFieldDefs; var FieldAbsIdxs: TFieldOffsets);
-{$ENDIF}
+
+    //Unfortunately, very first touch/pin of metadata needs to be by TidLocal, so that
+    //CC fields/indexes are in sync with TidLocal index roots, hence all the wrapping here.
+
+    //TODO - Optimise the use of these META functions, so that we don't need
+    // to repeatedly query for the TidLocal structure.
+
+    procedure META_CurIndexDefToFieldDefs(const Tid: TTransactionId; IndexDef: TMemIndexDef; var FieldDefs: TMemFieldDefs; var FieldAbsIdxs: TFieldOffsets);
+    function META_CurFieldDefList(const Tid: TTransactionId): TMemStreamableList;
   public
     procedure API_CreateField(T: TObject; Name: string; FieldType: TMDBFieldType);
     procedure API_DeleteField(T: TObject; Name: string);
@@ -203,40 +208,40 @@ type
                        var IndexAttrs: TMDBIndexAttrs): boolean;
     function API_GetIndexNames(T: TObject): TStringList;
 
-{$IFDEF MEMDB2_TEMP_REMOVE}
-    function API_DataLocate(Iso: TMDBIsolationLevel;
-                            Cursor: TItemRec;
+    function API_DataLocate(T:TObject;
+                            Cursor: TMemDBCursor;
                             Pos: TMemAPIPosition;
-                            IdxName: string): TItemRec; //Returns cursor.
+                            IdxName: string): TMemDBCursor; //Returns cursor.
 
-    function API_DataFindByIndex(Iso: TMDBIsolationLevel;
+    function API_DataFindByIndex(T: TObject;
                                 IdxName: string;
-                                const DataRecs: TMemDbFieldDataRecs): TItemRec; //Returns cursor
+                                const DataRecs: TMemDbFieldDataRecs): TMemDBCursor; //Returns cursor
 
-    function API_DataFindEdgeByIndex(Iso: TMDBIsolationLevel;
+    function API_DataFindEdgeByIndex(T:TObject;
                                      IdxName: string;
                                      const DataRecs: TMemDbFieldDataRecs;
-                                     Pos: TMemAPIPosition): TItemRec; //Returns cursor.
+                                     Pos: TMemAPIPosition): TMemDBCursor; //Returns cursor.
 
-    procedure API_DataReadRow(Iso: TMDBIsolationLevel;
-                             Cursor: TItemRec;
+    procedure API_DataReadRow(T:TObject;
+                             Cursor: TMemDBCursor;
                              FieldList: TMemStreamableList);
 
-    procedure API_DataInitRowForAppend(Iso: TMDBIsolationLevel;
-                                      Cursor: TItemRec;
+    procedure API_DataInitRowForAppend(T: TObject;
+                                      Cursor: TMemDBCursor;
                                       FieldList: TMemStreamableList);
 
-    procedure API_DataRowModOrAppend(Iso: TMDBIsolationLevel;
-                                    var Cursor: TItemRec;
+    procedure API_DataRowModOrAppend(T: TObject;
+                                    var Cursor: TMemDBCursor;
                                     FieldList: TMemStreamableList);
 
-    procedure API_DataRowDelete(Iso: TMDBIsolationLevel;
-                                var Cursor: TItemRec);
+    function API_DataRelocate(T: TObject; Cursor: TMemDBCursor): TMemDBCursor;
 
-    function API_DataGetFieldAbsIdx(Iso: TMDBIsolationLevel;
+    procedure API_DataRowDelete(T: TObject;
+                                Cursor: TMemDBCursor);
+
+    function API_DataGetFieldAbsIdx(T: TObject;
                                     FieldName: string): integer;
 
-{$ENDIF}
 public
     function HandleInterfacedObjRequest(Transaction: TObject; ID: TMemDBAPIId): TMemDBAPI;override;
   end;
@@ -295,9 +300,9 @@ const
   S_API_FIELDS_IN_INDEX_MUST_BE_DISJOINT = 'Cannot specify a field name more than once in an index.';
   S_API_INDEX_REFERENCES_FIELD = 'Cannot delete field, it is referenced by an index.';
   S_API_INTERNAL_ERROR = 'API implementation internal error.';
+  S_API_INDEX_NAME_NULL = 'Index name should be non-empty.';
   S_API_INDEX_NAME_CONFLICT = 'An index already exists with that name. Perhaps commit previous renames / deletions?';
   S_API_INDEX_MUST_HAVE_FIELDS = 'You must specify some fields to index on';
-  S_API_INDEX_NAME_NOT_FOUND = 'Index name not found.';
   S_API_INTERNAL_TAG_DATA_BAD = 'Index does not correspond with a valid tag';
   S_API_INTERNAL_READING_ROW = 'Internal error reading row data.';
   S_API_TABLE_METADATA_NOT_COMMITED = 'No committed metadata for this table';
@@ -309,6 +314,9 @@ const
   S_API_NO_ROW_FOR_DELETE = 'You need to navigate to a row before you can delete it.';
   S_API_INDEX_FOR_FK_UNIQUE_ATTR = 'Foreign key: referenced index must have unique attribute set.';
   S_FROM_SCRATCH_NOT_ALLOWED_MULTI = 'Checkpoint and first init changesets should not be in a multi-transaction';
+  S_TABLE_FORMAT_CONCURRENTLY_CHANGED_1 = 'Concurrency: Table format changed whilst iterating (1).';
+  S_TABLE_FORMAT_CONCURRENTLY_CHANGED_2 = 'Concurrency: Table format changed whilst iterating (2).';
+  S_TABLE_FORMAT_CONCURRENTLY_CHANGED_3 = 'Concurrency: Table format changed whilst reading (3).';
 
 function MakeStream(StorageMode: TTempStorageMode): TStream;
 var
@@ -557,13 +565,11 @@ end;
 
 { TMemAPITableData }
 
-{$IFDEF MEMDB2_TEMP_REMOVE}
-
 procedure TMemAPITableData.DiscardInternal;
 begin
   if FFieldListDirty then
     raise EMemDBAPIException.Create(S_API_POST_OR_DISCARD_BEFORE_NAVIGATING);
-  FFieldList.FreeAndClear;
+  FFieldList.ReleaseAndClear;
   FAdding := false;
 end;
 
@@ -581,19 +587,28 @@ end;
 
 destructor TMemAPITableData.Destroy;
 begin
-  FFieldList.FreeAndClear;
-  FFieldLIst.Free;
+  FFieldList.Release;
+  FCursor.Free;
   inherited;
 end;
 
 function TMemAPITableData.Locate(Pos: TMemAPIPosition; IdxName: string = ''): boolean;
+var
+  NCursor:TMemDBCursor;
 begin
   DiscardInternal;
-  FCursor := Table.API_DataLocate(FIsolation, FCursor, Pos, IdxName);
+  NCursor := Table.API_DataLocate(FAssociatedTransaction, FCursor, Pos, IdxName);
+  if NCursor <> FCursor then
+  begin
+    FCursor.Free;
+    FCursor := NCursor;
+  end;
   result := Assigned(FCursor);
   if result then
-    Table.API_DataReadRow(FIsolation, FCursor, FFieldList);
+    Table.API_DataReadRow(FAssociatedTransaction, FCursor, FFieldList);
 end;
+
+
 
 function TMemAPITableData.FindByIndex(IdxName: string;
                                       const Data: TMemDbFieldDataRec): boolean;
@@ -607,12 +622,19 @@ end;
 
 function TMemAPITableData.FindByMultiFieldIndex(IdxName: string;
                                         const DataRecs: TMemDbFieldDataRecs): boolean;
+var
+  NCursor:TMemDBCursor;
 begin
   DiscardInternal;
-  FCursor := Table.API_DataFindByIndex(FIsolation, IdxName, DataRecs);
+  NCursor := Table.API_DataFindByIndex(FAssociatedTransaction, IdxName, DataRecs);
+  if NCursor <> FCursor then
+  begin
+    FCursor.Free;
+    FCursor := NCursor;
+  end;
   result := Assigned(FCursor);
   if result then
-    Table.API_DataReadRow(FIsolation, FCursor, FFieldList);
+    Table.API_DataReadRow(FAssociatedTransaction, FCursor, FFieldList);
 end;
 
 function TMemAPITableData.FindEdgeByIndex(Pos: TMemAPIPosition; IdxName: string;
@@ -627,22 +649,31 @@ end;
 
 function TMemAPITableData.FindEdgeByMultiFieldIndex(Pos: TMemAPIPosition; IdxName: string;
                                             const DataRecs: TMemDbFieldDataRecs): boolean;
+var
+  NCursor:TMemDBCursor;
 begin
   DiscardInternal;
-  FCursor := Table.API_DataFindEdgeByIndex(FIsolation,
+  NCursor := Table.API_DataFindEdgeByIndex(FAssociatedTransaction,
                                            IdxName, DataRecs, Pos);
+  if NCursor <> FCursor then
+  begin
+    FCursor.Free;
+    FCursor := NCursor;
+  end;
   result := Assigned(FCursor);
   if result then
-    Table.API_DataReadRow(FIsolation, FCursor, FFieldList);
+    Table.API_DataReadRow(FAssociatedTransaction, FCursor, FFieldList);
 end;
 
 procedure TMemAPITableData.Append;
 begin
   CheckWriteTransaction;
   DiscardInternal;
+  FCursor.Free;
   FCursor := nil;
   FAdding := true;
-  Table.API_DataInitRowForAppend(FIsolation, FCursor, FFieldList);
+  Table.API_DataInitRowForAppend(FAssociatedTransaction, FCursor, FFieldList);
+  //No point reading, fields all zero.
 end;
 
 procedure TMemAPITableData.ReadField(FieldName: string;
@@ -656,7 +687,7 @@ begin
     raise EMemDBAPIException.Create(S_API_NO_ROW_SELECTED);
   if FFieldList.Count = 0 then
     raise EMemDBAPiException.Create(S_API_NO_FIELDS_DUP_POST_OR_DISCARD);
-  FieldAbsIdx := Table.API_DataGetFieldAbsIdx(FIsolation, FieldName);
+  FieldAbsIdx := Table.API_DataGetFieldAbsIdx(FAssociatedTransaction, FieldName);
   if (FieldAbsIdx < 0) or (FieldAbsIdx >= FFieldList.Count) then
     raise EMemDBInternalException.Create(S_API_BAD_FIELD_INDEX);
   MemFieldData := (FFieldList.Items[FieldAbsIdx] as TMemFieldData);
@@ -710,7 +741,7 @@ begin
     raise EMemDBAPIException.Create(S_API_NO_ROW_SELECTED);
   if FFieldList.Count = 0 then
     raise EMemDBAPiException.Create(S_API_NO_FIELDS_DUP_POST_OR_DISCARD);
-  FieldAbsIdx := Table.API_DataGetFieldAbsIdx(FIsolation, FieldName);
+  FieldAbsIdx := Table.API_DataGetFieldAbsIdx(FAssociatedTransaction, FieldName);
   if (FieldAbsIdx < 0) or (FieldAbsIdx >= FFieldList.Count) then
     raise EMemDBInternalException.Create(S_API_BAD_FIELD_INDEX);
   Field := (FFieldList.Items[FieldAbsIdx] as TMemFieldData);
@@ -750,40 +781,34 @@ procedure TMemAPITableData.Post;
 begin
   CheckWriteTransaction;
   //Do the post.
-  Table.API_DataRowModOrAppend(FIsolation, FCursor, FFieldList);
-  Discard; //Discard temp data.
-  //TODO - Arguably, we could re-read the data in and remove
-  //exceptions about no fields in field list.
-  //Table.API_DataReadRow(FIsolation, FCursor, FFieldList);
+  Table.API_DataRowModOrAppend(FAssociatedTransaction, FCursor, FFieldList);
+  Discard;
 end;
 
-procedure TMemAPITableData.Delete;
+procedure TMemAPITableData.Delete(AutoInc: boolean);
 var
-  NextCursor: TItemRec;
+  NextCursor: TMemDBCursor;
 begin
   CheckWriteTransaction;
   if not Assigned(FCursor) then
     raise EMemDBAPIException.Create(S_API_NO_ROW_SELECTED);
-  //TODO - Find some way of storing which Idx (or lack of) we
-  //are iterating on and increment cursor with respect to that,
-  //making delete behaviour more intuitive?
-  NextCursor := Table.API_DataLocate(FIsolation, FCursor, ptNext, '');
-  Table.API_DataRowDelete(FIsolation, FCursor);
-  if Isolation < TMDBIsolationLevel.ilCommittedRead  then
-  begin
-    Discard;
-    FCursor := NextCursor;
-    if Assigned(FCursor) then
-      Table.API_DataReadRow(FIsolation, FCursor, FFieldList);
-  end;
+
+  Discard;
+  if AutoInc and (FCursor.IterInc <> ptInvalid) then
+    NextCursor := Table.API_DataRelocate(FAssociatedTransaction, FCursor)
+  else
+    NextCursor := nil;
+  Table.API_DataRowDelete(FAssociatedTransaction, FCursor);
+  FCursor.Free;
+  FCursor := NextCursor;
+  if Assigned(FCursor) then
+    Table.API_DataReadRow(FAssociatedTransaction, FCursor, FFieldList);
 end;
 
 function TMemAPITableData.RowSelected: boolean;
 begin
   result := Assigned(FCursor);
 end;
-
-{$ENDIF}
 
 { TMemAPIForeignKey }
 
@@ -878,8 +903,8 @@ var
   Tr: TMemDBTransaction;
   AB: TBufSelector;
   SelLatest: TBufSelector;
-  RefNext: TMemDBReffed;
-  NextM : TMemDBReffed;
+  RefNext: TMemDBStreamable;
+  NextM : TMemDBStreamable;
 begin
   Tr := T as TMemDBTransaction;
   AB := MakeLatestBufSelector(Tr.Tid);
@@ -893,7 +918,7 @@ begin
 
   try
     //AB sel might be current (committed), not next.
-    RefNext := Entity.Metadata.GetNext(Tr.Tid);
+    RefNext := Entity.META_GetNext(Tr.Tid);
     if Assigned(RefNext) and (RefNext is TMemDeleteSentinel) then
       raise EMemDbAPIException.Create(S_API_ENTITY_NAME_NOT_FOUND);
 
@@ -914,8 +939,8 @@ begin
       raise EMemDBAPIException.Create(S_API_RENAME_OVERWRITE);
     end;
 
-    Entity.Metadata.RequestChange(Tr.Tid);
-    NextM := Entity.Metadata.GetNext(Tr.Tid);
+    Entity.META_RequestChange(Tr.Tid);
+    NextM := Entity.META_GetNext(Tr.Tid);
     Assert((not Assigned(RefNext)) or (RefNext = NextM));
     Assert(not (NextM is TMemDeleteSentinel));
     (NextM as TMemEntityMetadataItem).EntityName := NewName;
@@ -941,7 +966,7 @@ begin
     //Referenced by anything else?
     if Entity is TMemDbTablePersistent then
       CheckAPITableDelete(AB, Name);
-    Entity.Metadata.Delete(Tr.Tid);
+    Entity.META_Delete(Tr.Tid);
   finally
     Entity.Proxy.Release;
   end;
@@ -955,7 +980,7 @@ var
   Proxy: TMemDBEntityProxy;
   Entity: TMemDBEntity;
   i: integer;
-  MDReffed: TMemDBReffed;
+  MDReffed: TMemDBStreamable;
   MDItem: TMemEntityMetadataItem;
   tmpBufSel: TABSelType;
 begin
@@ -969,9 +994,9 @@ begin
       Proxy := EntityList.Items[i] as TMemDBEntityProxy;
       Entity := Proxy.Proxy as TMemDBEntity;
       case AB.SelType of
-        abCurrent: MDReffed := Entity.Metadata.PinCurrent(AB.TId, pinEvolve);
-        abNext: MDReffed := Entity.Metadata.GetNext(AB.TId);
-        abLatest: MDReffed := Entity.Metadata.GetPinLatest(AB.TId, tmpBufSel, pinEvolve);
+        abCurrent: MDReffed := Entity.META_PinCurrent(AB.TId, pinEvolve);
+        abNext: MDReffed := Entity.META_GetNext(AB.TId);
+        abLatest: MDReffed := Entity.META_GetPinLatest(AB.TId, tmpBufSel, pinEvolve);
       else
         Assert(false);
         MdReffed := nil;
@@ -1025,7 +1050,6 @@ end;
 
 procedure TMemDBTable.API_CreateField(T: TObject; Name: string; FieldType: TMDBFieldType);
 var
-  M: TMemDBTableMetadata;
   tmpIdx: integer;
   NewField: TMemFieldDef;
   Sel: TBufSelector;
@@ -1034,9 +1058,8 @@ var
   FieldHelper, IndexHelper: TMemDblBufListHelper;
 begin
   Tr := T as TMemDbTransaction;
-  M := Metadata as TMemDBTableMetadata;
   Sel := MakeLatestBufSelector(Tr.Tid);
-  if Assigned(M.FieldByName(Sel, Name, tmpIdx, pinEvolve)) then
+  if Assigned(META_FieldByName(Sel, Name, tmpIdx)) then
     raise EMemDBAPIException.Create(S_API_FIELD_NAME_CONFLICT);
   //Do data manipulation with list helper.
   TidLocal := GetMakeListHelpers(Tr.Tid, FieldHelper, IndexHelper);
@@ -1055,7 +1078,6 @@ end;
 
 procedure TMemDBTable.API_DeleteField(T: TObject; Name: string);
 var
-  M: TMemDBTableMetadata;
   FieldIdx, FieldIdx2: integer;
   IndexIdx, IdxFIdx: integer;
   Field: TMemFieldDef;
@@ -1067,8 +1089,7 @@ var
 begin
   Tr := T as TMemDbTransaction;
   Sel := MakeLatestBufSelector(Tr.Tid);
-  M := Metadata as TMemDBTableMetadata;
-  Field := M.FieldByName(Sel, Name, FieldIdx, pinEvolve);
+  Field := META_FieldByName(Sel, Name, FieldIdx);
   if not Assigned(Field) then
     raise EMemDBAPIException.Create(S_API_FIELD_NAME_NOT_FOUND);
   TidLocal := GetMakeListHelpers(Tr.Tid, FieldHelper, IndexHelper);
@@ -1099,7 +1120,6 @@ procedure TMemDBTable.API_RenameField(T: TObject; OldName: string; NewName: stri
 var
   Field: TMemFieldDef;
   FieldIdx, tmpIdx: integer;
-  M: TMemDBTableMetadata;
   IndexIdx, IdxFIdx: integer;
   Index: TMemIndexDef;
   Sel: TBufSelector;
@@ -1109,19 +1129,18 @@ var
 begin
   Tr := T as TMemDbTransaction;
   Sel := MakeLatestBufSelector(Tr.Tid);
-  M := Metadata as TMemDbTableMetadata;
-  Field := M.FieldByName(Sel, OldName, FieldIdx, pinEvolve);
+  Field := META_FieldByName(Sel, OldName, FieldIdx);
   TidLocal := GetMakeListHelpers(Tr.Tid, FieldHelper, IndexHelper);
   if (not Assigned(Field)) or (FieldHelper.ChildDeleted[FieldIdx]) then
     raise EMemDBAPIException.Create(S_API_FIELD_NAME_NOT_FOUND);
-  if Assigned(M.FieldByName(Sel, NewName, tmpIdx, pinEvolve)) then
+  if Assigned(META_FieldByName(Sel, NewName, tmpIdx)) then
     raise EMemDBAPIException.Create(S_API_FIELD_NAME_CONFLICT);
-  if AssignedNotSentinel(M.GetNext(Tr.Tid) as TMemDBStreamable) then
+  if AssignedNotSentinel(META_GetNext(Tr.Tid)) then
   begin
     //Check there has not been a previous conflicting rename.
     //If previously been deleted, ChildDeleted check above should fail.
-    Assert (AssignedNotSentinel((M.GetNext(Tr.Tid) as TMemTableMetadataItem).FieldDefs.Items[FieldIdx]));
-    Field := (M.GetNext(Tr.Tid) as TMemTableMetadataItem).FieldDefs.Items[FieldIdx]
+    Assert (AssignedNotSentinel((META_GetNext(Tr.Tid) as TMemTableMetadataItem).FieldDefs.Items[FieldIdx]));
+    Field := (META_GetNext(Tr.Tid) as TMemTableMetadataItem).FieldDefs.Items[FieldIdx]
       as TMemFieldDef;
     if Field.FieldName <> OldName then
       raise EMemDBAPIException.Create(S_API_RENAME_OVERWRITE);
@@ -1148,7 +1167,6 @@ end;
 
 function TMemDBTable.API_FieldInfo(T: TObject;  Name: string; var FieldType: TMDBFieldType): boolean;
 var
-  M: TMemDBTableMetadata;
   Field: TMemFieldDef;
   FieldIdx: integer;
   Sel: TBufSelector;
@@ -1156,8 +1174,7 @@ var
 begin
   Tr := T as TMemDbTransaction;
   Sel := MakeLatestBufSelector(Tr.Tid);
-  M := Metadata as TMemDBTableMetadata;
-  Field := M.FieldByName(Sel, Name, FieldIdx, pinEvolve);
+  Field := META_FieldByName(Sel, Name, FieldIdx);
   result := Assigned(Field);
   if result then
     FieldType := Field.FieldType;
@@ -1165,7 +1182,6 @@ end;
 
 function TMemDBTable.API_GetFieldNames(T: TObject): TStringList;
 var
-  M: TMemDBTableMetadata;
   MetadataCopy: TMemTableMetadataItem;
   FieldDef: TMemFieldDef;
   idx: integer;
@@ -1173,11 +1189,10 @@ var
   Selected: TABSelType;
 begin
   Tr := T as TMemDbTransaction;
-  M := Metadata as TMemDBTableMetadata;
   result := TStringList.Create;
-  if AssignedNotSentinel(M.GetPinLatest(Tr.Tid, Selected, pinEvolve) as TMemDBStreamable) then
+  if AssignedNotSentinel(META_GetPinLatest(Tr.Tid, Selected, pinEvolve)) then
   begin
-    MetadataCopy := M.GetPinLatest(Tr.Tid, Selected, pinEvolve) as TMemTableMetadataItem;
+    MetadataCopy := META_GetPinLatest(Tr.Tid, Selected, pinEvolve) as TMemTableMetadataItem;
     for idx := 0 to Pred(MetadataCopy.FieldDefs.Count) do
     begin
       if AssignedNotSentinel(MetadataCopy.FieldDefs.Items[idx]) then
@@ -1193,7 +1208,6 @@ procedure TMemDBTable.API_CreateIndex(T: TObject; Name: string;
                       IndexedFields: TMDBFieldNames;
                       IndexAttrs: TMDbIndexAttrs);
 var
-  M: TMemDbTableMetadata;
   Index: TMemIndexDef;
   IndexIdx: integer;
   Fields: TMemFieldDefs;
@@ -1205,14 +1219,15 @@ var
   FieldHelper, IndexHelper: TMemDblBufListHelper;
 begin
   Tr := T as TMemDbTransaction;
-  M := Metadata as TMemDBTableMetadata;
   Sel := MakeLatestBufSelector(Tr.Tid);
-  if Assigned(M.IndexByName(Sel, Name, IndexIdx, pinEvolve)) then
+  if Length(Name) = 0 then
+    raise EMemDBAPIException.Create(S_API_INDEX_NAME_NULL);
+  if Assigned(META_IndexByName(Sel, Name, IndexIdx)) then
     raise EMemDBAPIException.Create(S_API_INDEX_NAME_CONFLICT);
   if Length(IndexedFields) = 0 then
     raise EMemDbApiException.Create(S_API_INDEX_MUST_HAVE_FIELDS);
   Sel := MakeLatestBufSelector(Tr.Tid);
-  Fields := M.FieldsByNames(Sel, IndexedFields, FieldAbsIdxs, pinEvolve);
+  Fields := META_FieldsByNames(Sel, IndexedFields, FieldAbsIdxs);
   if Length(Fields) = 0 then
     raise EMemDBAPIException.Create(S_API_FIELD_NAME_NOT_FOUND);
   Assert(Length(Fields) = Length(IndexedFields));
@@ -1239,7 +1254,6 @@ end;
 
 procedure TMemDBTable.API_DeleteIndex(T: TObject; Name: string);
 var
-  M: TMemDBTableMetadata;
   MT: TMemTableMetadataItem;
   Index: TMemIndexDef;
   IndexIdx: integer;
@@ -1252,12 +1266,11 @@ begin
   Tr := T as TMemDbTransaction;
   Sel := MakeLatestBufSelector(Tr.Tid);
   TidLocal := GetMakeListHelpers(Tr.Tid, FieldHelper, IndexHelper);
-  M := Metadata as TMemDBTableMetadata;
-  Index := M.IndexByName(Sel, Name, IndexIdx, PinEvolve);
+  Index := META_IndexByName(Sel, Name, IndexIdx);
   if not Assigned(Index) then
     raise EMemDbAPIException.Create(S_API_INDEX_NAME_NOT_FOUND);
-  Assert(AssignedNotSentinel(M.GetPinLatest(Tr.Tid, Selected, pinEvolve) as TMemDBStreamable));
-  MT := M.GetPinLatest(Tr.Tid, Selected, pinEvolve) as TMemTableMetadataItem;
+  Assert(AssignedNotSentinel(META_GetPinLatest(Tr.Tid, Selected, pinEvolve)));
+  MT := META_GetPinLatest(Tr.Tid, Selected, pinEvolve) as TMemTableMetadataItem;
   ParentDB.CheckAPIIndexDelete(sel, MT.EntityName, Name);
   //Delete index.
   IndexHelper.Delete(IndexIdx);
@@ -1267,7 +1280,6 @@ end;
 
 procedure TMemDBTable.API_RenameIndex(T: TObject; OldName: string; NewName: string);
 var
-  M: TMemDbTableMetadata;
   Index: TMemIndexDef;
   IndexIdx, tmpIdx: integer;
   Tr: TMemDbTransaction;
@@ -1278,19 +1290,18 @@ var
 begin
   Tr := T as TMemDBTransaction;
   Sel := MakeLatestBufSelector(Tr.Tid);
-  M := Metadata as TMemDbTableMetadata;
-  Index := M.IndexByName(Sel, OldName, IndexIdx, pinEvolve);
+  Index := META_IndexByName(Sel, OldName, IndexIdx);
   TidLocal := GetMakeListHelpers(Tr.Tid, FieldHelper, IndexHelper);
   if (not Assigned(Index)) or (IndexHelper.ChildDeleted[IndexIdx]) then
     raise EMemDBAPIException.Create(S_API_INDEX_NAME_NOT_FOUND);
-  if Assigned(M.IndexByName(Sel, NewName, tmpIdx, pinEvolve)) then
+  if Assigned(META_IndexByName(Sel, NewName, tmpIdx)) then
     raise EMemDBAPIException.Create(S_API_INDEX_NAME_CONFLICT);
-  if AssignedNotSentinel(M.GetNext(Tr.Tid) as TMemDBStreamable) then
+  if AssignedNotSentinel(META_GetNext(Tr.Tid)) then
   begin
     //Check there has not been a previous conflicting rename.
     //If previously been deleted, ChildDeleted check above should fail.
-    Assert(AssignedNotSentinel((M.GetNext(Tr.Tid) as TMemTableMetadataItem).IndexDefs.Items[IndexIdx]));
-    Index := (M.GetNext(Tr.Tid) as TMemTableMetadataItem).IndexDefs.Items[IndexIdx]
+    Assert(AssignedNotSentinel((META_GetNext(Tr.Tid) as TMemTableMetadataItem).IndexDefs.Items[IndexIdx]));
+    Index := (META_GetNext(Tr.Tid) as TMemTableMetadataItem).IndexDefs.Items[IndexIdx]
       as TMemIndexDef;
     if Index.IndexName <> OldName then
       raise EMemDBAPIException.Create(S_API_RENAME_OVERWRITE);
@@ -1298,9 +1309,9 @@ begin
   //Now rename the index.
   Index := IndexHelper.Modify(IndexIdx) as TMemIndexDef;
   Index.IndexName := NewName;
-  Assert(AssignedNotSentinel(M.GetPinLatest(Tr.Tid, selected, pinEvolve) as TMemDBStreamable));
+  Assert(AssignedNotSentinel(META_GetPinLatest(Tr.Tid, selected, pinEvolve)));
   ParentDB.HandleAPIIndexRename(Sel,
-    (M.GetPinLatest(Tr.Tid, selected, pinEvolve) as TMemTableMetadataItem).EntityName,
+    (META_GetPinLatest(Tr.Tid, selected, pinEvolve) as TMemTableMetadataItem).EntityName,
     OldName, NewName);
   TidLocal.UpdateLayout(pinEvolve);
 end;
@@ -1309,7 +1320,6 @@ function TMemDBTable.API_IndexInfo(T: TObject; Name: string;
                    var IndexedFields: TMDBFieldNames;
                    var IndexAttrs: TMDBIndexAttrs): boolean;
 var
-  M: TMemDbTableMetadata;
   Index: TMemIndexDef;
   IndexIdx: integer;
   IdxFIdx: integer;
@@ -1318,8 +1328,7 @@ var
 begin
   Tr := T as TMemDbTransaction;
   Sel := MakeLatestBufSelector(Tr.Tid);
-  M := Metadata as TMemDbTableMetadata;
-  Index := M.IndexByName(Sel, Name, IndexIdx, pinEvolve);
+  Index := META_IndexByName(Sel, Name, IndexIdx);
   result := Assigned(Index);
   if result then
   begin
@@ -1332,18 +1341,17 @@ end;
 
 function TMemDBTable.API_GetIndexNames(T: TObject): TStringList;
 var
-  M: TMemDBTableMetadata;
   selected: TABSelType;
   Tr: TMemDbTransaction;
   MetadataCopy: TMemTableMetadataItem;
   IndexDef: TMemIndexDef;
   idx: integer;
 begin
-  M := Metadata as TMemDBTableMetadata;
   result := TStringList.Create;
-  if AssignedNotSentinel(M.GetPinLatest(Tr.Tid, selected, pinEvolve) as TMemDBStreamable) then
+  Tr := T as TMemDbTransaction;
+  if AssignedNotSentinel(META_GetPinLatest(Tr.Tid, selected, pinEvolve)) then
   begin
-    MetadataCopy := M.GetPinLatest(Tr.Tid, selected, pinEvolve) as TMemTableMetadataItem;
+    MetadataCopy := META_GetPinLatest(Tr.Tid, selected, pinEvolve) as TMemTableMetadataItem;
     for idx := 0 to Pred(MetadataCopy.IndexDefs.Count) do
     begin
       if AssignedNotSentinel(MetadataCopy.IndexDefs.Items[idx]) then
@@ -1372,9 +1380,9 @@ end;
 
 {$IFDEF MEMDB2_TEMP_REMOVE}
 
+//TODO - Transplant to GetUserTidLocalIndexRoot.
 function TMemDBTable.IndexNameToIndexAndTag(Iso: TMDBIsolationLevel;  var Idx:TMemIndexDef; Name: string): PITagStruct;
 var
-  M: TMemDBTableMetadata;
   IdxIdx: integer;
   Sic: TSubIndexClass;
   TagData: TMemDbITagData;
@@ -1386,7 +1394,6 @@ var
 begin
   if Length(Name) > 0 then
   begin
-    M := Metadata as TMemDbTableMetadata;
     //Always look in current metadata copy: Indexes don't change until the next commit.
     //However, can still use "current / next" index with respect to data changes.
     Idx := M.IndexByName(abCurrent, Name, IdxIdx);
@@ -1422,30 +1429,51 @@ begin
   end;
 end;
 
-procedure TMemDBTable.IndexDefToFieldDefs(IndexDef: TMemIndexDef; var FieldDefs: TMemFieldDefs; var FieldAbsIdxs: TFieldOffsets);
+{$ENDIF}
+
+procedure TMemDBTable.META_CurIndexDefToFieldDefs(const Tid: TTransactionId; IndexDef: TMemIndexDef; var FieldDefs: TMemFieldDefs; var FieldAbsIdxs: TFieldOffsets);
 var
-  M: TMemDBTableMetadata;
+  Sel: TBufSelector;
 begin
   Assert(Assigned(IndexDef));
   Assert(IndexDef.FieldNameCount > 0);
-  M := Metadata as TMemDbTableMetadata;
-  FieldDefs := M.FieldsByNames(abCurrent, IndexDef.FieldArray, FieldAbsIdxs);
+  Sel := MakeCurrentBufSelector(Tid);
+  FieldDefs := META_FieldsByNames(Sel, IndexDef.FieldArray, FieldAbsIdxs);
 end;
 
-function TMemDBTable.API_DataLocate(Iso: TMDBIsolationLevel;
-                        Cursor: TItemRec;
-                        Pos: TMemAPIPosition;
-                        IdxName: string): TItemRec; //Returns cursor.
+function TMemDBTable.META_CurFieldDefList(const Tid: TTransactionId): TMemStreamableList;
 var
-  PTagStruct: PITagStruct;
-  Idx: TMemIndexDef;
+  CB: TMemDBStreamable;
+  CurMetadata: TMemTableMetadataItem;
 begin
+  CB := META_PinCurrent(Tid, pinEvolve);
+  if NotAssignedOrSentinel(CB) then
+    raise EMemDBAPIException.Create(S_API_TABLE_METADATA_NOT_COMMITED);
+  CurMetadata := CB as TMemTableMetadataItem;
+  result := CurMetadata.FieldDefs;
+end;
+
+//TODO - Ensure debug / logging builds do in fact build.
+function TMemDBTable.API_DataLocate(T:TObject;
+                        Cursor: TMemDBCursor;
+                        Pos: TMemAPIPosition;
+                        IdxName: string): TMemDBCursor;
+var
+  IRoot: TMemDBIndex;
+  Idx: TMemIndexDef;
+  Tr: TMemDBTransaction;
+  TidLocal: TTidLocal;
+begin
+  Tr := T as TMemDBTransaction;
   if Length(IdxName) = 0 then
-    PTagStruct := nil
+  begin
+    IRoot := nil;
+    TidLocal := GetMakeTidLocal(Tr.Tid, pinEvolve);
+  end
   else
   begin
-    PTagStruct := IndexNameToIndexAndTag(Iso, Idx, IdxName);
-    if not Assigned(Idx) then
+    IRoot := GetUserTidLocalIndexRoot(Tr.Tid, TidLocal, Idx, IdxName);
+    if not Assigned(IRoot) then
       raise EMemDBAPIException.Create(S_API_SEARCH_REQUIRES_INDEX);
   end;
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
@@ -1462,32 +1490,50 @@ begin
       + ' Index name: ' + IdxName);
   end;
 {$ENDIF}
-  result := Data.MoveToRowByIndexTag(Iso, PTagStruct,
-                                     Cursor,
-                                     Pos);
+  result := TidLocal.UserMoveToRowByIndexRoot(IRoot, Cursor, Pos);
 end;
 
-function TMemDBTable.API_DataFindByIndex(Iso: TMDBIsolationLevel;
+
+function TMemDBTable.API_DataRelocate(T: TObject; Cursor: TMemDBCursor): TMemDBCursor;
+begin
+  if Assigned(Cursor) then
+  begin
+    result := Cursor.TidLocal.UserMoveToRowByIndexRoot(Cursor.IterIndex,
+                                                       Cursor,
+                                                       Cursor.IterInc);
+  end
+  else
+    result := nil;
+end;
+
+function TMemDBTable.API_DataFindByIndex(T:TObject;
                             IdxName: string;
-                            const DataRecs: TMemDbFieldDataRecs): TItemRec; //Returns cursor
+                            const DataRecs: TMemDbFieldDataRecs): TMemDbCursor; //Returns cursor
 var
-  ITagStruct: PITagStruct;
+  IRoot: TMemDBIndex;
   Idx: TMemIndexDef;
+  Tr: TMemDBTransaction;
+  TidLocal: TTidLocal;
   FieldDefs: TMemFieldDefs;
   FieldAbsIdxs: TFieldOffsets;
+
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
   i: integer;
 {$ENDIF}
 begin
-  //Cannot find by internal index.
+  Tr := T as TMemDBTransaction;
   if Length(IdxName) = 0 then
     raise EMemDBAPIException.Create(S_API_SEARCH_REQUIRES_INDEX);
-  ITagStruct := IndexNameToIndexAndTag(Iso, Idx, IdxName);
-  if not Assigned(Idx) then
+
+  IRoot := GetUserTidLocalIndexRoot(Tr.Tid, TidLocal, Idx, IdxName);
+  if not Assigned(IRoot) then
     raise EMemDBAPIException.Create(S_API_SEARCH_REQUIRES_INDEX);
-  IndexDefToFieldDefs(Idx, FieldDefs, FieldAbsIdxs);
+  Assert(Assigned(Idx));
+  Assert(Assigned(TidLocal));
+  META_CurIndexDefToFieldDefs(Tr.Tid, Idx, FieldDefs, FieldAbsIdxs);
   if Length(DataRecs)<> Length(FieldDefs) then
     raise EMemDBAPIException.Create(S_API_SEARCH_REQURES_CORRECT_FIELD_COUNT);
+  //More detailed check of field format later on.
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
   GLogLog(SV_INFO, 'FIND by index, IndexName: ' + Idx.IndexName);
   for i := 0 to Pred(Length(FieldDefs)) do
@@ -1496,35 +1542,42 @@ begin
     IntToStr(FieldDefs[i].FieldIndex) + ' FieldAbsIdx: ' + IntToStr(FieldAbsIdxs[i]));
   end;
 {$ENDIF}
-  result := self.Data.FindRowByIndexTag(Iso, Idx, FieldDefs, ITagStruct, DataRecs);
+  result := TidLocal.UserFindRowByIndexRoot(Idx, FieldDefs, IRoot, DataRecs);
 end;
 
-function TMemDBTable.API_DataFindEdgeByIndex(Iso: TMDBIsolationLevel;
+function TMemDBTable.API_DataFindEdgeByIndex(T: TObject;
                                              IdxName: string;
                                              const DataRecs: TMemDbFieldDataRecs;
-                                             Pos: TMemAPIPosition): TItemRec;
+                                             Pos: TMemAPIPosition): TMemDBCursor;
 var
-  ITagStruct: PITagStruct;
+  IRoot: TMemDBIndex;
+  Tr: TMemDBTransaction;
   Idx: TMemIndexDef;
-  FieldDefs: TMemFieldDefs;
+  TidLocal: TTidLocal;
+  IndexFieldDefs: TMemFieldDefs;
+  AllFieldDefs: TMemStreamableList;
   FieldAbsIdxs: TFieldOffsets;
-  Next: TItemRec;
+  Next: TMemDBCursor;
   NextFields, ResultFields: TMemStreamableList;
-  AB: TABSelection;
+  bufSel: TABSelType;
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
   i: integer;
 {$ENDIF}
 begin
   if Length(IdxName) = 0 then
     raise EMemDBAPIException.Create(S_API_SEARCH_REQUIRES_INDEX);
-  ITagStruct := IndexNameToIndexAndTag(Iso, Idx, IdxName);
+  Tr := T as TMemDBTransaction;
+  IRoot := GetUserTidLocalIndexRoot(Tr.Tid, TidLocal, Idx, IdxName);
   if not Assigned(Idx) then
     raise EMemDBAPIException.Create(S_API_SEARCH_REQUIRES_INDEX);
   if not (Pos in [ptFirst, ptLast]) then
     raise EMemDBAPIException.Create(S_API_FIND_EDGE_FIRST_OR_LAST);
-  IndexDefToFieldDefs(Idx, FieldDefs, FieldAbsIdxs);
-  if Length(DataRecs) <> Length(FieldDefs) then
+  META_CurIndexDefToFieldDefs(Tr.Tid, Idx, IndexFieldDefs, FieldAbsIdxs);
+  AllFieldDefs := META_CurFieldDefList(Tr.Tid);
+
+  if Length(DataRecs) <> Length(IndexFieldDefs) then
     raise EMemDBAPIException.Create(S_API_SEARCH_REQURES_CORRECT_FIELD_COUNT);
+  //More detailed check of field format later on.
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
   GLogLog(SV_INFO, 'EDGE by index, IndexName: ' + Idx.IndexName);
   for i := 0 to Pred(Length(FieldDefs)) do
@@ -1533,8 +1586,7 @@ begin
       IntToStr(FieldDefs[i].FieldIndex) + ' FieldAbsIdx: ' + IntToStr(FieldAbsIdxs[i]));
   end;
 {$ENDIF}
-  Result := self.Data.FindRowByIndexTag(Iso, Idx, FieldDefs, ITagStruct, DataRecs);
-  AB := IsoToAB(Iso);
+  result := TidLocal.UserFindRowByIndexRoot(Idx, IndexFieldDefs, IRoot, DataRecs);
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
   if Assigned(Result) then
   begin
@@ -1559,18 +1611,23 @@ begin
     GLogLog(SV_INFO, 'EDGE by Index, move extremity ' + MemAPIPositionStrings[Pos]);
 {$ENDIF}
     repeat
-      Next := self.Data.MoveToRowByIndexTag(Iso, ITagStruct,
-                                             result,
-                                             Pos);
+      Next := TidLocal.UserMoveToRowByIndexRoot(IRoot, result, Pos);
       if Assigned(Next) then
       begin
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
     GLogLog(SV_INFO, 'EDGE by Index, found ' + MemAPIPositionStrings[Pos] + ' row');
 {$ENDIF}
+        //Isolation be damned, it's gonna break.
+        if not Result.Row.CheckFormatAgainstMetaDefs(Tr.Tid, abLatest, AllFieldDefs, pinEvolve) then
+          raise EMemDBConcurrencyException.Create(S_TABLE_FORMAT_CONCURRENTLY_CHANGED_1);
+          //Might get raised if buggy format, but normally only concurrency.
+        ResultFields := result.Row.GetPinLatest(Tr.Tid, bufSel, pinEvolve) as TMemStreamableList;
 
-        //Pretty sure we shouldn't have any sentinels at this point.
-        NextFields := (Next.Item as TMemDBRow).ABData[AB] as TMemStreamableList;
-        ResultFields := (result.Item as TMemDBRow).ABData[AB] as TMemStreamableList;
+        //Isolation be damned, it's gonna break.
+        if not Next.Row.CheckFormatAgainstMetaDefs(Tr.Tid, abLatest, AllFieldDefs, pinEvolve) then
+          raise EMemDBConcurrencyException.Create(S_TABLE_FORMAT_CONCURRENTLY_CHANGED_2);
+          //Might get raised if buggy format, but normally only concurrency.
+        NextFields := Next.Row.GetPinLatest(Tr.Tid, bufSel, pinEvolve) as TMemStreamableList;
 
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
         //Compare all fields.
@@ -1604,119 +1661,136 @@ begin
   end;
 end;
 
-procedure TMemDBTable.API_DataReadRow(Iso: TMDBIsolationLevel;
-                         Cursor: TItemRec;
+procedure TMemDBTable.API_DataReadRow(T:TObject;
+                         Cursor: TMemDBCursor;
                          FieldList: TMemStreamableList);
 var
-  Row: TMemDBRow;
   RowFields: TMemStreamableList;
+  AllFieldDefs: TMemStreamableList;
+  Tr:  TMemDbTransaction;
+  bufSel: TABSelType;
 begin
+  Tr := T as TMemDBTransaction;
   if not (Assigned(Cursor) and Assigned(FieldList)) then
     raise EMemDBInternalException.Create(S_API_INTERNAL_READING_ROW);
-  FieldList.FreeAndClear;
-  Row := Cursor.Item as TMemDBRow;
-  RowFields := Row.ABData[IsoToAB(Iso)] as TMemStreamableList;
+  FieldList.ReleaseAndClear;
+  AllFieldDefs := META_CurFieldDefList(TR.Tid);
+
+  if not Cursor.Row.CheckFormatAgainstMetaDefs(Tr.Tid, abLatest, AllFieldDefs, pinEvolve) then
+    raise EMemDBConcurrencyException.Create(S_TABLE_FORMAT_CONCURRENTLY_CHANGED_3);
+    //Might get raised if buggy format, but normally only concurrency.
+
+  RowFields := Cursor.Row.GetPinLatest(Tr.Tid, bufSel, pinEvolve) as TMemStreamableList;
   FieldList.DeepAssign(RowFields);
 end;
 
-function TMemDBTable.GetFieldDefList: TMemStreamableList;
-var
-  M: TMemDBTableMetadata;
-  CurMetadata: TMemTableMetadataItem;
-begin
-  M := Metadata as TMemDbTableMetadata;
-  //No Current ABCopy. (maybe handled by no field layout changes).
-  if M.Added or M.Null then
-    raise EMemDBAPIException.Create(S_API_TABLE_METADATA_NOT_COMMITED);
-  //Always looking in current for reasons specified above??
-  CurMetadata := M.ABData[abCurrent] as TMemTableMetadataItem;
-  result := CurMetadata.FieldDefs;
-end;
 
-procedure TMemDBTable.API_DataInitRowForAppend(Iso: TMDBIsolationLevel;
-                                  Cursor: TItemRec;
+procedure TMemDBTable.API_DataInitRowForAppend(T: TObject;
+                                  Cursor: TMemDBCursor;
                                   FieldList: TMemStreamableList);
 var
-  MFields: TMemStreamableList;
+  AllFieldDefs: TMemStreamableList;
   MField: TMemFieldDef;
   MData: TMemFieldData;
   Idx: Integer;
+  Tr: TMemDBTransaction;
+  TidLocal: TTidLocal;
 begin
-   CheckNoFieldLayoutChanges;
+  Tr := T as TMemDbTransaction;
+  TidLocal := GetMakeTidLocal(Tr.Tid, pinEvolve);
+  if TidLocal.LayoutChangeRequired then
+    raise EMemDBAPIException.Create(S_FIELD_LAYOUT_CHANGED);
+
   //Create field list here based on existing metadata.
   if Assigned(Cursor) or (not Assigned(FieldList)) then
     raise EMemDBInternalException.Create(S_API_INTERNAL_READING_ROW);
-  FieldList.FreeAndClear;
-  MFields := GetFieldDefList;
-  if MFields.Count = 0 then
+
+  FieldList.ReleaseAndClear;
+
+  AllFieldDefs := META_CurFieldDefList(Tr.Tid);
+  if AllFieldDefs.Count = 0 then
     raise EMemDBAPIException.Create(S_API_NO_FIELDS_IN_TABLE_AT_APPEND_TIME);
-  for Idx := 0 to Pred(MFields.Count) do
+
+  for Idx := 0 to Pred(AllFieldDefs.Count) do
   begin
-    MField := MFields.Items[idx] as TMemFieldDef;
+    MField := AllFieldDefs.Items[idx] as TMemFieldDef;
     MData := TMemFieldData.Create;
     MData.FDataRec.FieldType := MField.FieldType;
     Assert(MField.FieldIndex = Idx); //No ND.
-    FieldList.Add(MData);
+    FieldList.AddNoRef(MData);
   end;
 end;
 
-procedure TMemDBTable.API_DataRowModOrAppend(Iso: TMDBIsolationLevel;
-                                var Cursor: TItemRec;
+
+procedure TMemDBTable.API_DataRowModOrAppend(T: TObject;
+                                var Cursor: TMemDBCursor;
                                 FieldList: TMemStreamableList);
 var
-  MFields: TMemStreamableList;
+  AllFieldDefs: TMemStreamableList;
   MField: TMemFieldDef;
   MData: TMemFieldData;
   Idx: Integer;
+  Tr: TMemDBTransaction;
+  TidLocal: TTidLocal;
 begin
-   CheckNoFieldLayoutChanges;
+  Tr := T as TMemDBTransaction;
+  TidLocal := GetMakeTidLocal(Tr.Tid, pinEvolve);
+  if TidLocal.LayoutChangeRequired then
+    raise EMemDBAPIException.Create(S_FIELD_LAYOUT_CHANGED);
+
   //We will validate new data format here, against existing metadata.
   if not Assigned(FieldList) then
     raise EMemDBInternalException.Create(S_API_INTERNAL_CHANGING_ROW);
-  MFields := GetFieldDefList;
-  if FieldList.Count <> MFields.Count then
+  AllFieldDefs := META_CurFieldDefList(Tr.Tid);
+  if FieldList.Count <> AllFieldDefs.Count then
     raise EMemDBInternalException.Create(S_API_ROW_BAD_STRUCTURE);
-  for Idx := 0 to Pred(MFields.Count) do
+  for Idx := 0 to Pred(AllFieldDefs.Count) do
   begin
-    MField := MFields.Items[idx] as TMemFieldDef;
+    MField := AllFieldDefs.Items[idx] as TMemFieldDef;
     MData := FieldList.Items[idx] as TMemFieldData;
     if MField.FieldType <> MData.FDataRec.FieldType then
       raise EMemDBInternalException.Create(S_API_ROW_BAD_STRUCTURE);
   end;
-  self.Data.WriteRowData(Cursor, Iso, FieldList);
+  //If we write row data that disagrees with a format change then
+  //either a) CheckChangedRowStructure will barf, or
+  // b) Write-after-write conflict detection will catch the error.
+  // We'll check it against the Cur metadata in the TidLocal row write.
+  TidLocal.UserWriteRowData(Cursor, FieldList);
 end;
 
-procedure TMemDBTable.API_DataRowDelete(Iso: TMDBIsolationLevel;
-                                        var Cursor: TItemRec);
+procedure TMemDBTable.API_DataRowDelete(T: TObject;
+                                        Cursor: TMemDBCursor);
+var
+  Tr: TMemDBTransaction;
+  TidLocal: TTidLocal;
 begin
-  //In an ideal world we could prob allow the row to be deleted anyway...
-  //but not sure what would happen with journal replay,
-  //and/or index changes, so will play safe.
-  CheckNoFieldLayoutChanges;
+  Tr := T as TMemDBTransaction;
+  TidLocal := GetMakeTidLocal(Tr.Tid, pinEvolve);
+  if TidLocal.LayoutChangeRequired then
+    raise EMemDBAPIException.Create(S_FIELD_LAYOUT_CHANGED);
   if not Assigned(Cursor) then
     raise EMemDBAPIException.Create(S_API_NO_ROW_FOR_DELETE);
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
   GLogLog(SV_INFO, 'API_DataRowDelete: Actual deletion.');
 {$ENDIF}
-  Data.DeleteRow(Cursor, Iso);
+  TidLocal.UserDeleteRow(Cursor);
 end;
 
-
-function TMemDBTable.API_DataGetFieldAbsIdx(Iso: TMDBIsolationLevel;
-                                FieldName: string): integer;
+function TMemDBTable.API_DataGetFieldAbsIdx(T: TObject;
+                                            FieldName: string): integer;
 var
-  M: TMemDbTableMetadata;
   FDef: TMemFieldDef;
+  Tr: TMemDBTransaction;
+  BufSel: TBufSelector;
 begin
-  M := Metadata as TMemDbTableMetadata;
   //Always look in current metadata copy: Field layout doesn't change until
   //the next commit.
-  FDef := M.FieldByName(abCurrent, FieldName, result);
+  Tr := T as TMemDBTransaction;
+  BufSel := MakeCurrentBufSelector(Tr.Tid);
+  FDef := META_FieldByName(BufSel, FieldName, result);
   if not Assigned(FDef) then
     raise EMemDBAPIException.Create(S_API_FIELD_NAME_NOT_FOUND);
 end;
-
-{$ENDIF}
 
 { TMemDBForeignKey}
 
@@ -1741,7 +1815,6 @@ var
   Entity: TMemDBEntity;
   Table: TMemDBTablePersistent;
   tmpIdx: Integer;
-  M: TMemDBTableMetadata;
 begin
   with ParentDB do
   begin
@@ -1750,7 +1823,6 @@ begin
     if not (Assigned(Entity) and (Entity is TMemDBTablePersistent)) then
       raise EMemDBAPIException.Create(S_API_ENTITY_NAME_NOT_FOUND);
     Table := Entity as TMemDBTablePersistent;
-    M := Table.Metadata as TMemDBTableMetadata;
     result := M.IndexByName(abLatest, IndexName, tmpIdx);
     if not Assigned(result) then
       raise EMemDBAPIException.Create(S_API_INDEX_NAME_NOT_FOUND);

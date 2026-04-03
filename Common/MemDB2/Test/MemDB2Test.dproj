@@ -168,6 +168,7 @@
         <DCCReference Include="..\..\LockAbstractions\TinyLock.pas"/>
         <DCCReference Include="..\..\LockAbstractions\RWWLock.pas"/>
         <DCCReference Include="..\MemDB2BufBase.pas"/>
+        <DCCReference Include="..\..\Reffed\Reffed.pas"/>
         <None Include="Performance figures.txt"/>
         <None Include="..\README_Conditionals.txt"/>
         <None Include="..\README_Ideas, and TODO.txt"/>

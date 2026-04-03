@@ -23,7 +23,8 @@ uses
   SRWLockWrapper in '..\..\SRWLockWrapper\SRWLockWrapper.pas',
   TinyLock in '..\..\LockAbstractions\TinyLock.pas',
   RWWLock in '..\..\LockAbstractions\RWWLock.pas',
-  MemDB2BufBase in '..\MemDB2BufBase.pas';
+  MemDB2BufBase in '..\MemDB2BufBase.pas',
+  Reffed in '..\..\Reffed\Reffed.pas';
 
 {$R *.res}
 
