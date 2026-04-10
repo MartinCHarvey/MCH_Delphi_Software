@@ -275,7 +275,8 @@ uses
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
   GlobalLog,
 {$ENDIF}
-  MemDB2, SysUtils, IoUtils, BufferedFileStream, Math, NullStream, MemDB2BufBase;
+  MemDB2, SysUtils, IoUtils, BufferedFileStream, Math, NullStream, MemDB2BufBase,
+  Reffed;
 
 const
   S_API_POST_OR_DISCARD_BEFORE_NAVIGATING =
@@ -976,7 +977,7 @@ function TMemDBDatabase.API_GetEntityNames(T: TObject): TStringList;
 var
   Tr: TMemDBTransaction;
   AB: TBufSelector;
-  EntityList: TMemDBReffedList;
+  EntityList: TReffedList;
   Proxy: TMemDBEntityProxy;
   Entity: TMemDBEntity;
   i: integer;
@@ -1542,7 +1543,7 @@ begin
     IntToStr(FieldDefs[i].FieldIndex) + ' FieldAbsIdx: ' + IntToStr(FieldAbsIdxs[i]));
   end;
 {$ENDIF}
-  result := TidLocal.UserFindRowByIndexRoot(Idx, FieldDefs, IRoot, DataRecs);
+  result := TidLocal.UserFindRowByIndexRoot(Idx, FieldDefs, FieldAbsIdxs, IRoot, DataRecs);
 end;
 
 function TMemDBTable.API_DataFindEdgeByIndex(T: TObject;
@@ -1586,7 +1587,7 @@ begin
       IntToStr(FieldDefs[i].FieldIndex) + ' FieldAbsIdx: ' + IntToStr(FieldAbsIdxs[i]));
   end;
 {$ENDIF}
-  result := TidLocal.UserFindRowByIndexRoot(Idx, IndexFieldDefs, IRoot, DataRecs);
+  result := TidLocal.UserFindRowByIndexRoot(Idx, IndexFieldDefs, FieldAbsIdxs, IRoot, DataRecs);
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
   if Assigned(Result) then
   begin

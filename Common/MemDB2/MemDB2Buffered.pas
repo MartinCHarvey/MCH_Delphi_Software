@@ -44,7 +44,7 @@ uses
   Trackables,
 {$ENDIF}
   IndexedStore, MemDB2Streamable, Classes, MemDB2Misc,
-  DLList, LockAbstractions, TinyLock, MemDB2BufBase, MemDB2Indexing;
+  DLList, LockAbstractions, TinyLock, MemDB2BufBase, MemDB2Indexing, Reffed;
 
 type
   TMemDBAPIInterfacedObject = class;
@@ -224,8 +224,9 @@ type
 {$ENDIF}
 
   TMemDBTablePersistent = class;
+  TTidLocal = class;
 
-  TMemDbRowProxy = class(TMemDBReffedProxy)
+  TMemDbRowProxy = class(TReffedProxy)
   end;
 
   TMemDBRow = class(TMemDBMultiBufferedTiny)
@@ -242,6 +243,7 @@ type
   protected
     procedure DCPHandle(const Update: TReferenceUpdate); override;
     procedure CPTidHandle(const Update: TTidUpdate); override;
+    function MakeCandidateIPins(Index: TMemDbIndex): TList;
   public
     constructor Create;
     procedure Init(Table: TMemDBTablePersistent; const Guid:TGuid);
@@ -260,6 +262,9 @@ type
     procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream);override;
     procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream);override;
 
+    procedure RemoveFromLocalIndices(TidLocal: TTidLocal);
+    procedure AddToLocalIndices(TidLocal: TTidLocal);
+
     property RowId:TGUID read FRowId write FRowId;
   end;
 
@@ -275,6 +280,7 @@ type
     FEntity: TMemDBEntity;
   protected
   public
+    constructor Create;
     procedure Init(const Tid: TTransactionId; Parent: TObject; Name:string; DSName: boolean); virtual;
     procedure DCPHandle(const Update: TReferenceUpdate); override;
   end;
@@ -451,14 +457,12 @@ type
 
   TMemDblBufListHelper = class;
 
-  TIndexRootArray = array of TMemDBIndex;
+  TIndexRootList = TReffedList;
 
   TCommitChangeMade = ( ccmAddedNewTagStructs,
                         ccmDeleteUnusedIndices,
                         ccmIndexesToTemporary);
   TCommitChangesMade = set of TCommitChangeMade;
-
-  TTidLocal = class;
 
 {$IFDEF USE_TRACKABLES}
   TMemDBCursor = class(TTrackable)
@@ -470,6 +474,7 @@ type
     FPinTid: TTransactionId;
     //Some fields so we can do something sensible on deletion.
     FIterIndex: TMemDBIndex;
+    FIterInode: TMemDBIndexLeaf;
     FIterInc: TMemAPIPosition;
     FTidLocal: TTidLocal;
   protected
@@ -509,7 +514,7 @@ type
     FIndexChangesets: TIndexChangeArray;
     FFieldChangesets: TFieldChangeArray;
     FIndexInit: boolean;
-    FLocalIndexCopies: TIndexRootArray;
+    FLocalIndexCopies: TIndexRootList;
 
     //TODO - Need store here, or can get away with DLList?
     //But then each MemDBRow needs a list of lists, which is a pain.
@@ -520,7 +525,6 @@ type
 
     procedure CheckTableRowCount;
     procedure CheckChangedRowStructure(Reason: TMemDBTransReason);
-    procedure CheckEntireIndexes;
     procedure CheckPartialIndexes;
     procedure RowLocalPreCommit(Reason: TMemDbTransReason);
 
@@ -564,6 +568,7 @@ type
     //out of date with Index.
     function UserFindRowByIndexRoot(IndexDef: TMemIndexDef;
                                     FieldDefs: TMemFieldDefs;
+                                    FieldAbsIdxs: TFieldOffsets;
                                     IRoot: TMemDbIndex;
                                     const DataRecs: TMemDbFieldDataRecs): TMemDbCursor;
 
@@ -619,7 +624,7 @@ type
     FTidLocalStructures: TDLEntry;
 
     FMetaIndexLock: TCriticalSection;
-    FMasterIndexes: TIndexRootArray;
+    FMasterIndexes: TIndexRootList;
 
 {$IFDEF MEMDB2_TEMP_REMOVE}
     //TODO - Just get rid of all this.
@@ -765,7 +770,7 @@ type
     mectChangedDataTable
   );
 
-  TMemDbEntityProxy = class(TMemDBReffedProxy)
+  TMemDbEntityProxy = class(TReffedProxy)
   protected
     FSiblings:TDLEntry;
   public
@@ -789,7 +794,7 @@ type
                              var ChangeType: TMemDBEntityChangeType;
                              var EntityName: string);
     //Atomically get and assemble list of entities.
-    function AssembleEntityList: TMemDBReffedList;
+    function AssembleEntityList: TReffedList;
   public
     function EntitiesByName(const AB:TBufSelector; Name: string; PinReason: TPinReason): TMemDBEntity;
 
@@ -1055,6 +1060,11 @@ const
   S_TABLE_ADJUST_FAILED_1 = 'Internal error adjusting table structure (1).';
   S_TABLE_ADJUST_FAILED_2 = 'Internal error adjusting table structure (2).';
   S_MOVE_ROW_NOT_VALID_POSITION = 'User move of row must specify a valid position/direction.';
+  S_LOCAL_INDEX_DELETION_BAD = 'Local index deletion failed or duplicate.';
+  S_LOCAL_INDEX_INSERTION_DUPLICATE = 'Local index insertion duplicate.';
+  S_LOCAL_INDEX_INSERTION_BAD_1 = 'Local index insertion failed (1).';
+  S_LOCAL_INDEX_INSERTION_BAD_2 = 'Local index insertion failed (2).';
+  S_INDEX_PIN_COLLATION_BAD = 'Index pin collation bad: Unexpected number of local INodes.';
 
 { Misc Functions }
 
@@ -2006,6 +2016,7 @@ var
   CC, NC: TMemTableMetadataItem;
   M: TMemDbStreamable;
   i: integer;
+  MasterIndex: TMemDBIndex;
 begin
   if not Assigned(FIndexHelper) then
   begin
@@ -2027,9 +2038,12 @@ begin
     FParentTable.FMetaIndexLock.Acquire;
     try
       M := FParentTable.FMetadata.PinCurrent(FTid, PinReason);
-      SetLength(FLocalIndexCopies, Length(FParentTable.FMasterIndexes));
-      for i := 0 to Pred(Length(FParentTable.FMasterIndexes)) do
-        FLocalIndexCopies[i] := FParentTable.FMasterIndexes[i].Clone;
+      Assert(FLocalIndexCopies.Count = 0);
+      for i := 0 to Pred(FParentTable.FMasterIndexes.Count) do
+      begin
+        MasterIndex := FParentTable.FMasterIndexes.Items[i] as TMemDBIndex;
+        FLocalIndexCopies.AddNoRef(MasterIndex.Clone);
+      end;
     finally
       FParentTable.FMetaIndexLock.Release;
     end;
@@ -2446,7 +2460,7 @@ var
   CCFieldCount: integer;
   i: integer;
   FieldData: TMemFieldData;
-  RowFields: TMemStreamableList;
+  RowFields: TMemRowFields;
   NxtFieldDef, CurFieldDef: TMemFieldDef;
 
 begin
@@ -2488,7 +2502,8 @@ begin
           raise EMemDBConcurrencyException.Create(S_TABLE_ADJUST_CONCURRENCY_CONFLICT);
 
         Row.RequestChange(FTid, ilReadRepeatable);
-        RowFields := Row.GetNext(FTid) as TMemStreamableList;
+        RowFields := Row.GetNext(FTid) as TMemRowFields;
+        RowFields.Sparse := true;
 
         Assert(Assigned(NC));
         if NotAssignedOrSentinel(CC) then
@@ -2554,6 +2569,7 @@ begin
   inherited;
   DLItemInitObj(self, @FTidLocalLinks);
   FCPRows := TIndexedStoreO.Create;
+  FLocalIndexCopies := TIndexRootList.Create;
 end;
 
 procedure TTidLocal.Init(Parent: TMemDBTablePersistent; const Tid: TTransactionId);
@@ -2592,6 +2608,7 @@ begin
   FIndexHelper.Free;
   FFieldHelper.Free;
   FEmptyList.Release;
+  FLocalIndexCopies.Release; //With contained indexes.
   inherited;
 end;
 
@@ -2860,11 +2877,6 @@ begin
   end;
 end;
 
-procedure TTidLocal.CheckEntireIndexes;
-begin
-  //TODO.
-end;
-
 procedure TTidLocal.CheckPartialIndexes;
 begin
   //TODO.
@@ -2911,9 +2923,7 @@ begin
   //(optimization options?)
   CheckChangedRowStructure(Reason);
 
-  //Check based on index changeset flags. (added etc).
-  CheckEntireIndexes;
-  //Check for non-added / changed indices based on row changes.
+  //TODO - Check partial index change for non-added / changed indices.
   CheckPartialIndexes;
 end;
 
@@ -2979,8 +2989,8 @@ begin
   if not Assigned(Def) then
     raise EMemDBAPIException.Create(S_API_INDEX_NAME_NOT_FOUND);
   Assert(AbsIndex >= 0);
-  Assert(AbsIndex < Length(FLocalIndexCopies));
-  result := FLocalIndexCopies[AbsIndex];  
+  Assert(AbsIndex < FLocalIndexCopies.Count);
+  result := FLocalIndexCopies.Items[AbsIndex] as TMemDbIndex;
 end;
 
 (*
@@ -3148,6 +3158,7 @@ function TTidLocal.UserMoveToRowByIndexRoot(IRoot: TMemDbIndex;
 var
   Row: TMemDBRow;
   IRec: TItemRec;
+  INode: TMemDbIndexLeaf;
   RetryPos: TMemApiPosition;
   Retry: boolean;
 begin
@@ -3160,6 +3171,7 @@ begin
   end;
   if not Assigned(IRoot) then
   begin
+    INode := nil;
     //TODO - Not do all traversal / skipping of NULL under index lock?
     //It's not expensive until someone deletes the table / all the rows...
     FParentTable.FMasterRowLock.Acquire;
@@ -3190,6 +3202,7 @@ begin
       begin
         Row := IRec.Item as TMemDBRow;
         Retry := not Row.PinForCursor(FTid);
+        //TODO - Number of acceptable retries before we raise concurrency exception?
         if Retry then
         begin
           //OK, no luck with that one, try next along the line.
@@ -3219,6 +3232,7 @@ begin
     result := TMemDbCursor.Create;
     result.SetRowPin(FTid, Row); //Unpins old row.
     result.FIterIndex := IRoot;
+    result.FIterInode := INode;
     result.FIterInc := RetryPos;
     result.FTidLocal := self;
   end
@@ -3299,12 +3313,70 @@ end;
 //out of date with Index.
 function TTidLocal.UserFindRowByIndexRoot(IndexDef: TMemIndexDef;
                                 FieldDefs: TMemFieldDefs;
+                                FieldAbsIdxs: TFieldOffsets;
                                 IRoot: TMemDbIndex;
                                 const DataRecs: TMemDbFieldDataRecs): TMemDbCursor;
+var
+  i: integer;
+  SV: TMemDBIndexSearchVal;
+  ILeaf: TMemDBIndexLeaf;
+  Cursor, NewCursor: TMemDBCursor;
+  Row: TMemDBRow;
 begin
   if not Assigned(IRoot) then
     raise EMemDbInternalException.Create(S_API_SEARCH_NO_INDEX_SPECIFIED);
 
+  if (Length(FieldDefs) <> Length(DataRecs)) or (Length(DataRecs) = 0) then
+    raise EMemDbInternalException.Create(S_API_SEARCH_BAD_FIELD_COUNT);
+    //Internal, should have been spotted before now.
+  for i := 0 to Pred(Length(FieldDefs)) do
+  begin
+    Assert(FieldDefs[i].FieldIndex = FieldAbsIdxs[i]); //No delete sentinels, fields compact.
+    if not (FieldDefs[i].FieldType in IndexableFieldTypes) then
+      raise EMemDBInternalException.Create(S_INDEX_BAD_FIELD_TYPE);
+    if DataRecs[i].FieldType <> FieldDefs[i].FieldType then
+      raise EMemDBAPIException.Create(S_API_SEARCH_VAL_BAD_TYPE);
+  end;
+  SV := TMemDbIndexSearchVal.Create;
+  try
+    SV.FFieldSearchVals := CopyDataRecs(DataRecs);
+    ILeaf := IRoot.Find(abCurrent, SV);
+    if Assigned(ILeaf) then
+    begin
+      Row := ILeaf.Row as TMemDBRow;
+      Cursor := TMemDBCursor.Create;
+      Cursor.SetRowPin(FTid, Row);
+      Cursor.FIterIndex := IRoot;
+      Cursor.FIterInode := ILeaf;
+      Cursor.FIterInc := ptNext;
+      Cursor.FTidLocal := self;
+
+      if Row.PinForCursorFromInode(FTid, ILeaf) then
+        result := Cursor
+      else
+      begin
+        try
+          NewCursor := UserMoveToRowByIndexRoot(IRoot, Cursor, Cursor.FIterInc);
+          //TODO - Check iterated to has same data as expected.
+          //Bad format = concurrency exception
+          //Diff data = NULL return.
+          if not Assigned(NewCursor) then
+          begin
+            Cursor.FIterInc := ptPrevious;
+            NewCursor := UserMoveToRowByIndexRoot(IRoot, Cursor, Cursor.FIterInc);
+          end;
+          //TODO - Check iterated to has same data as expected.
+          //Bad format = concurrency exception
+          //Diff data = NULL return.
+        finally
+          Cursor.Free;
+        end;
+        result := NewCursor;
+      end;
+    end;
+  finally
+    SV.Free;
+  end;
   raise EMemDBInternalException.Create(S_API_NOT_IMPLEMENTED);
 end;
 
@@ -3315,10 +3387,10 @@ begin
   if not Assigned(Cursor) then
     raise EMemDbInternalException.Create(S_CURSOR_NOT_ASSIGNED_AT_DELETE);
   Row := Cursor.Row;
+  Row.RemoveFromLocalIndices(self);
   //If next assigned, row delete will overwrite OK.
   //No new sorts of conflicts to deal with here.
   Row.Delete(FTid);
-  //TODO Local index update.
 end;
 
 procedure TTidLocal.UserWriteRowData(var Cursor:TMemDbCursor; FieldList: TMemStreamableList);
@@ -3326,7 +3398,7 @@ var
   Appending: boolean;
   Row: TMemDBRow;
   Next: TMemDBStreamable;
-  NewData: TMemStreamableList;
+  NewData: TMemRowFields;
   Guid: TGuid;
   CurMeta: TMemTableMetadataItem;
   PinOK: boolean;
@@ -3342,14 +3414,18 @@ begin
     CreateGUID(Guid);
     Row := TMemDBRow.Create;
     Row.Init(FParentTable, Guid);
-    NewData := TMemStreamableList.Create;
+    NewData := TMemRowFields.Create;
+    NewData.Sparse := false; //Running off current meta fields.
     NewData.DeepAssign(FieldList);
     Row.DirectSetNext(FTid, NewData);
     Row.FProxy.Release;
 
+    Row.AddToLocalIndices(self);
+
     Cursor := TMemDBCursor.Create;
     Cursor.SetRowPin(FTid, Row);
     Cursor.FIterIndex := nil;
+    Cursor.FIterInode := nil;
     Cursor.FIterInc := ptInvalid;
     Cursor.FTidLocal := self;
     PinOK := Row.PinForCursor(FTid);
@@ -3364,9 +3440,13 @@ begin
     //RequestChange will barf if it tries to undelete.
     //Caught nicely in isolation >= RepeatableRead.
     //Caught less nicely in isolation CommittedRead
+    Row.RemoveFromLocalIndices(self);
+
     Row.RequestChange(FTid);
     Next := Row.GetNext(FTid);
     Next.DeepAssign(FieldList);
+
+    Row.AddToLocalIndices(self);
   end;
   //Format checking happens here.
   //TODO - Local index update.
@@ -3529,6 +3609,7 @@ begin
 
   FTidLocalLock := TCriticalSection.Create;
   FMetaIndexLock := TCriticalSection.Create;
+  FMasterIndexes := TIndexRootList.Create;
   DLItemInitList(@FTidLocalStructures);
   DlItemInitList(@FAdditionLocks);
   FMetadata := TMemDbTableMetadata.Create;
@@ -3554,6 +3635,7 @@ begin
   FMasterRowLock.Free;
   FTidLocalLock.Free;
   FMetaIndexLock.Free;
+  FMasterIndexes.Release;
   FMetadata.Free;
 
 {$IFDEF MEMDB2_TEMP_REMOVE}
@@ -3756,6 +3838,7 @@ begin
     end;
     WrTag(Stream, mstTableEnd);
   end;
+  //TODO - Build changed indexes / validate indexes early if possible.
 end;
 
 procedure TMemDBTablePersistent.ToScratch(const PseudoTid: TTransactionId; Stream: TStream);
@@ -3839,6 +3922,7 @@ begin
 
   if TidLocal.LayoutChangeRequired then
     TidLocal.AdjustTableStructureForMetadata;
+  //TODO - Build changed indexes / validate indexes early if possible.
 end;
 
 procedure TMemDBTablePersistent.FromScratch(const PseudoTid: TTransactionId; Stream: TStream);
@@ -3859,6 +3943,7 @@ begin
   TidLocal := GetMakeTidLocal(PseudoTid, pinEvolve);
   TidLocal.FromScratch(Stream);
   ExpectTag(Stream, mstTableEnd);
+    //TODO - Build changed indexes / validate indexes early if possible.
 end;
 
 procedure TMemDBTablePersistent.PreCommit(const TId: TTransactionId; Reason: TMemDBTransReason);
@@ -3874,13 +3959,17 @@ begin
   if Null then
     exit; //Deleted case, still check all the rows have been deleted.
 
-  //Ignore indexing for the moment...
-
   //ToJournal / FromJournal has handled the layout change case,
   //which will have created a TidLocal if necessary.
   //All the other row checking can be done there.
+
+  //TODO - Build changed indexes later where early index build not possible.
+
   TidLocal := GetTidLocal(Tid);
   Assert(Assigned(TidLocal));
+
+  //TODO - Entire index validate.
+
   TidLocal.PreCommit(Reason);
 end;
 
@@ -6149,6 +6238,7 @@ begin
   inherited;
   FProxy := TMemDBRowProxy.Create;
   FProxy.Proxy := self;
+  SetListCreateClass(TMemRowFields);
 end;
 
 procedure TMemDBRow.Init(Table: TMemDBTablePersistent; const Guid: TGUID);
@@ -6328,8 +6418,168 @@ begin
   CheckABStreamableListChange(nil, Nxt as TMemStreamableList);
 end;
 
+//Assumption here is all stuff TidLocal is in local thread, so
+//no concurrency to worry about, except with the nasty issue
+//of index nodes in not-fully-local trees going away:
+
+//We can't always unambiguously determine whether an INode is reachable from
+//a tree without doing a top-down search.
+
+//Also you'd think that we just have a pair of possible nodes to worry
+//about, but that's not the case: Root index changing (cur / nxt) can be
+//going on at the same time, so we'll end up with a candidate list of nodes,
+//some possibly ephemeral, but we know that only one tree delete should succeed.
+function TMemDBRow.MakeCandidateIPins(Index: TMemDBIndex): TList;
+var
+  GIndex: TMemDBIndex;
+  Pin, MatchPin: PMemDbIndexPin;
+  Match: boolean;
+  i: integer;
+begin
+  Assert(Assigned(Index));
+  GIndex := Index.ParentIndex;
+  Result := TList.Create;
+  try
+    LockSelf;
+    try
+      Pin := PMemDBIndexPin(self.FIndexPins.FLink.Owner);
+      while Assigned(Pin) do
+      begin
+        Match := (Pin.INode.OriginalIndex = Index) or
+        (Assigned(GIndex) and (Pin.INode.OriginalIndex = GIndex));
+        if Match then
+        begin
+          MatchPin := self.HoldIndexPinInLock(Pin);
+          if Assigned(MatchPin) then
+            Result.Add(MatchPin);
+        end;
+        Pin := PMemDbIndexPin(Pin.Link.FLink.Owner);
+      end;
+    finally
+      UnlockSelf;
+    end;
+    //If local index search, then put the local one first,
+    //else we have no idea which INode it is.
+    if Assigned(GIndex) then
+    begin
+      Match := false;
+      for i  := 0 to Pred(result.Count) do
+      begin
+        MatchPin := PMemDbIndexPin(result.Items[i]);
+        if MatchPin.INode.OriginalIndex = Index then
+        begin
+          if Match then //Check its the only one.
+            raise EMemDbInternalException.Create(S_INDEX_PIN_COLLATION_BAD);
+          Match := true;
+          if (i <> 0) and (result.Count > 1) then
+          begin
+            //Swap with item 0.
+            result.Items[i] := result.Items[0];
+            result.Items[0] := MatchPin;
+          end;
+        end;
+      end;
+    end;
+  except
+    on E:Exception do
+    begin
+      while Result.Count > 0 do
+      begin
+        ReleaseIndexPinOutsideLock(PMemDbIndexPin(Result.Items[Pred(Result.Count)]));
+        Result.Delete(Pred(Result.Count));
+      end;
+      Result.Free;
+    end;
+  end;
+end;
+
+procedure TMemDBRow.RemoveFromLocalIndices(TidLocal: TTidLocal);
+var
+  Index: TMemDbIndex;
+  INodeList: TList;
+  i, j, DelCount: integer;
+  Pin: PMemDbIndexPin;
+begin
+  for i := 0 to Pred(TidLocal.FLocalIndexCopies.Count) do
+  begin
+    Index := TidLocal.FLocalIndexCopies.Items[i] as TMemDbIndex;
+    INodeList := MakeCandidateIPins(Index);
+    try
+      DelCount := 0;
+      for j := 0 to Pred(INodeList.Count) do
+      begin
+        Pin := PMemDbIndexPin(INodeList.Items[i]);
+        if Index.Remove(TABSelType.abCurrent, Pin.INode) then
+        begin
+          Inc(DelCount);
+{$IFOPT C-}
+          break;
+{$ENDIF}
+        end;
+      end;
+      if DelCount <> 1 then
+        raise EMemDBInternalException.Create(S_LOCAL_INDEX_DELETION_BAD);
+    finally
+      while INodeList.Count > 0 do
+      begin
+        ReleaseIndexPinOutsideLock(PMemDbIndexPin(INodeList.Items[Pred(INodeList.Count)]));
+        INodeList.Delete(Pred(INodeList.Count));
+      end;
+      INodeList.Free;
+    end;
+  end;
+end;
+
+procedure TMemDBRow.AddToLocalIndices(TidLocal: TTidLocal);
+var
+  Index: TMemDbIndex;
+  INodeList: TList;
+  Pin: PMemDbIndexPin;
+  INode: TMemDbIndexLeaf;
+  i: integer;
+begin
+  //Because of index de-duplication, we can't determine duplicate addition via
+  //inode. However, because the index is local, we can be sure there
+  //should not be any candidate IPins with our local index as the original index.
+  for i := 0 to Pred(TidLocal.FLocalIndexCopies.Count) do
+  begin
+    Index := TidLocal.FLocalIndexCopies.Items[i] as TMemDbIndex;
+    INodeList := MakeCandidateIPins(Index);
+    try
+      if INodeList.Count > 0 then
+      begin
+        Pin := PMemDbIndexPin(InodeList.Items[0]);
+        if Pin.INode.OriginalIndex = Index then
+          raise EMemDBInternalException.Create(S_LOCAL_INDEX_INSERTION_DUPLICATE);
+      end;
+    finally
+      while INodeList.Count > 0 do
+      begin
+        ReleaseIndexPinOutsideLock(PMemDbIndexPin(INodeList.Items[Pred(INodeList.Count)]));
+        INodeList.Delete(Pred(INodeList.Count));
+      end;
+      INodeList.Free;
+    end;
+    //OK, we're in with a chance of a good insertion.
+    INode := TMemDbIndexLeaf.Create;
+    try
+      if not self.PinForIndex(TidLocal.FTid, TABSelType.abLatest, INode) then
+        raise EMemDbInternalException.Create(S_LOCAL_INDEX_INSERTION_BAD_1);
+      if not Index.Add(abCurrent, INode) then
+        raise EMemDbInternalException.Create(S_LOCAL_INDEX_INSERTION_BAD_2);
+    except
+      on E: Exception do INode.Release;
+    end;
+  end;
+end;
 
 { TMemDBEntityMetadata }
+
+constructor TMemDbEntityMetadata.Create;
+begin
+  inherited;
+  SetListCreateClass(TMemStreamableList);
+end;
 
 procedure TMemDBEntityMetadata.Init(const Tid: TTransactionId; Parent: TObject; Name:string; DSName: boolean);
 begin
@@ -6644,7 +6894,7 @@ var
   i, j: integer;
   ProxI, ProxJ: TMemDBEntityProxy;
   ObjI, ObjJ: TMemDBEntity;
-  EntityList: TMemDBReffedList;
+  EntityList: TReffedList;
   IAdded, IChanged, IDeleted, INull: boolean;
   JAdded, JChanged, JDeleted, JNull: boolean;
   ICur, INxt, JCur, JNxt: TMemDbStreamable;
@@ -6788,7 +7038,7 @@ end;
 
 procedure TMemDBDatabasePersistent.ToJournal(const Tid: TTransactionId; Stream: TStream);
 var
-  EntityList: TMemDbReffedList;
+  EntityList: TReffedList;
   Prox: TMemDBEntityProxy;
   Entity: TMemDBEntity;
   i: integer;
@@ -6810,7 +7060,7 @@ end;
 
 procedure TMemDBDatabasePersistent.ToScratch(const PseudoTid:TTransactionId; Stream: TStream);
 var
-  EntityList: TMemDBReffedList;
+  EntityList: TReffedList;
   Proxy: TMemDbEntityProxy;
   Entity: TMemDbEntity;
   i: integer;
@@ -6945,8 +7195,8 @@ end;
 
 function TMemDBDatabasePersistent.AnyChangesForTid(const TId: TTransactionId): boolean;
 var
-  EntityList: TMemDBReffedList;
-  Proxy: TMemDBReffedProxy;
+  EntityList: TReffedList;
+  Proxy: TReffedProxy;
   Entity: TMemDbEntity;
   i: integer;
 begin
@@ -6955,7 +7205,7 @@ begin
     result := false;
     for i := 0 to Pred(EntityList.Count) do
     begin
-      Proxy := EntityList.Items[i] as TMemDBReffedProxy;
+      Proxy := EntityList.Items[i] as TReffedProxy;
       Entity := Proxy.Proxy as TMemDBEntity;
       result := result or Entity.AnyChangesForTid(Tid);
     end;
@@ -6966,8 +7216,8 @@ end;
 
 function TMemDBDatabasePersistent.AnyChanges(const TId: TTransactionId): boolean;
 var
-  EntityList: TMemDBReffedList;
-  Proxy: TMemDBReffedProxy;
+  EntityList: TReffedList;
+  Proxy: TReffedProxy;
   Entity: TMemDbEntity;
   i: integer;
 begin
@@ -6976,7 +7226,7 @@ begin
     result := false;
     for i := 0 to Pred(EntityList.Count) do
     begin
-      Proxy := EntityList.Items[i] as TMemDBReffedProxy;
+      Proxy := EntityList.Items[i] as TReffedProxy;
       Entity := Proxy.Proxy as TMemDBEntity;
       result := result or Entity.AnyChanges(Tid);
     end;
@@ -6987,7 +7237,7 @@ end;
 
 procedure TMemDBDatabasePersistent.Commit(const TId: TTransactionId; Reason: TMemDbTransReason);
 var
-  EntityList: TMemDbReffedList;
+  EntityList: TReffedList;
   Proxy: TMemDBEntityProxy;
   Entity: TMemDbEntity;
   i: integer;
@@ -7008,7 +7258,7 @@ end;
 
 procedure TMemDBDatabasePersistent.Rollback(const TId: TTransactionId; Reason: TMemDbTransReason);
 var
-  EntityList: TMemDBReffedList;
+  EntityList: TReffedList;
   Proxy: TMemDBEntityProxy;
   Entity: TMemDbEntity;
   i: integer;
@@ -7027,14 +7277,14 @@ begin
   end;
 end;
 
-function TMemDBDatabasePersistent.AssembleEntityList: TMemDbReffedList;
+function TMemDBDatabasePersistent.AssembleEntityList: TReffedList;
 var
   Proxy: TMemDBEntityProxy;
 begin
   //NB. Do not need PinForUnorderedContainer here, because we get all of them
   //at once. Some of them might be going away, but
   //later pins make them persistent enough for our transaction.
-  result := TMemDBReffedList.Create;
+  result := TReffedList.Create;
   try
     FEntityLock.Acquire;
     try
@@ -7062,7 +7312,7 @@ var
   i: integer;
   Proxy: TMemDBEntityProxy;
   Entity: TMemDBEntity;
-  List: TMemDbReffedList;
+  List: TReffedList;
   SelType: TABSelType;
   EntMetaS: TMemDBStreamable;
   EntMetaItem: TMemEntityMetadataItem;
@@ -7115,7 +7365,7 @@ end;
 destructor TMemDBDatabasePersistent.Destroy;
 var
   PseudoTid: TTransactionId;
-  EntityList: TMemDBReffedList;
+  EntityList: TReffedList;
   i: integer;
   Proxy: TMemDBEntityProxy;
   Entity: TMemDbEntity;
@@ -7182,7 +7432,7 @@ end;
 function TMemDBDatabasePersistent.HandleAPITableRename(const Sel: TBufSelector; OldName, NewName: string): boolean;
 var
   i: integer;
-  EntityList: TMemDBReffedList;
+  EntityList: TReffedList;
   Proxy: TMemDBEntityProxy;
   Entity: TMemDBEntity;
 begin
@@ -7205,7 +7455,7 @@ end;
 procedure TMemDBDatabasePersistent.CheckAPITableDelete(const Sel: TBufSelector; TableName: string);
 var
   i: integer;
-  EntityList: TMemDBReffedList;
+  EntityList: TReffedList;
   Proxy: TMemDBEntityProxy;
   Entity: TMemDBEntity;
 begin
@@ -7227,7 +7477,7 @@ end;
 function TMemDBDatabasePersistent.HandleAPIIndexRename(const Sel: TBufSelector; IsoDeterminedTableName, OldName, NewName: string): boolean;
 var
   i: integer;
-  EntityList: TMemDBReffedList;
+  EntityList: TReffedList;
   Proxy: TMemDBEntityProxy;
   Entity: TMemDBEntity;
 begin
@@ -7251,7 +7501,7 @@ end;
 procedure TMemDBDatabasePersistent.CheckAPIIndexDelete(const Sel: TBufSelector; IsoDeterminedTableName, IndexName: string);
 var
   i: integer;
-  EntityList: TMemDBReffedList;
+  EntityList: TReffedList;
   Proxy: TMemDBEntityProxy;
   Entity: TMemDBEntity;
 begin

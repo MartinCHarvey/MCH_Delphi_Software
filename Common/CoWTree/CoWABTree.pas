@@ -126,7 +126,6 @@ function TCoWABTree.Remove(item: TCowTreeItem; Src, Dest: TCowSel): Boolean;
 var
   InP, OutP: TCowTreeItem;
   h, found: TChkBool;
-  SrcSel, DstSel: TCowSel;
 begin
 {$IFOPT C+}
   found := TChkBool.Create;

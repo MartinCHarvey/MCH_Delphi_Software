@@ -47,6 +47,8 @@ uses
 
 type
   TBal = -1..1;
+  TCowTree = class;
+
   //Tree items are immutable. Once set up, should not be changed
   TCoWTreeItem = class(TReffed)
   private
@@ -61,8 +63,8 @@ type
 {$ENDIF}
   protected
     constructor Create; virtual;
-    function DupNoInit: TCowTreeItem;
-    function DupInit: TCowTreeItem;
+    function DupNoInit(SrcTree: TCowTree): TCowTreeItem; virtual;
+    function DupInit(SrcTree: TCowTree): TCowTreeItem;
     function Compare(Other: TCoWTreeItem;
                      AllowKeyDedupe: boolean): integer; virtual; abstract;
     //CopyFrom copies reffed children (providing the keys).
@@ -99,16 +101,7 @@ type
 {$ELSE}
   TChkBool = boolean;
 {$ENDIF}
-  function RdCk(B: TChkBool): boolean;
-{$IFOPT C-}
-    inline;
-{$ENDIF}
-  procedure WrCk(var B: TChkBool; NewVal:Boolean);
-{$IFOPT C-}
-    inline;
-{$ENDIF}
 
-type
   //All three search, two balance functions, and Delete.
   TDoubleItemVars = record
     q, r: TCowTreeItem;
@@ -137,6 +130,15 @@ type
   end;
 
   TCowTreeItemClass = class of TCowTreeItem;
+
+  function RdCk(B: TChkBool): boolean;
+{$IFOPT C-}
+    inline;
+{$ENDIF}
+  procedure WrCk(var B: TChkBool; NewVal:Boolean);
+{$IFOPT C-}
+    inline;
+{$ENDIF}
 
 implementation
 
@@ -215,14 +217,14 @@ begin
   inherited;
 end;
 
-function TCowTreeItem.DupNoInit: TCowTreeItem;
+function TCowTreeItem.DupNoInit(SrcTree: TCowTree): TCowTreeItem;
 begin
   result := TCowTreeItemClass(self.ClassType).Create;
 end;
 
-function TCowTreeItem.DupInit: TCowTreeItem;
+function TCowTreeItem.DupInit(SrcTree: TCowTree): TCowTreeItem;
 begin
-  result := TCowTreeItemClass(self.ClassType).Create;
+  result := DupNoInit(SrcTree);
   result.CopyFrom(self);
 end;
 
@@ -368,7 +370,7 @@ begin
       if Assigned(RetP) then //subtree ptr changed, but we know what it was before.
       begin
         Assert(RetP <> CallP);
-        Tmp := InP.DupInit;
+        Tmp := InP.DupInit(self);
         // LEFT comes from recursion → TRANSFER (NO AddRef)
         Tmp.left := RetP;
         RetP := nil;
@@ -402,7 +404,7 @@ begin
       if Assigned(RetP) then  //subtree ptr changed, but we know what it was before.
       begin
         Assert(RetP <> CallP);
-        Tmp := InP.DupInit;
+        Tmp := InP.DupInit(self);
         // LEFT comes from existing tree → SHARE (AddRef)
 {$IFOPT C+}
         Tmp.left := InP.left.AddRef as TCowTreeItem;
@@ -465,7 +467,7 @@ begin
     case p.bal of
       -1:
         begin
-          NewRoot := p.DupInit;
+          NewRoot := p.DupInit(self);
 {$IFOPT C+}
           NewRoot.left := p.left.AddRef as TCowTreeItem;
           NewRoot.right := p.right.AddRef as TCowTreeItem;
@@ -479,7 +481,7 @@ begin
 
       0:
         begin
-          NewRoot := p.DupInit;
+          NewRoot := p.DupInit(self);
 {$IFOPT C+}
           NewRoot.left := p.left.AddRef as TCowTreeItem;
           NewRoot.right := p.right.AddRef as TCowTreeItem;
@@ -498,7 +500,7 @@ begin
           begin
             // ===== SINGLE RR ROTATION =====
             // NewP (old root becomes left child)
-            NewP := p.DupInit;
+            NewP := p.DupInit(self);
 {$IFOPT C+}
             NewP.left := p.left.AddRef as TCowTreeItem;
             NewP.right := p1.left.AddRef as TCowTreeItem;
@@ -507,7 +509,7 @@ begin
             NewP.right := TCowTreeItem(p1.left.AddRef);
 {$ENDIF}
             // NewRoot (p1 becomes new root)
-            NewRoot := p1.DupInit;
+            NewRoot := p1.DupInit(self);
             NewRoot.left := NewP;   // transfer ownership
             NewP := nil;
 {$IFOPT C+}
@@ -540,7 +542,7 @@ begin
             // ===== DOUBLE RL ROTATION =====
             p2 := p1.left;
             // NewP (left subtree)
-            NewP := p.DupInit;
+            NewP := p.DupInit(self);
 {$IFOPT C+}
             NewP.left := p.left.AddRef as TCowTreeItem;
             NewP.right := p2.left.AddRef as TCowTreeItem;
@@ -549,7 +551,7 @@ begin
             NewP.right := TCowTreeItem(p2.left.AddRef);
 {$ENDIF}
             // NewP1 (right subtree)
-            NewP1 := p1.DupInit;
+            NewP1 := p1.DupInit(self);
 {$IFOPT C+}
             NewP1.left := p2.right.AddRef as TCowTreeItem;
             NewP1.right := p1.right.AddRef as TCowTreeItem;
@@ -558,7 +560,7 @@ begin
             NewP1.right := TCowTreeItem(p1.right.AddRef);
 {$ENDIF}
             // NewRoot (p2 becomes root)
-            NewRoot := p2.DupInit;
+            NewRoot := p2.DupInit(self);
             NewRoot.left := NewP;   // transfer
             NewRoot.right := NewP1; // transfer
             NewP := nil;
@@ -579,7 +581,7 @@ begin
           if not dl then
           begin
             // final rebalance overwrite
-            NewP2 := NewRoot.DupInit;
+            NewP2 := NewRoot.DupInit(self);
 {$IFOPT C+}
             NewP2.left := NewRoot.left.AddRef as TCowTreeItem;
             NewP2.right := NewRoot.right.AddRef as TCowTreeItem;
@@ -623,7 +625,7 @@ begin
     case p.bal of
       +1:
         begin
-          NewRoot := p.DupInit;
+          NewRoot := p.DupInit(self);
 {$IFOPT C+}
           NewRoot.left := p.left.AddRef as TCowTreeItem;
           NewRoot.right := p.right.AddRef as TCowTreeItem;
@@ -637,7 +639,7 @@ begin
 
       0:
         begin
-          NewRoot := p.DupInit;
+          NewRoot := p.DupInit(self);
 {$IFOPT C+}
           NewRoot.left := p.left.AddRef as TCowTreeItem;
           NewRoot.right := p.right.AddRef as TCowTreeItem;
@@ -656,7 +658,7 @@ begin
           begin
             // ===== SINGLE LL ROTATION =====
             // NewP (old root becomes right child)
-            NewP := p.DupInit;
+            NewP := p.DupInit(self);
 {$IFOPT C+}
             NewP.left := p1.right.AddRef as TCowTreeItem;
             NewP.right := p.right.AddRef as TCowTreeItem;
@@ -665,7 +667,7 @@ begin
             NewP.right := TCowTreeItem(p.right.AddRef);
 {$ENDIF}
             // NewRoot (p1 becomes new root)
-            NewRoot := p1.DupInit;
+            NewRoot := p1.DupInit(self);
 {$IFOPT C+}
             NewRoot.left := p1.left.AddRef as TCowTreeItem;
 {$ELSE}
@@ -700,7 +702,7 @@ begin
 
             p2 := p1.right;
             // NewP (right subtree)
-            NewP := p.DupInit;
+            NewP := p.DupInit(self);
 {$IFOPT C+}
             NewP.left := p2.right.AddRef as TCowTreeItem;
             NewP.right := p.right.AddRef as TCowTreeItem;
@@ -709,7 +711,7 @@ begin
             NewP.right := TCowTreeItem(p.right.AddRef);
 {$ENDIF}
             // NewP1 (left subtree)
-            NewP1 := p1.DupInit;
+            NewP1 := p1.DupInit(self);
 {$IFOPT C+}
             NewP1.left := p1.left.AddRef as TCowTreeItem;
             NewP1.right := p2.left.AddRef as TCowTreeItem;
@@ -718,7 +720,7 @@ begin
             NewP1.right := TCowTreeItem(p2.left.AddRef);
 {$ENDIF}
             // NewRoot (p2 becomes root)
-            NewRoot := p2.DupInit;
+            NewRoot := p2.DupInit(self);
             NewRoot.left := NewP1;
             NewRoot.right := NewP;
             NewP := nil;
@@ -742,7 +744,7 @@ begin
 
           if not dl then
           begin
-            NewP2 := NewRoot.DupInit;
+            NewP2 := NewRoot.DupInit(self);
 {$IFOPT C+}
             NewP2.left := NewRoot.left.AddRef as TCowTreeItem;
             NewP2.right := NewRoot.right.AddRef as TCowTreeItem;
@@ -798,7 +800,7 @@ begin
       //TODO Always modifies return? could optimise this out.
       if RetQR.r <> CallQR.r then
       begin
-        Tmp := InQR.r.DupInit;
+        Tmp := InQR.r.DupInit(self);
 {$IFOPT C+}
         Tmp.left := InQR.r.left.AddRef as TCoWTreeItem;
 {$ELSE}
@@ -836,7 +838,7 @@ begin
       //We pass back a modified q with new key (obtained from rightmost(q.left))
       //r is still the primary "modified subtree" returned back up.
 
-      Tmp := InQR.q.DupNoInit;
+      Tmp := InQR.q.DupNoInit(self);
       Tmp.CopyFrom(InQR.r); //Copy the key across from other node.
       Tmp.bal := InQR.q.bal; //Copy the balance across from original node, but not the children.
       RetQR.q := Tmp; //Return this modified Q to caller.
@@ -895,7 +897,7 @@ begin
       RetP := Delete(item, CallP, h, found);
       if RetP <> CallP then
       begin
-        Tmp := InP.DupInit;
+        Tmp := InP.DupInit(self);
         Tmp.left := RetP; //Transfer from called.
 {$IFOPT C+}
         Tmp.right := InP.right.AddRef as TCowTreeItem;
@@ -932,7 +934,7 @@ begin
       RetP := Delete(item, CallP, h, found);
       if RetP <> CallP then
       begin
-        Tmp := InP.DupInit;
+        Tmp := InP.DupInit(self);
 {$IFOPT C+}
         Tmp.left := InP.left.AddRef as TCowTreeItem;
 {$ELSE}

@@ -3,7 +3,7 @@ object CoWTreeTestForm: TCoWTreeTestForm
   Top = 0
   Caption = 'CoWTreeTestForm'
   ClientHeight = 242
-  ClientWidth = 527
+  ClientWidth = 356
   Color = clBtnFace
   Font.Charset = DEFAULT_CHARSET
   Font.Color = clWindowText
@@ -41,5 +41,23 @@ object CoWTreeTestForm: TCoWTreeTestForm
     Caption = 'Simple Tree'
     TabOrder = 0
     OnClick = STTestClick
+  end
+  object Performance: TButton
+    Left = 264
+    Top = 8
+    Width = 75
+    Height = 25
+    Caption = 'Performance'
+    TabOrder = 3
+    OnClick = PerformanceClick
+  end
+  object Memo1: TMemo
+    Left = 14
+    Top = 39
+    Width = 325
+    Height = 194
+    Lines.Strings = (
+      'Memo1')
+    TabOrder = 4
   end
 end

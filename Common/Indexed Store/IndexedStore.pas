@@ -1667,6 +1667,7 @@ begin
   //because variable class type creation used here.
 end;
 
+{$HINTS OFF}
 class function TIndexNode.ComparePointers(Own, Other: Pointer): integer;
 var
   OwnInt, OtherInt: Cardinal;
@@ -1697,6 +1698,7 @@ begin
   else
     Assert(false, S_POINTERS_ODD_SIZE);
 end;
+{$HINTS ON}
 
 function TIndexNode.Compare(Other: TBinTreeItem; AllowKeyDedupe: boolean): integer;
 var

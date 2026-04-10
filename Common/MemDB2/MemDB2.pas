@@ -755,6 +755,8 @@ begin
           FDatabase := TMemDBDatabase.Create;
           FSessionLock.Release;
 
+          //TODO TODO - Check this reset of DB state is the same
+          //as it was in MemDB1.
           DBTmp.Free;
           try
             FPersistWait.WaitFor(INFINITE);
