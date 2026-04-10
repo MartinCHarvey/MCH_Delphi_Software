@@ -45,40 +45,6 @@ type
 
   //Streamables now subclasses of this.
 
-
-  TMemDBReffedList = class(TReffed)
-  private
-    FList: TList;
-  protected
-    function GetCount: integer;
-{$IFOPT C+}
-    function GetItem(Idx: integer): TReffed;
-    procedure SetItem(Idx: integer; Item: TReffed);
-{$ELSE}
-    function GetItem(Idx: integer): TReffed; inline;
-    procedure SetItem(Idx: integer; Item: TReffed); inline;
-{$ENDIF}
-  public
-    constructor Create;
-    destructor Destroy; override;
-    procedure ReleaseAndClear;
-    //No delete sentinels in these lists - just allowing for
-    //dbl buffered, atomic, ref counted switchover between two sets of stuff.
-    function AddNoRef(Item: TReffed): integer;
-    procedure Clear;
-    procedure Pack;
-    property Count: Integer read GetCount;
-    property Items[idx:integer]: TReffed read GetItem write SetItem; default;
-  end;
-
-  TMemDBReffedProxy = class(TReffed)
-  private
-    FProxy: TObject;
-  public
-    destructor Destroy; override;
-    property Proxy: TObject read FProxy write FProxy;
-  end;
-
   TMemDBStreamable = class(TReffed)
   public
     constructor Create; virtual;
@@ -128,6 +94,14 @@ type
     procedure Pack;
     property Count: Integer read GetCount;
     property Items[idx:integer]: TMemDBSTreamable read GetItem write SetItem; default;
+  end;
+
+  TMemRowFields = class(TMemStreamableList)
+  private
+    FSparse: boolean;
+  public
+    procedure CommitPack; override;
+    property Sparse:boolean read FSparse write FSparse;
   end;
 
   //Delete sentinels *not* streamed to disk for
@@ -350,74 +324,6 @@ const
   S_NO_PACKING_SENTINELS = 'Sentinels cannot be packed.';
   S_FIELD_TYPE_NOT_STREAMABLE = 'Field type not streamable.';
   S_ASSIGN_UNSUPP_IN_META = 'Metadata does not support shallow assignment';
-
-
-{ TMemDBReffedList }
-
-constructor TMemDBReffedList.Create;
-begin
-  inherited;
-  FList := TList.Create;
-end;
-
-destructor TMemDBReffedList.Destroy;
-begin
-  ReleaseAndClear;
-  FList.Free;
-  inherited;
-end;
-
-function TMemDBReffedList.GetCount: integer;
-begin
-  result := FList.Count;
-end;
-
-function TMemDBReffedList.GetItem(Idx: integer): TReffed;
-begin
-  result := FList.Items[idx];
-end;
-
-procedure TMemDBReffedList.SetItem(Idx: integer; Item: TReffed);
-begin
-  FList.Items[idx] := Item;
-end;
-
-function TMemDBReffedList.AddNoRef(Item: TReffed): integer;
-begin
-  result := FList.Add(Item);
-end;
-
-procedure TMemDBReffedList.Clear;
-begin
-  FList.Clear;
-end;
-
-procedure TMemDBReffedList.Pack;
-begin
-  FList.Pack;
-end;
-
-procedure TMemDBReffedList.ReleaseAndClear;
-var
-  i: integer;
-begin
-  for i := 0 to Pred(Count) do
-    Items[i].Release;
-  Clear;
-end;
-
-{ TMemDbReffedProxy }
-
-//Generally the proxies will be used to allow atomic /
-//protected access to sets of things via pinned lists,
-//so we don't expect direct assignment, only referencing
-//via lists.
-
-destructor TMemDbReffedProxy.Destroy;
-begin
-  FProxy.Free;
-  inherited;
-end;
 
 { TMemDeleteSentinel }
 
@@ -686,6 +592,15 @@ begin
   for i := 0 to Pred(Count) do
     Items[i].Release;
   Clear;
+end;
+
+{ TMemRowFields }
+
+//TODO - Handling for this in various places throughout the code.
+procedure TMemRowFields.CommitPack;
+begin
+  FSparse := false;
+  inherited;
 end;
 
 { TMemFieldDef }

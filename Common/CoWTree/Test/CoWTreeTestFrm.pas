@@ -15,11 +15,14 @@ type
     BasicInsertBtn: TButton;
     BasicDeleteBtn: TButton;
     STTest: TButton;
+    Performance: TButton;
+    Memo1: TMemo;
     procedure BasicInsertBtnClick(Sender: TObject);
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
     procedure BasicDeleteBtnClick(Sender: TObject);
     procedure STTestClick(Sender: TObject);
+    procedure PerformanceClick(Sender: TObject);
   private
     { Private declarations }
     FStore: TIndexedStoreHack;
@@ -54,6 +57,8 @@ implementation
 
 const
   SMALL_ITEMCOUNT = 1000;
+  MIN_COUNT  = 100;
+  MAX_COUNT  = 100000;
 
   //Couple of hacky helper classes to get at the index nodes, and check
   //balance factors as well.
@@ -229,9 +234,9 @@ end;
 procedure TCowTreeTestForm.Report;
 begin
   if OK then
-    ShowMessage('All OK.')
+    Memo1.Lines.Add('All OK.')
   else
-    ShowMessage('Something broken');
+    Memo1.Lines.Add('Something broken');
 end;
 
 procedure TCowTreeTestForm.Reset;
@@ -268,6 +273,7 @@ var
 begin
   OK := true;
   CowSimple := TCowSimpleTree.Create;
+  CTI := nil;
   try
     for i := 0 to Pred(SMALL_ITEMCOUNT) do
     begin
@@ -322,13 +328,11 @@ var
   IRec: TItemRec;
   CowItem: TCowTestItem;
   RdSel: TCowSel;
-  Key: integer;
-  Broken: boolean;
 begin
   //Populate all three lists so they are the same.
   BasicInsertBtnClick(sender);
   CheckIndexesSame(abMain, FStore);
-  ShowMessage('Deletion of half via multiple traversals.');
+  Memo1.Lines.Add('Deletion of half via multiple traversals.');
   ToDelete := FStore.Count div 2;
   RdSel := abMain;
   while ToDelete > 0 do
@@ -360,7 +364,7 @@ begin
   CheckIndexessame(abMain, FOriginalAdditionStore);
   CheckIndexesSame(abNext, FStore);
   //OK, and now delete the remainder by key
-  ShowMessage('Deletion of remainder by key.');
+  Memo1.Lines.Add('Deletion of remainder by key.');
   CowItem := TCowTestItem.Create;
   try
     while (FStore.Count > 0) do
@@ -429,6 +433,163 @@ begin
   end;
   CheckIndexesSame(abMain, FOriginalAdditionStore);
   Report;
+end;
+
+procedure ToSecMsec(EndTime, StartTime: Int64; var Sec:integer; var MSec: integer);
+var
+  Freq: Int64;
+  Seconds: double;
+begin
+  QueryPerformanceFrequency(Freq);
+  Seconds := (EndTime - StartTime) / Freq;
+  Sec := Trunc(Seconds);
+  Seconds := Seconds - Sec;
+  MSec := Trunc(Seconds * 1000);
+end;
+
+procedure ToPerSec(Count: integer; EndTime, StartTime: Int64; var PerSec: integer);
+var
+  Freq: int64;
+  Seconds, PerSecDouble: double;
+begin
+  QueryPerformanceFrequency(Freq);
+  Seconds := (EndTime - StartTime) / Freq;
+  PerSecDouble := Count / Seconds;
+  PerSec := Trunc(PerSecDouble);
+end;
+
+var
+ NotSoRandSeed, FirstSeed: Longint;
+
+function NotSoRandom: Integer;
+var
+  Temp: Longint;
+begin
+  Temp := NotSoRandSeed * $08088405 + 1;
+  NotSoRandSeed := Temp;
+  Result := (UInt64(Cardinal(High(Integer))) * UInt64(Cardinal(Temp))) shr 32;
+end;
+
+procedure TCoWTreeTestForm.PerformanceClick(Sender: TObject);
+var
+  EndTime, StartTime: Int64;
+  Count: integer;
+  i: Integer;
+  NewItem: TTrivialDataItem;
+  RV: TIsRetVal;
+  IRec: TItemRec;
+  Sec,Msec, PerSec: integer;
+  SV: TTrivialSearchVal;
+  Item: TObject;
+  OK: boolean;
+
+  Node: TCowTestItem;
+begin
+  QueryPerformanceCounter(StartTime);
+  FirstSeed := Longint(StartTime);
+  Count := MIN_COUNT;
+  while Count <= MAX_COUNT do
+  begin
+    Reset;
+    NotSoRandSeed := FirstSeed;
+    QueryPerformanceCounter(StartTime);
+    for i := 0 to Pred(Count) do
+    begin
+      NewItem := TTrivialDataItem.Create;
+      NewItem.Key := NotSoRandom;
+      RV := FOriginalAdditionStore.AddItem(NewItem, IRec);
+      if rv = rvDuplicateKey then
+        break;
+    end;
+    QueryPerformanceCounter(EndTime);
+
+    ToSecMsec(EndTime, StartTime, Sec, MSec);
+    ToPerSec(Count, EndTime, StartTime, PerSec);
+
+    Memo1.Lines.Add('IStore Add' + IntToStr(Count) +': ' +
+                     IntToStr(Sec) + '.' + IntToStr(MSec) + 'sec, ' +
+                     IntToStr(PerSec) + '/sec');
+
+    SV := TTrivialSearchVal.Create;
+    try
+      NotSoRandSeed := FirstSeed;
+      QueryPerformanceCounter(StartTime);
+      for i := 0 to Pred(Count) do
+      begin
+        SV.SearchKey := NotSoRandom;
+        RV := FOriginalAdditionStore.FindByIndex(Pointer(1), SV, IRec);
+        if RV = rvNotFound then
+          break;
+        Item := IRec.Item;
+        FOriginalAdditionStore.RemoveItem(IRec);
+        Item.Free;
+      end;
+      QueryPerformanceCounter(EndTime);
+
+    finally
+      SV.Free;
+    end;
+
+    ToSecMsec(EndTime, StartTime, Sec, MSec);
+    ToPerSec(Count, EndTime, StartTime, PerSec);
+
+    Memo1.Lines.Add('IStore Remove' + IntToStr(Count) +': ' +
+                     IntToStr(Sec) + '.' + IntToStr(MSec) + 'sec, ' +
+                     IntToStr(PerSec) + '/sec');
+
+    ///////////////////////////////////
+
+    NotSoRandSeed := FirstSeed;
+    QueryPerformanceCounter(StartTime);
+    for i := 0 to Pred(Count) do
+    begin
+      Node := TCowTestItem.Create;
+      Node.Key := NotSoRandom;
+      OK := FCowTree.Add(Node, abMain, abMain);
+      if not OK then
+      begin
+        Node.Release;
+        break;
+      end;
+    end;
+    QueryPerformanceCounter(EndTime);
+
+    ToSecMsec(EndTime, StartTime, Sec, MSec);
+    ToPerSec(Count, EndTime, StartTime, PerSec);
+
+    Memo1.Lines.Add('CoW Tree Add' + IntToStr(Count) +': ' +
+                     IntToStr(Sec) + '.' + IntToStr(MSec) + 'sec, ' +
+                     IntToStr(PerSec) + '/sec');
+
+    Node := TCowTestItem.Create;
+    try
+      NotSoRandSeed := FirstSeed;
+      QueryPerformanceCounter(StartTime);
+      for i := 0 to Pred(Count) do
+      begin
+        Node.Key := NotSoRandom;
+        OK := FCowTree.Remove(Node, abMain, abMain);
+        if not OK then
+          break;
+      end;
+      QueryPerformanceCounter(EndTime);
+
+    finally
+      Node.Release;
+    end;
+
+    ToSecMsec(EndTime, StartTime, Sec, MSec);
+    ToPerSec(Count, EndTime, StartTime, PerSec);
+
+    Memo1.Lines.Add('CoW Tree Remove' + IntToStr(Count) +': ' +
+                     IntToStr(Sec) + '.' + IntToStr(MSec) + 'sec, ' +
+                     IntToStr(PerSec) + '/sec');
+
+
+    Count := Count * 10;
+    Application.ProcessMessages;
+  end;
+  Reset;
 end;
 
 procedure TCoWTreeTestForm.FormCreate(Sender: TObject);
