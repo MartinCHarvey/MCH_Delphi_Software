@@ -46,16 +46,37 @@ type
 {
    Isolation / serialization
 
-   Done:
-   1. Minimum isolation levels for Metadata / Implied row changes.
-     Now done.  => ReadCommitted. RMW race free.
-     Addition lock for table restructure.
+Some notes on pinning and consistency / isolation:
 
-   TODO - Serializable.
-   2. Serializable isolation:
-      - Need row addition lock from start of Txion:
-        To prevent phantoms & keep index traversal consistent.
-      - Need all meta/index pinning to happen atomically at Txion start.
+1. Plain pinning (not considering INodes).
+
+- Pin
+  - Pin latest current.
+  Re-pin: re-use the pin.
+
+- Delete, Request Change, SetNext:
+  - >= readRepeatable, pin must be up to date else abort.
+- PreCommit
+  - >= Serialisable, require all up to date at pre-commit (even just read).
+  - Always require writes in order, regardless of iso.
+
+2a. INode pinning:
+  - PinForINode, copy Tid across from source as expected.
+
+2b. Pin for cursor (regular pin from INode Pin):
+
+  - If existing pin, then use that.
+    - >= readRepeatable, pin must agree with iNodePin.
+  - If no existing pin.
+    - Can make *older* pin which keeps read  / preducate / set consistency.
+    - Same checking when it comes to modify time.
+
+TODO - Serializable.
+
+3. Serializable isolation:
+  - Need row addition/change lock from start of Txion:
+    To prevent phantoms & keep index traversal consistent.
+  - Need all meta/index pinning to happen atomically at Txion start.
 }
 
   //Object which can write changes between current and next version to journal.
@@ -182,10 +203,13 @@ type
 {$IFOPT C+}
     function FindTidReffing(const Tid: TTransactionId): PTidReference;
 {$ENDIF}
+    //DCPUpdates can be sent lazily.
     procedure DCPPre(Data, Changes, Pins: boolean; var Update: TReferenceUpdate);
     procedure DCPPost(Data, Changes, Pins: boolean; var Update: TReferenceUpdate);
+    procedure DCPLazyHandle(const Update: TReferenceUpdate);
     procedure DCPHandle(const Update: TReferenceUpdate); virtual;
 
+    //CPTid updates can't cos they are also used by TidLocal to determine TidLocal.ChangesForTid
     procedure CPTidPre(Changes, Pins: boolean; const Tid: TTransactionId; var Update:TTidUpdate);
     procedure CPTidPost(Changes, Pins: boolean; const Tid: TTransactionId; var Update:TTidUpdate);
     procedure CPTidHandle(const Update: TTidUpdate); virtual;
@@ -248,12 +272,15 @@ type
   PMemDbPinnedItem = ^TMemDbPinnedItem;
 {$ENDIF}
 
+//TODO - May be able to optimise this structure out with
+//an extra link field in TMemDbIndexLeaf.
 {$IFOPT C+}
   TMemDBIndexPin = class(TTrackable)
 {$ELSE}
   TMemDbIndexPin = record
 {$ENDIF}
     Link:TDLEntry;
+    PinnedTid: TTransactionId;
     INode: TMemDbIndexLeaf;
   end;
 {$IFOPT C+}
@@ -284,16 +311,26 @@ type
     procedure UnlockSelf; virtual; abstract;
 
     //Current, Next (Tid 1), Next (Tid 2) ...
+{$IFOPT C+}
+    function FindCurMultiItem: PMemDBMultiItem;
+    function FindNxtMultiItem(const TId: TTransactionId): PMemDBMultiItem;
+    function FindPin(const TId: TTransactionId): PMemDbPinnedItem;
+    function FindIndexPin(IndexNode: TMemDBIndexLeaf): PMemDBINdexPin;
+{$ELSE}
     function FindCurMultiItem: PMemDBMultiItem; inline;
     function FindNxtMultiItem(const TId: TTransactionId): PMemDBMultiItem; inline;
     function FindPin(const TId: TTransactionId): PMemDbPinnedItem; inline;
     function FindIndexPin(IndexNode: TMemDBIndexLeaf): PMemDBINdexPin; inline;
+{$ENDIF}
     //First multi-item should always be current,
     //and always exists (item ptr may be null).
     //Other multi-items are pre-transaction, and item ptr should never be NULL.
 
     function NewCurrentPinInternal(const Tid:TTransactionId; Reason:TPinReason): TMemDBStreamable;
     function ReUseCurrentPinInternal(Pin: PMemDbPinnedItem; Reason: TPinReason): TMemDbStreamable;
+
+    function NewCurrentPinForINode(const Tid:TTransactionId; IPin: PMemDBIndexPin; Reason:TPinReason): TMemDBStreamable;
+    function ReUseCurrentPinForINode(const Tid: TTransactionId; Pin: PMemDbPinnedItem; IPin: PMemDBIndexPin; Reason: TPinReason): TMemDbStreamable;
 
     //TODO - Move this somewhere else?
     procedure CheckABStreamableListChange(Current, Next: TMemStreamableList);
@@ -308,7 +345,6 @@ type
 
     procedure SetListCreateClass(New: TMemDBStreamableClass);
 
-    procedure IndexPinReleaseCommon(Pin: PMemDbIndexPin);
     function HoldIndexPinInLock(Pin: PMemDbIndexPin): PMemDBIndexPin;
     procedure ReleaseIndexPinOutsideLock(Pin: PMemDbIndexPin);
   public
@@ -352,7 +388,10 @@ type
     function PinForCursor(const Tid: TTransactionId): boolean;
     procedure UnPinCursor(const Tid: TTransactionId);
     //Navigated to via INode.
-    function PinForCursorFromInode(const Tid: TTRansactionId; INode: TMemDBIndexLeaf): boolean;
+
+    //User traversal.
+    function PinForCursorFromInode(const Tid: TTRansactionId; INode: TMemDBIndexLeaf; Reason: TPinReason): boolean;
+    //Index maintenance.
 
     //Generally, no un-pin for data. Commit/Rollback will clear.
     //Pins/Refs checked/ cleared at Txion time.
@@ -370,6 +409,7 @@ type
     function PinForIndex(const Tid: TTransactionId; ItemSel: TAbSelType;
                          IndexNode: TMemDbIndexLeaf): boolean;
     procedure UnpinFromIndex(IndexNode: TMemDbIndexLeaf);
+    procedure DupIndexPin(SourceNode, DestNode: TMemDBIndexLeaf);
   end;
 
   TMemDBMultiBufferedTiny = class(TMemDbMultiBuffered)
@@ -410,6 +450,8 @@ const
   S_MODIFIED_CONCURRENT_ABORT_WAR_2 = 'Aborted. Concurrency conflict (write-after-read). (Case 2). Retry?';
   S_MODIFIED_CONCURRENT_ABORT_WAR_3 = 'Aborted. Concurrency conflict (write-after-read). (Case 3). Retry?';
   S_MODIFIED_CONCURRENT_ABORT_WAR_4 = 'Aborted. Concurrency conflict (write-after-read). (Case 4). Retry?';
+  S_MODIFIED_CONCURRENT_ABORT_WAR_5 = 'Aborted. Concurrency conflict (write-after-read). (Case 5). Retry?';
+  S_MODIFIED_CONCURRENT_ABORT_WAR_6 = 'Aborted. Concurrency conflict (write-after-read). (Case 6). Retry?';
   S_MODIFIED_CONCURRENT_ABORT_WAW = 'Aborted. Concurrency conflict (write-after-write). Retry?';
   S_MODIFIED_CONCURRENT_ABORT_RAW = 'Aborted. Concurrency conflict (read-after-write). Retry?';
   S_PIN_EVOLVE_TOO_LATE_1 = 'Cannot pin for change at this time (already final-checking). (Case 1)';
@@ -419,6 +461,10 @@ const
   S_CREATE_CLASS_NOT_SET = 'Class type for list creation not set';
   S_INDEX_ALREADY_PINNED = 'Index node already pinned to an item/row';
   S_INDEX_PIN_NOT_FOUND = 'Index pin not found when unpinning';
+  S_ERROR_BAD_INODE_DURING_PIN = 'Bad INode getting cursor pin from INode.';
+  S_ERROR_BAD_IPIN_DURING_PIN = 'Bad IPin getting cursor pin from INode.';
+  S_ERROR_BAD_IPIN_DURING_PIN_CURRENT = 'Bad IPin getting current pin from INode';
+  S_ERROR_BAD_INODE_DURING_PIN_CURRENT = 'Bad INode getting current pin from INode';
 
 { Misc }
 
@@ -428,6 +474,7 @@ begin
   result := TMemDBMultiItem.Create;
 {$ELSE}
   New(result);
+  FillChar(result^, sizeof(result^), 0);
 {$ENDIF}
 end;
 
@@ -437,6 +484,7 @@ begin
   result := TMemDBPinnedItem.Create;
 {$ELSE}
   New(result);
+  FillChar(result^, sizeof(result^), 0);
 {$ENDIF}
 end;
 
@@ -446,6 +494,7 @@ begin
   result := TMemDBIndexPin.Create;
 {$ELSE}
   New(result);
+  FillChar(result^, sizeof(result^), 0);
 {$ENDIF}
 end;
 
@@ -504,6 +553,12 @@ end;
 procedure TMemDBReferenceReporter.DCPPost(Data, Changes, Pins: boolean; var Update: TReferenceUpdate);
 begin
   Update.Post := Data or Changes or Pins;
+end;
+
+procedure TMemDBReferenceReporter.DCPLazyHandle(const Update: TReferenceUpdate);
+begin
+  if Update.Pre <> Update.Post then
+    DCPHandle(Update);
 end;
 
 procedure TMemDBReferenceReporter.DCPHandle(const Update: TReferenceUpdate);
@@ -852,7 +907,7 @@ begin
     UnlockSelf;
   end;
   CPTidHandle(TidUp);
-  DCPHandle(RefUp);
+  DCPLazyHandle(RefUp);
 end;
 
 //TODO - This atomically works when updating
@@ -895,12 +950,12 @@ begin
     end
     else
     begin
-      //We can reasonably get here in some concurrency cases.
-      //(Non-repeatable reads).
-      //Because of the uniqueness of identifiers (guids), we're not allowed
-      //to arbitrarily undelete stuff.
       if not Assigned(Cur.Item) then
         raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_WOULD_UNDELETE)
+        //We can reasonably get here in some concurrency cases.
+        //(Non-repeatable reads).
+        //Because of the uniqueness of identifiers (guids), we're not allowed
+        //to arbitrarily undelete stuff.
       else
         Assert(not (Cur.Item is TMemDeleteSentinel));
     end;
@@ -930,7 +985,7 @@ begin
     UnlockSelf;
   end;
   CPTidHandle(TidUp);
-  DCPHandle(RefUp);
+  DCPLazyHandle(RefUp);
 end;
 
 procedure TMemDBMultiBuffered.RequestChange(const Tid: TTransactionId;  MinIso: TMDBIsolationLevel);
@@ -988,7 +1043,7 @@ begin
     UnlockSelf;
   end;
   CPTidHandle(TidUp);
-  DCPHandle(RefUp);
+  DCPLazyHandle(RefUp);
 end;
 
 //TODO - How to make sure that MultiBuffered "No pins after pre-commit"
@@ -1102,7 +1157,7 @@ begin
     UnlockSelf;
   end;
   CPTidHandle(TidUp);
-  DCPHandle(RefUp);
+  DCPLazyHandle(RefUp);
 end;
 
 procedure TMemDBMultiBuffered.Rollback(const Tid: TTransactionId; Reason: TMemDbTransReason);
@@ -1146,7 +1201,7 @@ begin
     UnlockSelf;
   end;
   CPTidHandle(TidUp);
-  DCPHandle(RefUp);
+  DCPLazyHandle(RefUp);
 end;
 
 function TMemDBMultiBuffered.PinForCursor(const Tid: TTransactionId): boolean;
@@ -1162,60 +1217,108 @@ begin
   //NOP.
 end;
 
-function TMemDBMultiBuffered.PinForCursorFromInode(const Tid: TTRansactionId; INode: TMemDBIndexLeaf): boolean;
+function TMemDbMultiBuffered.NewCurrentPinForINode(const Tid:TTransactionId; IPin: PMemDBIndexPin; Reason:TPinReason): TMemDBStreamable;
+var
+  INode: TMemDbIndexLeaf;
+  Pin: PMemDbPinnedItem;
+begin
+  //OK, this is a bit different. If we don't have a current pin,
+  //we can create one from the INode pin. It's potentially older
+  //than latest current, but gives us "snapshot-like" read consistency
+  //when initially traversing by INode.
+  //Subsequent modification still has consistency requirements.
+
+  Assert(not Assigned(FindPin(Tid)));
+  Assert(Assigned(IPin));
+  INode := IPin.INode;
+  Assert(Assigned(INode));
+  Assert(Assigned(INode.Pinned));
+
+  Pin := NewPinned;
+  DLItemInitObj(TObject(Pin), @Pin.Link);
+  Pin.Item := INode.Pinned.AddRef as TMemDbStreamable;
+  Assert(AssignedNotSentinel(Pin.Item));
+  Pin.PinnedCurrentTid := IPin.PinnedTid;
+  Pin.PinnedBy := Tid;
+  Pin.FinalCheck := (Reason = pinFinalCheck);
+  DLListInsertTail(@FPinnedItems, @Pin.Link);
+  result := Pin.Item;
+  Assert(Assigned(result));
+end;
+
+function TMemDbMultiBuffered.ReUseCurrentPinForINode(const Tid: TTransactionId; Pin: PMemDbPinnedItem; IPin: PMemDBIndexPin; Reason: TPinReason): TMemDbStreamable;
+begin
+  result := ReUseCurrentPinInternal(Pin, reason);
+  Assert(Assigned(result));
+  //Transitive consistency again, given we already have current pin,
+  //then it must be the same at repeatable read or greater.
+  if Tid.Iso >= ilReadRepeatable then
+    if Pin.PinnedCurrentTid <> IPin.PinnedTid then
+      raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ABORT_WAR_6);
+end;
+
+function TMemDBMultiBuffered.PinForCursorFromInode(const Tid: TTRansactionId; INode: TMemDBIndexLeaf; Reason: TPinReason): boolean;
 var
   RefUp: TReferenceUpdate;
-{$IFOPT C+}
   IPin: PMemDBIndexPin;
-{$ENDIF}
   CurPin: PMemDBPinnedItem;
   Item: TMemDBStreamable;
-  Multi: PMemDbMultiItem;
+  Nxt, Cur: PMemDbMultiItem;
 begin
   LockSelf;
   try
     DCPPre(RefUp);
     //First things first, check the INode is actually one of ours.
-    Assert(Assigned(INode));
-    Assert(Assigned(INode.Row));
-    Assert(Assigned(INode.Pinned));
-    Assert(INode.Row = self);
-{$IFOPT C+}
+    if not ((Assigned(INode)) and (Assigned(INode.Row))
+       and (Assigned(INode.Pinned)) and (INode.Row = self)) then
+      raise EMemDbInternalException.Create(S_ERROR_BAD_INODE_DURING_PIN);
     IPin := FindIndexPin(INode);
-    Assert(Assigned(IPin));
-{$ENDIF}
+    if not (Assigned(IPin) and (IPin.INode = INode)) then
+      raise EMemDBInternalException.Create(S_ERROR_BAD_IPIN_DURING_PIN);
+
     //This is effectively GetPinLatest, but with a twist.
-    Multi := FindNxtMultiItem(Tid);
-    Item := nil;
-    if Assigned(Multi) then
+
+    //Two earlier cases most likely when row found not by index, and read/written.
+    //so have a change and no current pin, or current pin not reached from iNode.
+    Nxt := FindNxtMultiItem(Tid);
+    Cur := FindCurMultiItem;
+    if Assigned(Nxt) then
     begin
-      Assert(Assigned(Multi.Item));
+      //Consistency requirements => Transitive,
+      //from INode, to CurPin, to Cur.Sel.Tid.
+      //INode Tid must be same as Cur.Sel.Tid
+      //If we have next at all, then CurPin, Cur.Sel.Tid has already been checked.
+
+      //We could just run with it, and provide next, but then PreCommit check would fail,
+      //and set of rows found by index not consistent with set of rows found
+      //by non-index traversal.
+      if Tid.Iso >= ilReadRepeatable then
+        if IPin.PinnedTid <> Cur.Sel.TId then
+          raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ABORT_WAR_5);
+
+      Assert(Assigned(Nxt.Item));
       Assert(not (INode.Pinned is TMemDeleteSentinel));
-      if INode.Pinned = Multi.Item then
-        Item := Multi.Item;
+      if not (Nxt.Item is TMemDeleteSentinel) then
+        Item := Nxt.Item
+      else
+        Item := nil;
     end
     else
     begin
-      //If INode same as we have previously pinned, then can use that!
+      //Again, make set of rows found by index traversal same as set of
+      //rows found by non-index traversal.
       CurPin := FindPin(Tid);
       if Assigned(CurPin) then
-      begin
-        if CurPin.Item = INode.Pinned then
-          Item := ReUseCurrentPinInternal(CurPin, pinEvolve)
-      end
+        Item := ReUseCurrentPinForINode(Tid, CurPin, IPin, Reason)
       else
-      begin
-        Multi := FindCurMultiItem;
-        if Multi.Item = INode.Pinned then
-          Item := NewCurrentPinInternal(Tid, pinEvolve)
-      end;
+        Item := NewCurrentPinForINode(Tid, IPin, Reason); //The twist is here.
     end;
     result := Assigned(Item);
     DCPPost(RefUp);
   finally
     UnlockSelf;
   end;
-  DCPHandle(RefUp);
+  DCPLazyHandle(RefUp);
 end;
 
 
@@ -1226,6 +1329,7 @@ var
   Pin: PMemDBIndexPin;
   Item: TMemDBStreamable;
   Multi: PMemDBMultiItem;
+  PinTid: TTransactionId;
 begin
   result := false;
   LockSelf;
@@ -1241,6 +1345,7 @@ begin
         Multi := FindCurMultiItem;
         Assert(Assigned(Multi));
         Item := Multi.Item;
+        PinTid := Multi.Sel.TId;
         Assert((not Assigned(Item)) or (not (Item is TMemDeleteSentinel)));
       end;
       abNext: begin
@@ -1250,7 +1355,10 @@ begin
         begin
           Assert(Assigned(Multi.Item));
           if not (Multi.Item is TMemDeleteSentinel) then
+          begin
             Item := Multi.Item;
+            PinTid := Multi.Sel.TId;
+          end;
         end;
       end;
       abLatest: begin
@@ -1260,7 +1368,10 @@ begin
         begin
           Assert(Assigned(Multi.Item));
           if not (Multi.Item is TMemDeleteSentinel) then
+          begin
             Item := Multi.Item;
+            PinTid := Multi.Sel.TId;
+          end;
         end
         else
         begin
@@ -1268,6 +1379,7 @@ begin
           Multi := FindCurMultiItem;
           Assert(Assigned(Multi));
           Item := Multi.Item;
+          PinTid := Multi.Sel.TId;
           Assert((not Assigned(Item)) or (not (Item is TMemDeleteSentinel)));
         end;
       end;
@@ -1277,10 +1389,12 @@ begin
     end;
     if not Assigned(Item) then
       exit;
+
     Pin := NewIndexPin;
     DLItemInitObj(TObject(Pin), @Pin.Link);
 
     Pin.INode := IndexNode; //No add-ref, node owns pin and will remove it.
+    Pin.PinnedTid := PinTid;
     IndexNode.Pinned := Item;
     IndexNode.Pinned.AddRef;
     IndexNode.Row := self;
@@ -1292,8 +1406,46 @@ begin
   finally
     UnlockSelf;
   end;
-  DCPHandle(RefUp);
+  DCPLazyHandle(RefUp);
 end;
+
+procedure TMemDBMultiBuffered.DupIndexPin(SourceNode, DestNode: TMemDBIndexLeaf);
+var
+  RefUp: TReferenceUpdate;
+  Pin, NewPin: PMemDBIndexPin;
+
+begin
+  //No race condition here: both nodes are known to exist in a tree
+  //which is undergoing manipulation, and the dop is called at the point
+  //where both are known to exist.
+  LockSelf;
+  try
+    DCPPre(RefUp);
+    //Check existing pin is all wired up good.
+    Assert(SourceNode.Row = Self);
+    Pin := FindIndexPin(SourceNode);
+    Assert(Assigned(Pin));
+    Assert(Pin.INode = SourceNode);
+    Assert(Assigned(SourceNode.Pinned));
+
+    //New pin which is just like the existing pin.
+    NewPin := NewIndexPin;
+    DLItemInitObj(TObject(NewPin), @NewPin.Link);
+    NewPin.INode := DestNode;
+    NewPin.PinnedTid := Pin.PinnedTid;
+    DestNode.Pinned := SourceNode.Pinned;
+    DestNode.Pinned.AddRef;
+    DestNode.Row := self;
+
+    DLListInsertTail(@FIndexPins, @NewPin.Link);
+    Assert(FindIndexPin(DestNode) = NewPin);
+    DCPPost(RefUp);
+  finally
+    UnlockSelf;
+  end;
+  DCPLazyHandle(RefUp);
+end;
+
 
 procedure TMemDBMultiBuffered.UnpinFromIndex(IndexNode: TMemDbIndexLeaf);
 var
@@ -1306,23 +1458,14 @@ begin
     Pin := FindIndexPin(IndexNode);
     if not Assigned(Pin) then
       raise EMemDBInternalException.Create(S_INDEX_PIN_NOT_FOUND);
-    Pin.INode := nil; //Synchronized under this lock...
-    IndexPinReleaseCommon(Pin);
+    Pin.INode := nil;  ///Belt and braces.
+    DLListRemoveObj(@Pin.Link);
+    DisposeIndexPin(Pin);
     DCPPost(RefUp);
   finally
     UnlockSelf;
   end;
-  DCPHandle(RefUp);
-end;
-
-procedure TMemDBMultiBuffered.IndexPinReleaseCommon(Pin: PMemDbIndexPin);
-begin
-  //Under lock.
-  if not Assigned(Pin.INode) then
-  begin
-    DLListRemoveObj(@Pin.Link);
-    DisposeIndexPin(Pin);
-  end;
+  DCPLazyHandle(RefUp);
 end;
 
 function TMemDBMultiBuffered.HoldIndexPinInLock(Pin: PMemDbIndexPin): PMemDbIndexPin;
@@ -1396,8 +1539,16 @@ end;
 
 function TMemDBMultiBuffered.ReUseCurrentPinInternal(Pin: PMemDbPinnedItem; Reason: TPinReason): TMemDbStreamable;
 begin
+  //At the moment, at commit time, things are pinned for "final check", to ensure
+  //user & code does not / cannot pin some later value.
+
+  //This prevents transactions which have previously failed a commit from being
+  //edited and recomitted. In most cases, there isn't much point: they are
+  //either out of date (concurrency), or have something a bit wrong.
+
+  //Email martin_c_harvey@hotmail.com if you'd like this changed.
   if (Reason = pinEvolve) and (Pin.FinalCheck) then
-    raise EMemDbInternalException.Create(S_PIN_EVOLVE_TOO_LATE_1);
+    raise EMemDBException.Create(S_PIN_EVOLVE_TOO_LATE_1);
   Pin.FinalCheck := Pin.FinalCheck or (Reason = pinFinalCheck);
   Assert(Assigned(Pin.Item));
   result := Pin.Item;
@@ -1428,7 +1579,7 @@ begin
     UnlockSelf;
   end;
   CPTidHandle(TidUp);
-  DCPHandle(RefUp);
+  DCPLazyHandle(RefUp);
 end;
 
 function TMemDbMultiBuffered.GetNext(const Tid: TTransactionId): TMemDBStreamable;
@@ -1489,7 +1640,7 @@ begin
     UnlockSelf;
   end;
   CPTidHandle(TidUp);
-  DCPHandle(RefUp);
+  DCPLazyHandle(RefUp);
 end;
 
 constructor TMemDbMultiBuffered.Create;

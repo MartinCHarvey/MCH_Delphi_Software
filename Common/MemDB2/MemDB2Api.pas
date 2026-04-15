@@ -306,7 +306,7 @@ const
   S_API_INDEX_MUST_HAVE_FIELDS = 'You must specify some fields to index on';
   S_API_INTERNAL_TAG_DATA_BAD = 'Index does not correspond with a valid tag';
   S_API_INTERNAL_READING_ROW = 'Internal error reading row data.';
-  S_API_TABLE_METADATA_NOT_COMMITED = 'No committed metadata for this table';
+  S_API_TABLE_METADATA_NOT_COMMITED = 'No committed metadata for this table (api level)';
   S_API_INTERNAL_CHANGING_ROW = 'Internal error changing row data.';
   S_API_ROW_BAD_STRUCTURE = 'Error changing row, field layout different from table.';
   S_API_SEARCH_REQUIRES_INDEX = 'Bad index name, or index not found, comitted indices only.';
@@ -370,15 +370,12 @@ begin
       DB.CommitLock.Release;
     end;
   except
-    on E:Exception do
-    begin
-      //Clear pins etc, although in this case, it's
-      //a non-start for the database.
-      //However, final deletion of entities should still work
-      //and delete everything provided we clear the pins.
-      DB.Rollback(PseudoTid, Reason);
-      raise;
-    end;
+    //Clear pins etc, although in this case, it's
+    //a non-start for the database.
+    //However, final deletion of entities should still work
+    //and delete everything provided we clear the pins.
+    DB.Rollback(PseudoTid, Reason);
+    raise;
   end;
 end;
 
@@ -405,6 +402,7 @@ begin
     on Exception do
     begin
       result.Free;
+      result := nil;
       raise; //Rely on later rollback etc to clear pins and such.
     end;
   end;
@@ -1558,7 +1556,7 @@ var
   IndexFieldDefs: TMemFieldDefs;
   AllFieldDefs: TMemStreamableList;
   FieldAbsIdxs: TFieldOffsets;
-  Next: TMemDBCursor;
+  Cur,Next: TMemDBCursor;
   NextFields, ResultFields: TMemStreamableList;
   bufSel: TABSelType;
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
@@ -1587,78 +1585,94 @@ begin
       IntToStr(FieldDefs[i].FieldIndex) + ' FieldAbsIdx: ' + IntToStr(FieldAbsIdxs[i]));
   end;
 {$ENDIF}
-  result := TidLocal.UserFindRowByIndexRoot(Idx, IndexFieldDefs, FieldAbsIdxs, IRoot, DataRecs);
+  Cur := TidLocal.UserFindRowByIndexRoot(Idx, IndexFieldDefs, FieldAbsIdxs, IRoot, DataRecs);
+  Next := nil;
+  result := nil;
+  try
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
-  if Assigned(Result) then
-  begin
-    GLogLog(SV_INFO, 'EDGE by Index, initial find '
-      + MemAPIPositionStrings[Pos] + ' ' + MDBIsoStrings[Iso] + ' OK');
-  end
-  else
-  begin
-    GLogLog(SV_INFO, 'EDGE by Index, initial find '
-      + MemAPIPositionStrings[Pos] + ' ' + MDBIsoStrings[Iso] + ' Failed');
-  end;
-{$ENDIF}
-  if Assigned(Result) then
-  begin
-    case Pos of
-      ptFirst: Pos := ptPrevious;
-      ptLast: Pos := ptNext;
+    if Assigned(Cur) then
+    begin
+      GLogLog(SV_INFO, 'EDGE by Index, initial find '
+        + MemAPIPositionStrings[Pos] + ' ' + MDBIsoStrings[Iso] + ' OK');
+    end
     else
-      Assert(false);
+    begin
+      GLogLog(SV_INFO, 'EDGE by Index, initial find '
+        + MemAPIPositionStrings[Pos] + ' ' + MDBIsoStrings[Iso] + ' Failed');
     end;
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-    GLogLog(SV_INFO, 'EDGE by Index, move extremity ' + MemAPIPositionStrings[Pos]);
 {$ENDIF}
-    repeat
-      Next := TidLocal.UserMoveToRowByIndexRoot(IRoot, result, Pos);
-      if Assigned(Next) then
-      begin
+    if Assigned(Cur) then
+    begin
+      case Pos of
+        ptFirst: Pos := ptPrevious;
+        ptLast: Pos := ptNext;
+      else
+        Assert(false);
+      end;
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
-    GLogLog(SV_INFO, 'EDGE by Index, found ' + MemAPIPositionStrings[Pos] + ' row');
+      GLogLog(SV_INFO, 'EDGE by Index, move extremity ' + MemAPIPositionStrings[Pos]);
 {$ENDIF}
-        //Isolation be damned, it's gonna break.
-        if not Result.Row.CheckFormatAgainstMetaDefs(Tr.Tid, abLatest, AllFieldDefs, pinEvolve) then
-          raise EMemDBConcurrencyException.Create(S_TABLE_FORMAT_CONCURRENTLY_CHANGED_1);
-          //Might get raised if buggy format, but normally only concurrency.
-        ResultFields := result.Row.GetPinLatest(Tr.Tid, bufSel, pinEvolve) as TMemStreamableList;
-
-        //Isolation be damned, it's gonna break.
-        if not Next.Row.CheckFormatAgainstMetaDefs(Tr.Tid, abLatest, AllFieldDefs, pinEvolve) then
-          raise EMemDBConcurrencyException.Create(S_TABLE_FORMAT_CONCURRENTLY_CHANGED_2);
-          //Might get raised if buggy format, but normally only concurrency.
-        NextFields := Next.Row.GetPinLatest(Tr.Tid, bufSel, pinEvolve) as TMemStreamableList;
-
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-        //Compare all fields.
-        if SameLayoutFieldsSame(NextFields, ResultFields, FieldAbsIdxs) then
+      repeat
+        Next := TidLocal.UserMoveToRowByIndexRoot(IRoot, Cur, Pos);
+        if Assigned(Next) then
         begin
-          GLogLog(SV_INFO, 'EDGE by Index ' + MemAPIPositionStrings[Pos] + ' row has same fields.');
-          for i := 0 to Pred(Length(FieldDefs)) do
+{$IFDEF DEBUG_DATABASE_NAVIGATE}
+      GLogLog(SV_INFO, 'EDGE by Index, found ' + MemAPIPositionStrings[Pos] + ' row');
+{$ENDIF}
+          //Isolation be damned, it's gonna break.
+          if not Cur.Row.CheckFormatAgainstMetaDefs(Tr.Tid, abLatest, AllFieldDefs, pinEvolve) then
+            raise EMemDBConcurrencyException.Create(S_TABLE_FORMAT_CONCURRENTLY_CHANGED_1);
+            //Might get raised if buggy format, but normally only concurrency.
+          ResultFields := Cur.Row.GetPinLatest(Tr.Tid, bufSel, pinEvolve) as TMemStreamableList;
+
+          //Isolation be damned, it's gonna break.
+          if not Next.Row.CheckFormatAgainstMetaDefs(Tr.Tid, abLatest, AllFieldDefs, pinEvolve) then
+            raise EMemDBConcurrencyException.Create(S_TABLE_FORMAT_CONCURRENTLY_CHANGED_2);
+            //Might get raised if buggy format, but normally only concurrency.
+          NextFields := Next.Row.GetPinLatest(Tr.Tid, bufSel, pinEvolve) as TMemStreamableList;
+
+{$IFDEF DEBUG_DATABASE_NAVIGATE}
+          //Compare all fields.
+          if SameLayoutFieldsSame(NextFields, ResultFields, FieldAbsIdxs) then
           begin
-            if (NextFields.Items[FieldAbsIdxs[i]] as TMemFieldData).FDataRec.FieldType = ftUnicodeString then
-              GLogLog(SV_INFO, 'Field['+ InttoStr(i) +'] is: ' +
-                (NextFields.Items[FieldAbsIdxs[i]] as TMemFieldData).FDataRec.sVal);
+            GLogLog(SV_INFO, 'EDGE by Index ' + MemAPIPositionStrings[Pos] + ' row has same fields.');
+            for i := 0 to Pred(Length(FieldDefs)) do
+            begin
+              if (NextFields.Items[FieldAbsIdxs[i]] as TMemFieldData).FDataRec.FieldType = ftUnicodeString then
+                GLogLog(SV_INFO, 'Field['+ InttoStr(i) +'] is: ' +
+                  (NextFields.Items[FieldAbsIdxs[i]] as TMemFieldData).FDataRec.sVal);
+            end;
+          end
+          else
+          begin
+            GLogLog(SV_INFO, 'EDGE by Index ' + MemAPIPositionStrings[Pos] + ' row differs.');
+            for i := 0 to Pred(Length(FieldDefs)) do
+            begin
+              if (NextFields.Items[FieldAbsIdxs[i]] as TMemFieldData).FDataRec.FieldType = ftUnicodeString then
+                GLogLog(SV_INFO, 'Field['+ InttoStr(i) +'] is: ' +
+                  (NextFields.Items[FieldAbsIdxs[i]] as TMemFieldData).FDataRec.sVal);
+            end;
           end;
-        end
-        else
-        begin
-          GLogLog(SV_INFO, 'EDGE by Index ' + MemAPIPositionStrings[Pos] + ' row differs.');
-          for i := 0 to Pred(Length(FieldDefs)) do
+{$ENDIF}
+          if not SameLayoutFieldsSame(NextFields, ResultFields, FieldAbsIdxs) then
           begin
-            if (NextFields.Items[FieldAbsIdxs[i]] as TMemFieldData).FDataRec.FieldType = ftUnicodeString then
-              GLogLog(SV_INFO, 'Field['+ InttoStr(i) +'] is: ' +
-                (NextFields.Items[FieldAbsIdxs[i]] as TMemFieldData).FDataRec.sVal);
+            Next.Free;
+            Next := nil
           end;
         end;
-{$ENDIF}
-        if not SameLayoutFieldsSame(NextFields, ResultFields, FieldAbsIdxs) then
+        if Assigned(Next) then
+        begin
+          Cur.Free;
+          Cur := Next;
           Next := nil;
-      end;
-      if Assigned(Next) then
-        result := Next;
-    until not Assigned(Next);
+        end;
+      until not Assigned(Next);
+      result := Cur;
+      Cur := nil;
+    end
+  finally
+    Cur.Free;
+    Next.Free;
   end;
 end;
 

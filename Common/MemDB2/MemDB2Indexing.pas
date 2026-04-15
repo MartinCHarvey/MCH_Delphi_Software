@@ -58,6 +58,7 @@ type
     //but other cursor handling code might.
     function Locate(Sel: TAbSelType; Pos: TMemAPIPosition; Cur: TMemDBIndexLeaf): TMemDBIndexLeaf;
     function Find(Sel: TAbSelType; SV: TMemDBIndexSearchVal): TMemDBIndexLeaf;
+    function CheckPresent(Sel: TAbSelType; Node: TMemDBIndexLeaf): boolean;
 
     //Add / remove guaranteed to add or remove in the tree, but
     //you may have to do a bit of hunting to find the right node from the row.
@@ -72,6 +73,8 @@ type
     procedure DiscardNext;
 
     property ParentIndex: TMemDbIndex read FParentIndex;
+    property FinalFieldOffsets: TFieldOffsets read FFinalFieldOffsets write FFinalFieldOffsets;
+    property SparseFieldOffsets: TFieldOffsets read FSparseFieldOffsets write FSparseFieldOffsets;
   end;
 
   TMemDBIndexLeaf = class(TCowTreeItem)
@@ -79,6 +82,11 @@ type
     FOriginalIndex: TMemDBIndex;
     FPinned: TMemDBStreamable;
     FRow: TObject;
+{$IFOPT C+}
+    FPinnedSet, FRowSet: boolean;
+    procedure SetPinned(NewPinned: TMemDBStreamable);
+    procedure SetRow(NewRow: TObject);
+{$ENDIF}
   protected
     class function ComparePointers(Own, Other: Pointer): integer;
     function DupNoInit(SrcTree: TCowTree): TCowTreeItem; override;
@@ -90,8 +98,13 @@ type
     procedure CopyFrom(Source: TCoWTreeItem); override;
 
     property OriginalIndex: TMemDbIndex read FOriginalIndex write FOriginalIndex;
+{$IFOPT C+}
+    property Pinned: TMemDBStreamable read FPinned write SetPinned;
+    property Row: TObject read FRow write SetRow;
+{$ELSE}
     property Pinned: TMemDBStreamable read FPinned write FPinned;
     property Row: TObject read FRow write FRow;
+{$ENDIF}
   end;
 
   TMemDbIndexSearchVal = class(TMemDBIndexLeaf)
@@ -146,6 +159,8 @@ function CompareFields(const OwnRec: TMemDbFieldDataRec; const OtherRec: TMemDbF
 function CompareFields(const OwnRec: TMemDbFieldDataRec; const OtherRec: TMemDbFieldDataRec): integer; inline;
 {$ENDIF}
 
+function TrailingZeros64(x: UInt64): Integer;
+
 const
   S_INDEXING_INTERNAL_FIELD_TYPE_1 = 'Internal indexing error: Different field types.';
   S_INDEXING_INTERNAL_FIELD_TYPE_2 = 'Internal indexing error: Unsupported field type.';
@@ -154,7 +169,7 @@ const
   S_BAD_POS_FOR_INDEX_OP = 'Bad API position argument for index operation';
   S_NEXT_PREVIOUS_REQUIRES_CURRENT = 'Next or previous by index requires current node.';
   S_INDEX_MOD_BAD_SELECTOR = 'Index selector does not agree with state of index.';
-  S_ADD_REQUIRES_NODE = 'Index addition requires a node to add';
+  S_ADD_REQUIRES_NODE = 'Index addition requires a node to add, and not in some other index.';
   S_FIND_REQUIRES_SEARCHVAL = 'Index find requires search value';
 
 implementation
@@ -393,7 +408,9 @@ begin
       ptNext, ptPrevious: begin
         if not Assigned(Cur) then
           raise EMemDBException.Create(S_NEXT_PREVIOUS_REQUIRES_CURRENT);
-        result := self.FindNeighbour(Cur, Root, FoundOrigin, Pos = ptPrevious) as TMemDbIndexLeaf;
+        WrCk(FoundOrigin, false);
+        result := self.FindNeighbour(Root, Cur, FoundOrigin, Pos = ptPrevious) as TMemDbIndexLeaf;
+        Assert(RdCk(FoundOrigin)); //Normal run-off-the end should still find what we supplied.
       end;
     else
       raise EMemDbInternalException.Create(S_BAD_POS_FOR_INDEX_OP);
@@ -415,6 +432,18 @@ begin
   result := SearchItem(SV, Root) as TMemDbIndexLeaf;
 end;
 
+function TMemDbIndex.CheckPresent(Sel: TAbSelType; Node: TMemDBIndexLeaf): boolean;
+var
+  Root, Leaf: TMemDbIndexLeaf;
+begin
+  Root := SelToRoot(Sel);
+  Assert(Assigned(Node));
+  Leaf := SearchNode(Node, Root) as TMemDBIndexLeaf;
+  if Assigned(Leaf) then
+    Assert(Leaf = Node);
+  result := Assigned(Leaf);
+end;
+
 function TMemDBIndex.Add(Sel: TAbSelType; New: TMemDBIndexLeaf): boolean;
 var
   Root, NewRoot: TMemDBIndexLeaf;
@@ -429,16 +458,20 @@ begin
     result := false;
 
     Root := SelToRoot(Sel);
+    //Selectors: abCurrent for both cloned and original indexes.
+    //abNext only for non-cloned indexes.
     case Sel of
-      abCurrent: SelGood := Assigned(FParentIndex);
+      abCurrent: SelGood := true;
       abNext: SelGood := not Assigned(FParentIndex);
     else
       SelGood := false;
     end;
     if not SelGood then
       raise EMemDBInternalException.Create(S_INDEX_MOD_BAD_SELECTOR);
-    if not Assigned(New) then
+    if (not Assigned(New)) or Assigned(New.FOriginalIndex) then
       raise EMemDBException.Create(S_ADD_REQUIRES_NODE);
+
+    New.FOriginalIndex := self;
     NewRoot := SearchAndInsert(New, Root, h, found) as TMemDBIndexLeaf;
     result := not RdCk(found);
     if Result then
@@ -452,7 +485,10 @@ begin
           FNext.Release; FNext := NewRoot;
         end;
       end;
-    end;
+    end
+    else
+      New.FOriginalIndex := nil;
+      //Just about the only time when we can alter node fields.
 {$IFOPT C+}
   finally
     h.Free;
@@ -514,6 +550,8 @@ begin
   if Assigned(FPinned) then
     (FRow as TMemDBRow).UnpinFromIndex(self);
   FPinned.Release;
+  FRow := nil;
+  FPinned := nil; //Protect against too much freeing in exception handlers.
   inherited;
 end;
 
@@ -522,11 +560,27 @@ function TMemDBIndexLeaf.DupNoInit(SrcTree: TCowTree): TCowTreeItem;
 begin
   result := inherited;
 {$IFOPT C+}
-  TMemDBIndexLeaf(result).FOriginalIndex := SrcTree as TMemDbIndex;;
+  TMemDBIndexLeaf(result).FOriginalIndex := SrcTree as TMemDbIndex;
 {$ELSE}
   TMemDBIndexLeaf(result).FOriginalIndex := TMemDBIndex(SrcTree);
 {$ENDIF}
 end;
+
+{$IFOPT C+}
+procedure TMemDbIndexLeaf.SetPinned(NewPinned: TMemDBStreamable);
+begin
+  Assert(not FPinnedSet);
+  FPinnedSet := true;
+  FPinned := NewPinned;
+end;
+
+procedure TMemDBIndexLeaf.SetRow(NewRow: TObject);
+begin
+  Assert(not FRowSet);
+  FRowSet := true;
+  FRow := NewRow;
+end;
+{$ENDIF}
 
 procedure TMemDBIndexLeaf.CopyFrom(Source: TCoWTreeItem);
 var
@@ -555,9 +609,10 @@ begin
   end;
   Assert(SameFamily);
 {$ENDIF}
-  FPinned.Release;
-  FPinned := TMemDbStreamable(SL.FPinned.AddRef);
-  Row := SL.Row;
+  (SL.Row as TMemDBRow).DupIndexPin(SL, self);
+  //Now we need a key de-dupe which is invariant even when we copy nodes,
+  //otherwise very bad things happen...
+  Assert(self.FPinned = SL.FPinned);
 end;
 
 function TMemDbIndexLeaf.Compare(Other: TCoWTreeItem;
@@ -568,7 +623,7 @@ var
   OwnFields, OtherFields: TMemRowFields;
   ff: integer;
   OwnField, OtherField: TMemDBStreamable;
-
+  OwnFieldData, OtherFieldData: TMemFieldData;
 begin
   OtherLeaf := TMemDbIndexLeaf(Other);
   Assert(Assigned(OtherLeaf));
@@ -601,15 +656,18 @@ begin
     Assert(AssignedNotSentinel(OwnField));
     Assert(AssignedNotSentinel(OtherField));
 {$IFOPT C+}
-    result := CompareFields((OwnField as TMemFieldData).FDataRec,
-                            (OtherField as TMemFieldData).FDataRec);
+    OwnFieldData := OwnField as TMemFieldData;
+    OtherFieldData := OtherField as TMemFieldData;
 {$ELSE}
-    result := CompareFields(TMemFieldData(OwnField).FDataRec,
-                            TMemFieldData(OtherField).FDataRec);
+    OwnFieldData := TMemFieldData(OwnField);
+    OtherFieldData := TMemFieldData(OtherField);
 {$ENDIF}
+    result := CompareFields(OwnFieldData.FDataRec,
+                            OtherFieldData.FDataRec);
+    Inc(ff);
   end;
   if (result = 0) and AllowKeyDedupe then
-    result := ComparePointers(self, other);
+    result := ComparePointers(self.FPinned, (Other as TMemDbIndexLeaf).FPinned);
 end;
 
 {$HINTS OFF}

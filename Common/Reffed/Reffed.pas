@@ -65,6 +65,7 @@ type
     FList: TList;
   protected
     function GetCount: integer;
+    procedure SetCount(NewCount: integer);
 {$IFOPT C+}
     function GetItem(Idx: integer): TReffed;
     procedure SetItem(Idx: integer; Item: TReffed);
@@ -81,7 +82,8 @@ type
     function AddNoRef(Item: TReffed): integer;
     procedure Clear;
     procedure Pack;
-    property Count: Integer read GetCount;
+     //Beware: SetCount acts like TList, and does not free stuff.
+    property Count: Integer read GetCount write SetCount;
     property Items[idx:integer]: TReffed read GetItem write SetItem; default;
   end;
 
@@ -214,6 +216,11 @@ end;
 function TReffedList.GetCount: integer;
 begin
   result := FList.Count;
+end;
+
+procedure TReffedList.SetCount(NewCount: integer);
+begin
+  FList.Count := NewCount;
 end;
 
 function TReffedList.GetItem(Idx: integer): TReffed;
