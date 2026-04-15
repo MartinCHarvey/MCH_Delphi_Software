@@ -112,13 +112,17 @@ type
     function DelHelper(InQR: TDoubleItemVars; var h: TChkBool; var found:TChkBool): TDoubleItemVars;
     function BalanceLeft(Inp: TCowTreeItem; dl: boolean; var h:TChkBool): TCowTreeItem;
     function BalanceRight(Inp: TCowTreeItem; dl: boolean; var h:TChkBool): TCowTreeItem;
+    function SearchGeneric(item: TCoWTreeItem; Inp: TCowTreeItem; AllowKeyDedupe: boolean): TCowTreeItem;
   protected
     function Delete(item: TCoWTreeItem; Inp: TCowTreeItem;
                              var h: TChkBool; var found:TChkBool): TCowTreeItem;
     function SearchAndInsert(item: TCoWTreeItem; Inp: TCowTreeItem;
                              var h: TChkBool; var found:TChkBool): TCowTreeItem;
     function SearchNearItem(item: TCoWTreeItem; Inp: TCowTreeItem): TCowTreeItem;
+    //Search based on key value (no de-dup of keys/nodes).
     function SearchItem(item: TCoWTreeItem; Inp: TCowTreeItem): TCowTreeItem;
+    //Search for a specific node including key dedup.
+    function SearchNode(item: TCoWTreeItem; Inp: TCowTreeItem): TCowTreeItem;
     function FindNeighbour(Current, Origin: TCoWTreeItem; var FoundOrigin: TChkBool; FindLowerNeighbour: boolean): TCoWTreeItem;
     function LeftMost(Item: TCoWTreeItem): TCoWTreeItem;
     function RightMost(Item: TCoWTreeItem): TCoWTreeItem;
@@ -306,7 +310,16 @@ end;
 //Item is searching from (initially root), p is result.
 //No tree mods.
 function TCowTree.SearchItem(item: TCoWTreeItem; Inp: TCowTreeItem): TCowTreeItem;
-//procedure TCowTree.SearchItem(item: TCowTreeItem; var p: TCowTreeItem);
+begin
+  result := SearchGeneric(item, Inp, false);
+end;
+
+function TCowTree.SearchNode(item: TCoWTreeItem; Inp: TCowTreeItem): TCowTreeItem;
+begin
+  result := SearchGeneric(item, Inp, true);
+end;
+
+function TCowTree.SearchGeneric(item: TCoWTreeItem; Inp: TCowTreeItem; AllowKeyDedupe: boolean): TCowTreeItem;
 var
   comparison: integer;
 begin
@@ -317,7 +330,7 @@ begin
       result := nil;
       exit;
     end;
-    comparison := item.compare(InP, false);
+    comparison := item.compare(InP, AllowKeyDedupe);
     if comparison > 0 then
       InP := InP.left
     else if comparison < 0 then

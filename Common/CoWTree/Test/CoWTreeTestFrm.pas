@@ -301,6 +301,7 @@ var
   TTDat: TTrivialDataItem;
   a,b: integer;
 begin
+  //Check it forward.
   Store.FirstByIndex(TObject(1), IRec);
   TestItem := FCowTree.First(Sel) as TCowTestItem;
   Chk(Assigned(IRec) = Assigned(TestItem));
@@ -317,6 +318,25 @@ begin
 
     Store.NextByIndex(TObject(1), IRec);
     TestItem := FCowTree.NeighbourNode(TestItem, Sel, false) as TCowTestItem;
+    Chk(Assigned(IRec) = Assigned(TestItem));
+  end;
+  //And backward.
+  Store.LastByIndex(TObject(1), IRec);
+  TestItem := FCowTree.Last(Sel) as TCowTestItem;
+  Chk(Assigned(IRec) = Assigned(TestItem));
+  while Assigned(IRec) do
+  begin
+    TTDat := Irec.Item as TTrivialDataItem;
+    Chk(Assigned(TTDat));
+    //Check keys.
+    Chk(TTDat.Key = TestItem.Key);
+    //Check balance factors.
+    a := TTDat.Bal(TItemRecHack(IRec), TIndexedStoreHack(Store));
+    b := TestItem.bal;
+    Chk(a = b);
+
+    Store.PreviousByIndex(TObject(1), IRec);
+    TestItem := FCowTree.NeighbourNode(TestItem, Sel, true) as TCowTestItem;
     Chk(Assigned(IRec) = Assigned(TestItem));
   end;
 end;

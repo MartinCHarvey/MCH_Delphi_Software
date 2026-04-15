@@ -144,6 +144,7 @@ begin
         as TMemAPITableMetadata;
       if not Assigned(TableMeta) then
       begin
+        LogTimeIncr('Creating: Test table');
         DBAPI.CreateTable('Test table');
         TableMeta := DBAPI.GetAPIObjectFromEntity('Test table', APITableMetadata)
           as TMemAPITableMetadata;
@@ -2419,26 +2420,33 @@ begin
 end;
 
 procedure TForm1.IndexTest2Click(Sender: TObject);
-{$IFDEF MEMDB2_TEMP_REMOVE}
 var
   Pass: boolean;
   Trans: TMemDBTransaction;
   DBAPI: TMemAPIDatabase;
-  Table: TMemDBHandle;
   TableMeta: TMemAPITableMetadata;
   TableData: TMemAPITableData;
-  i: integer;
+  i, tmp: integer;
   Data: TMemDbFieldDataRec;
 
   procedure DelTable;
+  var
+    Names: TStringList;
   begin
     Trans := FSession.StartTransaction(amReadWrite);
     try
       DBAPI := Trans.GetAPI;
       try
-        Table := DBAPI.OpenTableOrKey('IndexTest');
-        if Assigned(Table) then
-          DBAPI.DeleteTableOrKey('IndexTest');
+        Names := DBAPI.GetEntityNames;
+        try
+          if Names.IndexOf('IndexTest') >= 0 then
+          begin
+            LogTimeIncr('DelTable deleted: IndexTest');
+            DBAPI.DeleteTableOrKey('IndexTest');
+          end;
+        finally
+          Names.Free;
+        end;
       finally
         DBAPI.Free;
       end;
@@ -2461,8 +2469,7 @@ var
     try
       DBAPI := Trans.GetAPI;
       try
-        Table := DBAPI.OpenTableOrKey('IndexTest');
-        TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+        TableData := DBAPI.GetAPIObjectFromEntity('IndexTest', APITableData)  as TMemAPITableData;
         try
           Pass := TableData.Locate(TMemAPIPosition.ptFirst);
           while TableData.RowSelected do
@@ -2498,8 +2505,9 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Table := DBAPI.CreateTable('IndexTest');
-      TableMeta := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata) as TMemAPITableMetadata;
+      LogTimeIncr('Creating: IndexTest');
+      DBAPI.CreateTable('IndexTest');
+      TableMeta := DBAPI.GetAPIObjectFromEntity('IndexTest', APITableMetadata)  as TMemAPITableMetadata;
       try
         TableMeta.CreateField('Field1', ftInteger);
       finally
@@ -2513,7 +2521,7 @@ begin
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      LogTimeIncr('Index test 1ai failed.');
+      LogTimeIncr('Index test 1a failed.');
       raise;
     end;
   end;
@@ -2521,9 +2529,8 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Table := DBAPI.OpenTableOrKey('IndexTest');
-      TableMeta := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata) as TMemAPITableMetadata;
-      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+      TableData := DBAPI.GetAPIObjectFromEntity('IndexTest', APITableData)  as TMemAPITableData;
+      TableMeta := DBAPI.GetAPIObjectFromEntity('IndexTest', APITableMetadata)  as TMemAPITableMetadata;
       try
         TableMeta.CreateIndex('Index1', 'Field1', [iaUnique, iaNotEmpty]);
         for i := 1 to LIMIT do
@@ -2555,14 +2562,15 @@ begin
   DelTable;
 
   //1b) Unique values, one zero.
-  //1bii) Fail case.
+  //1bi) Fail case.
   Pass := false;
   Trans := FSession.StartTransaction(amReadWrite);
   try
     DBAPI := Trans.GetAPI;
     try
-      Table := DBAPI.CreateTable('IndexTest');
-      TableMeta := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata) as TMemAPITableMetadata;
+      LogTimeIncr('Creating: IndexTest');
+      DBAPI.CreateTable('IndexTest');
+      TableMeta := DBAPI.GetAPIObjectFromEntity('IndexTest', APITableMetadata)  as TMemAPITableMetadata;
       try
         TableMeta.CreateField('Field1', ftInteger);
       finally
@@ -2572,21 +2580,22 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
+    LogTimeIncr('Index test 1b OK.');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      LogTimeIncr('Index test 1bi failed.');
+      LogTimeIncr('Index test 1b failed.');
       raise;
     end;
   end;
+
   Trans := FSession.StartTransaction(amReadWrite);
   try
     DBAPI := Trans.GetAPI;
     try
-      Table := DBAPI.OpenTableOrKey('IndexTest');
-      TableMeta := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata) as TMemAPITableMetadata;
-      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+      TableData := DBAPI.GetAPIObjectFromEntity('IndexTest', APITableData)  as TMemAPITableData;
+      TableMeta := DBAPI.GetAPIObjectFromEntity('IndexTest', APITableMetadata)  as TMemAPITableMetadata;
       try
         TableMeta.CreateIndex('Index1', 'Field1', [iaUnique, iaNotEmpty]);
         for i := 0 to LIMIT do
@@ -2606,7 +2615,7 @@ begin
     end;
     Pass := true;
     Trans.CommitAndFree;
-    LogTimeIncr('Index test 1bi failed.');
+    LogTimeIncr('Index test 1bi failed. (commited OK when shouldn''t)');
   except
     on E:Exception do
     begin
@@ -2617,7 +2626,7 @@ begin
       end
       else
       begin
-        LogTimeIncr('Index test 1bi failed.');
+        LogTimeIncr('Index test 1bi failed. (failed before commit)');
         raise;
       end;
     end;
@@ -2626,14 +2635,15 @@ begin
   DelTable;
 
   //1c) A duplicate value.
-  //1cii) Fail case.
+  //1ci) Fail case.
   Pass := false;
   Trans := FSession.StartTransaction(amReadWrite);
   try
     DBAPI := Trans.GetAPI;
     try
-      Table := DBAPI.CreateTable('IndexTest');
-      TableMeta := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata) as TMemAPITableMetadata;
+      LogTimeIncr('Creating: IndexTest');
+      DBAPI.CreateTable('IndexTest');
+      TableMeta := DBAPI.GetAPIObjectFromEntity('IndexTest', APITableMetadata)  as TMemAPITableMetadata;
       try
         TableMeta.CreateField('Field1', ftInteger);
       finally
@@ -2643,11 +2653,12 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
+    LogTimeIncr('Index test 1c OK.');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      LogTimeIncr('Index test 1ci failed.');
+      LogTimeIncr('Index test 1c failed.');
       raise;
     end;
   end;
@@ -2655,9 +2666,8 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Table := DBAPI.OpenTableOrKey('IndexTest');
-      TableMeta := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata) as TMemAPITableMetadata;
-      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+      TableData := DBAPI.GetAPIObjectFromEntity('IndexTest', APITableData)  as TMemAPITableData;
+      TableMeta := DBAPI.GetAPIObjectFromEntity('IndexTest', APITableMetadata)  as TMemAPITableMetadata;
       try
         TableMeta.CreateIndex('Index1', 'Field1', [iaUnique, iaNotEmpty]);
         for i := 1 to LIMIT do
@@ -2682,7 +2692,7 @@ begin
     end;
     Pass := true;
     Trans.CommitAndFree;
-    LogTimeIncr('Index test 1ci failed.');
+    LogTimeIncr('Index test 1ci failed. (commited OK when shouldn''t)');
   except
     on E:Exception do
     begin
@@ -2693,7 +2703,7 @@ begin
       end
       else
       begin
-        LogTimeIncr('Index test 1ci failed.');
+        LogTimeIncr('Index test 1ci failed.  (failed before commit)');
         raise;
       end;
     end;
@@ -2702,14 +2712,14 @@ begin
 
   DelRows;
 
+  //1d
   //Now, create the index (we expected previous test to fail).
   //... and leave it in place.
   Trans := FSession.StartTransaction(amReadWrite);
   try
     DBAPI := Trans.GetAPI;
     try
-      Table := DBAPI.OpenTableOrKey('IndexTest');
-      TableMeta := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata) as TMemAPITableMetadata;
+      TableMeta := DBAPI.GetAPIObjectFromEntity('IndexTest', APITableMetadata)  as TMemAPITableMetadata;
       try
         TableMeta.CreateIndex('Index1', 'Field1', [iaUnique, iaNotEmpty]);
       finally
@@ -2719,12 +2729,12 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-    LogTimeIncr('Index test, add permanent index OK');
+    LogTimeIncr('Index test 1d OK');
   except
     on E:Exception do
     begin
       Trans.RollbackAndFree;
-      LogTimeIncr('Index test, add permanent index failed');
+      LogTimeIncr('Index test 1d failed');
       raise;
     end;
   end;
@@ -2736,8 +2746,7 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Table := DBAPI.OpenTableOrKey('IndexTest');
-      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+      TableData := DBAPI.GetAPIObjectFromEntity('IndexTest', APITableData)  as TMemAPITableData;
       try
         for i := 1 to LIMIT do
         begin
@@ -2754,11 +2763,11 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-    LogTimeIncr('Index test 2ai OK.');
+    LogTimeIncr('Index test 2a OK.');
   except
     on E:Exception do
     begin
-      LogTimeIncr('Index test 2ai failed.');
+      LogTimeIncr('Index test 2a failed.');
       Trans.RollbackAndFree;
       raise;
     end;
@@ -2773,8 +2782,7 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Table := DBAPI.OpenTableOrKey('IndexTest');
-      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+      TableData := DBAPI.GetAPIObjectFromEntity('IndexTest', APITableData)  as TMemAPITableData;
       try
         for i := 0 to LIMIT do
         begin
@@ -2792,7 +2800,7 @@ begin
     end;
     Pass := true;
     Trans.CommitAndFree;
-    LogTimeIncr('Index test 2bi failed.');
+    LogTimeIncr('Index test 2bi failed. (commited OK when shouldn''t)');
   except
     on E:Exception do
     begin
@@ -2803,7 +2811,7 @@ begin
       end
       else
       begin
-        LogTimeIncr('Index test 2bi failed.');
+        LogTimeIncr('Index test 2bi failed.  (failed before commit)');
         raise;
       end;
     end;
@@ -2818,8 +2826,7 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Table := DBAPI.OpenTableOrKey('IndexTest');
-      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+      TableData := DBAPI.GetAPIObjectFromEntity('IndexTest', APITableData)  as TMemAPITableData;
       try
         for i := 1 to LIMIT do
         begin
@@ -2842,7 +2849,7 @@ begin
     end;
     Pass := true;
     Trans.CommitAndFree;
-    LogTimeIncr('Index test 2ci failed.');
+    LogTimeIncr('Index test 2ci failed. (commited OK when shouldn''t)');
   except
     on E:Exception do
     begin
@@ -2853,25 +2860,18 @@ begin
       end
       else
       begin
-        LogTimeIncr('Index test 2ci failed.');
+        LogTimeIncr('Index test 2ci failed.  (failed before commit)');
         raise;
       end;
     end;
   end;
 end;
-{$ELSE}
-begin
-  Assert(false); //TODO - rewrite this.
-end;
-{$ENDIF}
 
 //Basic test of indexing.
 procedure TForm1.IndexTestClick(Sender: TObject);
-{$IFDEF MEMDB2_TEMP_REMOVE}
 var
   Trans: TMemDBTransaction;
   DBAPI: TMemAPIDatabase;
-  Table: TMemDBHandle;
   TableMeta: TMemAPITableMetadata;
   TableData: TMemAPITableData;
   Data: TMemDbFieldDataRec;
@@ -2881,11 +2881,8 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Table := DBAPI.OpenTableOrKey('Test table');
-      TableMeta := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata)
-        as TMemAPITableMetadata;
-      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData)
-        as TMemAPITableData;
+      TableMeta := DBAPI.GetAPIObjectFromEntity('Test table', APITableMetadata) as TMemAPITableMetadata;
+      TableData := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
       try
         TableMeta.CreateIndex('Index1', 'Int', [iaUnique, iaNotEmpty]);
         TableData.Locate(ptFirst, '');
@@ -2948,9 +2945,7 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Table := DBAPI.OpenTableOrKey('Test table');
-      TableMeta := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata)
-        as TMemAPITableMetadata;
+      TableMeta := DBAPI.GetAPIObjectFromEntity('Test table', APITableMetadata) as TMemAPITableMetadata;
       try
         TableMeta.CreateIndex('Index2', 'U64', [iaUnique, iaNotEmpty]);
         TableMeta.CreateIndex('Index3', 'String', [iaUnique, iaNotEmpty]);
@@ -2975,14 +2970,15 @@ begin
     end;
   end;
 
+  //TODO - Test index evolution when changing data, no index changes.
+
+
     //Delete index and associated field.
   Trans := FSession.StartTransaction(amReadWrite);
   try
     DBAPI := Trans.GetAPI;
     try
-      Table := DBAPI.OpenTableOrKey('Test table');
-      TableMeta := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata)
-        as TMemAPITableMetadata;
+      TableMeta := DBAPI.GetAPIObjectFromEntity('Test table', APITableMetadata) as TMemAPITableMetadata;
       try
         TableMeta.DeleteIndex('Index1');
         TableMeta.DeleteField('Int');
@@ -3008,11 +3004,8 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Table := DBAPI.OpenTableOrKey('Test table');
-      TableMeta := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata)
-        as TMemAPITableMetadata;
-      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData)
-        as TMemAPITableData;
+      TableMeta := DBAPI.GetAPIObjectFromEntity('Test table', APITableMetadata) as TMemAPITableMetadata;
+      TableData := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
       try
         //Add /delete indices at same time as add/deleting deleting field.
         TableMeta.DeleteIndex('Index2');
@@ -3040,11 +3033,6 @@ begin
     end;
   end;
 end;
-{$ELSE}
-begin
-  Assert(false); //TODO - rewrite this.
-end;
-{$ENDIF}
 
 procedure TForm1.MFFKeyTestClick(Sender: TObject);
 {$IFDEF MEMDB2_TEMP_REMOVE}
@@ -4006,6 +3994,7 @@ begin
           begin
             TestAPI.Free;
             DBAPI.DeleteTableOrKey(Strings[i]);
+            LogTimeIncr('Reset deleted: ' + Strings[i]);
           end;
         end;
         //And now the tables.
@@ -4016,6 +4005,7 @@ begin
           begin
             TestAPI.Free;
             DBAPI.DeleteTableOrKey(Strings[i]);
+            LogTimeIncr('Reset deleted: ' + Strings[i]);
           end;
         end;
       finally

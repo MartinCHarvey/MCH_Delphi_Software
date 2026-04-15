@@ -29,6 +29,8 @@ IN THE SOFTWARE.
   Also main logic for table and DB handling, ACID evolution.
 }
 
+//TODO - Check use of TMemDbRowFields in all cases where applicable.
+
 // TODO - When all is up and working, look at possibly
 // out of memory exception paths, and how to make them better.
 // Just go thru all the cases by class type and alloc position.
@@ -457,8 +459,6 @@ type
 
   TMemDblBufListHelper = class;
 
-  TIndexRootList = TReffedList;
-
   TCommitChangeMade = ( ccmAddedNewTagStructs,
                         ccmDeleteUnusedIndices,
                         ccmIndexesToTemporary);
@@ -514,18 +514,17 @@ type
     FIndexChangesets: TIndexChangeArray;
     FFieldChangesets: TFieldChangeArray;
     FIndexInit: boolean;
-    FLocalIndexCopies: TIndexRootList;
 
-    //TODO - Need store here, or can get away with DLList?
-    //But then each MemDBRow needs a list of lists, which is a pain.
+    FLocalIndexCopies: TReffedList;
+    FNewBuildIndices: TReffedList;
 
     FCPRows: TIndexedStoreO; //Rows changed or pinned by cur Txion.
-    //TODO - Local (Next) indices.
-    function LookaheadHelper(Stream: TStream; Scratch: boolean): TMemDBRow;
+
+    function LookaheadHelper(Stream: TStream; Scratch: boolean; var Created: boolean): TMemDBRow;
 
     procedure CheckTableRowCount;
     procedure CheckChangedRowStructure(Reason: TMemDBTransReason);
-    procedure CheckPartialIndexes;
+    procedure BuildCheckPartialIndexes;
     procedure RowLocalPreCommit(Reason: TMemDbTransReason);
 
     procedure UpdateHelpersAndIndices(PinReason: TPinReason);
@@ -545,9 +544,15 @@ type
 
     procedure PreCommit(Reason: TMemDBTransReason);
     procedure Commit(Reason: TMemDBTransReason);
-    procedure MetaIndexCommit(Reason: TMemDBTransReason);
     procedure Rollback(Reason: TMemDBTransReason);
+
+    procedure MetaIndexCommit(Reason: TMemDBTransReason);
     procedure MetaIndexRollback(Reason: TMemDBTransReason);
+    procedure MetaIndexLocalRollback(Reason: TMemDBTransReason);
+
+    procedure BuildValidateNewIndexesCommon(LocalIter: boolean);
+    procedure BuildValidateNewIndexesOutsideCommitLock;
+    procedure BuildValidateNewIndexesInsideCommitLock;
 
     procedure RowCPTidHandle(Sender: TObject; const Update: TTidUpdate);
   public
@@ -592,18 +597,22 @@ type
     procedure Init(const RowGuid: TGuid);
   end;
 
+  //Prohibits operations on all rows in a table whilst it is being modified.
+  //Better to abort the silly little transactions changing individual rows
+  //than one big one restructuring the table.
 {$IFOPT C+}
-  TRowAdditionLock = class(TTrackable)
+  TRowChangeLock = class(TTrackable)
 {$ELSE}
-  TRowAdditionLock = record
+  TRowChangeLock = record
 {$ENDIF}
     FSiblings: TDLEntry;
     Tid: TTransactionId;
+    ProhibitAdd, ProhibitChange, ProhibitDelete: boolean;
   end;
 {$IFOPT C+}
-  PRowAdditionLock = TRowAdditionLock;
+  PRowChangeLock = TRowChangeLock;
 {$ELSE}
-  PRowAdditionLock = ^TRowAdditionLock;
+  PRowChangeLock = ^TRowChangeLock;
 {$ENDIF}
 
 
@@ -624,7 +633,7 @@ type
     FTidLocalStructures: TDLEntry;
 
     FMetaIndexLock: TCriticalSection;
-    FMasterIndexes: TIndexRootList;
+    FMasterIndexes: TReffedList;
 
 {$IFDEF MEMDB2_TEMP_REMOVE}
     //TODO - Just get rid of all this.
@@ -648,14 +657,20 @@ type
     FEmptyList: TMemStreamableList;
 {$ENDIF}
   protected
-    function AddRowAdditionLockInCrit(const Tid: TTRansactionId): PRowAdditionLock;
-    function ProhibitRowAdd(const Tid: TTRansactionId): boolean;
-    procedure FindRmRowAdditionLock(const Tid: TTransactionId);
-    function NewRowAddLock: PRowAdditionLock;
-    procedure DisposeRowAddLock(Lock: PRowAdditionLock);
+    //Returns newly added for this tid.
+    function AddAllRowProhibitInCrit(const Tid: TTRansactionId;
+      ProhibitAdd, ProhibitChange, ProhibitDelete: boolean): boolean;
 
-    //TODO - Handle CPTid changes from rows, build TidLocal if you need to,
-    //Punt up to TidLocal.
+    procedure GetProhibitions(const Tid: TTRansactionId;
+                             var AddProhibited: boolean;
+                             var ChangeProhibited: boolean;
+                             var DeleteProhibited: boolean);
+
+    function FindRowProhibitLock(const Tid: TTransactionId): PRowChangeLock;
+    procedure FindRmRowProhibitLock(const Tid: TTransactionId);
+    function NewRowProhibitLock: PRowChangeLock;
+    procedure DisposeRowProhibitLock(Lock: PRowChangeLock);
+
     procedure RowDCPHandleAndForward(Sender: TObject; const Update: TReferenceUpdate);
     procedure RowCPTidHandleAndForward(Sender: TObject; const Update: TTidUpdate);
 
@@ -666,6 +681,7 @@ type
     procedure HandleReleaseForData(Sender: TObject);
 
     function GetTidLocal(const Tid: TTransactionId): TTidLocal;
+
     //This is not entirely race free: Insertion into the initial list
     //is race free, but no guarantee fully init until initialising call
     //has returned. However. Assumption is that calls for a certain
@@ -1046,7 +1062,7 @@ const
   S_DATA_AND_LAYOUT_CHANGE_TO_JOURNAL = 'Not allowed: Table has both changed data and layout to journal!';
   S_ROW_MAINT_INTERNAL = 'Row maintenance: Expect commit/rollback from lookaside in order.';
   S_CONCURRENT_MODIFY_DURING_REPLAY = 'Unexpected concurrent journal modification during replay.';
-  S_MODIFIED_CONCURRENT_ROW_ADD = 'Aborted. Concurrency conflict. (Rows added whilst changing table layout). Retry?';
+  S_MODIFIED_CONCURRENT_ROW_OP = 'Aborted. Concurrency conflict. (Changing rows whilst other tx changes layout). Retry?';
   S_INTERNAL_REGEN_CHANGESETS_1 = 'Internal error regenating changesets (1).';
   S_INTERNAL_REGEN_CHANGESETS_2 = 'Internal error regenating changesets (2).';
   S_INTERNAL_REGEN_CHANGESETS_3 = 'Internal error regenating changesets (3).';
@@ -1057,6 +1073,7 @@ const
   S_INDEX_FIELD_COUNTS_BAD_2 = 'Regen changesets: Query fields for index gave bad data (2).';
   S_INDEX_REARRANGE_BAD = 'Regen changesets: Abs/Rel index field check failed despite previous checks.';
   S_TABLE_ADJUST_CONCURRENCY_CONFLICT = 'Concurrency conflict adjusting table format.';
+  S_TABLE_ADJUST_REPEAT_FAILED = 'Repeated attempt to adjust table structure failed, time to rollback and start again.';
   S_TABLE_ADJUST_FAILED_1 = 'Internal error adjusting table structure (1).';
   S_TABLE_ADJUST_FAILED_2 = 'Internal error adjusting table structure (2).';
   S_MOVE_ROW_NOT_VALID_POSITION = 'User move of row must specify a valid position/direction.';
@@ -1065,6 +1082,34 @@ const
   S_LOCAL_INDEX_INSERTION_BAD_1 = 'Local index insertion failed (1).';
   S_LOCAL_INDEX_INSERTION_BAD_2 = 'Local index insertion failed (2).';
   S_INDEX_PIN_COLLATION_BAD = 'Index pin collation bad: Unexpected number of local INodes.';
+  S_NAV_TABLE_METADATA_NOT_COMMITED = 'No committed metadata for this table (nav level)';
+  S_FIELD_LIST_BAD_FOR_SV_COMPARISON = 'Field list bad (searchval comparison)';
+  S_ZERO_LENGTH_FIELD_LIST_COMPARING_SV = 'Field list empty (searchval comparison)';
+  S_SV_FIELD_COUNT_INCONSISTENT = 'Field count inconsistent (searchval comparison)';
+  S_SV_FIELD_OFFSET_OOR = 'Field offset out of range (searchval comparison)';
+  S_SV_FIELD_BAD = 'Field empty or deleted (searchval comparison)';
+  S_SV_FIELDS_DIFFERENT_FORMAT = 'Field formats do not match (seachval comparison)';
+  S_TABLE_FORMAT_CONCURRENTLY_CHANGED_NAV_0 = 'Concurrency: Table format changed whilst iterating (Nav 0).';
+  S_TABLE_FORMAT_CONCURRENTLY_CHANGED_NAV_1 = 'Concurrency: Table format changed whilst iterating (Nav 1).';
+  S_TABLE_FORMAT_CONCURRENTLY_CHANGED_NAV_2 = 'Concurrency: Table format changed whilst iterating (Nav 2).';
+  S_ROW_DELETED_NAV_0 = 'Row unexpectedly deleted (Nav 0).';
+  S_ROW_DELETED_NAV_1 = 'Row unexpectedly deleted (Nav 1).';
+  S_ROW_DELETED_NAV_2 = 'Row unexpectedly deleted (Nav 2).';
+  S_FIELDS_DONT_MATCH_IN_SEARCH = 'Internal error: Search Succeeded. but fields don''t match.';
+  S_NEXT_PREV_BY_IDX_NO_INODE = 'Next/Previous by Idx. Cursor, but no INode!';
+  S_NEXT_PREV_BY_IDX_INODE_FIND_FAILED = 'Next/Previous by Idx. Couldn''t find INode for index.';
+  S_ERROR_GETTING_OFFSETS_IN_INDEX_BUILD = 'Error getting field defs/offsets during index build';
+  S_PIN_FAILED_DURING_INDEX_BUILD = 'Pin for INode failed during index build';
+  S_PIN_FAILED_DURING_INDEX_BUILD_2 = 'Pin for INode failed during index build, despite change flags indicating possible.';
+  S_INSERT_FAILED_DURING_INDEX_BUILD = 'Tree insertion failed during index build.';
+  S_PIN_FAILURE_DURING_INDEX_VALIDATE = 'Pin for cursor failed during index validation.';
+  S_PIN_FIELDS_FAILURE_DURING_INDEX_VALIDATE = 'Pin fields failed during index validate, despite OK cursor.';
+  S_SPARSENESS_DIFFERS_CHECKING_INDEX = 'Row formats differ checking index (should be all sparse, or all compact).';
+  S_ERROR_IPINS_MODIFYING_INDEX = 'Confusion with IPins modifying index.';
+  S_ERROR_MODIFYING_INDEX_REMOVE = 'Failed to remove from tree during index modification.';
+  S_ERROR_PINNING_INDEX_ADD = 'Error adding pin during index modification.';
+  S_ERROR_MODIFYING_INDEX_ADD = 'Error adding to tree during index modification.';
+  S_ERROR_GETTING_OFFSETS_IN_INDEX_VALIDATE = 'Error getting field defs/offsets during index validation';
 
 { Misc Functions }
 
@@ -1114,6 +1159,39 @@ begin
     FieldData := F as TMemFieldData;
     ZeroRec.FieldType := FieldData.FDataRec.FieldType;
     if not DataRecsSame(ZeroRec, FieldData.FDataRec) then
+    begin
+      result := false;
+      exit;
+    end;
+  end;
+end;
+
+function SearchValFieldsSame(SvRecs:TMemDbFieldDataRecs; Fields: TMemStreamableList; const FieldOffsets: TFieldOffsets): boolean;
+var
+  L, F: integer;
+  S: TMemDBStreamable;
+  Field: TMemFieldData;
+begin
+  result := true;
+  if not (Assigned(SvRecs) and Assigned(Fields) and Assigned(FieldOffsets)) then
+    raise EMemDbInternalException.Create(S_FIELD_LIST_BAD_FOR_SV_COMPARISON);
+  L := Length(FieldOffsets);
+  if (L = 0) then
+    raise EMemDbInternalException.Create(S_ZERO_LENGTH_FIELD_LIST_COMPARING_SV);
+  if L <> Length(SVRecs) then
+    raise EMemDbInternalException.Create(S_SV_FIELD_COUNT_INCONSISTENT);
+  for L := 0 to Pred(Length(SVRecs)) do
+  begin
+    F := FieldOffsets[L];
+    if (F < 0) or (F >= Fields.Count) then
+      raise EMemDbInternalException.Create(S_SV_FIELD_OFFSET_OOR);
+    S := Fields[F];
+    if NotAssignedOrSentinel(S) then
+      raise EMemDbInternalException.Create(S_SV_FIELD_BAD);
+    Field := S as TMemFieldData;
+    if Field.FDataRec.FieldType <> SvRecs[L].FieldType then
+      raise EMemDbInternalException.Create(S_SV_FIELDS_DIFFERENT_FORMAT);
+    if not DataRecsSame(Field.FDataRec, SvRecs[L]) then
     begin
       result := false;
       exit;
@@ -2034,15 +2112,18 @@ begin
   //First metadata pin for a Txion has to be atomic with index clone.
   if not FIndexInit then
   begin
-    FIndexInit := true;
     FParentTable.FMetaIndexLock.Acquire;
     try
       M := FParentTable.FMetadata.PinCurrent(FTid, PinReason);
-      Assert(FLocalIndexCopies.Count = 0);
-      for i := 0 to Pred(FParentTable.FMasterIndexes.Count) do
+      if Assigned(M) then
       begin
-        MasterIndex := FParentTable.FMasterIndexes.Items[i] as TMemDBIndex;
-        FLocalIndexCopies.AddNoRef(MasterIndex.Clone);
+        FIndexInit := true;
+        Assert(FLocalIndexCopies.Count = 0);
+        for i := 0 to Pred(FParentTable.FMasterIndexes.Count) do
+        begin
+          MasterIndex := FParentTable.FMasterIndexes.Items[i] as TMemDBIndex;
+          FLocalIndexCopies.AddNoRef(MasterIndex.Clone);
+        end;
       end;
     finally
       FParentTable.FMetaIndexLock.Release;
@@ -2375,81 +2456,6 @@ begin
 end;
 
 
-{
-procedure TMemDbTablePersistent.AdjustTableStructureForMetadata;
-var
-  CC, NC: TMemTableMetadataItem;
-  Row: TMemDBRow;
-  EditRec: TEditRec;
-  NextFields: TMemStreamableList;
-  NextField: TMemFieldData;
-  FieldDef1, FieldDef2: TMemFieldDef;
-  i: integer;
-begin
-  //GetCurrentNextMetadataCopies(CC, NC, CCFieldCount, CCIndexCount, NCFieldCount, NCIndexCount);
-  GetCurrNxtMetaCopies(CC,NC);
-  EditRec := FData.MetaEditFirst;
-  while Assigned(EditRec) do
-  begin
-    Row := FData.MetaRemoveRowForEdit(EditRec);
-    try
-      //Go through all the fields.
-      Row.RequestChange;
-      NextFields := Row.ABData[abNext] as TMemStreamableList;
-      if NC.FieldDefs.Count = 0 then
-      begin
-        //All fields deleted, delete row.
-        Row.Delete;
-      end
-      else
-      begin
-        for i := 0 to Pred(NC.FieldDefs.Count) do
-        begin
-          //No delete sentinels in current or next at the moment....
-          if i < CC.FieldDefs.Count then
-          begin
-            NextField := NextFields.Items[i] as TMemFieldData;
-          end
-          else
-          begin
-            NextField := nil;
-          end;
-          if (NC.FieldDefs.Items[i]) is TMemDeleteSentinel then
-            FieldDef1 := nil
-          else
-            FieldDef1 := NC.FieldDefs.Items[i] as TMemFieldDef;
-          if i < CC.FieldDefs.Count then
-          begin
-            Assert(not (CC.FieldDefs.Items[i] is TMemDeleteSentinel));
-            FieldDef2 := CC.FieldDefs.Items[i] as TMemFieldDef
-          end
-          else
-            FieldDef2 := nil;
-          Assert((not Assigned(FieldDef1)) = (fctDeleted in FFieldChangesets[i]));
-          Assert((not Assigned(FieldDef2)) = (fctAdded in FFieldChangesets[i]));
-          if fctDeleted in  FFieldChangesets[i] then
-          begin
-            NextField.Free;
-            NextFields.Items[i] := TMemDeleteSentinel.Create;
-          end
-          else if fctAdded in FFieldChangesets[i] then
-          begin
-            NextField := TMemFieldData.Create;
-            NextField.FDataRec.FieldType :=
-              (NC.FieldDefs.Items[i] as TMemFieldDef).FieldType;
-            //Zero data OK, not explicitly representing NULL's.
-            NextFields.Add(NextField);
-          end
-        end;
-      end;
-    finally
-      FData.MetaInsertRowAfterEdit(EditRec, Row);
-    end;
-    EditRec := FData.MetaEditNext(EditRec);
-  end;
-end;
-}
-
 procedure TTidLocal.AdjustTableStructureForMetadata;
 var
   RNxt: TMemDbStreamable;
@@ -2474,90 +2480,100 @@ begin
     Delete := NC.FieldDefs.Count = 0;
   end;
 
-  //TODO - Lazy table restructure.
-  //Outside of one commit lock, possibly even outside of just one
-  //transaction.
-
-  //Also TODO - Functions for Pre/PostModify, Pre/PostCommit/Rollback for indexing.
+  //TODO - We have the row addition lock, so we can do this in batches
+  //without holding the master row lock for all of it.
   FParentTable.FMasterRowLock.Acquire;
   try
-    //Need adition lock whether in batches or not - not atomic with commit/rollback.
-    FParentTable.AddRowAdditionLockInCrit(FTid);
+    try
+      //Need addition lock whether in batches or not - not atomic with commit/rollback.
+      if not FParentTable.AddAllRowProhibitInCrit(FTid, true, true, true) then
+        exit; //Already adjusted table structure, perhaps previous abortive commit attempt
 
-    //NB. If/when traveral locks work, IRec is valid between master lock acquisitions.
-    IRec := FParentTable.FMasterRowList.GetAnItem;
-    while Assigned(IRec) do
-    begin
-      Row := IRec.Item as TMemDBRow;
-      if Delete then
-        Row.Delete(FTid, ilReadRepeatable)
-      else
+      //NB. If/when traveral locks work, IRec is valid between master lock acquisitions.
+      IRec := FParentTable.FMasterRowList.GetAnItem;
+      while Assigned(IRec) do
       begin
-        //No guarantee other format changes aren't going on at the same time.
-
-        //Basic format checks so algorithm doesnt die, but
-        //"formal" consistency check is done with Tid comparison,
-        //which will catch races one way round or another.
-        if not Row.CheckFormatAgainstMeta(FTid, abCurrent, CC, pinEvolve) then
-          raise EMemDBConcurrencyException.Create(S_TABLE_ADJUST_CONCURRENCY_CONFLICT);
-
-        Row.RequestChange(FTid, ilReadRepeatable);
-        RowFields := Row.GetNext(FTid) as TMemRowFields;
-        RowFields.Sparse := true;
-
-        Assert(Assigned(NC));
-        if NotAssignedOrSentinel(CC) then
-          CCFieldCount := 0
+        Row := IRec.Item as TMemDBRow;
+        if Delete then
+          Row.Delete(FTid, ilReadRepeatable)
         else
-          CCFieldCount := CC.FieldDefs.Count;
-
-        for i := 0 to Pred(NC.FieldDefs.Count) do
         begin
-          //No delete sentinels in current or next at the moment....
-          if i < CCFieldCount then
-          begin
-            FieldData := RowFields.Items[i] as TMemFieldData;
-          end
+          //No guarantee other format changes aren't going on at the same time.
+
+          //Basic format checks so algorithm doesnt die, but
+          //"formal" consistency check is done with Tid comparison,
+          //which will catch races one way round or another.
+          if not Row.CheckFormatAgainstMeta(FTid, abCurrent, CC, pinEvolve) then
+            raise EMemDBConcurrencyException.Create(S_TABLE_ADJUST_CONCURRENCY_CONFLICT);
+
+          Row.RequestChange(FTid, ilReadRepeatable);
+
+          //Catch previous abortive attempts to change structure.
+          //Expect next copy to be same as current copy, and pass such tests...
+          if not Row.CheckFormatAgainstMeta(FTid, abNext, CC, pinEvolve) then
+            raise EMemDBConcurrencyException.Create(S_TABLE_ADJUST_REPEAT_FAILED);
+
+          RowFields := Row.GetNext(FTid) as TMemRowFields;
+          RowFields.Sparse := true;
+
+          Assert(Assigned(NC));
+          if NotAssignedOrSentinel(CC) then
+            CCFieldCount := 0
           else
+            CCFieldCount := CC.FieldDefs.Count;
+
+          for i := 0 to Pred(NC.FieldDefs.Count) do
           begin
-            FieldData := nil;
+            //No delete sentinels in current or next at the moment....
+            if i < CCFieldCount then
+              FieldData := RowFields.Items[i] as TMemFieldData
+            else
+              FieldData := nil;
+
+            if (NC.FieldDefs.Items[i]) is TMemDeleteSentinel then
+              NxtFieldDef := nil
+            else
+              NxtFieldDef := NC.FieldDefs.Items[i] as TMemFieldDef;
+
+            if i < CCFieldCount then
+            begin
+              Assert(not (CC.FieldDefs.Items[i] is TMemDeleteSentinel));
+              CurFieldDef := CC.FieldDefs.Items[i] as TMemFieldDef
+            end
+            else
+              CurFieldDef := nil;
+
+            if not (((not Assigned(NxtFieldDef)) = (fctDeleted in FFieldChangesets[i]))
+              and ((not Assigned(CurFieldDef)) = (fctAdded in FFieldChangesets[i]))) then
+              raise EMemDBInternalException.Create(S_TABLE_ADJUST_FAILED_1);
+
+            if fctDeleted in  FFieldChangesets[i] then
+            begin
+              FieldData.Release;
+              RowFields.Items[i] := TMemDeleteSentinel.Create;
+            end
+            else if fctAdded in FFieldChangesets[i] then
+            begin
+              FieldData := TMemFieldData.Create;
+              FieldData.FDataRec.FieldType :=
+                (NC.FieldDefs.Items[i] as TMemFieldDef).FieldType;
+              //Zero data OK, not explicitly representing NULL's.
+
+              RowFields.AddNoRef(FieldData); //Ref count of 1 is what we want.
+            end
           end;
-
-          if (NC.FieldDefs.Items[i]) is TMemDeleteSentinel then
-            NxtFieldDef := nil
-          else
-            NxtFieldDef := NC.FieldDefs.Items[i] as TMemFieldDef;
-          if i < CCFieldCount then
-          begin
-            Assert(not (CC.FieldDefs.Items[i] is TMemDeleteSentinel));
-            CurFieldDef := CC.FieldDefs.Items[i] as TMemFieldDef
-          end
-          else
-            CurFieldDef := nil;
-
-          if not (((not Assigned(NxtFieldDef)) = (fctDeleted in FFieldChangesets[i]))
-            and ((not Assigned(CurFieldDef)) = (fctAdded in FFieldChangesets[i]))) then
-            raise EMemDBInternalException.Create(S_TABLE_ADJUST_FAILED_1);
-
-          if fctDeleted in  FFieldChangesets[i] then
-          begin
-            FieldData.Release;
-            RowFields.Items[i] := TMemDeleteSentinel.Create;
-          end
-          else if fctAdded in FFieldChangesets[i] then
-          begin
-            FieldData := TMemFieldData.Create;
-            FieldData.FDataRec.FieldType :=
-              (NC.FieldDefs.Items[i] as TMemFieldDef).FieldType;
-            //Zero data OK, not explicitly representing NULL's.
-
-            RowFields.AddNoRef(FieldData); //Ref count of 1 is what we want.
-          end
+          if not Row.CheckFormatAgainstMeta(FTid, abNext, NC, pinEvolve) then
+            raise EMemDbInternalException.Create(S_TABLE_ADJUST_FAILED_2);
         end;
-        if not Row.CheckFormatAgainstMeta(FTid, abNext, NC, pinEvolve) then
-          raise EMemDbInternalException.Create(S_TABLE_ADJUST_FAILED_2);
+        FParentTable.FMasterRowList.GetAnotherItem(IRec);
       end;
-      FParentTable.FMasterRowList.GetAnotherItem(IRec);
+    except
+      //Might actually be in some nasty intermediate state, but
+      //better that, (and it be rediscovered on next commit attempt),
+      //than keep prohibit lock and hence not try to
+      //adjust / finish adjusting structure when we should.
+      FParentTable.FindRmRowProhibitLock(FTid);
+      raise;
     end;
   finally
     FParentTable.FMasterRowLock.Release;
@@ -2569,7 +2585,7 @@ begin
   inherited;
   DLItemInitObj(self, @FTidLocalLinks);
   FCPRows := TIndexedStoreO.Create;
-  FLocalIndexCopies := TIndexRootList.Create;
+  FLocalIndexCopies := TReffedList.Create;
 end;
 
 procedure TTidLocal.Init(Parent: TMemDBTablePersistent; const Tid: TTransactionId);
@@ -2609,6 +2625,7 @@ begin
   FFieldHelper.Free;
   FEmptyList.Release;
   FLocalIndexCopies.Release; //With contained indexes.
+  FNewBuildIndices.Release;
   inherited;
 end;
 
@@ -2656,7 +2673,7 @@ begin
   WrTag(Stream, mstIndexedListEnd);
 end;
 
-function TTidLocal.LookaheadHelper(Stream: TStream; Scratch: boolean): TMemDBRow;
+function TTidLocal.LookaheadHelper(Stream: TStream; Scratch: boolean; var Created: boolean): TMemDBRow;
 var
   Pos: Int64;
   Tag: TMemStreamTag;
@@ -2665,6 +2682,7 @@ var
   RV: TISRetVal;
   IRec: TItemRec;
 begin
+  Created := false;
   Pos := Stream.Position;
   Tag := RdTag(Stream);
   case Tag of
@@ -2674,6 +2692,7 @@ begin
       if Scratch then
       begin
         result := TMemDBRow.Create;
+        Created := true;
         result.Init(FParentTable, RowId);
       end //DCPHandler will insert into master list, and de-dupe guids.
       else
@@ -2706,6 +2725,7 @@ begin
         begin
           Assert(not Assigned(IRec));
           result := TMemDBRow.Create;
+          Created := true;
           result.Init(FParentTable, RowId);
         end;
       end;
@@ -2720,14 +2740,16 @@ end;
 procedure TTidLocal.FromJournal(Stream: TStream);
 var
   Row: TMemDBRow;
+  Created: boolean;
 begin
   ExpectTag(Stream, mstIndexedListStart);
-  Row := LookaheadHelper(Stream, false);
+  Row := LookaheadHelper(Stream, false, Created);
   while Assigned(Row) do
   begin
     Row.FromJournal(FTid, Stream);
-    Row.FProxy.Release;
-    Row := LookaheadHelper(Stream, false);
+    if Created then
+      Row.FProxy.Release;
+    Row := LookaheadHelper(Stream, false, Created);
   end;
   ExpectTag(Stream, mstIndexedListEnd);
 end;
@@ -2735,16 +2757,18 @@ end;
 procedure TTidLocal.FromScratch(Stream: TStream);
 var
   Row: TMemDBRow;
+  Created: boolean;
 begin
   ExpectTag(Stream, mstIndexedListStart);
-  Row := LookaheadHelper(Stream, true);
+  Row := LookaheadHelper(Stream, true, Created);
   while Assigned(Row) do
   begin
     //Row DCP handler, Row CPTid handler handle reffing, and
     //all insertion except master list.
     Row.FromScratch(FTid, Stream);
-    Row.FProxy.Release;
-    Row := LookaheadHelper(Stream, true);
+    if Created then
+      Row.FProxy.Release;
+    Row := LookaheadHelper(Stream, true, Created);
   end;
   ExpectTag(Stream, mstIndexedListEnd);
 end;
@@ -2877,34 +2901,581 @@ begin
   end;
 end;
 
-procedure TTidLocal.CheckPartialIndexes;
+
+procedure TTidLocal.BuildValidateNewIndexesCommon(LocalIter: boolean);
+var
+  NewBuild: TReffedList;
+  i, j: integer;
+  NC: TMemTableMetadataItem;
+  IDef: TMemIndexDef;
+  FieldDefs: TMemFieldDefs;
+  SparseOffsets: TFieldOffsets;
+  CompactOffsets: TFieldOffsets;
+  CheckOffsets: TFieldOffsets;
+  NextBufSelector: TBufSelector;
+  NewIndex:TMemDBIndex;
+  INode, ValINode: TMemDbIndexLeaf;
+  IRec: TItemRec;
+  Row: TMemDBRow;
+  PinRet, TreeRet: boolean;
+{$IFOPT C+}
+  Cur, Nxt: TMemDbStreamable;
+  Added, Changed, Deleted, Null: boolean;
+{$ENDIF}
+  CurFields, PrevFields: TMemRowFields;
+  PinFields: TMemDBStreamable;
+  selType: TABSelType;
+{$IFOPT C+}
+  ProhibitLock: PRowChangeLock;
+{$ENDIF}
+
 begin
-  //TODO.
+  if Assigned(FNewBuildIndices) then
+    exit; //Inside lock case, may have previously been built outside lock.
+
+  NextBufSelector := MakeNextBufSelector(FTid);
+
+  NewBuild := nil;
+  NC := nil;
+  NewIndex := nil;
+  INode := nil;
+  PrevFields := nil;
+  try
+{$IFOPT C+}
+    if LocalIter then
+    begin
+      //Check that we hold a concurrent row modification lock.
+      ProhibitLock := FParentTable.FindRowProhibitLock(FTid);
+      Assert(Assigned(ProhibitLock));
+      Assert(ProhibitLock.ProhibitAdd);
+      Assert(ProhibitLock.ProhibitChange);
+      Assert(ProhibitLock.ProhibitDelete);
+    end;
+{$ENDIF}
+
+    Assert(Assigned(FIndexChangesets) and (Length(FIndexChangesets) > 0));
+    NewBuild := TReffedList.Create;
+    NewBuild.Count := Length(FIndexChangesets);
+    //Note that we create FNewBuildIndices array for later destruction
+    //swizzling in MetaIndexCommit. Always create this even if it's
+    //indexes / table being deleted.
+
+    //TODO - Execute parallel for better speed.
+    for i := 0 to Pred(Length(FIndexChangesets)) do
+    begin
+      if FIndexChangesets[i] * [ictAdded, ictChangedFieldNumber] <> [] then
+      begin
+        //Only get next metadata copy here, because del table -> No NC.
+        if not Assigned(NC) then
+        begin
+          NC := FParentTable.Metadata.GetNext(FTid) as TMemTableMetadataItem;
+          Assert(Assigned(NC));
+        end;
+
+        IDef := NC.IndexDefs[i] as TMemIndexDef;
+        FieldDefs := (FParentTable.Metadata as TMemDbTableMetadata).FieldsByNames(NextBufSelector,
+                                                                     IDef.FieldArray,
+                                                                     SparseOffsets, pinEvolve); //TODO FinalCheck?
+        Assert(Length(FieldDefs) = Length(SparseOffsets));
+        if not IDef.FieldNameCount = Length(FieldDefs) then
+          raise EMemDbInternalException.Create(S_ERROR_GETTING_OFFSETS_IN_INDEX_BUILD);
+
+        SetLength(CompactOffsets, Length(SparseOffsets));
+        for j := 0 to Pred(Length(CompactOffsets)) do
+          CompactOffsets[j] := FieldDefs[j].FieldIndex;
+
+        NewIndex := TMemDBIndex.Create;
+        NewIndex.FinalFieldOffsets := CompactOffsets;
+        NewIndex.SparseFieldOffsets := SparseOffsets;
+
+        if LocalIter then
+          IRec := FCPRows.GetAnItem
+        else
+          IRec := FParentTable.FMasterRowList.GetAnItem;
+        while Assigned(IRec) do
+        begin
+          Row := IRec.Item as TMemDBRow;
+
+          //Don't gratuitously create INodes if we don't need them.
+          if not Assigned(INode) then
+            INode := TMemDBIndexLeaf.Create;
+
+          //First, pin.
+          try
+            if LocalIter then
+            begin
+              //Expect all rows modded and atomic view, try next bufsel.
+              //Table deletion should not get here.
+              PinRet := Row.PinForIndex(FTid, abNext, INode);
+              if not PinRet then
+                raise EMemDBInternalException.Create(S_PIN_FAILED_DURING_INDEX_BUILD);
+            end
+            else
+            begin
+              //Not necessarily all rows modded,
+              //May have some deleted or NULL rows.
+              //Also, Cur data may have changed behind our back,
+
+              //However, ABLatest pin should not be able to resurrect data
+              //(would fail concurrency check).
+              PinRet := Row.PinForIndex(FTid, abLatest, INode);
+            end;
+          except
+            INode.Release; //Node unpins if necessary.
+            raise;
+          end;
+          //Then add to tree
+          if PinRet then
+          begin
+            try
+              TreeRet := NewIndex.Add(abCurrent, INode);
+              if not TreeRet then
+                raise EMemDBInternalException.Create(S_INSERT_FAILED_DURING_INDEX_BUILD);
+              INode := nil;
+            except
+              INode.Release; //Will unpin if necessary.
+              raise;
+            end;
+          end;
+          //All done, next row.
+          if LocalIter then
+            FCPRows.GetAnotherItem(IRec)
+          else
+            FParentTable.FMasterRowList.GetAnotherItem(IRec);
+        end;
+        //Added all the rows.
+
+        //Now validate the entire index if applicable.
+        if IDef.IndexAttrs * [iaUnique , iaNotEmpty] <> [] then
+        begin
+          ValINode := NewIndex.Locate(abCurrent, ptFirst, nil);
+          while Assigned(ValINode) do
+          begin
+            //Don't bother pinning code here, get straight from the INode.
+            //We are validating what the index really is,
+            //not any local pinned view of things.
+            PinFields := ValINode.Pinned;
+
+            if NotAssignedOrSentinel(PinFields) then
+              raise EMemDBInternalException.Create(S_PIN_FIELDS_FAILURE_DURING_INDEX_VALIDATE);
+
+            CurFields := PinFields as TMemRowFields;
+            if CurFields.Sparse then
+              CheckOffsets := SparseOffsets
+            else
+              CheckOffsets := CompactOffsets;
+            //CurFields assigned.
+
+            //OK, how do we get the subset of fields required for the index?
+            if IDef.IndexAttrs * [iaNotEmpty] <> [] then
+            begin
+              if AllFieldsZero(CurFields, CheckOffsets) then
+                raise EMemDBConsistencyException.Create(S_INDEX_CONSTRAINT_ZERO);
+            end;
+            if (IDef.IndexAttrs * [iaUnique] <> []) and Assigned(PrevFields) then
+            begin
+              //Do we expect sparseness to always be the same for the different rows?
+              //Sparse if table format change, else compact, and we're supposed to
+              //do all the rows in such cases.
+              if CurFields.Sparse <> PrevFields.Sparse then
+                raise EMemDbInternalException.Create(S_SPARSENESS_DIFFERS_CHECKING_INDEX);
+              //We could handle such cases, but do not expect them.
+              if SameLayoutFieldsSame(CurFields, PrevFields, CheckOffsets) then
+                raise EMemDBConsistencyException.Create(S_INDEX_CONSTRAINT_UNIQUE);
+            end;
+
+            PrevFields := CurFields;
+            ValINode := NewIndex.Locate(abCurrent, ptNext, ValINode);
+          end
+        end;
+
+        //Validated OK, add to list of new build indices.
+        NewBuild.Items[i] := NewIndex;
+        NewIndex := nil;
+      end; //If modded index.
+    end; //For index changeset.
+
+    FNewBuildIndices := NewBuild;
+    NewBuild := nil;
+  finally
+    NewBuild.Release;
+    NewIndex.Release;
+    INode.Release;
+  end
+end;
+
+procedure TTidLocal.BuildValidateNewIndexesOutsideCommitLock;
+begin
+  BuildValidateNewIndexesCommon(true);
+end;
+
+procedure TTidLocal.BuildValidateNewIndexesInsideCommitLock;
+begin
+  BuildValidateNewIndexesCommon(false);
+end;
+
+procedure TTidLocal.BuildCheckPartialIndexes;
+
+  function GetIPinForIndex(Row: TMemDBRow; Index: TMemDbIndex): PMemDbIndexPin;
+  var
+    IPins: TList;
+    j, fnd: integer;
+
+  begin
+    //Humm. We need to PinCurrent from the INode's point of view.
+    //Bit clunky, but safer.
+    result := nil;
+    IPins := Row.MakeCandidateIPins(Index); //Probably only one, actually.
+    try
+      fnd := 0;
+      for j := 0 to Pred(IPins.Count) do
+      begin
+        if Index.CheckPresent(abNext, PMemDbIndexPin(IPins[j]).INode) then
+        begin
+          result := PMemDbIndexPin(IPins[j]);
+          Inc(fnd);
+{$IFOPT C-}
+          break;
+{$ENDIF}
+        end
+      end;
+      if fnd > 1 then
+      begin
+        result := nil;
+        raise EMemDBInternalException.Create(S_ERROR_IPINS_MODIFYING_INDEX);
+      end;
+    finally
+      for j := 0 to Pred(IPins.Count) do
+        if IPins[j] <> result then
+          Row.ReleaseIndexPinOutsideLock(IPins[j]);
+      IPins.Free;
+    end;
+  end;
+
+var
+  i, k: integer;
+  PartialIndex: boolean;
+  Index: TMemDBIndex;
+  IRec: TItemRec;
+  Row: TMemDBRow;
+  Cur, Nxt, Other: TMemDBStreamable;
+  CurFields, OtherFields: TMemRowFields;
+  Added, Deleted, Changed, Null: boolean;
+  IPin: PMemDbIndexPin;
+  NewINode: TMemDbIndexLeaf;
+  OtherNode: TMemDBIndexLeaf;
+  Pos: TMemAPIPosition;
+  Ret: boolean;
+  C: TMemDBStreamable;
+  CC: TMemTableMetadataItem;
+  CCDef: TMemIndexDef;
+  CurrentBufSelector: TBufSelector;
+  FieldDefs: TMemFieldDefs;
+  CompactOffsets: TFieldOffsets;
+  SparseOffsets: TFieldOffsets;
+
+begin
+  CC := nil;
+  CurrentBufSelector := MakeCurrentBufSelector(FTid);
+
+  for i := 0 to Pred(FParentTable.FMasterIndexes.Count) do
+  begin
+    if not FIndexingChangeRequired then
+      PartialIndex := true
+    else
+    begin
+      Assert(i < Length(FIndexChangesets));
+      PartialIndex := FIndexChangesets[i]
+        * [ictAdded, ictDeleted, ictChangedFieldNumber] = [];
+    end;
+
+    //TODO - Do this in parallel for greater speed.
+
+    if PartialIndex then
+    begin
+      if not Assigned(CC) then
+      begin
+        //If partial index not added, deleted, changed then
+        //CC definition is still current.
+        C := FParentTable.Metadata.PinCurrent(FTid, pinFinalCheck);
+        Assert(Assigned(C));
+        Assert(C is TMemTableMetadataItem);
+        CC := C as TMemTableMetadataItem;
+      end;
+      //First, index modification:
+      Index := FParentTable.FMasterIndexes[i] as TMemDbIndex;
+      Index.RootToNext; //All manipulation here in abNext copy of index.
+
+      //TidLocal row set will not change under commit lock.
+      IRec := FCPRows.GetAnItem;
+      while Assigned(IRec) do
+      begin
+        Row := IRec.Item as TMemDBRow;
+
+        IPin := GetIPinForIndex(Row, Index);
+        Cur := nil;
+        try
+          if Assigned(IPin) then
+          begin
+            //Don't go thru standard pinning mechanism,
+            //we're under commit lock, and we know these indexes evolve
+            //in a thread-safe unitary fashion under that lock.
+            Cur := IPin.INode.Pinned;
+          end;
+          //And after all that hassle for Cur, Nxt is a breeze.
+          Nxt := Row.GetNext(FTid);
+          Row.ChangeFlagsFromPinned(Cur, Nxt, Added, Changed, Deleted, Null);
+
+          if Changed or Deleted then
+          begin
+            Assert(Assigned(IPin));
+            Ret := Index.Remove(abNext, IPin.INode);
+            if not Ret then
+              raise EMemDBInternalException.Create(S_ERROR_MODIFYING_INDEX_REMOVE);
+          end
+          else
+            Assert(not Assigned(IPin));
+        finally
+          if Assigned(IPin) then
+          begin
+            Assert(Assigned(Row));
+            Row.ReleaseIndexPinOutsideLock(IPin);
+            //Arguably, since we're in the commit lock here, shouldn't need to worry
+            //about this either, and not encountering local pins, but,
+            //hey ho play it safe.
+          end;
+        end;
+
+        if Added or Changed then
+        begin
+          NewINode := TMemDbIndexLeaf.Create;
+          try
+            if not Row.PinForIndex(FTid, abNext, NewINode) then
+              raise EMemDBInternalexception.Create(S_ERROR_PINNING_INDEX_ADD);
+
+            if not Index.Add(abNext, NewINode) then
+              raise EMemDBInternalexception.Create(S_ERROR_MODIFYING_INDEX_ADD);
+          except
+            NewINode.Release; //Will unpin if necessary.
+            raise;
+          end;
+        end;
+
+        FCPRows.GetAnotherItem(IRec);
+      end; //Assigned IRec.
+
+      //OK, index modified. Now for some validation.
+
+      CCDef := CC.IndexDefs[i] as TMemIndexDef;
+      if CCDef.IndexAttrs * [iaUnique, iaNotEmpty] <> [] then
+      begin
+        FieldDefs := (FParentTable.Metadata as TMemDbTableMetadata).
+          FieldsByNames(CurrentBufSelector, CCDef.FieldArray, SparseOffsets, pinFinalCheck);
+
+        Assert(Length(FieldDefs) = Length(SparseOffsets));
+        if not CCDef.FieldNameCount = Length(FieldDefs) then
+          raise EMemDbInternalException.Create(S_ERROR_GETTING_OFFSETS_IN_INDEX_VALIDATE);
+
+        SetLength(CompactOffsets, Length(SparseOffsets));
+        for k := 0 to Pred(Length(CompactOffsets)) do
+          CompactOffsets[k] := FieldDefs[k].FieldIndex;
+
+        IRec := FCPRows.GetAnItem;
+        while Assigned(IRec) do
+        begin
+          Row := IRec.Item as TMemDBRow;
+          //First off, is this row still in the index?
+          IPin := GetIPinForIndex(Row, Index);
+          try
+            if Assigned(IPin) then
+            begin
+              //Again, no pinning with row here, just validating what's
+              //well and truly in the index.
+
+              Cur := IPin.INode.Pinned;
+              Assert(Assigned(Cur));
+              Assert(Cur is TMemRowFields);
+              CurFields := Cur as TMemRowFields;
+              Assert(not CurFields.Sparse); //We've previously checked sparseness building the index, just assert here.
+
+              if CCDef.IndexAttrs * [iaNotEmpty] <> [] then
+              begin
+                if AllFieldsZero(CurFields, CompactOffsets) then
+                  raise EMemDBConsistencyException.Create(S_INDEX_CONSTRAINT_ZERO);
+              end;
+
+              if CCDef.IndexAttrs * [iaUnique] <> [] then
+              begin
+                Assert(ptPrevious = Succ(ptNext));
+                for Pos := ptNext to ptPrevious do
+                begin
+                  OtherFields := nil;
+                  OtherNode := Index.Locate(abNext, Pos, IPin.INode);
+
+                  if Assigned(OtherNode) then
+                  begin
+                    //No pinning with row here.
+                    Other := OtherNode.Pinned;
+                    Assert(Assigned(Other));
+                    Assert(Other is TMemRowFields);
+                    OtherFields := Other as TMemRowFields;
+                    Assert(not OtherFields.Sparse);
+                    //We've previously checked sparseness building the index, just assert here.
+                  end;
+                  if Assigned(OtherFields) then
+                  begin
+                    if SameLayoutFieldsSame(CurFields, OtherFields, CompactOffsets) then
+                      raise EMemDBConsistencyException.Create(S_INDEX_CONSTRAINT_UNIQUE);
+                  end;
+                end; //Next/prev check.
+              end; //Unique attr set..
+            end; //Got IPin for index.
+          finally
+            if Assigned(IPin) then
+            begin
+              Assert(Assigned(Row));
+              Row.ReleaseIndexPinOutsideLock(IPin);
+            end;
+          end;
+
+          FCPRows.GetAnotherItem(IRec);
+        end; //Round all rows.
+      end; //Index has attrs.
+    end; //Partial index.
+  end;
+end;
+
+procedure TTidLocal.MetaIndexCommit(Reason: TMemDbTransReason);
+var
+  i: integer;
+  AddOrRebuild: boolean;
+  Delete: boolean;
+  Index: TMemDbIndex;
+begin
+  if FIndexingChangeRequired then
+  begin
+    for i := 0 to Pred(Length(FIndexChangesets)) do
+    begin
+      //Index swizzling done here in sparse changeset array space.
+
+      AddOrRebuild := FIndexChangesets[i] * [ictAdded, ictChangedFieldNumber] <> [];
+      Delete := FIndexChangesets[i] * [ictDeleted] <> [];
+      Assert(not (AddOrRebuild and Delete));
+      if AddOrRebuild then
+      begin
+        //Local index copies always sparse.
+        Assert(FNewBuildIndices.Count > i);
+        if FParentTable.FMasterIndexes.Count <= i then
+          FParentTable.FMasterIndexes.Count := Succ(i); //Extend if needed.
+
+        //Swizzle new index onto master index copies.
+        Assert(Assigned(FNewBuildIndices[i]));
+        //FMasterIndexes might have a previous index here on re-build.
+        Index := FParentTable.FMasterIndexes[i] as TMemDBIndex;
+        FParentTable.FMasterIndexes[i] := FNewBuildIndices[i];
+        FNewBuildIndices[i] := Index;
+      end
+      else if Delete then
+      begin
+        //Master indexes temporarily sparse...
+        Assert(FParentTable.FMasterIndexes.Count > i);
+        Assert(FNewBuildIndices.Count > i);
+        //Swizzle old master index onto local list for later destruction.
+        Assert(not Assigned(FNewBuildIndices[i]));
+        Assert(Assigned(FParentTable.FMasterIndexes[i]));
+        FNewBuildIndices[i] := FParentTable.FMasterIndexes[i];
+        FParentTable.FMasterIndexes[i] := nil;
+      end
+      else
+      begin
+        //No large scale manipulation, commit index to next iteration.
+        Index := FParentTable.FMasterIndexes[i] as TMemDbIndex;
+        Index.CommitNextToRoot;
+      end;
+    end;
+    //And pack master indexes.
+    FParentTable.FMasterIndexes.Pack;
+  end
+  else
+  begin
+    for i := 0 to Pred(FParentTable.FMasterIndexes.Count) do
+    begin
+      Index := FParentTable.FMasterIndexes[i] as TMemDbIndex;
+      Index.CommitNextToRoot;
+    end;
+  end;
+end;
+
+procedure TTidLocal.MetaIndexRollback(Reason: TMemDbTransReason);
+var
+  i: integer;
+  Index: TMemDBIndex;
+begin
+  //FNewBuildIndices.Release;
+  //Let destructor handle it.
+
+  //TODO - Multi thread speedup / swizzle for later destruction?
+  //Already in index/meta lock for parent table.
+  Assert(Assigned(FParentTable.FMasterIndexes));
+  for i := 0 to Pred(FParentTable.FMasterIndexes.Count) do
+  begin
+    Index := FParentTable.FMasterIndexes.Items[i] as TMemDBIndex;
+    Index.DiscardNext;
+  end;
+end;
+
+procedure TTidLocal.MetaIndexLocalRollback(Reason: TMemDBTransReason);
+var
+  i: integer;
+  Index: TMemDBIndex;
+begin
+  FNewBuildIndices.Release;
+  FNewBuildIndices := nil;
+
+  //TODO - Multi thread speedup / swizzle for later destruction?
+  FParentTable.FMetaIndexLock.Acquire;
+  try
+    Assert(Assigned(FParentTable.FMasterIndexes));
+    for i := 0 to Pred(FParentTable.FMasterIndexes.Count) do
+    begin
+      Index := FParentTable.FMasterIndexes.Items[i] as TMemDBIndex;
+      Index.DiscardNext;
+    end;
+  finally
+    FParentTable.FMetaIndexLock.Release;
+  end;
 end;
 
 procedure TTidLocal.RowLocalPreCommit(Reason: TMemDBTransReason);
 var
   IRec: TItemRec;
   Row: TMemDBRow;
-  Prohibit: boolean;
   Cur, Nxt: TMemDBStreamable;
   Added, Changed, Deleted, Null: boolean;
+  NoAdd, NoChange, NoDelete: boolean;
+
 begin
-  Prohibit := FParentTable.ProhibitRowAdd(FTid);
+  FParentTable.GetProhibitions(FTid, NoAdd, NoChange, NoDelete);
   //No locking, this is TidLocal.
   IRec := FCPRows.GetAnItem;
   while Assigned(IRec) do
   begin
     Row := IRec.Item as TMemDBRow;
     Row.PreCommit(FTid, Reason);
-    if Prohibit then
-    begin
-      Cur := Row.PinCurrent(FTid, pinFinalCheck);
-      Nxt := Row.GetNext(FTid);
-      Row.ChangeFlagsFromPinned(Cur, Nxt, Added, Changed, Deleted, Null);
-      if Added then
-        raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ROW_ADD);
-    end;
+
+    { If next assigned:
+      - From pin which was up to date, and Nxt is still up to date (atomic).
+      - Covers changed, deleted.
+      If next not assigned,
+      - Cur pin *might* be wrong.
+        - Difference between Added and Null, except that we require
+          that RequestChange / Delete does not resurrect a row.
+          and we transitively check for atomicity, so is OK. }
+    Cur := Row.PinCurrent(FTid, pinFinalCheck);
+    Nxt := Row.GetNext(FTid);
+    Row.ChangeFlagsFromPinned(Cur, Nxt, Added, Changed, Deleted, Null);
+    if (Added and NoAdd) or (Changed and NoChange) or (Deleted and NoDelete) then
+        raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ROW_OP);
     FCPRows.GetAnotherItem(IRec);
   end;
 end;
@@ -2918,13 +3489,10 @@ begin
   RowLocalPreCommit(Reason);
   //Table row count for null cases and deleted fields.
   CheckTableRowCount;
-  //TODO - Currently checking row structure in all cases,
-  //could potentially skip either journal replay, or user trans or both
-  //(optimization options?)
+  //Check structure of changes rows, however that happened.
   CheckChangedRowStructure(Reason);
-
-  //TODO - Check partial index change for non-added / changed indices.
-  CheckPartialIndexes;
+  //Indexes not rebuit / revalidated.
+  BuildCheckPartialIndexes;
 end;
 
 procedure TTidLocal.Commit(Reason: TMemDbTransReason);
@@ -2947,11 +3515,6 @@ begin
   FLayoutChangeRequired := false;
 end;
 
-procedure TTidLocal.MetaIndexCommit(Reason: TMemDbTransReason);
-begin
-  //TODO - Write this.
-end;
-
 procedure TTidLocal.Rollback(Reason: TMemDbTransReason);
 var
   Row, LastRow: TMemDBRow;
@@ -2972,10 +3535,6 @@ begin
   FLayoutChangeRequired := false;
 end;
 
-procedure TTidLocal.MetaIndexRollback(Reason: TMemDbTransReason);
-begin
-  //TODO - Write this.
-end;
 
 function TTidLocal.GetUserIndexRoot(var Idx: TMemIndexDef; IdxName: string): TMemDBIndex;
 var
@@ -2993,165 +3552,6 @@ begin
   result := FLocalIndexCopies.Items[AbsIndex] as TMemDbIndex;
 end;
 
-(*
-function TMemDBTableList.MoveToRowByIndexTag(Iso: TMDBIsolationLevel; TagStruct: PITagStruct;
-                             Cursor: TItemRec;
-                             Pos: TMemAPIPosition): TItemRec;
-var
-  RV: TIsRetVal;
-  AB: TABSelection;
-  Row: TMemDBRow;
-begin
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-  if Assigned(Cursor) then
-  begin
-    GLogLog(SV_INFO, 'MoveToRowByIndexTag, with starting row ' +
-      MDBIsoStrings[Iso] + ' ' + MemAPIPositionStrings[Pos] +
-      ' TagStruct: ' + IntToStr(NativeInt(TagStruct)));
-  end
-  else
-  begin
-    GLogLog(SV_INFO, 'MoveToRowByIndexTag, no starting row ' +
-      MDBIsoStrings[Iso] + ' ' + MemAPIPositionStrings[Pos] +
-      ' TagStruct: ' + IntToStr(NativeInt(TagStruct)));
-  end;
-{$ENDIF}
-  RV := rvInternalError;
-  case Pos of
-    ptFirst:
-    begin
-      if Assigned(TagStruct) then
-        RV := FStore.FirstByIndex(TagStruct, result)
-      else
-      begin
-         result := FStore.GetAnItem;
-         if Assigned(result) then
-           RV := rvOK
-         else
-           RV := rvNotFound;
-      end;
-    end;
-    ptLast:
-    begin
-      if Assigned(TagStruct) then
-        RV := FStore.LastByIndex(TagStruct, result)
-      else
-      begin
-         result := FStore.GetLastItem;
-         if Assigned(result) then
-           RV := rvOK
-         else
-           RV := rvNotFound;
-      end;
-    end;
-    ptNext, ptPrevious:
-    begin
-      if not Assigned(Cursor) then
-        raise EMemDBAPIException.Create(S_API_NEXT_PREV_REQUIRES_CURRENT_ROW);
-      result := Cursor;
-      if Assigned(TagStruct) then
-      begin
-        if Pos = ptNext then
-          RV := FStore.NextByIndex(TagStruct, result)
-        else
-          RV := FStore.PreviousByIndex(TagStruct, result);
-  {$IFDEF DEBUG_DATABASE_NAVIGATE}
-          if RV = rvOK then
-            GLogLog(SV_INFO, 'MoveToRowByIndexTag, move by 1 from previous cursor OK.')
-          else
-            GLogLog(SV_INFO, 'MoveToRowByIndexTag, move by 1 from previous cursor failed');
-  {$ENDIF}
-      end
-      else
-      begin
-        if Pos = ptNext then
-          RV := FStore.GetAnotherItem(result)
-        else
-          RV := FStore.GetPreviousItem(result);
-      end;
-    end;
-  else
-    Assert(false);
-  end;
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-  if RV = rvOK then
-    GLogLog(SV_INFO, 'MoveToRowByIndexTag, move to row OK.')
-  else
-    GLogLog(SV_INFO, 'MoveToRowByIndexTag, move to row failed');
-{$ENDIF}
-  Assert(Assigned(result) = (rv = RVOK));
-  if not (RV in [rvOK, rvNotFound]) then
-  begin
-    if RV = rvTagNotFound then
-      raise EMemDBAPIException.Create(S_INDEX_NOT_YET_CREATED)
-    else
-      raise EMemDBInternalException.Create(S_API_NEXT_PREV_INTERNAL_ERROR);
-  end;
-
-  AB := IsoToAB(Iso);
-  //Now, just because we have specified a current or most recent index
-  //class does not mean that the current / next AB buffer will be valid,
-  //it's just that they end up at the top (or maybe bottom) of the index...
-  if Assigned(result) then
-  begin
-{$IFOPT C+}
-    row := result.Item as TMemDBROw;
-{$ELSE}
-    row := TMemDbRow(result.Item);
-{$ENDIF}
-  end
-  else
-    row := nil;
-
-  while Assigned(row) and NotAssignedOrSentinel(row.ABData[AB]) do
-  begin
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-    GLogLog(SV_INFO, 'MoveToRowByIndexTag, row is sentinel, skip ' + MDBABStrings[AB]);
-{$ENDIF}
-    case Pos of
-      ptFirst, ptNext:
-      begin
-        if Assigned(TagStruct) then
-          RV := FStore.NextByIndex(TagStruct, result)
-        else
-          RV := FStore.GetAnotherItem(result);
-      end;
-      ptLast, ptPrevious:
-      begin
-        if Assigned(TagStruct) then
-          RV := FStore.PreviousByIndex(TagStruct, result)
-        else
-          RV := FStore.GetPreviousItem(result);
-      end;
-    else
-      Assert(false);
-    end;
-    Assert(Assigned(result) = (rv = RVOK));
-    if RV = RVOK then
-    begin
-{$IFOPT C+}
-      row := result.Item as TMemDBROw;
-{$ELSE}
-      row := TMemDbRow(result.Item);
-{$ENDIF}
-    end
-    else
-      row := nil;
-    if not (RV in [rvOK, rvNotFound]) then
-      raise EMemDBInternalException.Create(S_API_NEXT_PREV_INTERNAL_ERROR);
-  end;
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-  if Assigned(result) then
-    GLogLog(SV_INFO, 'MoveToRowByIndexTag, final result found.')
-  else
-    GLogLog(SV_INFO, 'MoveToRowByIndexTag, final result failed.');
-{$ENDIF}
-end;
-*)
-
-
-//TODO - Ensure user can GetPinLatest for Tid without being
-//out of date with Index.
 function TTidLocal.UserMoveToRowByIndexRoot(IRoot: TMemDbIndex;
                                   Cursor: TMemDBCursor;
                                   Pos: TMemAPIPosition): TMemDbCursor;
@@ -3161,6 +3561,9 @@ var
   INode: TMemDbIndexLeaf;
   RetryPos: TMemApiPosition;
   Retry: boolean;
+  IPinList: TList;
+  i, fndcnt, fndidx: integer;
+  IPin: PMemDbIndexPin;
 begin
   case Pos of
     ptFirst: RetryPos := ptNext;
@@ -3169,6 +3572,7 @@ begin
   else
     raise EMemDBInternalException.Create(S_MOVE_ROW_NOT_VALID_POSITION);
   end;
+  Row := nil;
   if not Assigned(IRoot) then
   begin
     INode := nil;
@@ -3195,6 +3599,7 @@ begin
           IRec := Cursor.Row.FMasterRec;
           FParentTable.FMasterRowList.GetPreviousItem(IRec);
         end;
+        //ptInvalid won't happen here.
       end;
       //If the IRec is NULL, then we really are done searching.
       Retry := Assigned(IRec);
@@ -3218,19 +3623,100 @@ begin
     finally
       FParentTable.FMasterRowLock.Release;
     end;
+    if not Assigned(IRec) then
+      Row := nil;
   end
   else
   begin
-    raise EMemDBInternalException.Create(S_API_NOT_IMPLEMENTED);
+    IPin := nil;
+    FndIdx := -1;
+    case Pos of
+      ptFirst, ptLast: begin
+        INode := IRoot.Locate(abCurrent, Pos, nil);
+      end;
+      ptNext, ptPrevious: begin
+        if not (Assigned(Cursor) and Assigned(Cursor.Row)) then
+          raise EMemDBAPIException.Create(S_API_NEXT_PREV_REQUIRES_CURRENT_ROW);
+        if Cursor.IterIndex = IRoot then
+        begin
+          INode := Cursor.FIterInode;
+          if not (Assigned(INode)
+            and IRoot.CheckPresent(abCurrent, INode)) then
+            raise EMemDbInternalException.Create(S_NEXT_PREV_BY_IDX_NO_INODE);
+        end
+        else
+        begin
+          //Oh dear, we need to go on a hunt for the INode.
+          //Provided MemDBAPI has handled the cursors OK (no cursor for deleted row),
+          //then we should be able to find one.
+          IPinList := Cursor.Row.MakeCandidateIPins(IRoot);
+          try
+            //The one which we actually find should be local index, so
+            //guaranteed to persist, but the others are not.
+            fndcnt := 0;
+            for i := 0 to Pred(IPinList.Count) do
+            begin
+              IPin := PMemDBIndexPin(IPinList.Items[i]);
+              Assert(Assigned(IPin));
+              if IRoot.CheckPresent(abCurrent, IPin.INode) then
+              begin
+                fndidx := i;
+                Inc(FndCnt);
+{$IFOPT C+}
+                break;
+{$ENDIF}
+              end;
+            end;
+            if FndCnt <> 1 then
+              raise EMemDbInternalException.Create(S_NEXT_PREV_BY_IDX_INODE_FIND_FAILED);
+            IPin := IPinList.Items[FndIdx]; //This one is not ephemeral.
+          finally
+            while IPinList.Count > 0 do
+            begin
+              //Cheeky releasing all of them, but the one we want is in the local index...
+              Cursor.Row.ReleaseIndexPinOutsideLock(PMemDbIndexPin(IPinList.Items[Pred(IPinList.Count)]));
+              IPinList.Delete(Pred(IPinList.Count));
+            end;
+            IPinList.Free;
+          end;
+          //OK, we have our INode.
+          INode := IPin.INode;
+          Assert(Assigned(INode));
+        end;
+      end;
+    else
+      raise EMemDBInternalException.Create(S_MOVE_ROW_NOT_VALID_POSITION);
+    end;
+
+    //Have our INode, do the initial Next/Prev.
+    INode := IRoot.Locate(abCurrent, Pos, INode);
+    Retry := Assigned(INode);
+    while Retry do
+    begin
+      Row := INode.Row as TMemDBRow;
+      IRec := Row.FMasterRec;
+      Retry := not Row.PinForCursorFromInode(FTid, INode, pinEvolve);
+      //TODO - Number of acceptable retries before we raise concurrency exception?
+      if Retry then
+      begin
+        INode := IRoot.Locate(abCurrent, RetryPos, INode);
+        Retry := Assigned(INode);
+      end;
+    end;
+    if not Assigned(INode) then
+    begin
+      Row := nil;
+      IRec := nil;
+    end;
   end;
-  //Decision point as to whether search above has succeeded
-  //is Assigned(IRec);
-  if Assigned(IRec) then
+
+  Assert(Assigned(IRec) = Assigned(Row));
+  if Assigned(Row) then
   begin
-    Row := IRec.Item as TMemDBRow;
     //New row just been pinned. Always allocate new cursor.
     result := TMemDbCursor.Create;
     result.SetRowPin(FTid, Row); //Unpins old row.
+    Assert(Assigned(IRoot) = Assigned(INode));
     result.FIterIndex := IRoot;
     result.FIterInode := INode;
     result.FIterInc := RetryPos;
@@ -3240,77 +3726,6 @@ begin
     result := nil;
 end;
 
-(*
-function TMemDBTableList.FindRowByIndexTag(Iso: TMDBIsolationLevel;
-                                           IndexDef: TMemIndexDef;
-                                           FieldDefs: TMemFieldDefs;
-                                           ITagStruct: PITagStruct;
-                                           const DataRecs: TMemDbFieldDataRecs): TItemRec;
-var
-  RV: TIsRetVal;
-  SearchVal: TMemDBIndexNodeSearchVal;
-  ABSel: TABSelection;
-  i: integer;
-begin
-  if not Assigned(ITagStruct) then
-    raise EMemDbInternalException.Create(S_API_SEARCH_NO_INDEX_SPECIFIED);
-  if (Length(FieldDefs) <> Length(DataRecs)) or (Length(DataRecs) = 0) then
-    raise EMemDbInternalException.Create(S_API_SEARCH_BAD_FIELD_COUNT);
-    //Internal, should have been spotted before now.
-  for i := 0 to Pred(Length(FieldDefs)) do
-  begin
-    if not (FieldDefs[i].FieldType in IndexableFieldTypes) then
-      raise EMemDBInternalException.Create(S_INDEX_BAD_FIELD_TYPE);
-    if DataRecs[i].FieldType <> FieldDefs[i].FieldType then
-      raise EMemDBAPIException.Create(S_API_SEARCH_VAL_BAD_TYPE);
-  end;
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-    GLogLog(SV_INFO, 'FindRowByIndexTag ' +
-      MDBIsoStrings[Iso] + ' Tag: ' + IntToStr(NativeInt(ITagStruct)));
-    for i := 0 to Pred(Length(DataRecs)) do
-    begin
-      if DataRecs[i].FieldType = ftUnicodeString then
-      begin
-        GLogLog(SV_INFO, 'FindRowByIndexTag SearchVal[' + InttoStr(i)+ ']: ' + DataRecs[i].sVal);
-      end;
-    end;
-{$ENDIF}
-  SearchVal := TMemDBIndexNodeSearchVal.Create;
-  try
-    SearchVal.FieldSearchVals := CopyDataRecs(DataRecs);
-    RV := Store.FindByIndex(ITagStruct, SearchVal, result);
-    if not (RV in [rvOK, rvNotFound]) then
-    begin
-      if RV = rvTagNotFound then
-        raise EMemDBAPIException.Create(S_INDEX_NOT_YET_CREATED)
-      else
-        raise EMemDBInternalException.Create(S_API_SEARCH_INTERNAL);
-    end;
-  finally
-    SearchVal.Free;
-  end;
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-  if RV = rvOK then
-    GLogLog(SV_INFO, 'FindRowByIndexTag OK')
-  else
-    GLogLog(SV_INFO, 'FindRowByIndexTag failed');
-{$ENDIF}
-  Assert((RV = rvOk) = Assigned(result));
-  if RV = rvOK then
-  begin
-    ABSel := IsoToAB(Iso);
-    //We are searching on current metadata, and either current or latest
-    //index. Do some quick checking of AB result based on isolation level.
-    //We passed in some fields, so we should definitely have some result
-    //fields in the required AB buffer.
-    if NotAssignedOrSentinel((result.Item as TMemDBRow).ABData[ABSel]) then
-      raise EMemDbInternalException.Create(S_API_SEARCH_INTERNAL);
-  end
-end;
-*)
-
-//TODO - Ensure user can GetPinLatest for Tid without being
-//out of date with Index.
 function TTidLocal.UserFindRowByIndexRoot(IndexDef: TMemIndexDef;
                                 FieldDefs: TMemFieldDefs;
                                 FieldAbsIdxs: TFieldOffsets;
@@ -3322,6 +3737,11 @@ var
   ILeaf: TMemDBIndexLeaf;
   Cursor, NewCursor: TMemDBCursor;
   Row: TMemDBRow;
+  Cur: TMemTableMetadataItem;
+  AllFieldDefs: TMemStreamableList;
+  RowFields: TMemStreamableList;
+  S: TMemDBStreamable;
+  BufSel: TABSelType;
 begin
   if not Assigned(IRoot) then
     raise EMemDbInternalException.Create(S_API_SEARCH_NO_INDEX_SPECIFIED);
@@ -3338,6 +3758,9 @@ begin
       raise EMemDBAPIException.Create(S_API_SEARCH_VAL_BAD_TYPE);
   end;
   SV := TMemDbIndexSearchVal.Create;
+  Cursor := nil;
+  NewCursor := nil;
+  result := nil;
   try
     SV.FFieldSearchVals := CopyDataRecs(DataRecs);
     ILeaf := IRoot.Find(abCurrent, SV);
@@ -3351,33 +3774,88 @@ begin
       Cursor.FIterInc := ptNext;
       Cursor.FTidLocal := self;
 
-      if Row.PinForCursorFromInode(FTid, ILeaf) then
-        result := Cursor
+      S := FParentTable.Metadata.PinCurrent(FTid, pinEvolve);
+      if NotAssignedOrSentinel(S) then
+        raise EMemDBInternalException.Create(S_NAV_TABLE_METADATA_NOT_COMMITED);
+      Cur := S as TMemTableMetadataItem;
+      AllFieldDefs := Cur.FieldDefs;
+
+      if Row.PinForCursorFromInode(FTid, ILeaf, pinEvolve) then
+      begin
+        //Do not need to check field defs etc, will be done by subsequent read.
+{$IFOPT C+}
+        //Unless debug build, in which case, check here for sanity.
+        if not Cursor.Row.CheckFormatAgainstMetaDefs(
+          FTid, abLatest, AllFieldDefs, pinEvolve) then
+          raise EMemDBConcurrencyException.Create(S_TABLE_FORMAT_CONCURRENTLY_CHANGED_NAV_0);
+
+        S := Cursor.Row.GetPinLatest(FTid, BufSel, pinEvolve);
+        if NotAssignedOrSentinel(S) then
+          raise EMemDbInternalException.Create(S_ROW_DELETED_NAV_0); //This should have been caught earlier.
+        RowFields := S as TMemStreamableList;
+
+        if not SearchValFieldsSame(DataRecs, RowFields, FieldAbsIdxs) then
+          raise EMemDBInternalException.Create(S_FIELDS_DONT_MATCH_IN_SEARCH);
+{$ENDIF}
+        result := Cursor;
+        Cursor := nil;
+      end
       else
       begin
-        try
-          NewCursor := UserMoveToRowByIndexRoot(IRoot, Cursor, Cursor.FIterInc);
-          //TODO - Check iterated to has same data as expected.
-          //Bad format = concurrency exception
-          //Diff data = NULL return.
-          if not Assigned(NewCursor) then
+        //Pin failed. Try to pin adjacent, but need to check format is as expected
+        //and that all fields are the same for it to be a good find.
+
+        //Unfortunately, this means that when doing EdgeByIndex, we might
+        //end up traversing back and forth a bit, but c'est la vie.
+        NewCursor := UserMoveToRowByIndexRoot(IRoot, Cursor, Cursor.FIterInc);
+        if Assigned(NewCursor) then
+        begin
+          if not NewCursor.Row.CheckFormatAgainstMetaDefs(
+            FTid, abLatest, AllFieldDefs, pinEvolve) then
+            raise EMemDBConcurrencyException.Create(S_TABLE_FORMAT_CONCURRENTLY_CHANGED_NAV_1);
+
+          S := NewCursor.Row.GetPinLatest(FTid, BufSel, pinEvolve);
+          if NotAssignedOrSentinel(S) then
+            raise EMemDbInternalException.Create(S_ROW_DELETED_NAV_1); //This should have been caught earlier.
+          RowFields := S as TMemStreamableList;
+
+          if SearchValFieldsSame(DataRecs, RowFields, FieldAbsIdxs) then
           begin
-            Cursor.FIterInc := ptPrevious;
-            NewCursor := UserMoveToRowByIndexRoot(IRoot, Cursor, Cursor.FIterInc);
+            result := NewCursor;
+            NewCursor := nil;
+            exit;
           end;
-          //TODO - Check iterated to has same data as expected.
-          //Bad format = concurrency exception
-          //Diff data = NULL return.
-        finally
-          Cursor.Free;
         end;
-        result := NewCursor;
+
+        NewCursor.Free;
+        Cursor.FIterInc := ptPrevious;
+
+        NewCursor := UserMoveToRowByIndexRoot(IRoot, Cursor, Cursor.FIterInc);
+        if Assigned(NewCursor) then
+        begin
+          if not NewCursor.Row.CheckFormatAgainstMetaDefs(
+            FTid, abLatest, AllFieldDefs, pinEvolve) then
+            raise EMemDBConcurrencyException.Create(S_TABLE_FORMAT_CONCURRENTLY_CHANGED_NAV_2);
+
+          S := NewCursor.Row.GetPinLatest(FTid, BufSel, pinEvolve);
+          if NotAssignedOrSentinel(S) then
+            raise EMemDbInternalException.Create(S_ROW_DELETED_NAV_2); //This should have been caught earlier.
+          RowFields := S as TMemStreamableList;
+
+          if SearchValFieldsSame(DataRecs, RowFields, FieldAbsIdxs) then
+          begin
+            result := NewCursor;
+            NewCursor := nil;
+            exit;
+          end;
+        end;
       end;
     end;
   finally
     SV.Free;
+    Cursor.Free;
+    NewCursor.Free;
   end;
-  raise EMemDBInternalException.Create(S_API_NOT_IMPLEMENTED);
 end;
 
 procedure TTidLocal.UserDeleteRow(Cursor: TMemDbCursor);
@@ -3448,8 +3926,6 @@ begin
 
     Row.AddToLocalIndices(self);
   end;
-  //Format checking happens here.
-  //TODO - Local index update.
 end;
 
 (*
@@ -3519,74 +3995,116 @@ end;
 
 { TMemDBTablePersistent }
 
-function TMemDBTablePersistent.AddRowAdditionLockInCrit(const Tid: TTRansactionId): PRowAdditionLock;
+function TMemDBTablePersistent.AddAllRowProhibitInCrit(const Tid: TTRansactionId;
+  ProhibitAdd, ProhibitChange, ProhibitDelete: boolean): boolean;
+var
+  Lock: PRowChangeLock;
 begin
-  result := PRowAdditionLock(FAdditionLocks.FLink.Owner);
-  while Assigned(result) do
+  Lock := PRowChangeLock(FAdditionLocks.FLink.Owner);
+  while Assigned(Lock) do
   begin
-    if result.Tid = Tid then
+    if Lock.Tid = Tid then
+    begin
+      result := false;
+      Lock.ProhibitAdd := Lock.ProhibitAdd or ProhibitAdd;
+      Lock.ProhibitChange := Lock.ProhibitChange or ProhibitChange;
+      Lock.ProhibitDelete := Lock.ProhibitDelete or ProhibitDelete;
       exit;
-    result :=  PRowAdditionlock(result.FSiblings.FLink.Owner);
+    end;
+    Lock :=  PRowChangeLock(Lock.FSiblings.FLink.Owner);
   end;
-  result := NewRowAddLock;
-  result.Tid := Tid;
-  DLListInsertTail(@FAdditionLocks, @result.FSiblings);
+  result := true;
+  Lock := NewRowProhibitLock;
+  Lock.ProhibitAdd := ProhibitAdd;
+  Lock.ProhibitChange := ProhibitChange;
+  Lock.ProhibitDelete := ProhibitDelete;
+  Lock.Tid := Tid;
+  DLListInsertTail(@FAdditionLocks, @Lock.FSiblings);
 end;
 
-function TMemDBTablePersistent.ProhibitRowAdd(const Tid: TTRansactionId): boolean;
+procedure TMemDbTablePersistent.GetProhibitions(const Tid: TTRansactionId;
+                         var AddProhibited: boolean;
+                         var ChangeProhibited: boolean;
+                         var DeleteProhibited: boolean);
 var
-  PLock: PRowAdditionLock;
+  PLock: PRowChangeLock;
 begin
+  AddProhibited := false;
+  ChangeProhibited := false;
+  DeleteProhibited := false;
   FMasterRowLock.Acquire;
   try
-    PLock := PRowAdditionLock(FAdditionLocks.FLink.Owner);
+    PLock := PRowChangeLock(FAdditionLocks.FLink.Owner);
     while Assigned(PLock) do
     begin
       if PLock.Tid <> Tid then
       begin
-        result := true;
+        AddProhibited := AddProhibited or PLock.ProhibitAdd;
+        ChangeProhibited := ChangeProhibited or PLock.ProhibitChange;
+        DeleteProhibited := DeleteProhibited or PLock.ProhibitDelete;
         exit;
       end;
-      PLock :=  PRowAdditionlock(PLock.FSiblings.FLink.Owner);
+      PLock :=  PRowChangeLock(PLock.FSiblings.FLink.Owner);
     end;
   finally
      FMasterRowLock.Release;
   end;
-  result := false;
 end;
 
-procedure TMemDBTablePersistent.FindRmRowAdditionLock(const Tid: TTransactionId);
+function TMemDbTablePersistent.FindRowProhibitLock(const Tid: TTransactionId): PRowChangeLock;
 var
-  PLock: PRowAdditionLock;
+  PLock: PRowChangeLock;
 begin
   FMasterRowLock.Acquire;
   try
-    PLock := PRowAdditionLock(FAdditionLocks.FLink.Owner);
+    PLock := PRowChangeLock(FAdditionLocks.FLink.Owner);
     while Assigned(PLock) do
     begin
       if PLock.Tid = Tid then
       begin
-        DisposeRowAddLock(PLock);
+        result := PLock;
         exit;
       end;
-      PLock :=  PRowAdditionlock(PLock.FSiblings.FLink.Owner);
+      PLock :=  PRowChangeLock(PLock.FSiblings.FLink.Owner);
+    end;
+  finally
+     FMasterRowLock.Release;
+  end;
+  result := nil;
+end;
+
+procedure TMemDBTablePersistent.FindRmRowProhibitLock(const Tid: TTransactionId);
+var
+  PLock: PRowChangeLock;
+begin
+  FMasterRowLock.Acquire;
+  try
+    PLock := PRowChangeLock(FAdditionLocks.FLink.Owner);
+    while Assigned(PLock) do
+    begin
+      if PLock.Tid = Tid then
+      begin
+        DisposeRowProhibitLock(PLock);
+        exit;
+      end;
+      PLock :=  PRowChangeLock(PLock.FSiblings.FLink.Owner);
     end;
   finally
      FMasterRowLock.Release;
   end;
 end;
 
-function TMemDBTablePersistent.NewRowAddLock: PRowAdditionLock;
+function TMemDbTablePersistent.NewRowProhibitLock: PRowChangeLock;
 begin
 {$IFOPT C+}
-  result := TRowAdditionLock.Create;
+  result := TRowChangeLock.Create;
 {$ELSE}
   New(Result);
 {$ENDIF}
   DLItemInitObj(TObject(result), @result.FSiblings);
 end;
 
-procedure TMemDBTablePersistent.DisposeRowAddLock(Lock: PRowAdditionLock);
+procedure TMemDbTablePersistent.DisposeRowProhibitLock(Lock: PRowChangeLock);
 begin
   DLListRemoveObj(@Lock.FSiblings);
 {$IFOPT C+}
@@ -3595,6 +4113,7 @@ begin
   Dispose(Lock);
 {$ENDIF}
 end;
+
 
 constructor TMemDBTablePersistent.Create;
 var
@@ -3609,7 +4128,7 @@ begin
 
   FTidLocalLock := TCriticalSection.Create;
   FMetaIndexLock := TCriticalSection.Create;
-  FMasterIndexes := TIndexRootList.Create;
+  FMasterIndexes := TReffedList.Create;
   DLItemInitList(@FTidLocalStructures);
   DlItemInitList(@FAdditionLocks);
   FMetadata := TMemDbTableMetadata.Create;
@@ -3819,7 +4338,11 @@ begin
 
   DataChange := TidLocal.DataChanged;
   if TidLocal.LayoutChangeRequired then
+  begin
     TidLocal.AdjustTableStructureForMetadata;
+    if TidLocal.FIndexingChangeRequired then
+      TidLocal.BuildValidateNewIndexesOutsideCommitLock;
+  end;
 
   if MetaChange or DataChange then
   begin
@@ -3838,7 +4361,6 @@ begin
     end;
     WrTag(Stream, mstTableEnd);
   end;
-  //TODO - Build changed indexes / validate indexes early if possible.
 end;
 
 procedure TMemDBTablePersistent.ToScratch(const PseudoTid: TTransactionId; Stream: TStream);
@@ -3921,29 +4443,39 @@ begin
   ExpectTag(Stream, mstTableEnd);
 
   if TidLocal.LayoutChangeRequired then
+  begin
     TidLocal.AdjustTableStructureForMetadata;
-  //TODO - Build changed indexes / validate indexes early if possible.
+    if TidLocal.FIndexingChangeRequired then
+      TidLocal.BuildValidateNewIndexesOutsideCommitLock;
+  end;
 end;
 
 procedure TMemDBTablePersistent.FromScratch(const PseudoTid: TTransactionId; Stream: TStream);
 var
   TidLocal:TTidLocal;
+  Newly: boolean;
 begin
   FMasterRowLock.Acquire;
   try
     if FMetadata.AnyChangesForTid(PseudoTid)
-       or Assigned(META_PinCurrent(PseudoTid, pinEvolve))
+       or Assigned(Metadata.PinCurrent(PseudoTid, pinEvolve))
        or (FMasterRowList.Count > 0) then
       raise EMemDBInternalException.Create(S_FROM_SCRATCH_REQUIRES_EMPTY_OBJ);
+
+      Newly := AddAllRowProhibitInCrit(PseudoTid, true, true, true);
+      Assert(Newly);
   finally
     FMasterRowLock.Release;
   end;
   ExpectTag(Stream, mstTableStart);
-  FMetadata.FromScratch(PseudoTid, Stream);
   TidLocal := GetMakeTidLocal(PseudoTid, pinEvolve);
+  FMetadata.FromScratch(PseudoTid, Stream);
+  TidLocal.UpdateLayout(pinEvolve);
   TidLocal.FromScratch(Stream);
   ExpectTag(Stream, mstTableEnd);
-    //TODO - Build changed indexes / validate indexes early if possible.
+  //Do not expect any contention and all rows modded this txion.
+  if TidLocal.FIndexingChangeRequired then
+    TidLocal.BuildValidateNewIndexesOutsideCommitLock;
 end;
 
 procedure TMemDBTablePersistent.PreCommit(const TId: TTransactionId; Reason: TMemDBTransReason);
@@ -3967,38 +4499,30 @@ begin
 
   TidLocal := GetTidLocal(Tid);
   Assert(Assigned(TidLocal));
+  try
+    //In cases where "current" changes behind our back, better to concurrency check
+    //before building / revalidating indices.
+    TidLocal.PreCommit(Reason);
+    if TidLocal.FIndexingChangeRequired then
+      TidLocal.BuildValidateNewIndexesInsideCommitLock;
+  except
+    //It's possible (and silly) for commits to raise, and then
+    //users to make mods before retrying the commit operation. In such cases,
+    //we should roll back the index changes, so they dont get totally barfed.
 
-  //TODO - Entire index validate.
+    //TODO - What with pin reasons and all, it's debatable what changes
+    //you should / should not be allowed to make after initial commit attempt.
+    //Most people will just rollback.
+    //TODO - Check pin reasons and re-attempted commits.
 
-  TidLocal.PreCommit(Reason);
-end;
+    //TODO - Freeing of stuff outside Commit lock for better performance.
+    TidLocal.MetaIndexLocalRollback(Reason);
 
-{
-  Old version:
-
-procedure TMemDbTablePersistent.Commit(Reason: TMemDBTransReason);
-begin
-  //This with temporary index tags.
-  if not (FMetadata.Deleted or FMetadata.Null) then
-  begin
-    FData.Commit(Reason);
-    if ccmIndexesToTemporary in FCommitChangesMade then
-    begin
-      CommitRestoreIndicesToPermanent(Reason);
-      FCommitChangesMade := FCommitChangesMade - [ccmIndexesToTemporary];
-    end;
+    raise;
   end;
-  RemoveOldTagStructs;
-  //And now commit metadata.
-  inherited; //FMetadata.Commit(Reason);
-  FCommitChangesMade := [];
-  FDataChangeRequired := false;
-  FIndexingChangeRequired := false;
-  UpdateHelpersAndIndices;
-
-  //TODO - Prune empty TidLocals, and warn. (Do more thorough analysis of CPT for pins later).
 end;
-}
+
+
 procedure TMemDBTablePersistent.Commit(const TId: TTransactionId; Reason: TMemDbTransReason);
 var
   TidLocal: TTidLocal;
@@ -4021,9 +4545,9 @@ begin
   finally
     FMetaIndexLock.Release;
   end;
-  TidLocal.Free;
+  TidLocal.Free; //TODO - Free outside commit lock for better performance.
 
-  FindRmRowAdditionLock(Tid);
+  FindRmRowProhibitLock(Tid);
 end;
 
 procedure TMemDBTablePersistent.Rollback(const TId: TTransactionId; Reason: TMemDbTransReason);
@@ -4048,9 +4572,9 @@ begin
   finally
     FMetaIndexLock.Release;
   end;
-  TidLocal.Free;
+  TidLocal.Free;  //TODO - Free outside commit lock for better performance.
 
-  FindRmRowAdditionLock(Tid);
+  FindRmRowProhibitLock(Tid);
 end;
 
 {$IFDEF MEMDB2_TEMP_REMOVE}
@@ -6481,15 +7005,13 @@ begin
       end;
     end;
   except
-    on E:Exception do
+    while Result.Count > 0 do
     begin
-      while Result.Count > 0 do
-      begin
-        ReleaseIndexPinOutsideLock(PMemDbIndexPin(Result.Items[Pred(Result.Count)]));
-        Result.Delete(Pred(Result.Count));
-      end;
-      Result.Free;
+      ReleaseIndexPinOutsideLock(PMemDbIndexPin(Result.Items[Pred(Result.Count)]));
+      Result.Delete(Pred(Result.Count));
     end;
+    Result.Free;
+    raise;
   end;
 end;
 
