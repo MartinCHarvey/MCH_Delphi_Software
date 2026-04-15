@@ -562,7 +562,7 @@ var
   AnsiS: AnsiString;
   InitPos: integer;
 begin
-  //TODO - update for poper unicode handling, 64 bit stream sizes.
+  //TODO - update for proper unicode handling, 64 bit stream sizes.
   if Assigned(Stream) then
   begin
     InitPos := Stream.Position;

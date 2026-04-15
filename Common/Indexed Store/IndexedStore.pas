@@ -112,10 +112,10 @@ type
 {$ENDIF}
   private
     FSiblingListEntryIdx: TDLEntry;
-    FIndexNode: TIndexNode;
     FItemRec: TItemRec;
     FTSIndex: TSIndex;
   protected
+    FIndexNode: TIndexNode;
     procedure IndexCopiedFrom(Dest, Source: TIndexNode);
     property SiblingListEntryIdx: TDLEntry read FSiblingListEntryIdx write FSiblingListEntryIdx;
     property IndexNode: TIndexNode read FIndexNode write FIndexNode;
@@ -138,6 +138,7 @@ type
     FItem: TObject;
     FSiblingListEntryRec: TDLEntry;
     procedure SetItem(NewItem: TObject);
+  protected
     function GetIndexLinkByRoot(RootIdx: TSIndex; UseLocks: boolean): TIndexNodeLink;
   public
     constructor Create;
@@ -1666,6 +1667,7 @@ begin
   //because variable class type creation used here.
 end;
 
+{$HINTS OFF}
 class function TIndexNode.ComparePointers(Own, Other: Pointer): integer;
 var
   OwnInt, OtherInt: Cardinal;
@@ -1696,6 +1698,7 @@ begin
   else
     Assert(false, S_POINTERS_ODD_SIZE);
 end;
+{$HINTS ON}
 
 function TIndexNode.Compare(Other: TBinTreeItem; AllowKeyDedupe: boolean): integer;
 var
