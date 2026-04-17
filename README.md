@@ -6,12 +6,12 @@ Most recent (2026) development is in Common/MemDB2:
 - Builds on MemDB code, quick, and developed up to the end of 2025.
 - Current MemDB code is write-serialised.
 - MemDB2 is _very_ work in progress.
-- I expect _multiple_ writes/rewrites as I progress.
-  - Buffering and serialisation model will change, as I work out what runs best.
-  - Expect all operations to allow parallel transactions.
-  - Copy-on-write most state...
-  - But will need to consider caching to get it to work fast.
-  - Configurable SQL-compliant isolation levels...
+  - I expect _multiple_ writes/rewrites as I progress.
+    - Buffering and serialisation model will change, as I work out what runs best.
+    - Expect all operations to allow parallel transactions.
+    - Copy-on-write most state...
+    - But will need to consider caching to get it to work fast.
+    - Configurable SQL-compliant isolation levels...
   - _I'll let you know here when it's done and of acceptable quality, which it isn't yet._
 - SQL support for both MemDB and MemDB2 to follow.
 
