@@ -184,6 +184,7 @@ const
   S_COMMIT_ROLLBACK_IN_PROGRESS = 'Commit, rollback or mini-op for this transaction already in progress.';
   S_COMMIT_OR_ROLLBACK_BEFORE_FREE = 'Transactions should be committed or rolled back before destroying. Are you calling an inherited ''Free'' function? ';
   S_ERRORPHASE_ERROR = 'Can''t start transaction, error state: ';
+  S_ERRORPHASE_COMMIT_ERROR = 'Can''t stop transaction, error state: ';
   S_BADPHASE_ERROR = 'Can''t start transaction, DB not running or closing.';
   S_REINIT_DIFF_LOCATION = 'Database loaded at different location, unload first.';
   S_UNEXPECTED_ROLLBACK_FAILED = 'Unexpected rollback failed, state uncertain: ';
@@ -359,99 +360,82 @@ begin
   finally
     FSessionLock.Release;
   end;
+  //DB hosed is DB hosed.
+  if AsyncError then
+    raise EMemDBException.Create(S_ERRORPHASE_COMMIT_ERROR + FLastError);
+
   try
-    //Try and remove outstanding refs.
-    //Can sensibly throw in the non-error commit case,
-    //else quietly clean-up. Internal API is the last use of an API object in this
-    //transaction.
-    Transaction.CheckNoDanglingTransactionRefs(Commit and not AsyncError);
+    //Things get referenced from the API objects ...
+    //If it's a commit, then I'll check you've cleared those down.
+    //If it's a rollback then I won't, and will clean up for you.
+    Transaction.CheckNoDanglingTransactionRefs(Commit);
 
-    if Transaction.FMode in [amWriteShared, amWriteExclusive] then
-    begin
-      //Database interfaced not refcounted, but could move this inside
-      //"not async error".
-      API := FDatabase.Interfaced.GetAPIObject(Transaction, APIInternalCommitRollback)
-        as TMemAPIDatabaseInternal;
-      try
-        //If async journal error or multi-rollback failed, state is hosed, or
-        //not persistable, so no point even trying, just cleanup.
-
-        //Unfortunately AsyncError is from previous rollback fail.
-        //Which might me we can't clear the refs.
-        //TODO. This needs checking/sorting.
-
-        if not AsyncError then
-        begin
-          if Commit then
-          begin
-            if FJournal.NeedFlowControl then
-              Transaction.FSync := amFlushBuffers;
-
-            //This may raise exceptions if pre-commit checks fail.
-            //Arranges streams in transaction for final journalling;
-            CommitStream := API.UserCommitCycleV3;
-
-            //Exceptions after here less likely / not expected.
-            Assert(not Assigned(Transaction.Changeset));
-            Transaction.FChangeset := CommitStream;
-            //And only set up the wait if no prior exception.
-            WaitJournalDone := Commit and (Transaction.FSync = amFlushBuffers);
-            if WaitJournalDone then
-            begin
-              Assert(not Assigned(Transaction.FlushFinishedEvent));
-              Transaction.FFlushFinishedEvent := TEvent.Create(nil, true, false, '');
-            end;
-            //And now journal it.
-            Transaction.AddRef;
-            FJournal.TransactionCommitChangeset(Transaction);
-          end
-          else
-          begin
-            try
-              //Since everything is multi-buffered, barring out of memory
-              //exceptions we do not expect this to fail.
-              API.UserRollbackCycleV3;
-              //We really need rollback to work to clear pins and refcounts.
-            except
-              on E: Exception do
-              begin
-                FSessionLock.Acquire;
-                try
-                  Assert(FPhase in [mdbRunning, mdbClosingWaitClients, mdbError]);
-                  if FPhase = mdbRunning then
-                  begin
-                    FPhase := mdbError;
-                    FLastError := S_UNEXPECTED_ROLLBACK_FAILED + E.Message;
-                  end;
-                finally
-                  FSessionLock.Release;
-                end;
-                //We will swallow the exception having put the DB into the error
-                //state so that we can release locks and free the transaction.
-
-                //Unfortunately an exception in rollback is likely to leave things pinned.
-                //TODO - Fast deletion path to clear pins and destroy OK.
-              end;
-            end;
-          end;
-        end;
-      finally
-        API.Free;
-      end;
-    end
-    else
+    if not (Transaction.FMode in [amWriteShared, amWriteExclusive]) then
     begin
       if FDatabase.AnyChangesForTid(Transaction.Tid) then
         raise EMemDBInternalException.Create(S_READONLY_HAS_CHANGED_DATA);
+      //Internally read-only txions go through the rollback cycle to clear pins/refs etc.
+      Commit := false;
+    end;
 
-      //Rollback cycle to clear the pins.
-      API := FDatabase.Interfaced.GetAPIObject(Transaction, APIInternalCommitRollback)
-        as TMemAPIDatabaseInternal;
-      try
-        API.UserRollbackCycleV3;
-      finally
-        API.Free;
+    //Database interfaced not refcounted, but could move this inside
+    //"not async error".
+    API := FDatabase.Interfaced.GetAPIObject(Transaction, APIInternalCommitRollback)
+      as TMemAPIDatabaseInternal;
+    try
+      if Commit then
+      begin
+        if FJournal.NeedFlowControl then
+          Transaction.FSync := amFlushBuffers;
+
+        //This may raise exceptions if pre-commit checks fail.
+        //Arranges streams in transaction for final journalling;
+        CommitStream := API.UserCommitCycleV3;
+
+        //Exceptions after here less likely / not expected.
+        Assert(not Assigned(Transaction.Changeset));
+        Transaction.FChangeset := CommitStream;
+        //And only set up the wait if no prior exception.
+        WaitJournalDone := Commit and (Transaction.FSync = amFlushBuffers);
+        if WaitJournalDone then
+        begin
+          Assert(not Assigned(Transaction.FlushFinishedEvent));
+          Transaction.FFlushFinishedEvent := TEvent.Create(nil, true, false, '');
+        end;
+        //And now journal it.
+        Transaction.AddRef;
+        FJournal.TransactionCommitChangeset(Transaction);
+      end
+      else
+      begin
+        try
+          //Since everything is multi-buffered, barring out of memory
+          //exceptions we do not expect this to fail.
+          API.UserRollbackCycleV3;
+          //We really need rollback to work to clear pins and refcounts.
+          //If it doesn't then something's very very broken.
+        except
+          on E: Exception do
+          begin
+            FSessionLock.Acquire;
+            try
+              Assert(FPhase in [mdbRunning, mdbClosingWaitClients, mdbError]);
+              if FPhase = mdbRunning then
+              begin
+                FPhase := mdbError;
+                FLastError := S_UNEXPECTED_ROLLBACK_FAILED + E.Message;
+              end;
+            finally
+              FSessionLock.Release;
+            end;
+            //We will swallow the exception having put the DB into the error
+            //state. Unfortunately pins and refcounts will be hosed, but at least we
+            //drop the R/W lock.
+          end;
+        end;
       end;
+    finally
+      API.Free;
     end;
   finally
     FSessionLock.Acquire;
@@ -461,9 +445,10 @@ begin
       FSessionLock.Release;
     end;
   end;
-  //Only drop the RW Lock if no exception in the commit.
-  //If commit, then we'll hold into the RWLock,
-  //and wait for a subsequent rollback to drop it.
+  //If failed commit, hold the R/W lock.
+  //If good commit, drop the lock.
+  //If failed rollback, DB in error, exception swallowed, and drop the R/W lock.
+
   Assert(Transaction.FMode in [amReadShared, amWriteExclusive, amWriteShared]);
   FRWWLock.Release(DBAccessModeToLockReason(Transaction.FMode));
 
@@ -499,6 +484,7 @@ begin
       raise EMemDBException.Create(S_DB_SESSION_NOT_FOUND);
     if FPhase <> mdbRunning then
     begin
+      //DB hosed is DB hosed.
       if FPhase = mdbError then
         raise EMemDBException.Create(S_ERRORPHASE_ERROR + FLastError)
       else

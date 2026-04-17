@@ -58,7 +58,7 @@ type
     //but other cursor handling code might.
     function Locate(Sel: TAbSelType; Pos: TMemAPIPosition; Cur: TMemDBIndexLeaf): TMemDBIndexLeaf;
     function Find(Sel: TAbSelType; SV: TMemDBIndexSearchVal): TMemDBIndexLeaf;
-    function CheckPresent(Sel: TAbSelType; Node: TMemDBIndexLeaf): boolean;
+    function CheckNonAliasedPresent(Sel: TAbSelType; Node: TMemDBIndexLeaf): boolean;
 
     //Add / remove guaranteed to add or remove in the tree, but
     //you may have to do a bit of hunting to find the right node from the row.
@@ -117,23 +117,6 @@ type
 
 {$IFDEF MEMDB2_TEMP_REMOVE}
 type
-  TMemDBIndexNode = class(TDuplicateValIndexNode)
-  protected
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer; override;
-  end;
-
-  TMemDBIndexNodeSearchVal = class(TMemDbIndexNode)
-  private
-    FPointerSearchVal: pointer;
-    FIdSearchVal: TGUID;
-    FFieldSearchVals: TMemDbFieldDataRecs;
-  protected
-    function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer; override;
-  public
-    property PointerSearchVal: pointer read FPointerSearchVal write FPointerSearchVal;
-    property IdSearchVal: TGUID read FIdSearchVal write FIdSearchVal;
-    property FieldSearchVals: TMemDbFieldDataRecs read FFieldSearchVals write FFieldSearchVals;
-  end;
 
   //FK change-list indexing.
   TMemDBRowLookasideIndexNode = class(TDuplicateValIndexNode)
@@ -153,13 +136,7 @@ type
 
 {$ENDIF}
 
-{$IFOPT C+}
 function CompareFields(const OwnRec: TMemDbFieldDataRec; const OtherRec: TMemDbFieldDataRec): integer;
-{$ELSE}
-function CompareFields(const OwnRec: TMemDbFieldDataRec; const OtherRec: TMemDbFieldDataRec): integer; inline;
-{$ENDIF}
-
-function TrailingZeros64(x: UInt64): Integer;
 
 const
   S_INDEXING_INTERNAL_FIELD_TYPE_1 = 'Internal indexing error: Different field types.';
@@ -179,7 +156,7 @@ uses
 {$ELSE}
   Classes,
 {$ENDIF}
-  MemDB2Buffered, SysUtils;
+  MemDB2Buffered, SysUtils, Reffed;
 
 { Misc functions }
 
@@ -398,9 +375,9 @@ var
 begin
 {$IFOPT C+}
   FoundOrigin := TChkBool.Create;
+  result := nil;
   try
 {$ENDIF}
-    result := nil;
     Root := SelToRoot(Sel);
     case Pos of
       ptFirst: result := LeftMost(Root) as TMemDbIndexLeaf;
@@ -432,15 +409,22 @@ begin
   result := SearchItem(SV, Root) as TMemDbIndexLeaf;
 end;
 
-function TMemDbIndex.CheckPresent(Sel: TAbSelType; Node: TMemDBIndexLeaf): boolean;
+function TMemDbIndex.CheckNonAliasedPresent(Sel: TAbSelType; Node: TMemDBIndexLeaf): boolean;
 var
   Root, Leaf: TMemDbIndexLeaf;
 begin
   Root := SelToRoot(Sel);
   Assert(Assigned(Node));
   Leaf := SearchNode(Node, Root) as TMemDBIndexLeaf;
-  if Assigned(Leaf) then
-    Assert(Leaf = Node);
+  //Unfortunately, it all turns into attack of the clones ...
+  //The indexes de-dupe on key, and identity of key item (pinned data).
+  //Local index clones can be easily separated from the originals, but for
+  //a-b index modification, it's easy to find an alias in "the other" tree.
+  //We can't de-dupe on index nodes themselves, as they change when bits
+  //of the tree get rebalanced. Best I can find is to search for the node
+  //key, and then check it is the same node object.
+  if Assigned(Leaf) and (Leaf <> Node) then
+    Leaf := nil;
   result := Assigned(Leaf);
 end;
 
@@ -453,9 +437,9 @@ begin
 {$IFOPT C+}
   h := TChkBool.Create;
   found := TChkBool.Create;
+  result := false;
   try
 {$ENDIF}
-    result := false;
 
     Root := SelToRoot(Sel);
     //Selectors: abCurrent for both cloned and original indexes.
@@ -506,9 +490,9 @@ begin
 {$IFOPT C+}
   h := TChkBool.Create;
   found := TChkBool.Create;
+  result := false;
   try
 {$ENDIF}
-    result := false;
     Root := SelToRoot(Sel);
     case Sel of
       abCurrent: SelGood := Assigned(FParentIndex);
@@ -746,6 +730,7 @@ begin
     result := CompareFields(FFieldSearchVals[ff],
                             TMemFieldData(OtherField).FDataRec);
 {$ENDIF}
+    Inc(ff);
   end;
   Assert(not AllowKeyDedupe);
 end;
@@ -799,336 +784,6 @@ end;
 
 var
   GoodTagsRead: integer = 0;
-
-{$IFDEF MEMDB2_TEMP_REMOVE}
-function TMemDBIndexNode.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
-var
-  PTag: PITagStruct;
-  TagData: TMemDBITagData;
-
-  OwnRow, OtherRow: TMemDBRow;
-  OwnFieldList, OtherFieldList: TMemStreamableList;
-  OwnField, OtherField: TMemDBStreamable;
-//  OwnFieldOffsets, OtherFieldOffsets: TFieldOffsets;
-  OwnFieldOffsetsFast, OtherFieldOffsetsFast: TFieldOffsetsFast;
-  PtrOwnOffset, PtrOtherOffset: PFieldOffset;
-  UsingNextCopy, OtherUsingNextCopy: boolean;
-  ff:integer;
-  LOfs: integer;
-begin
-  Assert(Assigned(OwnItem));
-  Assert(Assigned(OtherItem));
-  Assert(OwnItem is TMemDbRow);
-  Assert(OtherItem is TMemDbRow);
-{$IFOPT C+}
-  OwnRow := OwnItem as TMemDbRow;
-  OtherRow := OtherItem as TMemDBRow;
-{$ELSE}
-  OwnRow := TMemDBRow(OwnItem);
-  OtherRow := TMemDBROw(OtherItem);
-{$ENDIF}
-  PTag := PItagStruct(IndexTag);
-  TagData := PTag.TagData;
-  Assert(TagData is TMemDBITagData);
-  Assert(TagData.TagStructs[sicCurrent].TagData = TagData);
-  Assert(TagData.TagStructs[sicLatest].TagData = TagData);
-  Inc(GoodTagsRead);
-  if TagData.MainIndexClass = micInternal then
-  begin
-    case TagData.InternalIndexClass of
-    iicRowId:
-      result:= CompareGuids(OwnRow.RowId, OtherRow.RowId);
-    else
-      Assert(false);
-      result :=0;
-    end;
-  end
-  else
-  begin
-    OwnFieldList := nil;
-    OtherFieldList := nil;
-
-    if Assigned(OwnRow.ABData[abCurrent]) then
-    begin
-      Assert(not (OwnRow.ABData[abCurrent] is TMemDeleteSentinel));
-{$IFOPT C+}
-      OwnFieldList := OwnRow.ABData[abCurrent] as TMemStreamableList;
-{$ELSE}
-      OwnFieldList := TMemStreamableList(OwnRow.ABData[abCurrent]);
-{$ENDIF}
-    end;
-    if Assigned(OtherRow.ABData[abCurrent]) then
-    begin
-      Assert(not (OtherRow.ABData[abCurrent] is TMemDeleteSentinel));
-{$IFOPT C+}
-      OtherFieldList := OtherRow.ABData[abCurrent] as TMemStreamableList;
-{$ELSE}
-      OtherFieldList := TMemStreamableList(OtherRow.ABData[abCurrent]);
-{$ENDIF}
-    end;
-    //Main index class is either permanent or temporary.
-    //Case 2)
-    //If temporary, then index newly added, or changing field number,
-    //hence latest ab buffer if table structure has changed, else current
-    //(possibly to add indexes without changing table structure).
-    //Case 1)
-    //If permanent, then using next if subclass is most recent.
-
-    if (TagData.MainIndexClass = micTemporary)
-      or (PTag.SubIndexClass = sicLatest) then
-    begin
-      //Go for most recent A/B buffer if we can.
-      UsingNextCopy := Assigned(OwnRow.ABData[abNext]);
-      OtherUsingNextCopy := Assigned(OtherRow.ABData[abNext]);
-      //Not necessarily!! When change table metadata, not all the rows
-      //have been processed at once.
-      //if IndexClass = icTemporary then
-        //Assert(UsingNextCopy = OtherUsingNextCopy);
-      if UsingNextCopy then
-      begin
-        if OwnRow.ABData[abNext] is TMemDeleteSentinel then
-          OwnFieldList := nil
-        else
-        begin
-{$IFOPT C+}
-          OwnFieldList := OwnRow.ABData[abNext] as TMemStreamableList;
-{$ELSE}
-          OwnFieldList := TMemStreamableList(OwnRow.ABData[abNext]);
-{$ENDIF}
-        end;
-      end;
-      if OtherUsingNextCopy then
-      begin
-        if OtherRow.ABData[abNext] is TMemDeleteSentinel then
-          OtherFieldList := nil
-        else
-        begin
-{$IFOPT C+}
-          OtherFieldList := OtherRow.ABData[abNext] as TMemStreamableList;
-{$ELSE}
-          OtherFieldList := TMemStreamableList(OtherRow.ABData[abNext]);
-{$ENDIF}
-        end;
-      end;
-    end
-    else
-    begin
-      UsingNextCopy := false;
-      OtherUsingNextCopy := false;
-    end;
-    if not (Assigned(OwnFieldList) or Assigned(OtherFieldList)) then
-      result := 0
-    else if not (Assigned(OwnFieldList) and Assigned(OtherFieldList)) then
-    begin
-      if Assigned(OwnFieldList) then
-        result := 1
-      else
-        result := -1;
-    end
-    else //Both assigned.
-    begin
-      if (TagData.MainIndexClass = micTemporary) then
-      begin
-        //These field offsets look the wrong way around, but aren't.
-
-        //ExtraFieldOffset is the "higher" number when removing fields from the
-        //table. Not only does it correspond to the old index, (which you expect)
-
-        //it *also* corresponds to the new index, when the delete sentinels
-        //have not yet been removed.
-
-        //Dynamic array assignment by reference - no dynamic array allocation
-        //or copying here.
-        if UsingNextCopy then
-          TagData.GetExtraFieldOffsetsFast(OwnFieldOffsetsFast)
-        else
-          TagData.GetDefaultFieldOffsetsFast(OwnFieldOffsetsFast);
-
-        if OtherUsingNextCopy then
-          TagData.GetExtraFieldOffsetsFast(OtherFieldOffsetsFast)
-        else
-          TagData.GetDefaultFieldOffsetsFast(OtherFieldOffsetsFast);
-      end
-      else
-      begin
-        TagData.GetDefaultFieldOffsetsFast(OwnFieldOffsetsFast);
-        TagData.GetDefaultFieldOffsetsFast(OtherFieldOffsetsFast);
-      end;
-
-      //Check field indexes in range.
-      //However, do not need to have the same number of fields in each...
-      LOfs := OwnFieldOffsetsFast.Count;
-      Assert(LOfs > 0);
-      Assert(LOfs = OtherFieldOffsetsFast.Count);
-      result := 0;
-      ff := 0;
-      PtrOwnOffset := OwnFieldOffsetsFast.PtrFirst;
-      PtrOtherOffset := OtherFieldOffsetsFast.PtrFirst;
-      while (result = 0) and (ff < LOfs) do
-      begin
-        Assert(PtrOwnOffset^ < OwnFieldList.Count);
-        Assert(PtrOtherOffset^ < OtherFieldList.Count);
-        OwnField := OwnFieldList.Items[PtrOwnOffset^];
-        OtherField := OtherFieldList.Items[PtrOtherOffset^];
-        Assert(not (OwnField is TMemDeleteSentinel));
-        Assert(not (OtherField is TMemDeleteSentinel));
-{$IFOPT C+}
-        result := CompareFields((OwnField as TMemFieldData).FDataRec,
-                                (OtherField as TMemFieldData).FDataRec);
-{$ELSE}
-        result := CompareFields(TMemFieldData(OwnField).FDataRec,
-                                TMemFieldData(OtherField).FDataRec);
-{$ENDIF}
-        Inc(ff);
-        Inc(PtrOwnOffset);
-        Inc(PtrOtherOffset);
-      end;
-    end;
-  end;
-end;
-{$ENDIF}
-
-{ TMemDBIndexNodeSearchVal }
-
-{$IFDEF MEMDB2_TEMP_REMOVE}
-function TMemDBIndexNodeSearchVal.CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
-//OwnItem ptr always NIL, use built in field. Own field always exists.
-//Otherwise, as function above.
-var
-  PTag: PITagStruct;
-  TagData: TMemDBITagData;
-
-  OtherRow: TMemDBRow;
-  OtherFieldList: TMemStreamableList;
-  OtherField: TMemDBStreamable;
-//  OtherFieldOffsets: TFieldOffsets;
-  OtherFieldOffsetsFast: TFieldOffsetsFast;
-  PtrOtherOffset: PFieldOffset;
-
-  OtherUsingNextCopy: boolean;
-  ff:integer;
-  LOfs: integer;
-
-begin
-  Assert(not Assigned(OwnItem));
-  Assert(Assigned(OtherItem));
-  Assert(OtherItem is TMemDbRow);
-{$IFOPT C+}
-  OtherRow := OtherItem as TMemDBRow;
-{$ELSE}
-  OtherRow := TMemDBRow(OtherItem);
-{$ENDIF}
-  PTag := PItagStruct(IndexTag);
-  TagData := PTag.TagData;
-  if TagData.MainIndexClass = micInternal then
-  begin
-    case TagData.InternalIndexClass of
-    iicRowId:
-      result:= CompareGuids(FIdSearchVal, OtherRow.RowId);
-    else
-      Assert(false);
-      result := 0;
-    end;
-  end
-  else
-  begin
-    OtherFieldList := nil;
-    if Assigned(OtherRow.ABData[abCurrent]) then
-    begin
-      Assert(not (OtherRow.ABData[abCurrent] is TMemDeleteSentinel));
-{$IFOPT C+}
-      OtherFieldList := OtherRow.ABData[abCurrent] as TMemStreamableList;
-{$ELSE}
-      OtherFieldList := TMemStreamableList(OtherRow.ABData[abCurrent]);
-{$ENDIF}
-    end;
-    //Main index class is either permanent or temporary.
-    //Case 2)
-    //If temporary, then index newly added, or changing field number,
-    //hence latest ab buffer if table structure has changed, else current
-    //(possibly to add indexes without changing table structure).
-    //Case 1)
-    //If permanent, then using next if subclass is most recent.
-
-    if (TagData.MainIndexClass = micTemporary)
-      or (PTag.SubIndexClass = sicLatest) then
-    begin
-      //N.B yes, there is some cleverness on removing index nodes
-      //for icCurrent, in that they're unchanged if a current index
-      //is marked as temporary (layout change => no data value change).
-
-      //Go for most recent A/B buffer.
-      OtherUsingNextCopy := Assigned(OtherRow.ABData[abNext]);
-
-      if OtherUsingNextCopy then
-      begin
-        if OtherRow.ABData[abNext] is TMemDeleteSentinel then
-          OtherFieldList := nil
-        else
-        begin
-{$IFOPT C+}
-          OtherFieldList := OtherRow.ABData[abNext] as TMemStreamableList;
-{$ELSE}
-          OtherFieldList := TMemStreamableList(OtherRow.ABData[abNext]);
-{$ENDIF}
-        end;
-      end;
-    end
-    else
-      OtherUsingNextCopy := false;
-
-    if not Assigned(OtherFieldList) then
-      result := 1
-    else //Both assigned.
-    begin
-      if (TagData.MainIndexClass = micTemporary) then
-      begin
-        //These field offsets look the wrong way around, but aren't.
-
-        //ExtraFieldOffset is the "higher" number when removing fields from the
-        //table. Not only does it correspond to the old index, (which you expect)
-
-        //it *also* corresponds to the new index, when the delete sentinels
-        //have not yet been removed.
-
-        //Dynamic array assignment by reference - no dynamic array allocation
-        //or copying here.
-        if OtherUsingNextCopy then
-          TagData.GetExtraFieldOffsetsFast(OtherfieldOffsetsFast)
-        else
-          TagData.GetDefaultFieldOffsetsFast(OtherFieldOffsetsFast);
-      end
-      else
-        TagData.GetDefaultFieldOffsetsFast(OtherFieldOffsetsFast);
-
-
-      //Check field indexes in range.
-      //However, do not need to have the same number of fields in each...
-      LOfs := OtherFieldOffsetsFast.Count;
-      Assert(LOfs > 0);
-      Assert(LOfs = Length(FFieldSearchVals));
-      result := 0;
-      ff := 0;
-      PtrOtherOffset := OtherFieldOffsetsFast.PtrFirst;
-      while (result = 0) and (ff < LOfs) do
-      begin
-        Assert(PtrOtherOffset^ < OtherFieldList.Count);
-        OtherField := OtherFieldList.Items[PtrOtherOffset^];
-        Assert(not (OtherField is TMemDeleteSentinel));
-  {$IFOPT C+}
-        result := CompareFields(FFieldSearchVals[ff],
-                                (OtherField as TMemFieldData).FDataRec);
-  {$ELSE}
-        result := CompareFields(FFieldSearchVals[ff],
-                                TMemFieldData(OtherField).FDataRec);
-  {$ENDIF}
-        Inc(ff);
-        Inc(PtrOtherOffset);
-      end;
-    end;
-  end;
-end;
-{$ENDIF}
 
 { TMemDBRowLookasideIndexNode}
 

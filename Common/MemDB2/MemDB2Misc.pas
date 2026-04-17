@@ -64,6 +64,8 @@ type
   //also implies repeatable read, and serializable.
 
   //TODO - Need to re-work this with respect to query results and row reading.
+  //TODO - Snapshot isolation support.
+  //TODO - Snapshot index read at Txion start when snapshot or serialisable.
   TMDBIsolationLevel = (ilReadComitted, ilReadRepeatable, ilSerialisable);
 
 const
@@ -192,77 +194,6 @@ type
 {$ENDIF}
   //TODO - Possibly "to-string" or other serialization.
   end;
-
-
-{$IFDEF MEMDB2_TEMP_REMOVE}
-    //TODO - Old TMemDBITagData
-
-    //Do not put tag structs at the start of the class,
-    //so we can check that we're not erroneously using them instead of
-    //PITagStructs to indexed store calls.
-    FIndexClass: TMainIndexClass;
-    FInternalIndexClass:TInternalIndexClass;
-    //Do not need encap index class.
-    FDefaultFieldOffsets: TFieldOffsets;
-    FExtraFieldOffsets: TFieldOffsets;
-
-    FDefaultFastOffsets: TFieldOffsetsFast;
-    FExtraFastOffsets: TFieldOffsetsFast;
-
-    FInit: boolean;
-    FStoreIdxSet: TIndexedStoreO;
-
-    FCurrentTagStruct: TITagStruct;
-    FLatestTagStruct: TITagStruct;
-  protected
-{$IFDEF USE_TRACKABLES}
-    function GetExtraInfoText: string; override;
-{$ENDIF}
-    function GetIdxsSetToStore: boolean;
-    function GetInternalIndexClass: TInternalIndexClass;
-    function GetTagStructBySubClass(SubClass: TSubIndexSelType): PITagStruct;
-
-    function GetDefaultFieldOffsets: TFieldOffsets;
-    function GetExtraFieldOffsets: TFieldOffsets;
-
-  public
-    constructor Create;
-    destructor Destroy; override;
-
-    //For user indexes, classes created dynamically.
-    procedure InitPermanent(DefaultFieldOffsets: TFieldOffsets);
-    procedure MakePermanentTemporary(NewOffsets: TFieldOffsets);
-    procedure CommitRestoreToPermanent;
-    procedure RollbackRestoreToPermanent;
-
-    procedure CommitAddIdxsToStore(Store: TIndexedStoreO);
-    procedure CommitRmIdxsFromStore;
-    procedure RollbackRestoreIdxsToStore(Store: TIndexedStoreO);
-    procedure RollbackRmIdxsFromStore;
-
-    //For internal indexes, classes shared between all instances.
-    procedure InitInternal(InternalClass: TInternalIndexClass);
-    procedure AddInternalIndexToStore(Store:TIndexedStoreO);
-
-    //No interlocked ops on DynArray refcounts.
-    procedure GetDefaultFieldOffsetsFast(var OfsFast: TFieldOffsetsFast); inline;
-    procedure GetExtraFieldOffsetsFast(var OfsFast: TFieldOffsetsFast); inline;
-
-    property IdxsSetToStore: boolean read GetIdxsSetToStore;
-
-    property MainIndexClass: TMainIndexClass read FIndexClass;
-    property InternalIndexClass:TInternalIndexClass read GetInternalIndexClass;
-
-    property TagStructs[S:TSubIndexSelType]:PITagStruct read GetTagStructBySubClass;
-
-    property DefaultFieldOffsets: TFieldOffsets read GetDefaultFieldOffsets;
-    property ExtraFieldOffsets: TFieldOffsets read GetExtraFieldOffsets;
-  end;
-
-{$ENDIF}
-
-
-  //TODO - Optimizations are DB local.
 
 const
   IndexableFieldTypes: TMDBFieldTypeSet = [ftInteger,

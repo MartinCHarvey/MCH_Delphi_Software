@@ -146,7 +146,7 @@ type
 
 implementation
 
-uses LockAbstractions;
+uses LockAbstractions, SysUtils;
 
 { Misc functions }
 
@@ -355,7 +355,7 @@ begin
   NewNode := nil;
   Tmp := nil;
   RetP := nil;
-
+  result := nil;
   try
     if not Assigned(InP) then
     begin
@@ -474,7 +474,7 @@ begin
   NewP := nil;
   NewP1 := nil;
   NewP2 := nil;
-
+  result := nil;
   p := InP;
   try
     case p.bal of
@@ -632,7 +632,7 @@ begin
   NewP := nil;
   NewP1 := nil;
   NewP2 := nil;
-
+  result := nil;
   p := InP;
   try
     case p.bal of
@@ -890,7 +890,7 @@ begin
   Tmp := nil;
   RetQR.q := nil;
   RetQR.r := nil;
-
+  result := nil;
   try
     if InP = nil then
     begin
