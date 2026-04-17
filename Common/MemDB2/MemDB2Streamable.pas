@@ -284,27 +284,15 @@ type
     mstReservedForEscape2 //NB, can add after these. No longer FE, FF.
   );
 
-{$IFOPT C+}
-  procedure WrTag(Stream: TStream; Tag: TMemStreamTag);
-  function RdTag(Stream: TStream): TMemStreamTag;
-  procedure ExpectTag(Stream: TStream; Tag: TMemStreamTag);
-  procedure WrStreamString(Stream: TStream; const S: string);
-  function RdStreamString(Stream: TStream): string;
-  procedure WrStreamChangeType(Stream: TStream; Changetype: TMDBChangeType);
-  function RdStreamChangeType(Stream: TStream): TMDBChangeType;
-  procedure WrGuid(Stream:TStream; const G:TGUID);
-  function RdGuid(Stream:TStream): TGUID;
-{$ELSE}
-  procedure WrTag(Stream: TStream; Tag: TMemStreamTag); inline;
-  function RdTag(Stream: TStream): TMemStreamTag; inline;
-  procedure ExpectTag(Stream: TStream; Tag: TMemStreamTag); inline;
-  procedure WrStreamString(Stream: TStream; const S: string); inline;
-  function RdStreamString(Stream: TStream): string; inline;
-  procedure WrStreamChangeType(Stream: TStream; Changetype: TMDBChangeType); inline;
-  function RdStreamChangeType(Stream: TStream): TMDBChangeType; inline;
-  procedure WrGuid(Stream:TStream; const G:TGUID); inline;
-  function RdGuid(Stream:TStream): TGUID; inline;
-{$ENDIF}
+procedure WrTag(Stream: TStream; Tag: TMemStreamTag);
+function RdTag(Stream: TStream): TMemStreamTag;
+procedure ExpectTag(Stream: TStream; Tag: TMemStreamTag);
+procedure WrStreamString(Stream: TStream; const S: string);
+function RdStreamString(Stream: TStream): string;
+procedure WrStreamChangeType(Stream: TStream; Changetype: TMDBChangeType);
+function RdStreamChangeType(Stream: TStream): TMDBChangeType;
+procedure WrGuid(Stream:TStream; const G:TGUID);
+function RdGuid(Stream:TStream): TGUID;
 
 function AssignedNotSentinel(X: TMemDBStreamable): boolean; inline;
 function NotAssignedOrSentinel(X: TMemDBStreamable): boolean; inline;

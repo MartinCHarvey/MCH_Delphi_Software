@@ -104,7 +104,10 @@ procedure ExecParallel(Handlers: TParallelHandlers;
                        var  Rets: TPHRefs;
                        const Xlators: PExceptionHandlerChain = nil);
 var
-  L, BatchL, BatchOfs, i: integer;
+  L, i: integer;
+{$IFDEF USE_WINDOWS_LOCKS}
+  BatchL, BatchOfs: integer;
+{$ENDIF}
   Threads: TThreadArray;
 {$IFDEF USE_WINDOWS_LOCKS}
   WaitHandles: THandleArray;

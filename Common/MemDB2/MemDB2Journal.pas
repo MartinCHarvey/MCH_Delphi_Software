@@ -181,7 +181,7 @@ type
 
 implementation
 
-uses MemDB2, Windows, SysUtils, BufferedFileStream;
+uses MemDB2, Windows, SysUtils, BufferedFileStream, Reffed;
 
 const
   JOURNAL_PENDING_QUEUE_LIMIT = 4096;
@@ -845,6 +845,7 @@ var
   end;
 
 begin
+  result := false;
   try
     FileName := FBaseDirectory + IntToStr(FWriteSeq) + FileExts[jftIncremental];
     OutputStream := TWriteCachedFileStream.Create(FileName, FILE_CACHE_SIZE);

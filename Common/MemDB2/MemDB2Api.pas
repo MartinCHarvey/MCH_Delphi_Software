@@ -140,7 +140,7 @@ type
     //Row deletion.
     //Optionally autoincrements on the most recent index/container you
     //were iterating through.
-    procedure Delete(AutoInc: boolean = false);
+    procedure Delete(AutoInc: boolean = true);
     function RowSelected: boolean;
   end;
 
@@ -230,14 +230,13 @@ type
                                       Cursor: TMemDBCursor;
                                       FieldList: TMemStreamableList);
 
-    procedure API_DataRowModOrAppend(T: TObject;
-                                    var Cursor: TMemDBCursor;
-                                    FieldList: TMemStreamableList);
+    function API_DataRowModOrAppend(T: TObject;
+                                    Cursor: TMemDBCursor;
+                                    FieldList: TMemStreamableList): TMemDBCursor;
 
-    function API_DataRelocate(T: TObject; Cursor: TMemDBCursor): TMemDBCursor;
-
-    procedure API_DataRowDelete(T: TObject;
-                                Cursor: TMemDBCursor);
+    function API_DataRowDelete(T: TObject;
+                               Cursor: TMemDBCursor;
+                               AutoInc: boolean): TMemDBCursor;
 
     function API_DataGetFieldAbsIdx(T: TObject;
                                     FieldName: string): integer;
@@ -402,7 +401,6 @@ begin
     on Exception do
     begin
       result.Free;
-      result := nil;
       raise; //Rely on later rollback etc to clear pins and such.
     end;
   end;
@@ -777,11 +775,16 @@ begin
 end;
 
 procedure TMemAPITableData.Post;
+var
+  NewCursor: TMemDBCursor;
 begin
   CheckWriteTransaction;
   //Do the post.
-  Table.API_DataRowModOrAppend(FAssociatedTransaction, FCursor, FFieldList);
+  NewCursor := Table.API_DataRowModOrAppend(FAssociatedTransaction, FCursor, FFieldList);
   Discard;
+  Assert(NewCursor <> FCursor);
+  FCursor.Free;
+  FCursor := NewCursor;
 end;
 
 procedure TMemAPITableData.Delete(AutoInc: boolean);
@@ -793,11 +796,8 @@ begin
     raise EMemDBAPIException.Create(S_API_NO_ROW_SELECTED);
 
   Discard;
-  if AutoInc and (FCursor.IterInc <> ptInvalid) then
-    NextCursor := Table.API_DataRelocate(FAssociatedTransaction, FCursor)
-  else
-    NextCursor := nil;
-  Table.API_DataRowDelete(FAssociatedTransaction, FCursor);
+  NextCursor := Table.API_DataRowDelete(FAssociatedTransaction, FCursor, AutoInc);
+  Assert(NextCursor <> FCursor);
   FCursor.Free;
   FCursor := NextCursor;
   if Assigned(FCursor) then
@@ -1493,18 +1493,6 @@ begin
 end;
 
 
-function TMemDBTable.API_DataRelocate(T: TObject; Cursor: TMemDBCursor): TMemDBCursor;
-begin
-  if Assigned(Cursor) then
-  begin
-    result := Cursor.TidLocal.UserMoveToRowByIndexRoot(Cursor.IterIndex,
-                                                       Cursor,
-                                                       Cursor.IterInc);
-  end
-  else
-    result := nil;
-end;
-
 function TMemDBTable.API_DataFindByIndex(T:TObject;
                             IdxName: string;
                             const DataRecs: TMemDbFieldDataRecs): TMemDbCursor; //Returns cursor
@@ -1527,6 +1515,7 @@ begin
   IRoot := GetUserTidLocalIndexRoot(Tr.Tid, TidLocal, Idx, IdxName);
   if not Assigned(IRoot) then
     raise EMemDBAPIException.Create(S_API_SEARCH_REQUIRES_INDEX);
+
   Assert(Assigned(Idx));
   Assert(Assigned(TidLocal));
   META_CurIndexDefToFieldDefs(Tr.Tid, Idx, FieldDefs, FieldAbsIdxs);
@@ -1737,9 +1726,9 @@ begin
 end;
 
 
-procedure TMemDBTable.API_DataRowModOrAppend(T: TObject;
-                                var Cursor: TMemDBCursor;
-                                FieldList: TMemStreamableList);
+function TMemDBTable.API_DataRowModOrAppend(T: TObject;
+                                Cursor: TMemDBCursor;
+                                FieldList: TMemStreamableList): TMemDBCursor;
 var
   AllFieldDefs: TMemStreamableList;
   MField: TMemFieldDef;
@@ -1770,11 +1759,12 @@ begin
   //either a) CheckChangedRowStructure will barf, or
   // b) Write-after-write conflict detection will catch the error.
   // We'll check it against the Cur metadata in the TidLocal row write.
-  TidLocal.UserWriteRowData(Cursor, FieldList);
+  result := TidLocal.UserWriteRowData(Cursor, FieldList);
 end;
 
-procedure TMemDBTable.API_DataRowDelete(T: TObject;
-                                        Cursor: TMemDBCursor);
+function TMemDBTable.API_DataRowDelete(T: TObject;
+                                        Cursor: TMemDBCursor;
+                                        AutoInc: boolean): TMemDBCursor;
 var
   Tr: TMemDBTransaction;
   TidLocal: TTidLocal;
@@ -1788,7 +1778,7 @@ begin
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
   GLogLog(SV_INFO, 'API_DataRowDelete: Actual deletion.');
 {$ENDIF}
-  TidLocal.UserDeleteRow(Cursor);
+  result := TidLocal.UserDeleteRow(Cursor, AutoInc);
 end;
 
 function TMemDBTable.API_DataGetFieldAbsIdx(T: TObject;
