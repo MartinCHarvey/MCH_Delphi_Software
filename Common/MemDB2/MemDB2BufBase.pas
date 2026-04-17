@@ -1260,14 +1260,18 @@ end;
 function TMemDBMultiBuffered.PinForCursorFromInode(const Tid: TTRansactionId; INode: TMemDBIndexLeaf; Reason: TPinReason): boolean;
 var
   RefUp: TReferenceUpdate;
+  TidUp: TTidUpdate;
   IPin: PMemDBIndexPin;
   CurPin: PMemDBPinnedItem;
   Item: TMemDBStreamable;
   Nxt, Cur: PMemDbMultiItem;
 begin
+  result := false;
   LockSelf;
   try
     DCPPre(RefUp);
+    CPTidPre(Tid, TidUp);
+
     //First things first, check the INode is actually one of ours.
     if not ((Assigned(INode)) and (Assigned(INode.Row))
        and (Assigned(INode.Pinned)) and (INode.Row = self)) then
@@ -1315,9 +1319,11 @@ begin
     end;
     result := Assigned(Item);
     DCPPost(RefUp);
+    CPTidPost(Tid, TidUp);
   finally
     UnlockSelf;
   end;
+  CPTidHandle(TidUp);
   DCPLazyHandle(RefUp);
 end;
 

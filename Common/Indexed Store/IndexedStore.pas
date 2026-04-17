@@ -748,8 +748,10 @@ var
   UseLocks: boolean;
 
   procedure Cleanup; //One index for all the items
+{$IFOPT C+}
   var
     res2: TIsRetVal;
+{$ENDIF}
   begin
     Assert(Assigned(CurItem));
     Assert(Assigned(NewIndex));

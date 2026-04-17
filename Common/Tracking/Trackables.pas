@@ -421,6 +421,7 @@ end;
  * TTrackItem                       *
  ************************************)
 
+ {$HINTS OFF}
 function TTrackItem.Compare(Other: TBinTreeItem; AllowKeyDedupe: boolean): integer;
 var
   OwnInt, OtherInt: Cardinal;

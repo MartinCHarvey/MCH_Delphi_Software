@@ -759,17 +759,16 @@ begin
 end;
 
 procedure TForm1.TstBlobsClick(Sender: TObject);
-{$IFDEF MEMDB2_TEMP_REMOVE}
 var
   Trans: TMemDBTransaction;
   DBAPI: TMemAPIDatabase;
   TableData: TMemAPITableData;
   TableMeta: TMemAPITableMetadata;
-  Table: TMemDBHandle;
   SearchData, Data, IData: TMemDbFieldDataRec;
   i, j: integer;
   OK: boolean;
   PD: PAnsiChar;
+  Names: TStringList;
 
 begin
   ResetClick(Sender);
@@ -778,11 +777,18 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Table := DBAPI.OpenTableOrKey('Test table');
-      if Assigned(Table) then
-        DBAPI.DeleteTableOrKey('Test table');
-      Table := DBAPI.CreateTable('Test table');
-      TableMeta := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata) as TMemAPITableMetadata;
+      Names := DBAPI.GetEntityNames;
+      try
+        if Names.IndexOf('Test table') >= 0 then
+        begin
+          LogTimeIncr('DelTable deleted: Test table');
+          DBAPI.DeleteTableOrKey('Test table');
+        end;
+      finally
+        Names.Free;
+      end;
+      DBAPI.CreateTable('Test table');
+      TableMeta := DBAPI.GetAPIObjectFromEntity('Test table', APITableMetadata) as TMemAPITableMetadata;
       try
         TableMeta.CreateField('Int', ftInteger);
         TableMeta.CreateIndex('IntIdx', 'Int', []);
@@ -808,8 +814,7 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Table := DBAPI.OpenTableOrKey('Test table');
-      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+      TableData := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
       try
         for i := 0 to LIMIT do
         begin
@@ -857,8 +862,7 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Table := DBAPI.OpenTableOrKey('Test table');
-      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+      TableData := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
       try
         FillChar(Data, sizeof(Data), 0);
         OK := TableData.Locate(ptFirst, '');
@@ -940,8 +944,7 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Table := DBAPI.OpenTableOrKey('Test table');
-      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+      TableData := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
       try
         OK := TableData.Locate(ptFirst, '');
         while OK do
@@ -1000,8 +1003,7 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Table := DBAPI.OpenTableOrKey('Test table');
-      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+      TableData := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
       try
         FillChar(SearchData, sizeof(SearchData), 0);
         SearchData.FieldType := ftBlob;
@@ -1042,14 +1044,8 @@ begin
     raise;
   end;
 end;
-{$ELSE}
-begin
-  Assert(false); //TODO - rewrite this.
-end;
-{$ENDIF}
 
 procedure TForm1.FindEdgeTestClick(Sender: TObject);
-{$IFDEF MEMDB2_TEMP_REMOVE}
 
 const
   DUP_FACTOR = 3;
@@ -1059,22 +1055,26 @@ var
   DBAPI: TMemAPIDatabase;
   TableData: TMemAPITableData;
   TableMeta: TMemAPITableMetadata;
-  Table: TMemDBHandle;
   SearchData, Data: TMemDbFieldDataRec;
   i, j: Integer;
   OK: boolean;
 begin
   ResetClick(Sender);
+
   //Create a table with the right structure.
   Trans := FSession.StartTransaction(amReadWrite);
   try
     DBAPI := Trans.GetAPI;
     try
-      Table := DBAPI.OpenTableOrKey('Test table');
-      if Assigned(Table) then
+      TableMeta := DBAPI.GetAPIObjectFromEntity('Test table', APITableMetadata) as TMemAPITableMetadata;
+      if Assigned(TableMeta) then
+      begin
+        TableMeta.Free;
         DBAPI.DeleteTableOrKey('Test table');
-      Table := DBAPI.CreateTable('Test table');
-      TableMeta := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata) as TMemAPITableMetadata;
+      end;
+
+      DBAPI.CreateTable('Test table');
+      TableMeta := DBAPI.GetAPIObjectFromEntity('Test table', APITableMetadata) as TMemAPITableMetadata;
       try
         TableMeta.CreateField('Int', ftInteger);
         TableMeta.CreateIndex('IntIdx', 'Int', []);
@@ -1097,8 +1097,7 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Table := DBAPI.OpenTableOrKey('Test table');
-      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+      TableData := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
       try
         for i := 0 to Pred(DUP_FACTOR) do
         begin
@@ -1129,8 +1128,7 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Table := DBAPI.OpenTableOrKey('Test table');
-      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+      TableData := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
       try
         SearchData.FieldType := ftInteger;
         SearchData.i32Val := LIMIT div 2;
@@ -1216,8 +1214,7 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Table := DBAPI.OpenTableOrKey('Test table');
-      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+      TableData := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
       try
         TableData.Locate(ptFirst);
         while TableData.RowSelected do
@@ -1254,8 +1251,7 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Table := DBAPI.OpenTableOrKey('Test table');
-      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+      TableData := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
       try
         //Now cheekily use the fact that the rows are in order to delete two
         //rows out of every three.
@@ -1327,11 +1323,7 @@ begin
     end;
   end;
 end;
-{$ELSE}
-begin
-  Assert(false); //TODO - rewrite this.
-end;
-{$ENDIF}
+
 
 procedure TForm1.FKTestClick(Sender: TObject);
 {$IFDEF MEMDB2_TEMP_REMOVE}
@@ -2426,7 +2418,7 @@ var
   DBAPI: TMemAPIDatabase;
   TableMeta: TMemAPITableMetadata;
   TableData: TMemAPITableData;
-  i, tmp: integer;
+  i: integer;
   Data: TMemDbFieldDataRec;
 
   procedure DelTable;
@@ -3523,11 +3515,9 @@ end;
 {$ENDIF}
 
 procedure TForm1.MFIndexTestClick(Sender: TObject);
-{$IFDEF MEMDB2_TEMP_REMOVE}
 var
   Trans:TMemDBTransaction;
   DBAPI: TMemAPIDatabase;
-  Tbl: TMemDBHandle;
   TblMeta: TMemAPITableMetadata;
   TblData: TMemAPITableData;
   i: integer;
@@ -3542,8 +3532,8 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Tbl := DBAPI.CreateTable('Test table');
-      TblMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
+      DBAPI.CreateTable('Test table');
+      TblMeta := DBAPI.GetAPIObjectFromEntity('Test table', APITableMetadata) as TMemAPITableMetadata;
       try
         TblMeta.CreateField('U64', ftUint64);
         TblMeta.CreateField('IntLo', ftInteger);
@@ -3573,8 +3563,7 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Tbl := DBAPI.OpenTableOrKey('Test table');
-      TblData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+      TblData := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
       try
         FillChar(Data, sizeof(Data), 0);
         for i := 1 to LIMIT do
@@ -3615,8 +3604,7 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Tbl := DBAPI.OpenTableOrKey('Test table');
-      TblData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+      TblData := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
       try
         i := 1;
         Ret := TblData.Locate(ptFirst, 'I64');
@@ -3679,8 +3667,7 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Tbl := DBAPI.OpenTableOrKey('Test table');
-      TblData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+      TblData := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
       try
         i := 1;
         SetLength(DataRecs, 2);
@@ -3729,8 +3716,7 @@ begin
     try
       DBAPI := Trans.GetAPI;
       try
-        Tbl := DBAPI.OpenTableOrKey('Test table');
-        TblData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+        TblData := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
         try
           SetLength(DataRecs, 2);
           DataRecs[0].FieldType := ftInteger;
@@ -3774,11 +3760,6 @@ begin
     end;
   end;
 end;
-{$ELSE}
-begin
-  Assert(false); //TODO - rewrite this.
-end;
-{$ENDIF}
 
 type
   TRRThread = class(TThread)
@@ -3787,7 +3768,6 @@ type
   end;
 
 procedure TRRThread.Execute;
-{$IFDEF MEMDB2_TEMP_REMOVE}
 var
   i: integer;
   j: integer;
@@ -3803,8 +3783,7 @@ begin
     try
       DBAPI := T.GetAPI;
       try
-        TblData := DBAPI.GetApiObjectFromHandle(
-          DBAPI.OpenTableOrKey('Test table'), APITableData) as TMemAPITableData;
+        TblData := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
         try
           DataRec.FieldType := ftInteger;
           j := Succ(Random(LIMIT));
@@ -3829,17 +3808,11 @@ begin
     end;
   end;
 end;
-{$ELSE}
-begin
-  Assert(false); //TODO - rewrite this.
-end;
-{$ENDIF}
 
 //Basic check to ensure that can start multi read transactions
 //in parallel, that cursors don't interfere, that references
 //get cleared down correctly etc.
 procedure TForm1.MultiRRTrans(Sender: TObject);
-{$IFDEF MEMDB2_TEMP_REMOVE}
 
   procedure BlastRR;
   var
@@ -3871,7 +3844,6 @@ procedure TForm1.MultiRRTrans(Sender: TObject);
   procedure SetupRR;
   var
     T: TMemDBTransaction;
-    Tbl: TMemDBHandle;
     DBAPI: TMemAPIDatabase;
     TblMeta: TMemAPITableMetadata;
     TblData: TMemAPITableData;
@@ -3883,8 +3855,8 @@ procedure TForm1.MultiRRTrans(Sender: TObject);
     try
       DBAPI := T.GetAPI;
       try
-        Tbl := DBAPI.CreateTable('Test table');
-        TblMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
+        DBAPI.CreateTable('Test table');
+        TblMeta := DBAPI.GetAPIObjectFromEntity('Test table', APITableMetadata) as TMemAPITableMetadata;
         try
           TblMeta.CreateField('IntField1', ftInteger);
           TblMeta.CreateField('StringField1', ftUnicodeString);
@@ -3913,8 +3885,7 @@ procedure TForm1.MultiRRTrans(Sender: TObject);
     try
       DBAPI := T.GetAPI;
       try
-        Tbl := DBAPI.OpenTableOrKey('Test table');
-        TblData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+        TblData := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
         try
           for i := 1 to LIMIT do
           begin
@@ -3954,22 +3925,11 @@ begin
   BlastRR;
   //TODO - More RW transactions / modes etc when they arrive.
 end;
-{$ELSE}
-begin
-  Assert(false); //TODO - rewrite this.
-end;
-{$ENDIF}
 
 procedure TForm1.MultiTransClick(Sender: TObject);
-{$IFDEF MEMDB2_TEMP_REMOVE}
 begin
   MultiRRTrans(Sender);
 end;
-{$ELSE}
-begin
-  Assert(false); //TODO - rewrite this.
-end;
-{$ENDIF}
 
 procedure TForm1.ResetClick(Sender: TObject);
 var
@@ -4027,7 +3987,6 @@ begin
 end;
 
 procedure TForm1.SmallTransClick(Sender: TObject);
-{$IFDEF MEMDB2_TEMP_REMOVE}
 var
   idx: integer;
   Trans: TMemDBTransaction;
@@ -4056,11 +4015,6 @@ begin
     end;
   end;
 end;
-{$ELSE}
-begin
-  Assert(false); //TODO - rewrite this.
-end;
-{$ENDIF}
 
 initialization
   Randomize;

@@ -39,6 +39,28 @@ type
     BLink: PDLEntry;
   end;
 
+{$IFOPT C+}
+procedure DLItemInitObj(Owner: TObject; Entry: PDLEntry);
+procedure DLItemInitList(Entry: PDLEntry);
+
+function DLItemIsList(Entry: PDLEntry): boolean;
+function DlItemIsEmpty(Entry: PDLEntry): boolean;
+
+procedure DLItemInsertAfter(Entry: PDLEntry; NewEntry: PDLEntry);
+procedure DLItemInsertBefore(Entry: PDLEntry; NewEntry: PDLEntry);
+
+function DLItemRemoveBefore(Entry: PDLEntry): PDLEntry;
+function DLItemRemoveAfter(Entry: PDLEntry): PDLEntry;
+
+procedure DLListInsertHead(List: PDLEntry; NewEntry: PDlEntry);
+procedure DLListInsertTail(List: PDLEntry; NewEntry: PDlEntry);
+
+function DLListRemoveHead(List: PDLEntry): PDLEntry;
+function DLListRemoveTail(List: PDLEntry): PDLEntry;
+
+procedure DLListRemoveObj(Entry: PDlEntry);
+procedure DLListRemoveList(List: PDLEntry);
+{$ELSE}
 procedure DLItemInitObj(Owner: TObject; Entry: PDLEntry); inline;
 procedure DLItemInitList(Entry: PDLEntry); inline;
 
@@ -59,6 +81,7 @@ function DLListRemoveTail(List: PDLEntry): PDLEntry; inline;
 
 procedure DLListRemoveObj(Entry: PDlEntry); inline;
 procedure DLListRemoveList(List: PDLEntry); inline;//Remove list head ptr from list.
+{$ENDIF}
 
 implementation
 
