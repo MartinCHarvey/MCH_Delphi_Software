@@ -177,7 +177,8 @@ TODO - Serializable.
   end;
 
   TTidUpdate = record
-    Ref: TReferenceUpdate; //Actually changes or pins.
+    Changes: TReferenceUpdate;
+    Pins: TReferenceUpdate;
     Tid: TTransactionId;
   end;
 
@@ -188,9 +189,6 @@ TODO - Serializable.
   end;
   PTidReference = TTidReference;
 {$ENDIF}
-
-  //TODO - DCPHandle don't call down where it's not necessary.
-  //       CPTid handling always required.
 
   //Assumed all these except the final handler and destructor under lock.
   TMemDBReferenceReporter = class(TMemDbChangeable)
@@ -204,14 +202,14 @@ TODO - Serializable.
     function FindTidReffing(const Tid: TTransactionId): PTidReference;
 {$ENDIF}
     //DCPUpdates can be sent lazily.
-    procedure DCPPre(Data, Changes, Pins: boolean; var Update: TReferenceUpdate);
-    procedure DCPPost(Data, Changes, Pins: boolean; var Update: TReferenceUpdate);
-    procedure DCPLazyHandle(const Update: TReferenceUpdate);
+    procedure DCPPre(Data, Changes, Pins: boolean; var Update: TReferenceUpdate); inline;
+    procedure DCPPost(Data, Changes, Pins: boolean; var Update: TReferenceUpdate); inline;
+    procedure DCPLazyHandle(const Update: TReferenceUpdate); inline;
     procedure DCPHandle(const Update: TReferenceUpdate); virtual;
 
     //CPTid updates can't cos they are also used by TidLocal to determine TidLocal.ChangesForTid
-    procedure CPTidPre(Changes, Pins: boolean; const Tid: TTransactionId; var Update:TTidUpdate);
-    procedure CPTidPost(Changes, Pins: boolean; const Tid: TTransactionId; var Update:TTidUpdate);
+    procedure CPTidPre(Changes, Pins: boolean; const Tid: TTransactionId; var Update:TTidUpdate); inline;
+    procedure CPTidPost(Changes, Pins: boolean; const Tid: TTransactionId; var Update:TTidUpdate); inline;
     procedure CPTidHandle(const Update: TTidUpdate); virtual;
   public
     constructor Create;
@@ -311,17 +309,10 @@ TODO - Serializable.
     procedure UnlockSelf; virtual; abstract;
 
     //Current, Next (Tid 1), Next (Tid 2) ...
-{$IFOPT C+}
-    function FindCurMultiItem: PMemDBMultiItem;
+    function FindCurMultiItem: PMemDBMultiItem; inline;
     function FindNxtMultiItem(const TId: TTransactionId): PMemDBMultiItem;
     function FindPin(const TId: TTransactionId): PMemDbPinnedItem;
     function FindIndexPin(IndexNode: TMemDBIndexLeaf): PMemDBINdexPin;
-{$ELSE}
-    function FindCurMultiItem: PMemDBMultiItem; inline;
-    function FindNxtMultiItem(const TId: TTransactionId): PMemDBMultiItem; inline;
-    function FindPin(const TId: TTransactionId): PMemDbPinnedItem; inline;
-    function FindIndexPin(IndexNode: TMemDBIndexLeaf): PMemDBINdexPin; inline;
-{$ENDIF}
     //First multi-item should always be current,
     //and always exists (item ptr may be null).
     //Other multi-items are pre-transaction, and item ptr should never be NULL.
@@ -574,13 +565,15 @@ end;
 
 procedure TMemDBReferenceReporter.CPTidPre(Changes, Pins: boolean; const Tid: TTransactionId; var Update:TTidUpdate);
 begin
-  Update.Ref.Pre := Changes or Pins;
+  Update.Changes.Pre := Changes;
+  Update.Pins.Pre := Pins;
   Update.Tid := Tid;
 end;
 
 procedure TMemDBReferenceReporter.CPTidPost(Changes, Pins: boolean; const Tid: TTransactionId; var Update:TTidUpdate);
 begin
-  Update.Ref.Post := Changes or Pins;
+  Update.Changes.Post := Changes;
+  Update.Pins.Post := Pins;
   Assert(Update.Tid = Tid);
 end;
 
@@ -602,14 +595,17 @@ procedure TMemDBReferenceReporter.CPTidHandle(const Update: TTidUpdate);
 {$IFOPT C+}
 var
   LastReffing: PTidReference;
+  GeneralPre, GeneralPost: boolean;
 {$ENDIF}
 begin
 {$IFOPT C+}
-  if Update.Ref.Pre <> Update.Ref.Post then
+  GeneralPre := Update.Changes.Pre or Update.Pins.Pre;
+  GeneralPost := Update.Changes.Post or Update.Pins.Post;
+  if GeneralPre <> GeneralPost then
   begin
     LastReffing := FindTidReffing(Update.Tid);
-    Assert(Assigned(LastReffing) <> Update.Ref.Post);
-    if Update.Ref.Post then
+    Assert(Assigned(LastReffing) <> GeneralPost);
+    if GeneralPost then
     begin
       if not Assigned(LastReffing) then
       begin

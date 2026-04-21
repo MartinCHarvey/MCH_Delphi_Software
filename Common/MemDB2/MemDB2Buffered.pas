@@ -179,21 +179,18 @@ type
 
   TMemDBForeignKeyMetadata = class(TMemDBEntityMetadata)
   protected
-{$IFDEF MEMDB2_TEMP_REMOVE}
     //A/B buffer holds TMemForeignKeyMetadataItem
-    function GetReferer(RT: TMemDBFKRefType; const AB: TBufSelector):string;
-    function GetReferred(RT: TMemDBFKRefType; const AB: TBufSelector):string;
-    procedure ConsistencyCheck;
+    function GetReferer(RT: TMemDBFKRefType; const AB: TBufSelector; Reason: TPinReason):string;
+    function GetReferred(RT: TMemDBFKRefType; const AB: TBufSelector; Reason: TPinReason):string;
+    procedure ConsistencyCheck(const Tid: TTransactionId);
   public
 
-    property Referer[RT: TMemDBFKRefType; const AB: TBufSelector]: string read GetReferer;
-    property Referred[RT: TMemDBFKRefType; const AB: TBufSelector]: string read GetReferred;
+    property Referer[RT: TMemDBFKRefType; const AB: TBufSelector; Reason: TPinReason]: string read GetReferer;
+    property Referred[RT: TMemDBFKRefType; const AB: TBufSelector; Reason: TPinReason]: string read GetReferred;
 
-    procedure SetReferer(RT: TMemDBFKRefType; Referer: string);
-    procedure SetReferred(RT: TMemDBFKRefType; Referred: string);
-{$ELSE}
-  public
-{$ENDIF}
+    procedure SetReferer(const Tid: TTransactionId; RT: TMemDBFKRefType; Referer: string);
+    procedure SetReferred(const Tid: TTransactionId; RT: TMemDBFKRefType; Referred: string);
+
     procedure Init(const Tid: TTransactionId; Parent: TObject; Name:string; DSName: boolean); override;
   end;
 
@@ -262,7 +259,6 @@ type
     TableReferring, TableReferred: TMemDbTablePersistent;
     IndexDefReferring, IndexDefReferred: TMemIndexDef;
     FieldDefsReferring, FieldDefsReferred: TMemFieldDefs;
-    TableReferringIdx, TableReferredIdx,
     //IndexIdx and FieldIdx absolute in rearrangement cases.
     IndexDefReferringAbsIdx, IndexDefReferredAbsIdx: integer;
     FieldDefsReferringAbsIdx, FieldDefsReferredAbsIdx: TFieldOffsets;
@@ -272,11 +268,11 @@ type
   PMemDBFKMeta = ^TMemDBFKMeta;
 
   TMemDBForeignKeyPersistent = class(TMemDBEntity)
-{$IFDEF MEMDB2_TEMP_REMOVE}
   private
   protected
+{$IFDEF MEMDB2_TEMP_REMOVE}
     procedure SetupIndexes(var Meta: TMemDBFKMeta);
-    procedure ClearIndexes(var Meta: TMemDbFkMeta);
+    procedure ClearIndexes(var Meta: TMemDBFKMeta);
 
     //TODO - Check TIndexSelector, TSubIndexSelType
     function FindIndexTag(Table: TMemDbTablePersistent;
@@ -294,17 +290,20 @@ type
     procedure CreateReferredDeletedList(const Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
     procedure TrimReferredDeletedList(const Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
     procedure CheckOutstandingCrossRefs(const Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
-
+{$ENDIF}
   public
     constructor Create;
     destructor Destroy; override;
+
+    function AnyChanges(const Tid:TTransactionId): boolean; override;
+    function AnyChangesForTid(const Tid: TTransactionId): boolean; override;
+
     procedure PreCommit(const TId: TTransactionId; Reason: TMemDBTransReason); override;
 
-    procedure ToJournal(const Tid: TTransactionId; Stream: TStream); override;
-    procedure ToScratch(const PseudoTid: TTransactionId; Stream: TStream); override;
-    procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream); override;
-    procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream); override;
-{$ENDIF} // MEMDB2_TEMP_REMOVE
+    procedure ToJournal(const Tid: TTransactionId; Stream: TStream);override;
+    procedure ToScratch(const PseudoTid:TTransactionId; Stream: TStream);override;
+    procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream);override;
+    procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream);override;
 
     procedure CheckAPITableDelete(const Sel: TBufSelector; TableName: string);
     procedure CheckAPIIndexDelete(const Sel: TBufSelector; IsoDeterminedTableName, IndexName: string);
@@ -585,8 +584,8 @@ type
 
     function DataChangedForTid(const Tid:TTransactionId): boolean;
     function LayoutChangesRequiredForTid(const Tid: TTransactionId): boolean;
-    function AnyChanges(const Tid:TTransactionId): boolean; override; //TODO - Check OK: Not atomic, meant for debug checking.
-    function AnyChangesForTid(const Tid: TTransactionId): boolean; override; //TODO - Check OK: Only atomic from the thread processing that Tid.
+    function AnyChanges(const Tid:TTransactionId): boolean; override;
+    function AnyChangesForTid(const Tid: TTransactionId): boolean; override;
 
     //TODO - Cache metadata for current access for API to reduce lock contention.
     function META_PinCurrent(const Tid: TTransactionId; Reason: TPinReason): TMemDBStreamable; override;
@@ -2081,12 +2080,15 @@ end;
 procedure TTidLocal.RowCPTidHandle(Sender: TObject; const Update: TTidUpdate);
 var
   IRec: TItemRec;
+  GeneralPre, GeneralPost:boolean;
 begin
   Assert(Assigned(Sender));
-  if Update.Ref.Post <> Update.Ref.Pre then
+  GeneralPre := Update.Changes.Pre or Update.Pins.Pre;
+  GeneralPost := Update.Changes.Post or Update.Pins.Post;
+  if GeneralPost <> GeneralPre then
   begin
     Assert(Update.Tid = FTid);
-    if Update.Ref.Post then
+    if GeneralPost then
     begin
       FCPRows.AddItem(Sender, IRec);
       Assert(Assigned(IRec));
@@ -2102,7 +2104,8 @@ begin
       FCPRows.RemoveItem(IRec);
     end;
   end;
-  if Update.Ref.Post then
+  //And now deal with NoChanges -> Changes transition separately.
+  if Update.Changes.Post then
     FDataChanged := FDataChanged or (Sender as TMemDBRow).AnyChangesForTid(Update.Tid);
 end;
 
@@ -2512,55 +2515,61 @@ begin
       begin
         Row := IRec.Item as TMemDBRow;
 
-        IPin := GetIPinForIndex(Row, Index, abNext);
-        Cur := nil;
-        try
-          if Assigned(IPin) then
-          begin
-            //Don't go thru standard pinning mechanism,
-            //we're under commit lock, and we know these indexes evolve
-            //in a thread-safe unitary fashion under that lock.
-            Cur := IPin.INode.Pinned;
-          end;
-          //And after all that hassle for Cur, Nxt is a breeze.
-          Nxt := Row.GetNext(FTid);
-          Row.ChangeFlagsFromPinned(Cur, Nxt, Added, Changed, Deleted, Null);
+        if Row.AnyChangesForTid(self.FTid) then
+        begin //Save ourselves unnecessary index traversal.
 
-          if Changed or Deleted then
-          begin
-            if not Assigned(IPin) then
-              raise EMemDBInternalException.Create(S_ERROR_FINDING_PIN_FOR_INDEX_REMOVE);
-
-            Ret := Index.Remove(abNext, IPin.INode);
-            if not Ret then
-              raise EMemDBInternalException.Create(S_ERROR_MODIFYING_INDEX_REMOVE);
-          end
-          else
-            if Assigned(IPin) then
-              raise EMemDBInternalException.Create(S_ERROR_UNEXPECTED_PIN_FOR_INDEX_REMOVE);
-        finally
-          if Assigned(IPin) then
-          begin
-            Assert(Assigned(Row));
-            Row.ReleaseIndexPinOutsideLock(IPin);
-            //Arguably, since we're in the commit lock here, shouldn't need to worry
-            //about this either, and not encountering local pins, but,
-            //hey ho play it safe.
-          end;
-        end;
-
-        if Added or Changed then
-        begin
-          NewINode := TMemDbIndexLeaf.Create;
+          IPin := GetIPinForIndex(Row, Index, abNext);
+          Cur := nil;
           try
-            if not Row.PinForIndex(FTid, abNext, NewINode) then
-              raise EMemDBInternalexception.Create(S_ERROR_PINNING_INDEX_ADD);
+            if Assigned(IPin) then
+            begin
+              //Don't go thru standard pinning mechanism,
+              //we're under commit lock, and we know these indexes evolve
+              //in a thread-safe unitary fashion under that lock.
+              Cur := IPin.INode.Pinned;
+            end;
+            //And after all that hassle for Cur, Nxt is a breeze.
+            Nxt := Row.GetNext(FTid);
+            Row.ChangeFlagsFromPinned(Cur, Nxt, Added, Changed, Deleted, Null);
 
-            if not Index.Add(abNext, NewINode) then
-              raise EMemDBInternalexception.Create(S_ERROR_MODIFYING_INDEX_ADD);
-          except
-            NewINode.Release; //Will unpin if necessary.
-            raise;
+            if Changed or Deleted then
+            begin
+              if not Assigned(IPin) then
+                raise EMemDBInternalException.Create(S_ERROR_FINDING_PIN_FOR_INDEX_REMOVE);
+
+              Ret := Index.Remove(abNext, IPin.INode);
+              if not Ret then
+                raise EMemDBInternalException.Create(S_ERROR_MODIFYING_INDEX_REMOVE);
+            end
+            else if Added or Null then
+            begin
+              if Assigned(IPin) then
+                raise EMemDBInternalException.Create(S_ERROR_UNEXPECTED_PIN_FOR_INDEX_REMOVE);
+            end;
+          finally
+            if Assigned(IPin) then
+            begin
+              Assert(Assigned(Row));
+              Row.ReleaseIndexPinOutsideLock(IPin);
+              //Arguably, since we're in the commit lock here, shouldn't need to worry
+              //about this either, and not encountering local pins, but,
+              //hey ho play it safe.
+            end;
+          end;
+
+          if Added or Changed then
+          begin
+            NewINode := TMemDbIndexLeaf.Create;
+            try
+              if not Row.PinForIndex(FTid, abNext, NewINode) then
+                raise EMemDBInternalexception.Create(S_ERROR_PINNING_INDEX_ADD);
+
+              if not Index.Add(abNext, NewINode) then
+                raise EMemDBInternalexception.Create(S_ERROR_MODIFYING_INDEX_ADD);
+            except
+              NewINode.Release; //Will unpin if necessary.
+              raise;
+            end;
           end;
         end;
 
@@ -3468,9 +3477,12 @@ var
   TidLocal: TTidLocal;
 begin
   Assert(Assigned(Sender));
-  if Update.Ref.Pre <> Update.Ref.Post then
+  //If any changes.
+  if (Update.Changes.Pre <> Update.Changes.Post)
+    or (Update.Pins.Pre <> Update.Pins.Post) then
   begin
-    if Update.Ref.Post then
+    //And any of them are more "local changed" than previously
+    if Update.Changes.Post or Update.Pins.Post then
       TidLocal := GetMakeTidLocal(Update.Tid, pinEvolve)
     else
     begin
@@ -3673,7 +3685,10 @@ var
   Added, Changed, Deleted, Null: boolean;
   TidLocal: TTidLocal;
 begin
+  //TODO. Long hard head-scratch about ilRepeatable read serialisation here.
+  //Might want that TransactionStart handler ...
   FMetadata.PreCommit(Tid, Reason);
+
   Cur := META_PinCurrent(Tid, pinFinalCheck);
   Next := META_GetNext(Tid);
   ChangeFlagsFromPinned(Cur, Next, Added, Changed, Deleted, Null);
@@ -3951,8 +3966,6 @@ end;
 
 { TMemDBForeignKeyPersistent }
 
-{$IFDEF MEMDB2_TEMP_REMOVE}
-
 constructor TMemDBForeignKeyPersistent.Create;
 begin
   inherited;
@@ -3965,179 +3978,244 @@ begin
   inherited;
 end;
 
-procedure TMemDBForeignKeyPersistent.ToJournal(Stream: TStream);
+function TMemDBForeignKeyPersistent.AnyChanges(const Tid:TTransactionId): boolean;
 begin
-  if FMetadata.AnyChangesAtAll then
+  result := FMetadata.AnyChanges(Tid);
+end;
+
+function TMemDBForeignKeyPersistent.AnyChangesForTid(const Tid: TTransactionId): boolean;
+begin
+  result := FMetadata.AnyChangesForTid(Tid);
+end;
+
+procedure TMemDBForeignKeyPersistent.ToJournal(const Tid: TTransactionId; Stream: TStream);
+begin
+  if FMetadata.AnyChangesForTid(Tid) then
   begin
     WrTag(Stream, mstFkStart);
-    FMetadata.ToJournal(Stream);
+    FMetadata.ToJournal(Tid, Stream);
     WrTag(Stream, mstFkEnd);
   end;
 end;
 
-procedure TMemDBForeignKeyPersistent.ToScratch(Stream: TStream);
+procedure TMemDBForeignKeyPersistent.ToScratch(const PseudoTid:TTransactionId; Stream: TStream);
+var
+  CP, NP: TMemDBStreamable;
+  Added, Changed, Deleted, Null: boolean;
 begin
-  //TODO - Only if metadata indicates not NULL.
-  WrTag(Stream, mstFkStart);
-  FMetadata.ToScratch(Stream);
-  WrTag(Stream, mstFkEnd);
+  CP := FMetadata.PinCurrent(PseudoTid, pinEvolve);
+  NP := FMetadata.GetNext(PseudoTid);
+  ChangeFlagsFromPinned(CP, NP, Added, Changed, Deleted, Null);
+  if not Null then
+  begin
+    WrTag(Stream, mstFkStart);
+    FMetadata.ToScratch(PseudoTid, Stream);
+    WrTag(Stream, mstFkEnd);
+  end;
 end;
 
-procedure TMemDBForeignKeyPersistent.FromJournal(Stream: TStream);
+procedure TMemDBForeignKeyPersistent.FromJournal(const PseudoTid: TTransactionId; Stream: TStream);
 begin
   //Premise is that this is being called given appropriate previous lookahead
   //and construction.
   ExpectTag(Stream, mstFkStart);
-  FMetadata.FromJournal(Stream);
+  FMetadata.FromJournal(PseudoTid, Stream);
   ExpectTag(Stream, mstFkEnd);
 end;
 
-procedure TMemDBForeignKeyPersistent.FromScratch(Stream: TStream);
+procedure TMemDBForeignKeyPersistent.FromScratch(const PseudoTid: TTransactionId; Stream: TStream);
+var
+  CP, NP: TMemDBStreamable;
+  Added, Changed, Deleted, Null: boolean;
 begin
+  CP := FMetadata.PinCurrent(PseudoTid, pinEvolve);
+  NP := FMetadata.GetNext(PseudoTid);
+  ChangeFlagsFromPinned(CP, NP, Added, Changed, Deleted, Null);
   //Premise is that this is being called given appropriate previous lookahead
   //and construction.
-  if not FMetadata.Null then
+  if not Null then
     raise EMemDBInternalException.Create(S_FROM_SCRATCH_REQUIRES_EMPTY_OBJ);
   ExpectTag(Stream, mstFkStart);
-  FMetadata.FromScratch(Stream);
+  FMetadata.FromScratch(PseudoTid, Stream);
   ExpectTag(Stream, mstFkEnd);
 end;
 
-procedure TMemDBForeignKeyPersistent.PreCommit(Reason: TMemDBTransReason);
+
+procedure TMemDBForeignKeyPersistent.PreCommit(const Tid: TTransactionId; Reason: TMemDBTransReason);
 var
+  CP, NP: TMemDBStreamable;
+  Added, Changed, Deleted, Null: boolean;
+  SelLatest, SelCurrent: TBufSelector;
+
   EntityReferring, EntityReferred: TMemDBEntity;
   CCEntityReferring, CCEntityReferred: TMemDbEntity;
   FKM, FKMCC: TMemForeignKeyMetadataItem;
   M: TMemDBTableMetadata;
-  Meta: TMemDbFKMeta;
+  Meta: TMemDBFKMeta;
   CCMeta: TMemDBFKMeta;
   ff: integer;
 
 begin
   inherited;
-  if FMetadata.Deleted or FMetadata.Null then
+  //TODO. Long hard head-scratch about ilRepeatable read serialisation here.
+  //Might want that TransactionStart handler ...
+  FMetadata.PreCommit(Tid, Reason);
+
+  CP := FMetadata.PinCurrent(Tid, pinFinalCheck);
+  NP := FMetadata.GetNext(Tid);
+  ChangeFlagsFromPinned(CP, NP, Added, Changed, Deleted, Null);
+
+  if Deleted or Null then
     exit;
   FillChar(Meta, sizeof(Meta), 0);
   //Very basic metadata checking.
-  (Metadata as TMemDBForeignKeyMetadata).ConsistencyCheck;
-  FKM := (Metadata as TMemDBForeignKeyMetadata).ABData[abLatest]
-    as TMemForeignKeyMetadataItem;
+  (Metadata as TMemDBForeignKeyMetadata).ConsistencyCheck(Tid);
+
+  //FKM = Latest.
+  if AssignedNotSentinel(NP) then
+    FKM := NP as TMemForeignKeyMetadataItem
+  else if AssignedNotSentinel(CP) then
+    FKM := CP as TMemForeignKeyMetadataItem
+  else
+    FKM := nil;
+  Assert(AssignedNotSentinel(FKM));
+
   //Referring index.
-  EntityReferring := ParentDB.EntitiesByName(abLatest, FKM.TableReferer, Meta.TableReferringIdx);
-  if not (Assigned(EntityReferring) and (EntityReferring is TMemDBTablePersistent)) then
-    raise EMemDBException.Create(S_FK_TABLE_NOT_FOUND);
-  Meta.TableReferring := EntityReferring as TMemDBTablePersistent;
-  M := Meta.TableReferring.Metadata as TMemDBTableMetadata;
-  Meta.IndexDefReferring := M.IndexByName(abLatest, FKM.IndexReferer, Meta.IndexDefReferringAbsIdx);
-  if not Assigned(Meta.IndexDefReferring) then
-    raise EMemDBException.Create(S_FK_INDEX_NOT_FOUND);
-  //..and fields (names should already have been checked, tables before fkeys).
-  Meta.FieldDefsReferring := M.FieldsByNames(abLatest, Meta.IndexDefReferring.FieldArray, Meta.FieldDefsReferringAbsIdx);
-  if Length(Meta.FieldDefsReferring) = 0 then
-    raise EMemDBInternalException.Create(S_FK_INDEX_FIELD_INTERNAL);
-  Assert(Length(Meta.FieldDefsReferring) = Length(Meta.FieldDefsReferringAbsIdx));
+  SelLatest := MakeLatestBufSelector(Tid);
 
-  //Referred index.
-  EntityReferred := ParentDB.EntitiesByName(abLatest, FKM.TableReferred, Meta.TableReferredIdx);
-  if not (Assigned(EntityReferred) and (EntityReferred is TMemDBTablePersistent)) then
-    raise EMemDBException.Create(S_FK_TABLE_NOT_FOUND);
-  Meta.TableReferred := EntityReferred as TMemDBTablePersistent;
-  M := Meta.TableReferred.Metadata as TMemDBTableMetadata;
-  Meta.IndexDefReferred := M.IndexByName(abLatest, FKM.IndexReferred, Meta.IndexDefReferredAbsIdx);
-  if not Assigned(Meta.IndexDefReferred) then
-    raise EMemDBException.Create(S_FK_INDEX_NOT_FOUND);
-  //...And fields (names should already have been checked, tables before fkeys).
-  Meta.FieldDefsReferred := M.FieldsByNames(abLatest, Meta.IndexDefReferred.FieldArray, Meta.FieldDefsReferredAbsIdx);
-  if Length(Meta.FieldDefsReferred) = 0 then
-    raise EMemDBInternalException.Create(S_FK_INDEX_FIELD_INTERNAL);
-  Assert(Length(Meta.FieldDefsReferred) = Length(Meta.FieldDefsReferredAbsIdx));
+  EntityReferring := nil;
+  EntityReferred := nil;
+  CCEntityReferring := nil;
+  CCEntityReferred := nil;
 
-  //Index uniqueness
-  if not (iaUnique in Meta.IndexDefReferred.IndexAttrs) then
-    raise EMemDBException.Create(S_INDEX_FOR_FK_UNIQUE_ATTR);
+  try
+    EntityReferring := ParentDB.EntitiesByName(SelLatest, FKM.TableReferer, pinFinalCheck);
+    if not (Assigned(EntityReferring) and (EntityReferring is TMemDBTablePersistent)) then
+      raise EMemDBException.Create(S_FK_TABLE_NOT_FOUND);
+    Meta.TableReferring := EntityReferring as TMemDBTablePersistent;
+    M := Meta.TableReferring.Metadata as TMemDBTableMetadata;
+    Meta.IndexDefReferring := M.IndexByName(SelLatest, FKM.IndexReferer, Meta.IndexDefReferringAbsIdx, pinFinalCheck);
+    if not Assigned(Meta.IndexDefReferring) then
+      raise EMemDBException.Create(S_FK_INDEX_NOT_FOUND);
+    //..and fields (names should already have been checked, tables before fkeys).
+    Meta.FieldDefsReferring := M.FieldsByNames(SelLatest, Meta.IndexDefReferring.FieldArray, Meta.FieldDefsReferringAbsIdx, pinFinalCheck);
+    if Length(Meta.FieldDefsReferring) = 0 then
+      raise EMemDBInternalException.Create(S_FK_INDEX_FIELD_INTERNAL);
+    Assert(Length(Meta.FieldDefsReferring) = Length(Meta.FieldDefsReferringAbsIdx));
 
-  //Indexes have same field count and type / order.
-  if Length(Meta.FieldDefsReferring) <> Length(Meta.FieldDefsReferred) then
-    raise EMemDbException.Create(S_FK_INDEXES_DIFF_FIELDCOUNT);
+    //Referred index.
+    EntityReferred := ParentDB.EntitiesByName(SelLatest, FKM.TableReferred, pinFinalCheck);
+    if not (Assigned(EntityReferred) and (EntityReferred is TMemDBTablePersistent)) then
+      raise EMemDBException.Create(S_FK_TABLE_NOT_FOUND);
+    Meta.TableReferred := EntityReferred as TMemDBTablePersistent;
+    M := Meta.TableReferred.Metadata as TMemDBTableMetadata;
+    Meta.IndexDefReferred := M.IndexByName(SelLatest, FKM.IndexReferred, Meta.IndexDefReferredAbsIdx, pinFinalCheck);
+    if not Assigned(Meta.IndexDefReferred) then
+      raise EMemDBException.Create(S_FK_INDEX_NOT_FOUND);
+    //...And fields (names should already have been checked, tables before fkeys).
+    Meta.FieldDefsReferred := M.FieldsByNames(SelLatest, Meta.IndexDefReferred.FieldArray, Meta.FieldDefsReferredAbsIdx, pinFinalCheck);
+    if Length(Meta.FieldDefsReferred) = 0 then
+      raise EMemDBInternalException.Create(S_FK_INDEX_FIELD_INTERNAL);
+    Assert(Length(Meta.FieldDefsReferred) = Length(Meta.FieldDefsReferredAbsIdx));
 
-  for ff := 0 to Pred(Length(Meta.FieldDefsReferring)) do
-  begin
-    //Field type cross check.
-    if Meta.FieldDefsReferring[ff].FieldType <> Meta.FieldDefsReferred[ff].FieldType then
-      raise EMemDBException.Create(S_FK_FIELDS_DIFFERENT_TYPES);
-  end;
+    //Index uniqueness
+    if not (iaUnique in Meta.IndexDefReferred.IndexAttrs) then
+      raise EMemDBException.Create(S_INDEX_FOR_FK_UNIQUE_ATTR);
 
-  if not FMetadata.Added then
-  begin
-    //Whether changed or not, should be able to get hold of CCopy of index
-    //and field defs, and check that they are the "same" (AbsIdx)
-    //as the latest ones. Explicit check tables, indexes and fields have not
-    //been moved around (too much) under our feet.
+    //Indexes have same field count and type / order.
+    if Length(Meta.FieldDefsReferring) <> Length(Meta.FieldDefsReferred) then
+      raise EMemDbException.Create(S_FK_INDEXES_DIFF_FIELDCOUNT);
 
-    //This a slightly more obvious and sensible check of potential multiple
-    //index, field, table renames (which may have been renamed more than once).
-    //These conditions were implicit, but not explicitly checked for previously.
-
-    FillChar(CCMeta, sizeof(CCMeta), 0);
-    FKMCC := (Metadata as TMemDBForeignKeyMetadata).ABData[abCurrent]
-      as TMemForeignKeyMetadataItem;
-    Assert(AssignedNotSentinel(FKMCC));
-    //If we have a current copy (not added), then it must have referred to
-    //existing table objects, and those existing table objects must have
-    //been present in same copy as CC of our metadata.
-
-    //Tables.
-    CCEntityReferring := ParentDB.EntitiesByName(abCurrent, FKMCC.TableReferer, CCMeta.TableReferringIdx);
-    CCEntityReferred := ParentDB.EntitiesByName(abCurrent, FKMCC.TableReferred, CCMeta.TableReferredIdx);
-
-    //Tables actually have to be the same object in memory.
-    if (EntityReferring <> CCEntityReferring)
-      or (EntityReferred <> CCEntityReferred) then
-      raise EMemDBInternalException.Create(S_FOREIGN_KEY_UNDERLYING_TABLE_CHANGED);
-    CCMeta.TableReferring := CCEntityReferring as TMemDBTablePersistent;
-    CCMeta.TableReferred := CCEntityReferred as TMemDbTablePersistent;
-
-    //Indexes.
-    M := CCMeta.TableReferring.Metadata as TMemDBTableMetadata;
-    CCMeta.IndexDefReferring := M.IndexByName(abCurrent, FKMCC.IndexReferer, CCMeta.IndexDefReferringAbsIdx);
-    M := CCMeta.TableReferred.Metadata as TMemDBTableMetadata;
-    CCMeta.IndexDefReferred := M.IndexByName(abCurrent, FKMCC.IndexReferred, CCMeta.IndexDefReferredAbsIdx);
-    //Index objs do not actually need to be the same object (copied on write),
-    //and nor do they have to have the same name, or refer to the same fields,
-    //but for them to be the "same" index, we expect the IndexIndex (which is AbsIndex, not NDIndex),
-    //to be the same (hence why we have changeset arrays).
-    if (CCMeta.IndexDefReferringAbsIdx <> Meta.IndexDefReferringAbsIdx)
-      or (CCMeta.IndexDefReferredAbsIdx <> Meta.IndexDefReferredAbsIdx) then
-      raise EMemDBInternalException.Create(S_FOREIGN_KEY_UNDERLYING_INDEX_CHANGED);
-
-    //Fields.
-    M := CCMeta.TableReferring.Metadata as TMemDBTableMetadata;
-    CCMeta.FieldDefsReferring := M.FieldsByNames(abCurrent, CCMeta.IndexDefReferring.FieldArray, CCMeta.FieldDefsReferringAbsIdx);
-    M := CCMeta.TableReferred.Metadata as TMemDBTableMetadata;
-    CCMeta.FieldDefsReferred := M.FieldsByNames(abCurrent, CCMeta.IndexDefReferred.FieldArray, CCMeta.FieldDefsReferredAbsIdx);
-
-    //Expect CC meta to be as consistent as NCMeta....
-    if Length(CCMeta.FieldDefsReferring) <> Length(CCMeta.FieldDefsReferred) then
-      raise EMemDBInternalException.Create(S_FOREIGN_KEY_UNDERLYING_FIELD_CHANGED);
-
-    //And lengths between them also to be the same.
-    if Length(CCMeta.FieldDefsReferring) <> Length(Meta.FieldDefsReferred) then
-      raise EMemDBInternalException.Create(S_FOREIGN_KEY_UNDERLYING_FIELD_CHANGED);
-
-    //And expect field defs to have same absIdx as before, even if field rearrangement.
-    for ff := 0 to Pred(Length(CCMeta.FieldDefsReferring)) do
+    for ff := 0 to Pred(Length(Meta.FieldDefsReferring)) do
     begin
-      //As with Index defs, field defs do not need to be the same object, but they need
-      //to be (for each xaction changeset) at the same AbsIdx as previously,
-      //hence changeset arrays.
-      if (CCMeta.FieldDefsReferringAbsIdx[ff] <> Meta.FieldDefsReferringAbsIdx[ff])
-        or (CCMeta.FieldDefsReferredAbsIdx[ff] <> Meta.FieldDefsReferredAbsIdx[ff]) then
-        raise EMemDBInternalException.Create(S_FOREIGN_KEY_UNDERLYING_FIELD_CHANGED);
+      //Field type cross check.
+      if Meta.FieldDefsReferring[ff].FieldType <> Meta.FieldDefsReferred[ff].FieldType then
+        raise EMemDBException.Create(S_FK_FIELDS_DIFFERENT_TYPES);
     end;
-  end;
 
-  //And now the grunt work of checking the relation.
-  CreateCheckForeignKeyRowSets(Meta,Reason);
+    if not Added then
+    begin
+      //Whether changed or not, should be able to get hold of CCopy of index
+      //and field defs, and check that they are the "same" (AbsIdx)
+      //as the latest ones. Explicit check tables, indexes and fields have not
+      //been moved around (too much) under our feet.
+
+      //This a slightly more obvious and sensible check of potential multiple
+      //index, field, table renames (which may have been renamed more than once).
+      //These conditions were implicit, but not explicitly checked for previously.
+
+      FillChar(CCMeta, sizeof(CCMeta), 0);
+      FKMCC := CP as TMemForeignKeyMetadataItem;
+      Assert(AssignedNotSentinel(FKMCC));
+      //If we have a current copy (not added), then it must have referred to
+      //existing table objects, and those existing table objects must have
+      //been present in same copy as CC of our metadata.
+
+      //Tables.
+      SelCurrent := MakeCurrentBufSelector(Tid);
+      CCEntityReferring := ParentDB.EntitiesByName(SelCurrent, FKMCC.TableReferer, pinFinalCheck);
+      CCEntityReferred := ParentDB.EntitiesByName(SelCurrent, FKMCC.TableReferred, pinFinalCheck);
+
+      //Tables actually have to be the same object in memory.
+      if (EntityReferring <> CCEntityReferring)
+        or (EntityReferred <> CCEntityReferred) then
+        raise EMemDBInternalException.Create(S_FOREIGN_KEY_UNDERLYING_TABLE_CHANGED);
+      CCMeta.TableReferring := CCEntityReferring as TMemDBTablePersistent;
+      CCMeta.TableReferred := CCEntityReferred as TMemDbTablePersistent;
+
+      //Indexes.
+      M := CCMeta.TableReferring.Metadata as TMemDBTableMetadata;
+      CCMeta.IndexDefReferring := M.IndexByName(SelCurrent, FKMCC.IndexReferer, CCMeta.IndexDefReferringAbsIdx, pinFinalCheck);
+      M := CCMeta.TableReferred.Metadata as TMemDBTableMetadata;
+      CCMeta.IndexDefReferred := M.IndexByName(SelCurrent, FKMCC.IndexReferred, CCMeta.IndexDefReferredAbsIdx, pinFinalCheck);
+      //Index objs do not actually need to be the same object (copied on write),
+      //and nor do they have to have the same name, or refer to the same fields,
+      //but for them to be the "same" index, we expect the IndexIndex (which is AbsIndex, not NDIndex),
+      //to be the same (hence why we have changeset arrays).
+      if (CCMeta.IndexDefReferringAbsIdx <> Meta.IndexDefReferringAbsIdx)
+        or (CCMeta.IndexDefReferredAbsIdx <> Meta.IndexDefReferredAbsIdx) then
+        raise EMemDBInternalException.Create(S_FOREIGN_KEY_UNDERLYING_INDEX_CHANGED);
+
+      //Fields.
+      M := CCMeta.TableReferring.Metadata as TMemDBTableMetadata;
+      CCMeta.FieldDefsReferring := M.FieldsByNames(SelCurrent, CCMeta.IndexDefReferring.FieldArray, CCMeta.FieldDefsReferringAbsIdx, pinFinalCheck);
+      M := CCMeta.TableReferred.Metadata as TMemDBTableMetadata;
+      CCMeta.FieldDefsReferred := M.FieldsByNames(SelCurrent, CCMeta.IndexDefReferred.FieldArray, CCMeta.FieldDefsReferredAbsIdx, pinFinalCheck);
+
+      //Expect CC meta to be as consistent as NCMeta....
+      if Length(CCMeta.FieldDefsReferring) <> Length(CCMeta.FieldDefsReferred) then
+        raise EMemDBInternalException.Create(S_FOREIGN_KEY_UNDERLYING_FIELD_CHANGED);
+
+      //And lengths between them also to be the same.
+      if Length(CCMeta.FieldDefsReferring) <> Length(Meta.FieldDefsReferred) then
+        raise EMemDBInternalException.Create(S_FOREIGN_KEY_UNDERLYING_FIELD_CHANGED);
+
+      //And expect field defs to have same absIdx as before, even if field rearrangement.
+      for ff := 0 to Pred(Length(CCMeta.FieldDefsReferring)) do
+      begin
+        //As with Index defs, field defs do not need to be the same object, but they need
+        //to be (for each xaction changeset) at the same AbsIdx as previously,
+        //hence changeset arrays.
+        if (CCMeta.FieldDefsReferringAbsIdx[ff] <> Meta.FieldDefsReferringAbsIdx[ff])
+          or (CCMeta.FieldDefsReferredAbsIdx[ff] <> Meta.FieldDefsReferredAbsIdx[ff]) then
+          raise EMemDBInternalException.Create(S_FOREIGN_KEY_UNDERLYING_FIELD_CHANGED);
+      end;
+    end;
+
+{$IFDEF MEMDB2_TEMP_REMOVE}
+    //And now the grunt work of checking the relation.
+    CreateCheckForeignKeyRowSets(Meta,Reason);
+{$ENDIF}
+  finally
+    if Assigned(EntityReferring) then
+      EntityReferring.FProxy.Release;
+    if Assigned(EntityReferred) then
+      EntityReferred.FProxy.Release;
+    if Assigned(CCEntityReferring) then
+      CCEntityReferring.FProxy.Release;
+    if Assigned(CCEntityReferred) then
+      CCEntityReferred.FProxy.Release;
+  end;
 end;
 
 type
@@ -4152,6 +4230,8 @@ type
     Action: TRowProcessingAction;
   end;
   PProcessRowFKStruct = ^TProcessRowFKStruct;
+
+{$IFDEF MEMDB2_TEMP_REMOVE}
 
 procedure TMemDBForeignKeyPersistent.ProcessRow(Row: TMemDBRow;
                      Ref1, Ref2: TObject; TblList: TMemDbIndexedList);
@@ -4641,6 +4721,7 @@ begin
   end;
 end;
 
+
 procedure TMemDbForeignKeyPersistent.SetupIndexes(var Meta: TMemDBFkMeta);
 var
   RV: TIsRetVal;
@@ -4673,6 +4754,7 @@ begin
     SyncFastOffsets(TagReferredAddedNext.FieldAbsIdxs, TagReferredAddedNext.FieldAbsIdxsFast);
   end;
 end;
+
   //Referential integrity is violated when:
   //1. Rows / data are added to the Referring that do not exist in the referred.
   //2. Rows / data are deleted from the Referred that exist in the referring.
@@ -4725,129 +4807,125 @@ end;
 
 {$ENDIF}
 
+//TODO - This can be optimised considerably if API only deals in latest names etc.
 function TMemDBForeignKeyPersistent.HandleAPITableRename(const Sel: TBufSelector; OldName, NewName: string): boolean;
-{$IFDEF MEMDB2_TEMP_REMOVE}
 var
   FKMeta: TMemDBForeignKeyMetadata;
-  AB:TABSelection;
+  P: TMemDBStreamable;
+  SelLatest: TBufSelector;
+  bufSel: TABSelType;
 begin
   result := false;
-  AB := IsoToAB(Iso);
-  if AssignedNotSentinel(Metadata.ABData[abLatest]) then
+  P := Metadata.GetPinLatest(Sel.TId, bufSel, pinEvolve);
+  SelLatest := MakeLatestBufSelector(Sel.TId);
+  if AssignedNotSentinel(P) then
   begin
     FKMeta := Metadata as TMemDBForeignKeyMetadata;
-    if OldName = FKMeta.Referer[fkTable, AB] then
+    if OldName = FKMeta.Referer[fkTable, Sel, pinEvolve] then
     begin
       //Rename overwrites should already have been caught.
-      if OldName <> FKMeta.Referer[fkTable, abLatest] then
+      if OldName <> FKMeta.Referer[fkTable, SelLatest, pinEvolve] then
         raise EMemDBInternalException.Create(S_FK_INTERNAL_OVERWRITE);
-      FKMeta.SetReferer(fkTable, NewName);
+      FKMeta.SetReferer(Sel.Tid, fkTable, NewName);
       result :=  true;
     end;
-    if OldName = FKMeta.Referred[fkTable, AB] then
+    if OldName = FKMeta.Referred[fkTable, Sel, pinEvolve] then
     begin
       //Rename overwrites should already have been caught.
-      if OldName <> FKMeta.Referred[fkTable, abLatest] then
+      if OldName <> FKMeta.Referred[fkTable, SelLatest, pinEvolve] then
         raise EMemDBInternalException.Create(S_FK_INTERNAL_OVERWRITE);
-      FKMeta.SetReferred(fkTable, NewName);
+      FKMeta.SetReferred(Sel.Tid, fkTable, NewName);
       result := true;
     end;
   end;
-{$ENDIF}
-begin
-  Assert(false); //TODO - write this.
-  result := false;
 end;
 
+//TODO - This can be optimised considerably if API only deals in latest names etc.
 procedure TMemDBForeignKeyPersistent.CheckAPITableDelete(const Sel: TBufSelector; TableName: string);
-{$IFDEF MEMDB2_TEMP_REMOVE}
 var
   FKMeta: TMemDBForeignKeyMetadata;
-  AB:TABSelection;
+  SelLatest: TBufSelector;
+  P: TMemDBStreamable;
+  bufSel: TABSelType;
 begin
-  AB := IsoToAB(Iso);
-  if AssignedNotSentinel(Metadata.ABData[abLatest]) then
+  SelLatest := MakeLatestBufSelector(Sel.TId);
+  P := Metadata.GetPinLatest(Sel.TId, bufSel, pinEvolve);
+  if AssignedNotSentinel(P) then
   begin
     FKMeta := Metadata as TMemDBForeignKeyMetadata;
     //Looks funny, but foreign key references cannot be moved from one place
     //to another. After multiple renames, should still be able to refer
     //to a table by its old name....
-    if (TableName = FKMeta.Referer[fkTable, AB]) or
-       (TableName = FKMeta.Referred[fkTable, AB]) then
+    if (TableName = FKMeta.Referer[fkTable, Sel, pinEvolve]) or
+       (TableName = FKMeta.Referred[fkTable, Sel, pinEvolve]) then
       raise EMemDBAPIException.Create(S_FK_REFERENCES_TABLE);
   end;
-{$ENDIF}
-begin
-  Assert(false); //TODO - write this.
 end;
 
+//TODO - This can be optimised considerably if API only deals in latest names etc.
 function TMemDBForeignKeyPersistent.HandleAPIIndexRename(const Sel: TBufSelector; IsoDeterminedTableName, OldName, NewName: string): boolean;
-{$IFDEF MEMDB2_TEMP_REMOVE}
 var
   FKMeta: TMemDBForeignKeyMetadata;
-  AB:TABSelection;
+  SelLatest: TBufSelector;
+  P: TMemDBStreamable;
+  bufSel: TABSelType;
 begin
   result := false;
-  AB := IsoToAB(Iso);
-  if AssignedNotSentinel(Metadata.ABData[abLatest]) then
+  SelLatest := MakeLatestBufSelector(Sel.TId);
+  P := Metadata.GetPinLatest(Sel.TId, bufSel, pinEvolve);
+  if AssignedNotSentinel(P) then
   begin
     FKMeta := Metadata as TMemDBForeignKeyMetadata;
-    if IsoDeterminedTableName = FKMeta.Referer[fkTable, AB] then
+    if IsoDeterminedTableName = FKMeta.Referer[fkTable, Sel, pinEvolve] then
     begin
-      if OldName = FKMeta.Referer[fkIndex, AB] then
+      if OldName = FKMeta.Referer[fkIndex, Sel, pinEvolve] then
       begin
         //Rename overwrites should already have been caught.
-        if OldName <> FKMeta.Referer[fkIndex, abLatest] then
+        if OldName <> FKMeta.Referer[fkIndex, SelLatest, pinEvolve] then
           raise EMemDBInternalException.Create(S_FK_INTERNAL_OVERWRITE);
-        FKMeta.SetReferer(fkIndex, NewName);
+        FKMeta.SetReferer(Sel.TId,fkIndex, NewName);
         result :=  true;
       end;
     end;
-    if IsoDeterminedTableName = FKMeta.Referred[fkTable, AB] then
+    if IsoDeterminedTableName = FKMeta.Referred[fkTable, Sel, pinEvolve] then
     begin
-      if OldName = FKMeta.Referred[fkIndex, AB] then
+      if OldName = FKMeta.Referred[fkIndex, Sel, PinEvolve] then
       begin
         //Rename overwrites should already have been caught.
-        if OldName <> FKMeta.Referred[fkIndex, abLatest] then
+        if OldName <> FKMeta.Referred[fkIndex, SelLatest, pinEvolve] then
           raise EMemDBInternalException.Create(S_FK_INTERNAL_OVERWRITE);
-        FKMeta.SetReferred(fkIndex, NewName);
+        FKMeta.SetReferred(Sel.TId,fkIndex, NewName);
         result :=  true;
       end;
     end;
   end;
-{$ENDIF}
-begin
-  Assert(false); //TODO - write this.
-  result := false;
 end;
 
+//TODO - This can be optimised considerably if API only deals in latest names etc.
 procedure TMemDBForeignKeyPersistent.CheckAPIIndexDelete(const Sel: TBufSelector; IsoDeterminedTableName, IndexName: string);
-{$IFDEF MEMDB2_TEMP_REMOVE}
 var
   FKMeta: TMemDBForeignKeyMetadata;
-  AB:TABSelection;
+  P: TMemDBStreamable;
+  bufSel: TABSelType;
 begin
-  AB := IsoToAB(Iso);
-  if AssignedNotSentinel(Metadata.ABData[abLatest]) then
+  P := Metadata.GetPinLatest(Sel.TId, bufSel, pinEvolve);
+  if AssignedNotSentinel(P) then
   begin
     FKMeta := Metadata as TMemDBForeignKeyMetadata;
     //Looks funny, but foreign key references cannot be moved from one place
     //to another. After multiple renames, should still be able to refer
     //to a table by its old name....
-    if IsoDeterminedTableName = FKMeta.Referer[fkTable, AB] then
+    if IsoDeterminedTableName = FKMeta.Referer[fkTable, Sel, pinEvolve] then
     begin
-      if IndexName = FKMeta.Referer[fkIndex, AB] then
+      if IndexName = FKMeta.Referer[fkIndex, Sel, pinEvolve] then
         raise EMemDBAPIException.Create(S_FK_REFERENCES_INDEX);
     end;
-    if IsoDeterminedTableName = FKMeta.Referred[fkTable, AB] then
+    if IsoDeterminedTableName = FKMeta.Referred[fkTable, Sel, pinEvolve] then
     begin
-      if IndexName = FKMeta.Referred[fkIndex, AB] then
+      if IndexName = FKMeta.Referred[fkIndex, Sel, pinEvolve] then
         raise EMemDBAPIException.Create(S_FK_REFERENCES_INDEX);
     end;
   end;
-{$ENDIF}
-begin
-  Assert(false); //TODO - write this.
 end;
 
 { TMemDBRow }
@@ -5381,14 +5459,23 @@ end;
 
 { TMemDBForeignKeyMetadata }
 
-{$IFDEF MEMDB2_TEMP_REMOVE}
-
-function TMemDbForeignKeyMetadata.GetReferer(RT: TMemDBFKRefType; AB: TABSelection):string;
+function TMemDbForeignKeyMetadata.GetReferer(RT: TMemDBFKRefType; const AB: TBufSelector; Reason: TPinReason):string;
 var
   Meta: TMemForeignKeyMetadataItem;
+  P: TMemDBStreamable;
+  BufSel: TABSelType;
+
 begin
-  Assert(AssignedNotSentinel(ABData[AB]));
-  Meta := ABData[AB] as TMemForeignKeyMetadataItem;
+  case AB.SelType of
+    abCurrent: P := PinCurrent(AB.TId, Reason);
+    abNext: P := GetNext(AB.TId);
+    abLatest: P := GetPinLatest(AB.TId, bufSel, Reason);
+  else
+    Assert(false);
+    P := nil;
+  end;
+  Assert(AssignedNotSentinel(P));
+  Meta := P as TMemForeignKeyMetadataItem;
   case RT of
     fkTable: result := Meta.TableReferer;
     fkIndex: result := Meta.IndexReferer;
@@ -5397,12 +5484,22 @@ begin
   end;
 end;
 
-function TMemDbForeignKeyMetadata.GetReferred(RT: TMemDBFKRefType; AB: TABSelection):string;
+function TMemDbForeignKeyMetadata.GetReferred(RT: TMemDBFKRefType; const AB: TBufSelector; Reason: TPinReason):string;
 var
   Meta: TMemForeignKeyMetadataItem;
+  P: TMemDBStreamable;
+  BufSel: TABSelType;
 begin
-  Assert(AssignedNotSentinel(ABData[AB]));
-  Meta := ABData[AB] as TMemForeignKeyMetadataItem;
+  case AB.SelType of
+    abCurrent: P := PinCurrent(AB.TId, Reason);
+    abNext: P := GetNext(AB.TId);
+    abLatest: P := GetPinLatest(AB.TId, bufSel, Reason);
+  else
+    Assert(false);
+    P := nil;
+  end;
+  Assert(AssignedNotSentinel(P));
+  Meta := P as TMemForeignKeyMetadataItem;
   case RT of
     fkTable: result := Meta.TableReferred;
     fkIndex: result := Meta.IndexReferred;
@@ -5411,13 +5508,16 @@ begin
   end;
 end;
 
-procedure TMemDBForeignKeyMetadata.ConsistencyCheck;
+procedure TMemDBForeignKeyMetadata.ConsistencyCheck(const Tid: TTRansactionId);
 var
   Meta: TMemForeignKeyMetadataItem;
+  P: TMemDBStreamable;
+  BufSel:TABSelType;
 begin
-  if AssignedNotSentinel(ABData[abLatest]) then
+  P := GetPinLatest(Tid, BufSel, pinFinalCheck);
+  if AssignedNotSentinel(P) then
   begin
-    Meta := ABData[abLatest] as TMemForeignKeyMetadataItem;
+    Meta := P as TMemForeignKeyMetadataItem;
     if (Length(Meta.TableReferer) = 0)
       or (Length(Meta.TableReferred) = 0)
       or (Length(Meta.IndexReferer) = 0)
@@ -5428,7 +5528,6 @@ begin
   //can do that in the pre-commit check when we need to use them.
 end;
 
-{$ENDIF}
 
 procedure TMemDbForeignKeyMetadata.Init(const Tid: TTransactionId; Parent: TObject; Name:string; DSName: boolean);
 var
@@ -5443,14 +5542,12 @@ begin
   end;
 end;
 
-{$IFDEF MEMDB2_TEMP_REMOVE}
-
-procedure TMemDbForeignKeyMetadata.SetReferer(RT: TMemDBFKRefType; Referer: string);
+procedure TMemDbForeignKeyMetadata.SetReferer(const Tid: TTransactionId; RT: TMemDBFKRefType; Referer: string);
 var
   Meta: TMemForeignKeyMetadataItem;
 begin
-  RequestChange;
-  Meta := ABData[abNext] as TMemForeignKeyMetadataItem;
+  RequestChange(Tid);
+  Meta := GetNext(Tid) as TMemForeignKeyMetadataItem;
   case RT of
     fkTable: Meta.TableReferer := Referer;
     fkIndex: Meta.IndexReferer := Referer;
@@ -5459,12 +5556,12 @@ begin
   end;
 end;
 
-procedure TMemDbForeignKeyMetadata.SetReferred(RT: TMemDBFKRefType; Referred: string);
+procedure TMemDbForeignKeyMetadata.SetReferred(const Tid: TTRansactionId; RT: TMemDBFKRefType; Referred: string);
 var
   Meta: TMemForeignKeyMetadataItem;
 begin
-  RequestChange;
-  Meta := ABData[abNext] as TMemForeignKeyMetadataItem;
+  RequestChange(Tid);
+  Meta := GetNext(Tid) as TMemForeignKeyMetadataItem;
   case RT of
     fkTable: Meta.TableReferred := Referred;
     fkIndex: Meta.IndexReferred := Referred;
@@ -5472,8 +5569,6 @@ begin
     Assert(false);
   end;
 end;
-
-{$ENDIF}
 
 { TMemDBEntityProxy }
 

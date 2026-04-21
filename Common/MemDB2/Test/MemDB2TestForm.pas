@@ -1326,44 +1326,36 @@ end;
 
 
 procedure TForm1.FKTestClick(Sender: TObject);
-{$IFDEF MEMDB2_TEMP_REMOVE}
 begin
   FKTestBase(Sender);
   FKTestSameTable(Sender);
 end;
-{$ELSE}
-begin
-  Assert(false); //TODO - rewrite this.
-end;
-{$ENDIF}
 
 procedure TForm1.FKTestSameTable(Sender: TObject);
-{$IFDEF MEMDB2_TEMP_REMOVE}
 
   procedure SetBaseTableStructure();
   var
     Trans: TMemDbTransaction;
     DBAPI: TMemAPIDatabase;
-    Tbl: TMemDBHandle;
     TableMeta: TMemAPITableMetadata;
   begin
     Trans := FSession.StartTransaction(amReadWrite);
     try
       DBAPI := Trans.GetAPI;
       try
-        Tbl := DBAPI.OpenTableOrKey('FKTestTableMaster');
-        if not Assigned(Tbl) then
-        begin
-          Tbl := DBAPI.CreateTable('FKTestTableMaster');
-          TableMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
-          try
+        TableMeta := DBAPI.GetAPIObjectFromEntity('FKTestTableMaster', APITableMetadata) as TMemAPITableMetadata;
+        try
+          if not Assigned(TableMeta) then
+          begin
+            DBAPI.CreateTable('FKTestTableMaster');
+            TableMeta := DBAPI.GetAPIObjectFromEntity('FKTestTableMaster', APITableMetadata) as TMemAPITableMetadata;
             TableMeta.CreateField('MasterKey', ftInteger);
             TableMeta.CreateIndex('MasterKeyIdx', 'MasterKey', [iaUnique, iaNotEmpty]);
             TableMeta.CreateField('KeyReferrer', ftInteger);
             TableMeta.CreateIndex('KeyReferrerIdx', 'KeyReferrer', [iaNotEmpty]);
-          finally
-            TableMeta.Free;
           end;
+        finally
+          TableMeta.Free;
         end;
       finally
         DBAPI.Free;
@@ -1385,7 +1377,6 @@ procedure TForm1.FKTestSameTable(Sender: TObject);
     Data: TMemDbFieldDataRec;
     Trans: TMemDBTransaction;
     DBAPI: TMemAPIDatabase;
-    Tbl: TMemDbHandle;
     TableData: TMemAPITableData;
   begin
     //Delete all existing rows, but keep table intact and present.
@@ -1393,8 +1384,7 @@ procedure TForm1.FKTestSameTable(Sender: TObject);
     try
       DBAPI := Trans.GetAPI;
       try
-        Tbl := DBAPI.OpenTableOrKey('FKTestTableMaster');
-        TableData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+        TableData := DBAPI.GetAPIObjectFromEntity('FKTestTableMaster', APITableData) as TMemAPITableData;
         try
           Data.FieldType := ftInteger;
           for i := 1 to LIMIT do
@@ -1428,7 +1418,6 @@ procedure TForm1.FKTestSameTable(Sender: TObject);
   var
     Trans: TMemDbTransaction;
     DBAPI: TMemAPIDatabase;
-    FK: TMemDbHandle;
     FKey: TMemAPIForeignKey;
 
   begin
@@ -1436,8 +1425,8 @@ procedure TForm1.FKTestSameTable(Sender: TObject);
     try
       DBAPI := Trans.GetAPI;
       try
-        FK := DBAPI.CreateForeignKey('ForeignKey1');
-        FKey := DBAPI.GetApiObjectFromHandle(FK, APIForeignKey) as TMemAPIForeignKey;
+        DBAPI.CreateForeignKey('ForeignKey1');
+        FKey := DBAPI.GetAPIObjectFromEntity('ForeignKey1', APIForeignKey) as TMemAPIForeignKey;
         try
           FKey.SetReferencingChild('FKTestTableMaster', 'KeyReferrerIdx');
           FKey.SetReferencedParent('FKTestTableMaster','MasterKeyIdx');
@@ -1467,7 +1456,6 @@ procedure TForm1.FKTestSameTable(Sender: TObject);
     Pass, BreakReferred: boolean;
     Trans: TMemDbTransaction;
     DBAPI: TMemAPIDatabase;
-    Tbl: TMemDbHandle;
     TblData: TMemApiTableData;
     Data: TMemDbFieldDataRec;
     FieldToChange: string;
@@ -1481,8 +1469,7 @@ procedure TForm1.FKTestSameTable(Sender: TObject);
       try
         DBAPI := Trans.GetAPI;
         try
-          Tbl := DBAPI.OpenTableOrKey('FKTestTableMaster');
-          TblData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+          TblData := DBAPI.GetAPIObjectFromEntity('FKTestTableMaster', APITableData) as TMemAPITableData;
           try
             Data.FieldType := ftInteger;
             Data.i32Val := RowSel;
@@ -1536,24 +1523,17 @@ begin
   AddFKSameTable();
   BreakFKSameTable();
 end;
-{$ELSE}
-begin
-  Assert(false); //TODO - rewrite this.
-end;
-{$ENDIF}
 
 procedure TForm1.FKTestBase(Sender: TObject);
-{$IFDEF MEMDB2_TEMP_REMOVE}
 var
   Trans: TMemDBTRansaction;
   DBAPI: TMemAPIDatabase;
   TableMeta: TMemAPITableMetadata;
   TableData: TMemAPITableData;
-  Tbl: TMemDBHandle;
-  FK: TMemDBHandle;
   FKey: TMemAPIForeignKey;
   Data: TMemDbFieldDataRec;
   Pass: boolean;
+  EntityNames: TStringList;
 
   procedure DelRows;
   begin
@@ -1562,8 +1542,7 @@ var
     try
       DBAPI := Trans.GetAPI;
       try
-        Tbl := DBAPI.OpenTableOrKey('FKTestTableMaster');
-        TableData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+        TableData := DBAPI.GetAPIObjectFromEntity('FKTestTableMaster', APITableData) as TMemAPITableData;
         try
           TableData.Locate(TMemAPIPosition.ptFirst);
           while TableData.RowSelected do
@@ -1573,8 +1552,7 @@ var
         finally
           TableData.Free;
         end;
-        Tbl := DBAPI.OpenTableOrKey('FKTestTableSub');
-        TableData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+        TableData := DBAPI.GetAPIObjectFromEntity('FKTestTableSub', APITableData) as TMemAPITableData;
         try
           TableData.Locate(TMemAPIPosition.ptFirst);
           while TableData.RowSelected do
@@ -1609,8 +1587,7 @@ var
     try
       DBAPI := Trans.GetAPI;
       try
-        Tbl := DBAPI.OpenTableOrKey('FKTestTableMaster');
-        TableData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+        TableData := DBAPI.GetAPIObjectFromEntity('FKTestTableMaster', APITableData) as TMemAPITableData;
         try
           Data.FieldType := ftInteger;
           for i := 1 to LIMIT do
@@ -1623,8 +1600,7 @@ var
         finally
           TableData.Free;
         end;
-        Tbl := DBAPI.OpenTableOrKey('FKTestTableSub');
-        TableData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+        TableData := DBAPI.GetAPIObjectFromEntity('FKTestTableSub', APITableData) as TMemAPITableData;
         try
           Data.FieldType := ftInteger;
           for i := 1 to LIMIT do
@@ -1659,29 +1635,32 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableMaster');
-      if not Assigned(Tbl) then
-      begin
-        Tbl := DBAPI.CreateTable('FKTestTableMaster');
-        TableMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
-        try
-          TableMeta.CreateField('MasterKey', ftInteger);
-          TableMeta.CreateIndex('MasterKeyIdx', 'MasterKey', [iaUnique, iaNotEmpty]);
-        finally
-          TableMeta.Free;
+      EntityNames := DBAPI.GetEntityNames;
+      try
+        if EntityNames.IndexOf('FKTestTableMaster') < 0 then
+        begin
+          DBAPI.CreateTable('FKTestTableMaster');
+          TableMeta := DBAPI.GetAPIObjectFromEntity('FKTestTableMaster', APITableMetadata) as TMemAPITableMetadata;
+          try
+            TableMeta.CreateField('MasterKey', ftInteger);
+            TableMeta.CreateIndex('MasterKeyIdx', 'MasterKey', [iaUnique, iaNotEmpty]);
+          finally
+            TableMeta.Free;
+          end;
         end;
-      end;
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableSub');
-      if not Assigned(Tbl) then
-      begin
-        Tbl := DBAPI.CreateTable('FKTestTableSub');
-        TableMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
-        try
-          TableMeta.CreateField('ReferringField', ftInteger);
-          TableMeta.CreateIndex('ReferringFieldIdx', 'ReferringField', [iaNotEmpty]);
-        finally
-          TableMeta.Free;
+        if EntityNames.IndexOf('FKTestTableSub') < 0 then
+        begin
+          DBAPI.CreateTable('FKTestTableSub');
+          TableMeta := DBAPI.GetAPIObjectFromEntity('FKTestTableSub', APITableMetadata) as TMemAPITableMetadata;
+          try
+            TableMeta.CreateField('ReferringField', ftInteger);
+            TableMeta.CreateIndex('ReferringFieldIdx', 'ReferringField', [iaNotEmpty]);
+          finally
+            TableMeta.Free;
+          end;
         end;
+      finally
+        EntityNames.Free;
       end;
     finally
       DBAPI.Free;
@@ -1703,13 +1682,14 @@ begin
   //Add rows satisfying FK relationship to both tables (Base row set).
   SetBaseRowSet;
 
+
   //Add FK, check all OK.
   Trans := FSession.StartTransaction(amReadWrite);
   try
     DBAPI := Trans.GetAPI;
     try
-      FK := DBAPI.CreateForeignKey('ForeignKey1');
-      FKey := DBAPI.GetApiObjectFromHandle(FK, APIForeignKey) as TMemAPIForeignKey;
+      DBAPI.CreateForeignKey('ForeignKey1');
+      FKey := DBAPI.GetAPIObjectFromEntity('ForeignKey1', APIForeignKey) as TMemAPIForeignKey;
       try
         FKey.SetReferencingChild('FKTestTableSub', 'ReferringFieldIdx');
         FKey.SetReferencedParent('FKTestTableMaster','MasterKeyIdx');
@@ -1750,14 +1730,14 @@ begin
     end;
   end;
 
+
   //Add extra row in Referring, re-add FK (all in same transaction).
   Pass := false;
   Trans := FSession.StartTransaction(amReadWrite);
   try
     DBAPI := Trans.GetAPI;
     try
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableSub');
-      TableData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+      TableData := DBAPI.GetAPIObjectFromEntity('FKTestTableSub', APITableData) as TMemAPITableData;
       try
         TableData.Append;
         Data.FieldType := ftInteger;
@@ -1767,14 +1747,16 @@ begin
       finally
         TableData.Free;
       end;
-      FK := DBAPI.CreateForeignKey('ForeignKey1');
-      FKey := DBAPI.GetApiObjectFromHandle(FK, APIForeignKey) as TMemAPIForeignKey;
+{
+      DBAPI.CreateForeignKey('ForeignKey1');
+      FKey := DBAPI.GetAPIObjectFromEntity('ForeignKey1', APIForeignKey) as TMemAPIForeignKey;
       try
         FKey.SetReferencingChild('FKTestTableSub', 'ReferringFieldIdx');
         FKey.SetReferencedParent('FKTestTableMaster','MasterKeyIdx');
       finally
         FKey.Free;
       end;
+}
     finally
       DBAPI.Free;
     end;
@@ -1800,6 +1782,7 @@ begin
   //Test 1b.
   //Remove row in master, re-add FK (all in same transaction)
   DelRows;
+
   SetBaseRowSet;
 
   Pass := false;
@@ -1807,16 +1790,15 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableMaster');
-      TableData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+      TableData := DBAPI.GetAPIObjectFromEntity('FKTestTableMaster', APITableData) as TMemAPITableData;
       try
         TableData.Locate(TMemAPIPosition.ptFirst);
         TableData.Delete;
       finally
         TableData.Free;
       end;
-      FK := DBAPI.CreateForeignKey('ForeignKey1');
-      FKey := DBAPI.GetApiObjectFromHandle(FK, APIForeignKey) as TMemAPIForeignKey;
+      DBAPI.CreateForeignKey('ForeignKey1');
+      FKey := DBAPI.GetAPIObjectFromEntity('ForeignKey1', APIForeignKey) as TMemAPIForeignKey;
       try
         FKey.SetReferencingChild('FKTestTableSub', 'ReferringFieldIdx');
         FKey.SetReferencedParent('FKTestTableMaster','MasterKeyIdx');
@@ -1856,8 +1838,8 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      FK := DBAPI.CreateForeignKey('ForeignKey1');
-      FKey := DBAPI.GetApiObjectFromHandle(FK, APIForeignKey) as TMemAPIForeignKey;
+      DBAPI.CreateForeignKey('ForeignKey1');
+      FKey := DBAPI.GetAPIObjectFromEntity('ForeignKey1', APIForeignKey) as TMemAPIForeignKey;
       try
         FKey.SetReferencingChild('FKTestTableSub', 'ReferringFieldIdx');
         FKey.SetReferencedParent('FKTestTableMaster','MasterKeyIdx');
@@ -1886,8 +1868,7 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableSub');
-      TableData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+      TableData := DBAPI.GetAPIObjectFromEntity('FKTestTableSub', APITableData) as TMemAPITableData;
       try
         TableData.Append;
         Data.FieldType := ftInteger;
@@ -1928,8 +1909,7 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableMaster');
-      TableData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+      TableData := DBAPI.GetAPIObjectFromEntity('FKTestTableMaster', APITableData) as TMemAPITableData;
       try
         TableData.Locate(TMemAPIPosition.ptFirst);
         TableData.Delete;
@@ -1967,8 +1947,7 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableSub');
-      TableData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+      TableData := DBAPI.GetAPIObjectFromEntity('FKTestTableSub', APITableData) as TMemAPITableData;
       try
         TableData.Locate(ptFirst, '');
         TableData.ReadField('ReferringField', Data);
@@ -2009,8 +1988,7 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableMaster');
-      TableData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+      TableData := DBAPI.GetAPIObjectFromEntity('FKTestTableMaster', APITableData) as TMemAPITableData;
       try
         TableData.Locate(ptFirst, '');
         TableData.ReadField('MasterKey', Data);
@@ -2052,8 +2030,7 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableSub');
-      TableData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+      TableData := DBAPI.GetAPIObjectFromEntity('FKTestTableSub', APITableData) as TMemAPITableData;
       try
         TableData.Locate(ptFirst, '');
         TableData.ReadField('ReferringField', Data);
@@ -2087,8 +2064,7 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableMaster');
-      TableData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+      TableData := DBAPI.GetAPIObjectFromEntity('FKTestTableMaster', APITableData) as TMemAPITableData;
       try
         TableData.Locate(ptFirst, '');
         TableData.ReadField('MasterKey', Data);
@@ -2125,15 +2101,13 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableMaster');
-      TableMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
+      TableMeta := DBAPI.GetAPIObjectFromEntity('FKTestTableMaster', APITableMetadata) as TMemAPITableMetadata;
       try
         TableMeta.CreateField('MasterKey2', ftInteger);
       finally
         TableMeta.Free;
       end;
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableSub');
-      TableMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
+      TableMeta := DBAPI.GetAPIObjectFromEntity('FKTestTableSub', APITableMetadata) as TMemAPITableMetadata;
       try
         TableMeta.CreateField('ReferringField2', ftInteger);
       finally
@@ -2161,9 +2135,8 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableMaster');
-      TableMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
-      TableData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+      TableMeta := DBAPI.GetApiObjectFromEntity('FKTestTableMaster', APITableMetadata) as TMemAPITableMetadata;
+      TableData := DBAPI.GetApiObjectFromEntity('FKTestTableMaster', APITableData) as TMemAPITableData;
       try
         TableMeta.CreateIndex('MasterKey2Idx', 'MasterKey2', [iaUnique, iaNotEmpty]);
         TableData.Locate(ptFirst, '');
@@ -2178,9 +2151,8 @@ begin
         TableMeta.Free;
         TableData.Free;
       end;
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableSub');
-      TableMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
-      TableData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+      TableMeta := DBAPI.GetApiObjectFromEntity('FKTestTableSub', APITableMetadata) as TMemAPITableMetadata;
+      TableData := DBAPI.GetApiObjectFromEntity('FKTestTableSub', APITableData) as TMemAPITableData;
       try
         TableMeta.CreateIndex('ReferringField2Idx', 'ReferringField2', []);
         TableData.Locate(ptFirst, '');
@@ -2195,8 +2167,8 @@ begin
         TableMeta.Free;
         TableData.Free;
       end;
-      FK := DBAPI.CreateForeignKey('ForeignKey2');
-      FKey := DBAPI.GetApiObjectFromHandle(FK, APIForeignKey) as TMemAPIForeignKey;
+      DBAPI.CreateForeignKey('ForeignKey2');
+      FKey := DBAPI.GetAPIObjectFromEntity('ForeignKey2', APIForeignKey) as TMemAPIForeignKey;
       try
         FKey.SetReferencingChild('FKTestTableSub', 'ReferringField2Idx');
         FKey.SetReferencedParent('FKTestTableMaster','MasterKey2Idx');
@@ -2224,20 +2196,21 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      FK := DBAPI.OpenTableOrKey('ForeignKey1');
-      if Assigned(FK) then
-        DBAPI.DeleteTableOrKey('ForeignKey1');
-
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableMaster');
-      TableMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
+      EntityNames := DBAPI.GetEntityNames;
+      try
+        if EntityNames.IndexOf('ForeignKey1') >= 0 then
+          DBAPI.DeleteTableOrKey('ForeignKey1');
+      finally
+        EntityNames.Free;
+      end;
+      TableMeta := DBAPI.GetAPIObjectFromEntity('FKTestTableMaster', APITableMetadata) as TMemAPITableMetadata;
       try
         TableMeta.DeleteIndex('MasterKeyIdx');
         TableMeta.DeleteField('MasterKey');
       finally
         TableMeta.Free;
       end;
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableSub');
-      TableData := DBAPI.GetApiObjectFromHandle(TBL, APITableData) as TMemAPITableData;
+      TableData := DBAPI.GetAPIObjectFromEntity('FKTestTableSub', APITableData) as TMemAPITableData;
       try
         TableData.Append;
         Data.FieldType := ftInteger;
@@ -2277,20 +2250,22 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      FK := DBAPI.OpenTableOrKey('ForeignKey1');
-      if Assigned(FK) then
-        DBAPI.DeleteTableOrKey('ForeignKey1');
+      EntityNames := DBAPI.GetEntityNames;
+      try
+        if EntityNames.IndexOf('ForeignKey1') >= 0 then
+          DBAPI.DeleteTableOrKey('ForeignKey1');
+      finally
+        EntityNames.Free;
+      end;
 
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableSub');
-      TableMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
+      TableMeta := DBAPI.GetAPIObjectFromEntity('FKTestTableSub', APITableMetadata) as TMemAPITableMetadata;
       try
         TableMeta.DeleteIndex('ReferringFieldIdx');
         TableMeta.DeleteField('ReferringField');
       finally
         TableMeta.Free;
       end;
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableMaster');
-      TableData := DBAPI.GetApiObjectFromHandle(TBL, APITableData) as TMemAPITableData;
+      TableData := DBAPI.GetAPIObjectFromEntity('FKTestTableMaster', APITableData) as TMemAPITableData;
       try
         TableData.Locate(ptFirst, '');
         TableData.Delete;
@@ -2326,20 +2301,22 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      FK := DBAPI.OpenTableOrKey('ForeignKey1');
-      if Assigned(FK) then
-        DBAPI.DeleteTableOrKey('ForeignKey1');
+      EntityNames := DBAPI.GetEntityNames;
+      try
+        if EntityNames.IndexOf('ForeignKey1') >= 0 then
+          DBAPI.DeleteTableOrKey('ForeignKey1');
+      finally
+        EntityNames.Free;
+      end;
 
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableSub');
-      TableMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
+      TableMeta := DBAPI.GetAPIObjectFromEntity('FKTestTableSub', APITableMetadata) as TMemAPITableMetadata;
       try
         TableMeta.DeleteIndex('ReferringFieldIdx');
         TableMeta.DeleteField('ReferringField');
       finally
         TableMeta.Free;
       end;
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableMaster');
-      TableMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
+      TableMeta := DBAPI.GetAPIObjectFromEntity('FKTestTableMaster', APITableMetadata) as TMemAPITableMetadata;
       try
         TableMeta.DeleteIndex('MasterKeyIdx');
         TableMeta.DeleteField('MasterKey');
@@ -2366,16 +2343,14 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableMaster');
-      TableMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
+      TableMeta := DBAPI.GetAPIObjectFromEntity('FKTestTableMaster', APITableMetadata) as TMemAPITableMetadata;
       try
         TableMeta.RenameField('MasterKey2', 'MasterKey');
         TableMeta.RenameIndex('MasterKey2Idx', 'MasterKeyIdx');
       finally
         TableMeta.Free;
       end;
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableSub');
-      TableMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
+      TableMeta := DBAPI.GetApiObjectFromEntity('FKTestTableSub', APITableMetadata) as TMemAPITableMetadata;
       try
         TableMeta.RenameField('ReferringField2', 'ReferringField');
         TableMeta.RenameIndex('ReferringField2Idx', 'ReferringFieldIdx');
@@ -2399,11 +2374,7 @@ begin
     end;
   end;
 end;
-{$ELSE}
-begin
-  Assert(false); //TODO - rewrite this.
-end;
-{$ENDIF}
+
 
 procedure TForm1.FormCreate(Sender: TObject);
 begin
@@ -3027,8 +2998,6 @@ begin
 end;
 
 procedure TForm1.MFFKeyTestClick(Sender: TObject);
-{$IFDEF MEMDB2_TEMP_REMOVE}
-
 var
   Trans:TMemDBTransaction;
   Pass: boolean;
@@ -3037,17 +3006,14 @@ var
   var
     i,j,k: integer;
     TableData1, TableData2: TMemAPITableData;
-    Table1, Table2: TMemDBHandle;
     Data: TMemDbFieldDataRec;
     DBAPI: TMemAPIDatabase;
 
   begin
     DBAPI := Trans.GetAPI;
     try
-      Table1 := DBAPI.OpenTableOrKey('FKTestTableMaster');
-      Table2 := DBAPI.OpenTableOrKey('FKTestTableSub');
-      TableData1 := DBAPI.GetApiObjectFromHandle(Table1, APITableData) as TMemAPITableData;
-      TableData2 := DBAPI.GetApiObjectFromHandle(Table2, APITableData) as TMemAPiTableData;
+      TableData1 := DBAPI.GetApiObjectFromEntity('FKTestTableMaster', APITableData) as TMemAPITableData;
+      TableData2 := DBAPI.GetApiObjectFromEntity('FKTestTableSub', APITableData) as TMemAPiTableData;
       try
         for i := 1 to LIMIT_CUBEROOT do
           for j := 1 to LIMIT_CUBEROOT do
@@ -3085,60 +3051,63 @@ var
     FNames: TMDBFieldNames;
     DBAPI: TMemAPIDatabase;
     TableMeta: TMemAPITableMetadata;
-    Table: TMemDBHandle;
+    Names: TStringList;
   begin
     DBAPI := Trans.GetAPI;
     try
-      Table := DBAPI.OpenTableOrKey('FKTestTableMaster');
-      if not Assigned(Table) then
-      begin
-        Table := DBAPI.CreateTable('FKTestTableMaster');
-        TableMeta := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata) as TMemAPITableMetadata;
-        try
-          //Fields in different order in tables, for checking.
-          TableMeta.CreateField('MasterKey2', ftUnicodeString);
-          TableMeta.CreateField('MasterKey1', ftInteger);
-          TableMeta.CreateField('MasterKey3', ftGuid);
-          SetLength(FNames,2);
-          FNames[0] := 'MasterKey1';
-          FNames[1] := 'MasterKey2';
-          TableMeta.CreateMultiFieldIndex('MasterKeyIdx2', FNames, [iaNotEmpty]);
-          FNames[1] := 'MasterKey3';
-          TableMeta.CreateMultiFieldIndex('MasterKeyIdx3', FNames, [iaNotEmpty]);
-          SetLength(FNames,3);
-          FNames[0] := 'MasterKey1';
-          FNames[1] := 'MasterKey2';
-          FNames[2] := 'MasterKey3';
-          TableMeta.CreateMultiFieldIndex('MasterKeyIdx1', FNames, [iaUnique, iaNotEmpty]);
-        finally
-          TableMeta.Free;
+      Names := DBAPI.GetEntityNames;
+      try
+        if Names.IndexOf('FKTestTableMaster') < 0 then
+        begin
+          DBAPI.CreateTable('FKTestTableMaster');
+          TableMeta := DBAPI.GetApiObjectFromEntity('FKTestTableMaster', APITableMetadata) as TMemAPITableMetadata;
+          try
+            //Fields in different order in tables, for checking.
+            TableMeta.CreateField('MasterKey2', ftUnicodeString);
+            TableMeta.CreateField('MasterKey1', ftInteger);
+            TableMeta.CreateField('MasterKey3', ftGuid);
+            SetLength(FNames,2);
+            FNames[0] := 'MasterKey1';
+            FNames[1] := 'MasterKey2';
+            TableMeta.CreateMultiFieldIndex('MasterKeyIdx2', FNames, [iaNotEmpty]);
+            FNames[1] := 'MasterKey3';
+            TableMeta.CreateMultiFieldIndex('MasterKeyIdx3', FNames, [iaNotEmpty]);
+            SetLength(FNames,3);
+            FNames[0] := 'MasterKey1';
+            FNames[1] := 'MasterKey2';
+            FNames[2] := 'MasterKey3';
+            TableMeta.CreateMultiFieldIndex('MasterKeyIdx1', FNames, [iaUnique, iaNotEmpty]);
+          finally
+            TableMeta.Free;
+          end;
         end;
-      end;
-      Table := DBAPI.OpenTableOrKey('FKTestTableSub');
-      if not Assigned(Table) then
-      begin
-        Table := DBAPI.CreateTable('FKTestTableSub');
-        TableMeta := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata) as TMemAPITableMetadata;
-        try
-          //Fields in different order in tables, for checking.
-          TableMeta.CreateField('ReferringField1', ftInteger);
-          TableMeta.CreateField('ReferringField3', ftGuid);
-          TableMeta.CreateField('ReferringField2', ftUnicodeString);
-          SetLength(FNames, 2);
-          FNames[0] := 'ReferringField1';
-          FNames[1] := 'ReferringField2';
-          TableMeta.CreateMultiFieldIndex('ReferringIdx2', FNames, [iaNotEmpty]);
-          FNames[0] := 'ReferringField3';
-          TableMeta.CreateMultiFieldIndex('ReferringIdx3', FNames, [iaNotEmpty]);
-          TableMeta.CreateIndex('ExtraIndex', 'ReferringField1', []);
-          SetLength(FNames,3);
-          FNames[0] := 'ReferringField1';
-          FNames[1] := 'ReferringField2';
-          FNames[2] := 'ReferringField3';
-          TableMeta.CreateMultiFieldIndex('ReferringIdx1', FNames, [iaNotEmpty]);
-        finally
-          TableMeta.Free;
+        if Names.IndexOf('FKTestTableSub') < 0 then
+        begin
+          DBAPI.CreateTable('FKTestTableSub');
+          TableMeta := DBAPI.GetApiObjectFromEntity('FKTestTableSub', APITableMetadata) as TMemAPITableMetadata;
+          try
+            //Fields in different order in tables, for checking.
+            TableMeta.CreateField('ReferringField1', ftInteger);
+            TableMeta.CreateField('ReferringField3', ftGuid);
+            TableMeta.CreateField('ReferringField2', ftUnicodeString);
+            SetLength(FNames, 2);
+            FNames[0] := 'ReferringField1';
+            FNames[1] := 'ReferringField2';
+            TableMeta.CreateMultiFieldIndex('ReferringIdx2', FNames, [iaNotEmpty]);
+            FNames[0] := 'ReferringField3';
+            TableMeta.CreateMultiFieldIndex('ReferringIdx3', FNames, [iaNotEmpty]);
+            TableMeta.CreateIndex('ExtraIndex', 'ReferringField1', []);
+            SetLength(FNames,3);
+            FNames[0] := 'ReferringField1';
+            FNames[1] := 'ReferringField2';
+            FNames[2] := 'ReferringField3';
+            TableMeta.CreateMultiFieldIndex('ReferringIdx1', FNames, [iaNotEmpty]);
+          finally
+            TableMeta.Free;
+          end;
         end;
+      finally
+        Names.Free;
       end;
     finally
       DBAPI.Free;
@@ -3148,23 +3117,27 @@ var
   procedure CreateFKeysInTransaction;
   var
     DBAPI: TMemAPIDatabase;
-    FKHandle: TMemDBHandle;
     FKMeta: TMemAPIForeignKey;
+    Names: TStringList;
 
   begin
     DBAPI := Trans.GetAPI;
     try
-      FKHandle := DBAPI.OpenTableOrKey('FKTest1');
-      if not Assigned(FKHandle) then
-      begin
-        FKHandle := DBAPI.CreateForeignKey('FKTest1');
-        FKMeta := DBAPI.GetApiObjectFromHandle(FKHandle, APIForeignKey) as TMemAPIForeignKey;
-        try
-          FKMeta.SetReferencedParent('FKTestTableMaster','MasterKeyIdx1');
-          FKMeta.SetReferencingChild('FKTestTableSub', 'ReferringIdx1');
-        finally
-          FKMeta.Free;
+      Names := DBAPI.GetEntityNames;
+      try
+        if Names.IndexOf('FKTest1') < 0 then
+        begin
+          DBAPI.CreateForeignKey('FKTest1');
+          FKMeta := DBAPI.GetApiObjectFromEntity('FKTest1', APIForeignKey) as TMemAPIForeignKey;
+          try
+            FKMeta.SetReferencedParent('FKTestTableMaster','MasterKeyIdx1');
+            FKMeta.SetReferencingChild('FKTestTableSub', 'ReferringIdx1');
+          finally
+            FKMeta.Free;
+          end;
         end;
+      finally
+        Names.Free;
       end;
     finally
       DBAPI.Free;
@@ -3174,15 +3147,13 @@ var
   procedure AddMasterVal(i: integer);
   var
     TableData: TMemAPITableData;
-    Table: TMemDBHandle;
     Data: TMemDbFieldDataRec;
     DBAPI: TMemAPIDatabase;
 
   begin
     DBAPI := Trans.GetAPI;
     try
-      Table := DBAPI.OpenTableOrKey('FKTestTableMaster');
-      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+      TableData := DBAPI.GetApiObjectFromEntity('FKTestTableMaster', APITableData) as TMemAPITableData;
       try
         TableData.Append;
         Data.FieldType := ftInteger;
@@ -3207,15 +3178,13 @@ var
   procedure AddSubVal(i: integer);
   var
     TableData: TMemAPITableData;
-    Table: TMemDBHandle;
     Data: TMemDbFieldDataRec;
     DBAPI: TMemAPIDatabase;
 
   begin
     DBAPI := Trans.GetAPI;
     try
-      Table := DBAPI.OpenTableOrKey('FKTestTableSub');
-      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+      TableData := DBAPI.GetAPIObjectFromEntity('FKTestTableSub', APITableData) as TMemAPITableData;
       try
         TableData.Append;
         Data.FieldType := ftInteger;
@@ -3246,15 +3215,13 @@ var
   procedure DelMasterVal(i: integer);
   var
     TableData: TMemAPITableData;
-    Table: TMemDBHandle;
     DataRecs: TMemDbFieldDataRecs;
     DBAPI: TMemAPIDatabase;
 
   begin
     DBAPI := Trans.GetAPI;
     try
-      Table := DBAPI.OpenTableOrKey('FKTestTableMaster');
-      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+      TableData := DBAPI.GetAPIObjectFromEntity('FKTestTableMaster', APITableData) as TMemAPITableData;
       try
         SetLength(DataRecs, 3);
         DataRecs[0].FieldType := ftInteger;
@@ -3508,11 +3475,6 @@ begin
     end;
   end;
 end;
-{$ELSE}
-begin
-  Assert(false); //TODO - rewrite this.
-end;
-{$ENDIF}
 
 procedure TForm1.MFIndexTestClick(Sender: TObject);
 var

@@ -147,7 +147,6 @@ type
   //Foreign key operations.
   TMemAPIForeignKey = class(TMemDBAPI)
   protected
-{$IFDEF MEMDB2_TEMP_REMOVE}
     function GetInterfacedObject: TMemDBForeignKey;
     property ForeignKey: TMemDbForeignKey read GetInterfacedObject;
   public
@@ -159,7 +158,6 @@ type
                                   var IndexName: string);
     procedure GetReferencedParent(var TableName: string;
                                   var IndexName: string);
-{$ENDIF}
   end;
 
   //TODO TODO - Make sure no metadata pinning here
@@ -241,34 +239,38 @@ type
     function API_DataGetFieldAbsIdx(T: TObject;
                                     FieldName: string): integer;
 
-public
+  public
     function HandleInterfacedObjRequest(Transaction: TObject; ID: TMemDBAPIId): TMemDBAPI;override;
   end;
 
   TMemDBForeignKey = class(TMemDbForeignKeyPersistent)
-{$IFDEF MEMDB2_TEMP_REMOVE}
   protected
-    function LookupTableAndIndex(TableName: string; IndexName: string): TMemIndexDef;
+    function LookupTableAndIndex(T: TObject; TableName: string; IndexName: string): TMemIndexDef;
   public
 
-    procedure API_SetReferencingChild(TableName: string;
+    procedure API_SetReferencingChild(T: TObject;
+                                      TableName: string;
                                       IndexName: string);
-    procedure API_SetReferencedParent(TableName: string;
+    procedure API_SetReferencedParent(T: TObject;
+                                      TableName: string;
                                       IndexName: string);
-    procedure API_GetReferencingChild(Iso: TMDBIsolationLevel;
+    procedure API_GetReferencingChild(T: TObject;
                                       var TableName: string;
                                       var IndexName: string);
-    procedure API_GetReferencedParent(Iso: TMDBIsolationLevel;
+    procedure API_GetReferencedParent(T: TObject;
                                       var TableName: string;
                                       var IndexName: string);
-{$ENDIF}
-public
+
+  public
     function HandleInterfacedObjRequest(Transaction: TObject; ID: TMemDBAPIId): TMemDBAPI;override;
   end;
 
 function MakeStream(StorageMode: TTempStorageMode): TStream;
 
 implementation
+
+//TODO - Optimise stuff that only uses latest (or current, or ...)
+//buf selector.
 
 uses
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
@@ -811,8 +813,6 @@ end;
 
 { TMemAPIForeignKey }
 
-{$IFDEF MEMDB2_TEMP_REMOVE}
-
 function TMemAPIForeignKey.GetInterfacedObject: TMemDBForeignKey;
 begin
   result := FInterfacedObject.Parent as TMemDBForeignKey;
@@ -821,30 +821,28 @@ end;
 procedure TMemAPIForeignKey.SetReferencingChild(TableName: string;
                               IndexName: string);
 begin
-  CheckWriteExclusiveTransaction;
-  ForeignKey.API_SetReferencingChild(TableName,IndexName);
+  CheckWriteTransaction;
+  ForeignKey.API_SetReferencingChild(FAssociatedTransaction, TableName,IndexName);
 end;
 
 procedure TMemAPIForeignKey.SetReferencedParent(TableName: string;
                               IndexName: string);
 begin
-  CheckWriteExclusiveTransaction;
-  ForeignKey.API_SetReferencedParent(TableName, IndexName);
+  CheckWriteTransaction;
+  ForeignKey.API_SetReferencedParent(FAssociatedTransaction, TableName, IndexName);
 end;
 
 procedure TMemAPIForeignKey.GetReferencingChild(var TableName: string;
                               var IndexName: string);
 begin
-  ForeignKey.API_GetReferencingChild(Isolation, TableName, IndexName);
+  ForeignKey.API_GetReferencingChild(FAssociatedTransaction, TableName, IndexName);
 end;
 
 procedure TMemAPIForeignKey.GetReferencedParent(var TableName: string;
                               var IndexName: string);
 begin
-  ForeignKey.API_GetReferencedParent(Isolation, TableName, IndexName);
+  ForeignKey.API_GetReferencedParent(FAssociatedTransaction, TableName, IndexName);
 end;
-
-{$ENDIF}
 
 //////////////////////////////////////////////////////////////////////
 
@@ -900,18 +898,16 @@ var
   Entity: TMemDBEntity;
   NNEntity: TMemDBEntity;
   Tr: TMemDBTransaction;
-  AB: TBufSelector;
   SelLatest: TBufSelector;
   RefNext: TMemDBStreamable;
   NextM : TMemDBStreamable;
 begin
   Tr := T as TMemDBTransaction;
-  AB := MakeLatestBufSelector(Tr.Tid);
   SelLatest := MakeLatestBufSelector(Tr.Tid);
 
   //These checks are not definitive, not until pre-commit can we be sure we're OK.
   //Checking next buffers is however, definitive.
-  Entity := EntitiesByName(AB, OldName, pinEvolve);
+  Entity := EntitiesByName(SelLatest, OldName, pinEvolve);
   if not Assigned(Entity) then
     raise EMemDbAPIException.Create(S_API_ENTITY_NAME_NOT_FOUND);
 
@@ -943,7 +939,7 @@ begin
     Assert((not Assigned(RefNext)) or (RefNext = NextM));
     Assert(not (NextM is TMemDeleteSentinel));
     (NextM as TMemEntityMetadataItem).EntityName := NewName;
-    HandleAPITableRename(AB, OldName, NewName);
+    HandleAPITableRename(SelLatest, OldName, NewName);
   finally
     Entity.Proxy.Release;
   end;
@@ -953,18 +949,18 @@ procedure TMemDBDatabase.API_DeleteTableOrKey(T: TObject; Name: string);
 var
   Tr: TMemDbTransaction;
   Entity: TMemDBEntity;
-  AB: TBufSelector;
+  SelLatest: TBufSelector;
 begin
   Tr := T as TMemDBTransaction;
-  AB := MakeLatestBufSelector(Tr.Tid);
+  SelLatest := MakeLatestBufSelector(Tr.Tid);
   //Exists.
-  Entity := EntitiesByName(AB, Name, pinEvolve);
+  Entity := EntitiesByName(SelLatest, Name, pinEvolve);
   if not Assigned(Entity) then
     raise EMemDbAPIException.Create(S_API_ENTITY_NAME_NOT_FOUND);
   try
     //Referenced by anything else?
     if Entity is TMemDbTablePersistent then
-      CheckAPITableDelete(AB, Name);
+      CheckAPITableDelete(SelLatest, Name);
     Entity.META_Delete(Tr.Tid);
   finally
     Entity.Proxy.Release;
@@ -1601,7 +1597,15 @@ begin
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
       GLogLog(SV_INFO, 'EDGE by Index, move extremity ' + MemAPIPositionStrings[Pos]);
 {$ENDIF}
+      Next := nil;
       repeat
+        if Assigned(Next) then
+        begin
+          Cur.Free;
+          Cur := Next;
+          Next := nil;
+        end;
+
         Next := TidLocal.UserMoveToRowByIndexRoot(IRoot, Cur, Pos);
         if Assigned(Next) then
         begin
@@ -1648,12 +1652,6 @@ begin
             Next.Free;
             Next := nil
           end;
-        end;
-        if Assigned(Next) then
-        begin
-          Cur.Free;
-          Cur := Next;
-          Next := nil;
         end;
       until not Assigned(Next);
       result := Cur;
@@ -1813,102 +1811,128 @@ begin
   end;
 end;
 
-{$IFDEF MEMDB2_TEMP_REMOVE}
-
-function TMemDBForeignKey.LookupTableAndIndex(TableName: string; IndexName: string): TMemIndexDef;
+function TMemDBForeignKey.LookupTableAndIndex(T: TObject; TableName: string; IndexName: string): TMemIndexDef;
 var
   Entity: TMemDBEntity;
   Table: TMemDBTablePersistent;
   tmpIdx: Integer;
+  SelLatest: TBufSelector;
+  Tr: TMemDBTransaction;
 begin
+  Tr := T as TMemDBTransaction;
+  SelLatest := MakeLatestBufSelector(Tr.Tid);
   with ParentDB do
   begin
     //Latest entities, this checks specified params are valid.
-    Entity := EntitiesByName(abLatest, TableName, tmpIdx);
-    if not (Assigned(Entity) and (Entity is TMemDBTablePersistent)) then
-      raise EMemDBAPIException.Create(S_API_ENTITY_NAME_NOT_FOUND);
-    Table := Entity as TMemDBTablePersistent;
-    result := M.IndexByName(abLatest, IndexName, tmpIdx);
-    if not Assigned(result) then
-      raise EMemDBAPIException.Create(S_API_INDEX_NAME_NOT_FOUND);
+    Entity := EntitiesByName(SelLatest, TableName, pinEvolve);
+    try
+      if not (Assigned(Entity) and (Entity is TMemDBTablePersistent)) then
+        raise EMemDBAPIException.Create(S_API_ENTITY_NAME_NOT_FOUND);
+      Table := Entity as TMemDBTablePersistent;
+      result := Table.META_IndexByName(SelLatest, IndexName, tmpIdx);
+      if not Assigned(result) then
+        raise EMemDBAPIException.Create(S_API_INDEX_NAME_NOT_FOUND);
+    finally
+      if Assigned(Entity) then
+        Entity.Proxy.Release;
+    end;
   end;
 end;
 
-procedure TMemDBForeignKey.API_SetReferencingChild(TableName: string;
-                                  IndexName: string);
+procedure TMemDBForeignKey.API_SetReferencingChild(T: TObject;
+                                                   TableName: string;
+                                                   IndexName: string);
 var
   M: TMemDBForeignKeyMetadata;
   MI: TMemForeignKeyMetadataItem;
+  Tr: TMemDBTransaction;
+  P: TMemDBStreamable;
+  selType: TABSelType;
 begin
-  LookupTableAndIndex(TableName, IndexName);
+  LookupTableAndIndex(T, TableName, IndexName);
+  Tr := T as TMemDBTransaction;
   //Referencing field/index does not need to be unique.
   //Referenced field/index does.
   M := Metadata as TMemDBForeignKeyMetadata;
-  M.RequestChange;
-  Assert(AssignedNotSentinel(M.ABData[abLatest]));
-  MI := M.ABData[abLatest] as TMemForeignKeyMetadataItem;
+  M.RequestChange(Tr.Tid);
+  P := M.GetPinLatest(Tr.Tid, selType, pinEvolve);
+  Assert(AssignedNotSentinel(P));
+  MI := P as TMemForeignKeyMetadataItem;
   MI.TableReferer := TableName;
   MI.IndexReferer := IndexName;
   //Do not need to re-gen any internal structures.
 end;
 
-procedure TMemDBForeignKey.API_SetReferencedParent(TableName: string;
+procedure TMemDBForeignKey.API_SetReferencedParent(T: TObject; TableName: string;
                                   IndexName: string);
 var
   IdxDef: TMemIndexDef;
   M: TMemDBForeignKeyMetadata;
+  G: TMemDBStreamable;
   MI: TMemForeignKeyMetadataItem;
+  Tr: TMemDBTransaction;
+  selType: TABSelType;
 begin
-  IdxDef := LookupTableAndIndex(TableName, IndexName);
+  Tr := T as TMemDBTransaction;
+  IdxDef := LookupTableAndIndex(T, TableName, IndexName);
   //Referencing field/index does not need to be unique.
   //Referenced field/index does.
   if not (iaUnique in IdxDef.IndexAttrs) then
     raise EMemDbAPIException.Create(S_API_INDEX_FOR_FK_UNIQUE_ATTR);
   M := Metadata as TMemDBForeignKeyMetadata;
-  M.RequestChange;
-  Assert(AssignedNotSentinel(M.ABData[abLatest]));
-  MI := M.ABData[abLatest] as TMemForeignKeyMetadataItem;
+  M.RequestChange(Tr.Tid);
+  G := M.GetPinLatest(TR.Tid, selType, pinEvolve);
+  Assert(AssignedNotSentinel(G));
+  MI := G as TMemForeignKeyMetadataItem;
   MI.TableReferred := TableName;
   MI.IndexReferred := IndexName;
   //Do not need to re-gen any internal structures.
 end;
 
-procedure TMemDBForeignKey.API_GetReferencingChild(Iso: TMDBIsolationLevel;
+procedure TMemDBForeignKey.API_GetReferencingChild(T: TObject;
                                   var TableName: string;
                                   var IndexName: string);
 var
   M: TMemDBForeignKeyMetadata;
   MI: TMemForeignKeyMetadataItem;
-  AB: TABSelection;
+  Tr: TMemDBTransaction;
+  G: TMemDBStreamable;
+  bufSel: TABSelType;
 begin
-  AB := IsoToAB(Iso);
+  Tr := T as TMemDBTransaction;
+  SetLength(TableName, 0);
+  SetLength(IndexName, 0);
   M := Metadata as TMemDBForeignKeyMetadata;
-  if M.HasData[AB] then
+  G := M.GetPinLatest(Tr.Tid, bufSel, pinEvolve);
+  if AssignedNotSentinel(G) then
   begin
-    MI := M.ABData[AB] as TMemForeignKeyMetadataItem;
+    MI := G as TMemForeignKeyMetadataItem;
     TableName := MI.TableReferer;
     IndexName := MI.IndexReferer;
   end;
 end;
 
-procedure TMemDBForeignKey.API_GetReferencedParent(Iso: TMDBIsolationLevel;
+procedure TMemDBForeignKey.API_GetReferencedParent(T: TObject;
                                   var TableName: string;
                                   var IndexName: string);
 var
   M: TMemDBForeignKeyMetadata;
   MI: TMemForeignKeyMetadataItem;
-  AB: TABSelection;
+  Tr: TMemDBTransaction;
+  G: TMemDBStreamable;
+  bufSel: TABSelType;
 begin
-  AB := IsoToAB(Iso);
+  Tr := T as TMemDBTransaction;
+  SetLength(TableName, 0);
+  SetLength(IndexName, 0);
   M := Metadata as TMemDBForeignKeyMetadata;
-  if M.HasData[AB] then
+  G := M.GetPinLatest(Tr.Tid, bufSel, pinEvolve);
+  if AssignedNotSentinel(G) then
   begin
-    MI := M.ABData[AB] as TMemForeignKeyMetadataItem;
+    MI := G as TMemForeignKeyMetadataItem;
     TableName := MI.TableReferred;
     IndexName := MI.IndexReferred;
   end;
 end;
-
-{$ENDIF}
 
 end.
