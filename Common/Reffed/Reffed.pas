@@ -40,6 +40,10 @@ type
 {$ENDIF}
   private
     FRef: integer;
+  protected
+{$IFDEF USE_TRACKABLES}
+    function GetExtraInfoText: string; override;
+{$ENDIF}
   public
     constructor Create;
 
@@ -106,6 +110,15 @@ implementation
 
 uses
   LockAbstractions;
+
+
+{$IFDEF USE_TRACKABLES}
+function TReffed.GetExtraInfoText: string;
+begin
+  result := inherited;
+  result := result + 'Refcount: ' + IntToStr(FRef);
+end;
+{$ENDIF}
 
 constructor TReffed.Create;
 begin
