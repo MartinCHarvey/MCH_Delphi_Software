@@ -2524,6 +2524,8 @@ begin
 
   DelTable;
 
+  //exit; //TODO - Debugging up to here.
+
   //1b) Unique values, one zero.
   //1bi) Fail case.
   Pass := false;

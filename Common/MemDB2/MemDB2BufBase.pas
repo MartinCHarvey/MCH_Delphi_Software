@@ -38,11 +38,6 @@ uses
   MemDB2Misc, Classes, MemDb2Streamable, DLList, TinyLock, LockAbstractions,
   MemDB2Indexing;
 
-type
-  TMemDBTransReason = (mtrUserOp,
-                       mtrReplayFromScratch,
-                       mtrReplayFromJournal);
-
 {
    Isolation / serialization
 
@@ -78,6 +73,10 @@ TODO - Serializable.
     To prevent phantoms & keep index traversal consistent.
   - Need all meta/index pinning to happen atomically at Txion start.
 }
+type
+  TMemDBPreCommitPhase = (pcpFKeys, pcpTables);
+  TMemDBCommitPhase = (ccpData, ccpMetaIndex, ccpCleardown);
+  TMemDBRollbackPhase = (rbpMetaIndexRollback, rbpDelayedRollback);
 
   //Object which can write changes between current and next version to journal.
 {$IFDEF USE_TRACKABLES}
@@ -114,11 +113,13 @@ TODO - Serializable.
     //but this class is not ref counted. Hopefully will be used as final double-check
     //against referencing.
 
+    procedure StartTransaction(const Tid: TTRansactionId); virtual; abstract;
     //Check A/B buffered changes consistent and logical (and/or atomic) before commit.
-    procedure PreCommit(const TId: TTransactionId; Reason: TMemDBTransReason); virtual; abstract;
+    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase); virtual; abstract;
     //Save to journal / Make the changes.
-    procedure Commit(const TId: TTransactionId; Reason: TMemDbTransReason); virtual; abstract;
-    procedure Rollback(const TId: TTransactionId; Reason: TMemDbTransReason); virtual; abstract;
+    procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase); virtual; abstract;
+    //Rollback changes, possibly promptly or delayed.
+    procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase); virtual; abstract;
   end;
 
   //Generally deep clone unless some list magic requires otherwise.
@@ -202,9 +203,15 @@ TODO - Serializable.
     function FindTidReffing(const Tid: TTransactionId): PTidReference;
 {$ENDIF}
     //DCPUpdates can be sent lazily.
+{$IFOPT C+}
+    procedure DCPPre(Data, Changes, Pins: boolean; var Update: TReferenceUpdate);
+    procedure DCPPost(Data, Changes, Pins: boolean; var Update: TReferenceUpdate);
+    procedure DCPLazyHandle(const Update: TReferenceUpdate);
+{$ELSE}
     procedure DCPPre(Data, Changes, Pins: boolean; var Update: TReferenceUpdate); inline;
     procedure DCPPost(Data, Changes, Pins: boolean; var Update: TReferenceUpdate); inline;
     procedure DCPLazyHandle(const Update: TReferenceUpdate); inline;
+{$ENDIF}
     procedure DCPHandle(const Update: TReferenceUpdate); virtual;
 
     //CPTid updates can't cos they are also used by TidLocal to determine TidLocal.ChangesForTid
@@ -371,9 +378,10 @@ TODO - Serializable.
     procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream);override;
     procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream);override;
 
-    procedure PreCommit(const Tid: TTransactionId; Reason: TMemDbTransReason); override;
-    procedure Commit(const Tid: TTransactionId; Reason: TMemDbTransReason); override;
-    procedure Rollback(const Tid: TTransactionId; Reason: TMemDbTransReason); override;
+    procedure StartTransaction(const Tid: TTRansactionId); override;
+    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase); override;
+    procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase); override;
+    procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase); override;
 
     //Navigated to via row list.
     function PinForCursor(const Tid: TTransactionId): boolean;
@@ -387,9 +395,19 @@ TODO - Serializable.
     //Generally, no un-pin for data. Commit/Rollback will clear.
     //Pins/Refs checked/ cleared at Txion time.
     function PinCurrent(const Tid: TTransactionId; Reason: TPinReason): TMemDBStreamable;
+{$IFDEF DEBUG_PINS}
+    virtual;
+{$ENDIF}
+
+    //And in addition to all the ISO checking.
+    procedure RequireCurrentAtomic(const Tid: TTransactionId);
+
     function GetNext(const Tid: TTransactionId): TMemDBStreamable;
     function GetPinLatest(const Tid: TTransactionId;
                             var BufSelected: TAbSelType; Reason: TPinReason): TMemDBStreamable;
+{$IFDEF DEBUG_PINS}
+    virtual;
+{$ENDIF}
 
     //Index pinning is a bit different. We can get the item based on Tid,
     //but it's pinned across transactions. No pin reason, you either add or
@@ -443,6 +461,7 @@ const
   S_MODIFIED_CONCURRENT_ABORT_WAR_4 = 'Aborted. Concurrency conflict (write-after-read). (Case 4). Retry?';
   S_MODIFIED_CONCURRENT_ABORT_WAR_5 = 'Aborted. Concurrency conflict (write-after-read). (Case 5). Retry?';
   S_MODIFIED_CONCURRENT_ABORT_WAR_6 = 'Aborted. Concurrency conflict (write-after-read). (Case 6). Retry?';
+  S_MODIFIED_CONCURRENT_ABORT_WAR_7 = 'Aborted. Concurrency conflict (write-after-read). (Case 7). Retry?';
   S_MODIFIED_CONCURRENT_ABORT_WAW = 'Aborted. Concurrency conflict (write-after-write). Retry?';
   S_MODIFIED_CONCURRENT_ABORT_RAW = 'Aborted. Concurrency conflict (read-after-write). Retry?';
   S_PIN_EVOLVE_TOO_LATE_1 = 'Cannot pin for change at this time (already final-checking). (Case 1)';
@@ -660,6 +679,8 @@ procedure TMemDBMultiBuffered.DCPMake(var Data: boolean; var Changes: boolean; v
 var
   Cur: PMemDbMultiItem;
   PNext: PDLEntry;
+  IndexPins: boolean;
+  ItemPins: boolean;
 begin
   //Any data, at all.
   Cur := FindCurMultiItem;
@@ -668,7 +689,9 @@ begin
   PNext := Cur.Link.Flink;
   Changes := not DLItemIsList(PNext);
   //Any pins at all.
-  Pins := (not DlItemIsEmpty(@FPinnedItems)) or (not DlItemIsEmpty(@FIndexPins));
+  IndexPins := not DlItemIsEmpty(@FIndexPins);
+  ItemPins := not DlItemIsEmpty(@FPinnedItems);
+  Pins := IndexPins or ItemPins;
 end;
 
 procedure TMemDBMultiBuffered.DCPPre(var Update: TReferenceUpdate);
@@ -881,21 +904,27 @@ begin
     end;
 
     Nxt := FindNxtMultiItem(Tid);
-    if not Assigned(Nxt) then
+    if Assigned(Cur.Item) or Assigned(Nxt) then
     begin
-      Nxt := NewMulti;
-      Nxt.Sel := MakeNextBufSelector(Tid);
-      Assert(Cur.Sel.Tid <> Cur.Sel.Tid.Empty); //Should never have to delete NULL
-      Nxt.ParentTid := Cur.Sel.Tid;
-      DLItemInitObj(TObject(Nxt), @Nxt.Link);
-      DLListInsertTail(@FMultiItems, @Nxt.Link);
-    end;
+      if not Assigned(Nxt) then
+      begin
+        Nxt := NewMulti;
+        Nxt.Sel := MakeNextBufSelector(Tid);
+        Assert(Cur.Sel.Tid <> Cur.Sel.Tid.Empty); //Should never have to delete NULL
+        Nxt.ParentTid := Cur.Sel.Tid;
+        DLItemInitObj(TObject(Nxt), @Nxt.Link);
+        DLListInsertTail(@FMultiItems, @Nxt.Link);
+      end;
 
-    //Yes allow next buffer overwrites if it deleted stuff.
-    //But don't change the original parent Tid (someone else changed stuff in meantime).
-    //transaction ID
-    Nxt.Item.Release;
-    Nxt.Item := TMemDeleteSentinel.Create;
+      //Yes allow next buffer overwrites if it deleted stuff.
+      //But don't change the original parent Tid (someone else changed stuff in meantime).
+      //transaction ID
+      Nxt.Item.Release;
+      Nxt.Item := TMemDeleteSentinel.Create;
+    end;
+    //If not (Assigned Cur.Item or Assigned(Nxt)) then is NULL,
+    //in datastructures probably for referencing reasons, ignore
+    //duplicate delete.
 
     DCPPost(RefUp);
     CPTidPost(Tid, TidUp);
@@ -1042,11 +1071,33 @@ begin
   DCPLazyHandle(RefUp);
 end;
 
-//TODO - How to make sure that MultiBuffered "No pins after pre-commit"
-//are set/cleared in all cases. Having a No-Pin hanging around after a commit
-//or rollback would be very bad indeed.
+procedure TMemDBMultiBuffered.StartTransaction(const Tid: TTRansactionId);
+begin
+  Assert(false); //Generally not for double buffered, but yes for entities and DB.
+end;
 
-procedure TMemDBMultiBuffered.PreCommit(const Tid: TTransactionId; Reason: TMemDbTransReason);
+procedure TMemDBMultiBuffered.RequireCurrentAtomic(const Tid: TTransactionId);
+var
+  Cur: PMemDbMultiItem;
+  Pin: PMemDbPinnedItem;
+begin
+  LockSelf;
+  try
+    Cur := FindCurMultiItem;
+    Pin := FindPin(Tid);
+    Assert(Assigned(Cur));
+    if Assigned(Pin) then
+    begin
+      //Strict metadata currency checking.
+      if Pin.PinnedCurrentTid <> Cur.Sel.TId then
+        raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ABORT_WAR_7);
+    end;
+  finally
+    UnlockSelf;
+  end;
+end;
+
+procedure TMemDBMultiBuffered.PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase);
 var
   Cur, Nxt: PMemDbMultiItem;
   Pin: PMemDbPinnedItem;
@@ -1080,7 +1131,7 @@ end;
 
 //TODO - Prohibit pin mechanism requires that we pre-commit eveything before commit?
 
-procedure TMemDBMultiBuffered.Commit(const Tid: TTransactionId; Reason: TMemDbTransReason);
+procedure TMemDBMultiBuffered.Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase);
 var
   Cur, Nxt: PMemDbMultiItem;
   Pin: PMemDbPinnedItem;
@@ -1156,7 +1207,7 @@ begin
   DCPLazyHandle(RefUp);
 end;
 
-procedure TMemDBMultiBuffered.Rollback(const Tid: TTransactionId; Reason: TMemDbTransReason);
+procedure TMemDBMultiBuffered.Rollback(const Tid: TTransactionId; Phase: TMemDBRollbackPhase);
 var
   Nxt: PMemDBMultiItem;
   Pin: PMemDbPinnedItem;
@@ -1267,7 +1318,7 @@ begin
   try
     DCPPre(RefUp);
     CPTidPre(Tid, TidUp);
-
+    Assert(Tid <> TTransactionId.Empty);
     //First things first, check the INode is actually one of ours.
     if not ((Assigned(INode)) and (Assigned(INode.Row))
        and (Assigned(INode.Pinned)) and (INode.Row = self)) then
@@ -1397,8 +1448,7 @@ begin
 
     Pin.INode := IndexNode; //No add-ref, node owns pin and will remove it.
     Pin.PinnedTid := PinTid;
-    IndexNode.Pinned := Item;
-    IndexNode.Pinned.AddRef;
+    IndexNode.Pinned := Item.AddRef as TMemDBStreamable;
     IndexNode.Row := self;
 
     DLListInsertTail(@FIndexPins, @Pin.Link);
@@ -1435,8 +1485,7 @@ begin
     DLItemInitObj(TObject(NewPin), @NewPin.Link);
     NewPin.INode := DestNode;
     NewPin.PinnedTid := Pin.PinnedTid;
-    DestNode.Pinned := SourceNode.Pinned;
-    DestNode.Pinned.AddRef;
+    DestNode.Pinned := SourceNode.Pinned.AddRef as TMemDBStreamable;
     DestNode.Row := self;
 
     DLListInsertTail(@FIndexPins, @NewPin.Link);
@@ -1567,6 +1616,7 @@ begin
   try
     DCPPre(RefUp);
     CPTidPre(Tid, TidUp);
+    Assert(Tid <> TTransactionId.Empty);
     result := nil;
     //Always return pin before current.
     Pin := FindPin(Tid);
@@ -1616,6 +1666,7 @@ begin
   try
     DCPPre(RefUp);
     CPTidPre(Tid, TidUp);
+    Assert(Tid <> TTransactionId.Empty);
 
     result := nil;
     //Find next preferentially.

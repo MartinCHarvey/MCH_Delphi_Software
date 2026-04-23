@@ -99,7 +99,7 @@
     <PropertyGroup Condition="'$(Cfg_1)'!=''">
         <DCC_RangeChecking>true</DCC_RangeChecking>
         <DCC_IntegerOverflowCheck>true</DCC_IntegerOverflowCheck>
-        <DCC_Define>DEBUG;USE_TRACKABLES;$(DCC_Define)</DCC_Define>
+        <DCC_Define>DEBUG;USE_TRACKABLES;DEBUG_PINS;$(DCC_Define)</DCC_Define>
         <DCC_DebugDCUs>true</DCC_DebugDCUs>
         <DCC_Optimize>false</DCC_Optimize>
         <DCC_GenerateStackFrames>true</DCC_GenerateStackFrames>
