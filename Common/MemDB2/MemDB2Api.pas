@@ -54,6 +54,7 @@ type
   TMemAPIDatabaseInternal = class(TMemAPIDBTopLevel)
   protected
   public
+    procedure TransactionStartCycle;
     //Really don't call any of these functions if you're an end user.
     procedure JournalReplayCycleV3(JournalEntry: TStream; Initial: boolean);
     function UserCommitCycleV3: TStream;
@@ -344,38 +345,46 @@ end;
 
 { TMemAPIDatabaseInternal}
 
+procedure TMemAPIDatabaseInternal.TransactionStartCycle;
+var
+  T: TMemDBTransaction;
+begin
+  T := FAssociatedTransaction as TMemDBTransaction;
+  Assert(Assigned(T));
+  DB.MetaIndexLock.Acquire;
+  try
+    DB.StartTransaction(T.Tid);
+  finally
+    DB.MetaIndexLock.Release;
+  end;
+end;
+
 procedure TMemAPIDatabaseInternal.JournalReplayCycleV3(JournalEntry: TStream; Initial: boolean);
 var
-   Reason: TMemDBTransReason;
    PseudoTid: TTransactionId;
 begin
-  if Initial then
-    Reason := mtrReplayFromScratch
-  else
-    Reason := mtrReplayFromJournal;
-
   PseudoTid := TTransactionId.NewTransactionID(ilSerialisable); //if only writer, should be serialisable.
-
   try
+    DB.StartTransaction(PseudoTid);
+
     Assert(not DB.AnyChanges(PseudoTid));
     if Initial then
       DB.FromScratch(PseudoTid, JournalEntry)
     else
       DB.FromJournal(PseudoTid, JournalEntry);
 
-    DB.CommitLock.Acquire; //TODO - We will get rid of the commit lock eventually.
-    try
-      DB.PreCommit(PseudoTid, Reason);
-      DB.Commit(PseudoTid, Reason);
-    finally
-      DB.CommitLock.Release;
-    end;
+    DB.PreCommit(PseudoTid, pcpTables);
+    DB.PreCommit(PseudoTid, pcpFKeys);
+    DB.Commit(PseudoTid, ccpData);
+    DB.Commit(PseudoTid, ccpMetaIndex);
+    DB.Commit(PseudoTid, ccpCleardown);
   except
     //Clear pins etc, although in this case, it's
     //a non-start for the database.
     //However, final deletion of entities should still work
     //and delete everything provided we clear the pins.
-    DB.Rollback(PseudoTid, Reason);
+    DB.Rollback(PseudoTid, rbpMetaIndexRollback);
+    DB.Rollback(PseudoTid, rbpDelayedRollback);
     raise;
   end;
 end;
@@ -389,13 +398,33 @@ begin
   Assert(not Assigned(T.Changeset));
   result := MakeStream(T.Session.TempStorageMode);
   try
-    //TODO - Check Journalling before pre-commit works as we expect.
     DB.ToJournal(T.Tid, result);
 
-    DB.CommitLock.Acquire; //TODO - We will get rid of the commit lock eventually.
+    DB.CommitLock.Acquire;
     try
-      DB.PreCommit(T.Tid, mtrUserOp);
-      DB.Commit(T.Tid, mtrUserOp);
+      try
+        DB.PreCommit(T.Tid, pcpTables);
+        DB.PreCommit(T.Tid, pcpFKeys);
+
+        //The assumption is all exceptions raised in pre-commit.
+        //We're not checking for errors or allocating memory by the time
+        //it comes to the commit step.
+        DB.Commit(T.Tid, ccpData);
+        DB.MetaIndexLock.Acquire;
+        try
+          DB.Commit(T.Tid, ccpMetaIndex);
+        finally
+          DB.MetaIndexLock.Release;
+        end;
+        DB.Commit(T.Tid, ccpCleardown);
+      except
+        DB.MetaIndexLock.Acquire;
+        try
+          DB.Rollback(T.Tid, rbpMetaIndexRollback);
+        finally
+          DB.MetaIndexLock.Release;
+        end;
+      end;
     finally
       DB.CommitLock.Release;
     end;
@@ -414,8 +443,16 @@ var
 begin
   T := FAssociatedTransaction as TMemDBTransaction;
   Assert(Assigned(T));
-  //Should not raise exceptions.
-  DB.Rollback(T.Tid, mtrUserOp);
+
+  DB.MetaIndexLock.Acquire;
+  try
+    DB.Rollback(T.Tid, rbpMetaIndexRollback);
+  finally
+    DB.MetaIndexLock.Release;
+  end;
+  //OK to rollback general double buffered outside lock:
+  //we know changes won't be committed to current world-view.
+  DB.Rollback(T.Tid, rbpDelayedRollback);
 end;
 
 { TMemAPIDatabase }
@@ -868,6 +905,7 @@ begin
   end;
   NewTable := TMemDBTable.Create;
   NewTable.Init(Tr.Tid, self, Name, true);
+  NewTable.StartTransaction(Tr.Tid);
   NewTable.Proxy.Release;
 end;
 
@@ -890,6 +928,7 @@ begin
   end;
   NewKey := TMemDBForeignKey.Create;
   NewKey.Init(Tr.Tid, self, Name, true);
+  NewKey.StartTransaction(Tr.Tid);
   NewKey.Proxy.Release;
 end;
 
@@ -1463,7 +1502,7 @@ begin
   if Length(IdxName) = 0 then
   begin
     IRoot := nil;
-    TidLocal := GetMakeTidLocal(Tr.Tid, pinEvolve);
+    TidLocal := GetTidLocal(Tr.Tid);
   end
   else
   begin
@@ -1513,7 +1552,6 @@ begin
     raise EMemDBAPIException.Create(S_API_SEARCH_REQUIRES_INDEX);
 
   Assert(Assigned(Idx));
-  Assert(Assigned(TidLocal));
   META_CurIndexDefToFieldDefs(Tr.Tid, Idx, FieldDefs, FieldAbsIdxs);
   if Length(DataRecs)<> Length(FieldDefs) then
     raise EMemDBAPIException.Create(S_API_SEARCH_REQURES_CORRECT_FIELD_COUNT);
@@ -1699,7 +1737,7 @@ var
   TidLocal: TTidLocal;
 begin
   Tr := T as TMemDbTransaction;
-  TidLocal := GetMakeTidLocal(Tr.Tid, pinEvolve);
+  TidLocal := GetTidLocal(Tr.Tid);
   if TidLocal.LayoutChangeRequired then
     raise EMemDBAPIException.Create(S_FIELD_LAYOUT_CHANGED);
 
@@ -1736,7 +1774,7 @@ var
   TidLocal: TTidLocal;
 begin
   Tr := T as TMemDBTransaction;
-  TidLocal := GetMakeTidLocal(Tr.Tid, pinEvolve);
+  TidLocal := GetTidLocal(Tr.Tid);
   if TidLocal.LayoutChangeRequired then
     raise EMemDBAPIException.Create(S_FIELD_LAYOUT_CHANGED);
 
@@ -1768,7 +1806,7 @@ var
   TidLocal: TTidLocal;
 begin
   Tr := T as TMemDBTransaction;
-  TidLocal := GetMakeTidLocal(Tr.Tid, pinEvolve);
+  TidLocal := GetTidLocal(Tr.Tid);
   if TidLocal.LayoutChangeRequired then
     raise EMemDBAPIException.Create(S_FIELD_LAYOUT_CHANGED);
   if not Assigned(Cursor) then
@@ -1821,6 +1859,7 @@ var
 begin
   Tr := T as TMemDBTransaction;
   SelLatest := MakeLatestBufSelector(Tr.Tid);
+  result := nil;
   with ParentDB do
   begin
     //Latest entities, this checks specified params are valid.

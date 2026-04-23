@@ -857,8 +857,11 @@ begin
       RetQR.q := Tmp; //Return this modified Q to caller.
       Tmp := nil;
 
-      RetQR.r := InQR.r.left; //Return modified R to caller.
-      RetQR.r.AddRef; //And ref it, as it's part of an existing tree.
+{$IFOPT C+}
+      RetQR.r := InQR.r.left.AddRef as TCowTreeItem; //Return modified R to caller.
+{$ELSE}
+      RetQR.r := TCowTreeItem(InQR.r.left.AddRef);
+{$ENDIF}
       WrCk(h, true);
       result := RetQR;
       RetQR.q := nil;
@@ -983,16 +986,22 @@ begin
       begin
         { p := q.left; h := true; }
         //Skip over this node, return child to caller.
-        Tmp := q.left;
-        Tmp.AddRef;
+{$IFOPT C+}
+        Tmp := q.left.AddRef as TCowTreeItem;
+{$ELSE}
+        Tmp := TCowTreeItem(q.left.AddRef);
+{$ENDIF}
         WrCk(h, true);
       end
       else if q.left = nil then
       begin
         { p := q.right; h := true; }
         //Skip over this node, return child to caller.
-        Tmp := q.right;
-        Tmp.AddRef;
+{$IFOPT C+}
+        Tmp := q.right.AddRef as TCowTreeItem;
+{$ELSE}
+        Tmp := TCowTreeItem(q.right.AddRef);
+{$ENDIF}
         WrCk(h, true);
       end
       else

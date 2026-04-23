@@ -158,6 +158,16 @@ type
     constructor Create;
     procedure Init(const Tid: TTransactionId; Parent: TObject; Name:string; DSName: boolean); virtual;
     procedure DCPHandle(const Update: TReferenceUpdate); override;
+{$IFDEF DEBUG_PINS}
+    function PinCurrent(const Tid: TTransactionId; Reason: TPinReason): TMemDBStreamable; override;
+    function GetPinLatest(const Tid: TTransactionId;
+                            var BufSelected: TAbSelType; Reason: TPinReason): TMemDBStreamable; override;
+
+    procedure StartTransaction(const Tid: TTRansactionId); override;
+    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase); override;
+    procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase); override;
+    procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase); override;
+{$ENDIF}
   end;
 
   //Internal maintenance operations at this level.
@@ -171,7 +181,7 @@ type
     function FieldByName(const AB: TBufSelector; const Name: string; var AbsIndex: integer; Reason: TPinReason): TMemFieldDef;
     function IndexByName(const AB: TBufSelector; const Name: string; var AbsIndex: integer; Reason: TPinReason): TMemIndexDef;
   public
-    procedure PreCommit(const Tid: TTransactionId; Reason: TMemDbTransReason); override;
+    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase); override;
     procedure Init(const Tid: TTransactionId; Parent: TObject; Name:string; DSName: boolean); override;
   end;
 
@@ -213,7 +223,7 @@ type
     procedure HandleReleaseForAPI(Sender: TObject);
     procedure MetadataDCPHandle(Sender: TObject; const Update:TReferenceUpdate);
 
-    property Metadata: TMemDBEntityMetadata read FMetadata;    
+    property Metadata: TMemDBEntityMetadata read FMetadata;
   public
     constructor Create;
     destructor Destroy; override;
@@ -225,9 +235,11 @@ type
     procedure META_RequestChange(const Tid: TTransactionId); virtual;
     procedure META_Delete(const Tid: TTransactionId); virtual;
 
-    procedure PreCommit(const TId: TTransactionId; Reason: TMemDBTransReason); override;
-    procedure Commit(const TId: TTransactionId; Reason: TMemDbTransReason); override;
-    procedure Rollback(const TId: TTransactionId; Reason: TMemDbTransReason); override;
+    procedure StartTransaction(const Tid: TTransactionId); override;
+    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase); override;
+    procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase); override;
+    procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase); override;
+
     procedure Init(const Tid: TTransactionId; Parent: TObject; Name:string; DSName: boolean);
 
     property ParentDB: TMemDBDatabasePersistent read FParentDB;
@@ -298,7 +310,7 @@ type
     function AnyChanges(const Tid:TTransactionId): boolean; override;
     function AnyChangesForTid(const Tid: TTransactionId): boolean; override;
 
-    procedure PreCommit(const TId: TTransactionId; Reason: TMemDBTransReason); override;
+    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase); override;
 
     procedure ToJournal(const Tid: TTransactionId; Stream: TStream);override;
     procedure ToScratch(const PseudoTid:TTransactionId; Stream: TStream);override;
@@ -394,12 +406,12 @@ type
     FDataChanged: boolean;
     FLayoutChangeRequired: boolean;
     FIndexingChangeRequired: boolean;
+    FDoneMetaIndexRollback: boolean;
 
     FIndexHelper, FFieldHelper: TMemDblBufListHelper;
     FEmptyList: TMemStreamableList;
     FIndexChangesets: TIndexChangeArray;
     FFieldChangesets: TFieldChangeArray;
-    FIndexInit: boolean;
 
     FLocalIndexCopies: TReffedList;
     FNewBuildIndices: TReffedList;
@@ -409,11 +421,12 @@ type
     function LookaheadHelper(Stream: TStream; Scratch: boolean; var Created: boolean): TMemDBRow;
 
     procedure CheckTableRowCount;
-    procedure CheckChangedRowStructure(Reason: TMemDBTransReason);
+    procedure CheckChangedRowStructure;
     procedure BuildCheckPartialIndexes;
-    procedure RowLocalPreCommit(Reason: TMemDbTransReason);
+    procedure RowLocalPreCommit;
 
-    procedure UpdateHelpersAndIndices(PinReason: TPinReason);
+    procedure InitialUpdate;
+    procedure UpdateNHelpers;
     procedure DimensionChangesets(PinReason: TPinReason);
     procedure ReGenChangesets(PinReason: TPinReason);
 
@@ -428,13 +441,13 @@ type
     procedure FromJournal(Stream: TStream);
     procedure FromScratch(Stream: TStream);
 
-    procedure PreCommit(Reason: TMemDBTransReason);
-    procedure Commit(Reason: TMemDBTransReason);
-    procedure Rollback(Reason: TMemDBTransReason);
+    procedure PreCommit(Phase: TMemDBPreCommitPhase);
+    procedure Commit(Phase: TMemDBCommitPhase);
+    procedure Rollback;
 
-    procedure MetaIndexCommit(Reason: TMemDBTransReason);
-    procedure MetaIndexRollback(Reason: TMemDBTransReason);
-    procedure MetaIndexLocalRollback(Reason: TMemDBTransReason);
+    procedure MetaIndexCommit;
+    function DoneMetaIndexRollback: boolean;
+    procedure MetaIndexRollback;
 
     procedure BuildValidateNewIndexesCommon(LocalIter: boolean);
     procedure BuildValidateNewIndexesOutsideCommitLock;
@@ -455,8 +468,6 @@ type
                                       Cursor: TMemDBCursor;
                                       Pos: TMemAPIPosition): TMemDBCursor;
 
-    //TODO - Ensure user can GetPinLatest for Tid without being
-    //out of date with Index.
     function UserFindRowByIndexRoot(IndexDef: TMemIndexDef;
                                     FieldDefs: TMemFieldDefs;
                                     FieldAbsIdxs: TFieldOffsets;
@@ -513,12 +524,10 @@ type
 
     FMasterRowList: TIndexedStoreO;
 
-    //TODO - Consider dangling Tids in exception cases, and
-    //how to clean up.
     FTidLocalLock: TCriticalSection;
     FTidLocalStructures: TDLEntry;
-
-    FMetaIndexLock: TCriticalSection;
+    //No Meta index lock here - it's DB global
+    //for snapshot index/meta consistency.
     FMasterIndexes: TReffedList;
   protected
     //Returns newly added for this tid.
@@ -544,13 +553,8 @@ type
     procedure HandleAddRefForData(Sender: TObject);
     procedure HandleReleaseForData(Sender: TObject);
 
+    function GetOptTidLocal(const Tid: TTransactionId): TTidLocal;
     function GetTidLocal(const Tid: TTransactionId): TTidLocal;
-
-    //This is not entirely race free: Insertion into the initial list
-    //is race free, but no guarantee fully init until initialising call
-    //has returned. However. Assumption is that calls for a certain
-    //Tid are in the same thread.
-    function GetMakeTidLocal(const Tid: TTransactionId; PinReason: TPinReason): TTidLocal;
 
     function GetMakeListHelpers(const Tid: TTransactionId;
                                 var FieldHelper: TMemDblBufListHelper;
@@ -578,9 +582,10 @@ type
     procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream); override;
     procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream); override;
 
-    procedure PreCommit(const TId: TTransactionId; Reason: TMemDBTransReason); override;
-    procedure Commit(const TId: TTransactionId; Reason: TMemDbTransReason); override;
-    procedure Rollback(const TId: TTransactionId; Reason: TMemDbTransReason); override;
+    procedure StartTransaction(const Tid: TTRansactionId); override;
+    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase); override;
+    procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase); override;
+    procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase); override;
 
     function DataChangedForTid(const Tid:TTransactionId): boolean;
     function LayoutChangesRequiredForTid(const Tid: TTransactionId): boolean;
@@ -626,6 +631,7 @@ type
     //for ensuring consistency of indices and foreign keys.
     //Big TODO is eventually getting rid of it.
     FCommitLock: TCriticalSection;
+    FMetaIndexLock: TCriticalSection;
 
     function HandleInterfacedObjRequest(Transaction: TObject; ID: TMemDBAPIId): TMemDBAPI;virtual;
     procedure LookaheadHelper(Stream: TStream;
@@ -644,9 +650,10 @@ type
     function AnyChangesForTid(const TId: TTransactionId): boolean; override;
     function AnyChanges(const Tid: TTransactionId): boolean; override;
 
-    procedure PreCommit(const TId: TTransactionId; Reason: TMemDBTransReason); override;
-    procedure Commit(const TId: TTransactionId; Reason: TMemDbTransReason); override;
-    procedure Rollback(const TId: TTransactionId; Reason: TMemDbTransReason); override;
+    procedure StartTransaction(const Tid: TTRansactionId); override;
+    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase); override;
+    procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase); override;
+    procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase); override;
 
     constructor Create;
     destructor Destroy; override;
@@ -658,6 +665,7 @@ type
 
     property Interfaced: TMemDBAPIInterfacedObject read FInterfaced;
     property CommitLock: TCriticalSection read FCommitLock;
+    property MetaIndexLock: TCriticalSection read FMetaIndexLock;
   end;
 
   //Helper class to manage A/B buffered lists.
@@ -761,6 +769,9 @@ implementation
 
 uses
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
+  GlobalLog,
+{$ENDIF}
+{$IFDEF DEBUG_PINS}
   GlobalLog,
 {$ENDIF}
   SysUtils, MemDB2, NullStream, MemDB2Api;
@@ -938,6 +949,7 @@ const
   S_ERROR_PINNING_INDEX_ADD = 'Error adding pin during index modification.';
   S_ERROR_MODIFYING_INDEX_ADD = 'Error adding to tree during index modification.';
   S_ERROR_GETTING_OFFSETS_IN_INDEX_VALIDATE = 'Error getting field defs/offsets during index validation';
+  S_EXPECTED_TID_LOCAL = 'Expected transaction local datastructures.';
 
 { Misc Functions }
 
@@ -1272,6 +1284,12 @@ end;
 
 destructor TMemDBEntity.Destroy;
 begin
+  FParentDB.FEntityLock.Acquire;
+  try
+    DLListRemoveObj(@FProxy.FSiblings);
+  finally
+    FParentDB.FEntityLock.Release;
+  end;
   FInterfaced.Free;
   //Proxy is freeing us.
   inherited;
@@ -1303,45 +1321,39 @@ begin
   if Update.Pre <> Update.Post then
   begin
     if Update.Post then
-    begin
-      FProxy.AddRef;
-      //If DCP then in entity list, AddRef is for list ownership.
-      FParentDB.FEntityLock.Acquire;
-      try
-        DLListInsertTail(@FParentDB.FEntityList, @FProxy.FSiblings);
-      finally
-        FParentDB.FEntityLock.Release;
-      end;
-    end
+      FProxy.AddRef
     else
-    begin
-      FParentDB.FEntityLock.Acquire;
-      try
-        DLListRemoveObj(@FProxy.FSiblings);
-      finally
-        FParentDB.FEntityLock.Release;
-      end;
-      FProxy.Release;
-    end;
+      FProxy.Release; //Release from list finally when destroyed.
   end;
 end;
 
-procedure TMemDBEntity.PreCommit(const TId: TTransactionId; Reason: TMemDBTransReason);
+procedure TMemDBEntity.StartTransaction(const Tid: TTransactionId);
 begin
   inherited;
-  FMetadata.PreCommit(Tid, Reason);
+  FMetadata.PinCurrent(Tid, pinEvolve);
 end;
 
-procedure TMemDBEntity.Commit(const TId: TTransactionId; Reason: TMemDBTransReason);
+procedure TMemDBEntity.PreCommit(const TId: TTransactionId; Phase:TMemDBPreCommitPhase);
 begin
   inherited;
-  FMetadata.Commit(Tid, Reason);
+  FMetadata.PreCommit(Tid, Phase);
+  //Do not absolutely require atomic here.
+  //Let tables / keys decide whether OK to proceed with metadata
+  //changed behind our back.
 end;
 
-procedure TMemDBEntity.Rollback(const TId: TTransactionId; Reason: TMemDBTransReason);
+procedure TMemDBEntity.Commit(const TId: TTransactionId; Phase:TMemDBCommitPhase);
 begin
   inherited;
-  FMetadata.Rollback(Tid, Reason);
+  if Phase = ccpMetaIndex then
+    FMetadata.Commit(Tid, Phase);
+end;
+
+procedure TMemDBEntity.Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase);
+begin
+  inherited;
+  if Phase = rbpMetaIndexRollback then
+    FMetadata.Rollback(Tid, Phase);
 end;
 
 procedure TMemDBEntity.Init(const Tid: TTransactionId; Parent: TObject; Name:string; DSName: boolean);
@@ -1349,6 +1361,14 @@ begin
   Assert(Assigned(Parent));
   Assert(Parent is TMemDBDatabasePersistent);
   FParentDB := Parent as TMemDBDatabasePersistent;
+
+  FParentDB.FEntityLock.Acquire;
+  try
+    DLListInsertTail(@FParentDB.FEntityList, @FProxy.FSiblings);
+  finally
+    FParentDB.FEntityLock.Release;
+  end;
+
   FMetadata.Init(Tid, self, Name, DSName);
 end;
 
@@ -1383,58 +1403,45 @@ end;
 procedure TTidLocal.HandleHelperChangeRequest(Sender: TObject);
 begin
   FParentTable.FMetadata.RequestChange(FTid, ilReadRepeatable);
-  UpdateHelpersAndIndices(pinEvolve);
+  UpdateNHelpers;
+  //TODO - Clear cached copies, if they're here.
 end;
 
 procedure TTidLocal.UpdateLayout(PinReason: TPinReason);
 begin
-  UpdateHelpersAndIndices(PinReason);
+  UpdateNHelpers;
   DimensionChangesets(PinReason);
   ReGenChangesets(PinReason);
 end;
 
-procedure TTidLocal.UpdateHelpersAndIndices(PinReason: TPinReason);
+procedure TTidLocal.InitialUpdate;
 var
-  CC, NC: TMemTableMetadataItem;
   M: TMemDbStreamable;
   i: integer;
   MasterIndex: TMemDBIndex;
+  CC: TMemTableMetadataItem;
+
 begin
-  if not Assigned(FIndexHelper) then
-  begin
-    FIndexHelper :=  TMemDblBufListHelper.Create;
-    FIndexHelper.OnChangeRequest := HandleHelperChangeRequest;
-  end;
-  if not Assigned(FFieldHelper) then
-  begin
-    FFieldHelper := TMemDblBufListHelper.Create;
-    FFieldHelper.OnChangeRequest := HandleHelperChangeRequest;
-  end;
-  if not Assigned(FEmptyList) then
-    FEmptyList := TMemStreamableList.Create;
+  FIndexHelper :=  TMemDblBufListHelper.Create;
+  FIndexHelper.OnChangeRequest := HandleHelperChangeRequest;
+  FFieldHelper := TMemDblBufListHelper.Create;
+  FFieldHelper.OnChangeRequest := HandleHelperChangeRequest;
+  FEmptyList := TMemStreamableList.Create;
 
   //First metadata pin for a Txion has to be atomic with index clone.
-  if not FIndexInit then
+  //TODO - Foreign key metadata first pin.
+  //TODO TODO - Require metadata up to date at commit time.
+  //Pin absolute??
+  M := FParentTable.FMetadata.PinCurrent(FTid, pinEvolve);
+  if Assigned(M) then
   begin
-    FParentTable.FMetaIndexLock.Acquire;
-    try
-      M := FParentTable.FMetadata.PinCurrent(FTid, PinReason);
-      if Assigned(M) then
-      begin
-        FIndexInit := true;
-        Assert(FLocalIndexCopies.Count = 0);
-        for i := 0 to Pred(FParentTable.FMasterIndexes.Count) do
-        begin
-          MasterIndex := FParentTable.FMasterIndexes.Items[i] as TMemDBIndex;
-          FLocalIndexCopies.AddNoRef(MasterIndex.Clone);
-        end;
-      end;
-    finally
-      FParentTable.FMetaIndexLock.Release;
+    Assert(FLocalIndexCopies.Count = 0);
+    for i := 0 to Pred(FParentTable.FMasterIndexes.Count) do
+    begin
+      MasterIndex := FParentTable.FMasterIndexes.Items[i] as TMemDBIndex;
+      FLocalIndexCopies.AddNoRef(MasterIndex.Clone);
     end;
-  end
-  else
-    M := FParentTable.FMetadata.PinCurrent(FTid, PinReason);
+  end;
 
   if AssignedNotSentinel(M) then
   begin
@@ -1447,12 +1454,21 @@ begin
     FFieldHelper.List[abCurrent] := FEmptyList;
     FIndexHelper.List[abCurrent] := FEmptyList;
   end;
-  M := FParentTable.FMetadata.GetNext(FTid);
-  if AssignedNotSentinel(M) then
+  UpdateNHelpers;
+end;
+
+procedure TTidLocal.UpdateNHelpers;
+var
+  NC: TMemDBStreamable;
+  MI: TMemTableMetadataItem;
+begin
+  NC := FParentTable.FMetadata.GetNext(FTid);
+
+  if AssignedNotSentinel(NC) then
   begin
-    NC := M as TMemTableMetadataItem;
-    FFieldHelper.List[abNext] := NC.FieldDefs;
-    FIndexHelper.List[abNext] := NC.IndexDefs;
+    MI := NC as TMemTableMetadataItem;
+    FFieldHelper.List[abNext] := MI.FieldDefs;
+    FIndexHelper.List[abNext] := MI.IndexDefs;
   end
   else
   begin
@@ -1464,7 +1480,8 @@ end;
 procedure TTidLocal.DimensionChangesets(PinReason: TPinReason);
 var
   i: integer;
-  CC, NC: TMemDbStreamable;
+  CC, NC: TMemDBStreamable;
+  MI: TMemTableMetadataItem;
   Added, Changed, Deleted, Null: boolean;
 begin
   CC := FParentTable.FMetadata.PinCurrent(FTid, PinReason);
@@ -1764,6 +1781,7 @@ procedure TTidLocal.AdjustTableStructureForMetadata;
 var
   RNxt: TMemDbStreamable;
   CC, NC: TMemTableMetadataItem;
+  RC: TMemDBStreamable;
   Row: TMemDBRow;
   IRec: TItemRec;
   Delete: boolean;
@@ -1798,76 +1816,82 @@ begin
       while Assigned(IRec) do
       begin
         Row := IRec.Item as TMemDBRow;
-        if Delete then
-          Row.Delete(FTid, ilReadRepeatable)
-        else
+        //If can pin current, then not a NULL row,
+        //other race conditions handled by PreCommit.
+        RC := Row.PinCurrent(FTid, pinEvolve);
+        if Assigned(RC) then
         begin
-          //No guarantee other format changes aren't going on at the same time.
-
-          //Basic format checks so algorithm doesnt die, but
-          //"formal" consistency check is done with Tid comparison,
-          //which will catch races one way round or another.
-          if not Row.CheckFormatAgainstMeta(FTid, abCurrent, CC, pinEvolve) then
-            raise EMemDBConcurrencyException.Create(S_TABLE_ADJUST_CONCURRENCY_CONFLICT);
-
-          Row.RequestChange(FTid, ilReadRepeatable);
-
-          //Catch previous abortive attempts to change structure.
-          //Expect next copy to be same as current copy, and pass such tests...
-          if not Row.CheckFormatAgainstMeta(FTid, abNext, CC, pinEvolve) then
-            raise EMemDBConcurrencyException.Create(S_TABLE_ADJUST_REPEAT_FAILED);
-
-          RowFields := Row.GetNext(FTid) as TMemRowFields;
-          RowFields.Sparse := true;
-
-          Assert(Assigned(NC));
-          if NotAssignedOrSentinel(CC) then
-            CCFieldCount := 0
+          if Delete then
+            Row.Delete(FTid, ilReadRepeatable)
           else
-            CCFieldCount := CC.FieldDefs.Count;
-
-          for i := 0 to Pred(NC.FieldDefs.Count) do
           begin
-            //No delete sentinels in current or next at the moment....
-            if i < CCFieldCount then
-              FieldData := RowFields.Items[i] as TMemFieldData
+            //No guarantee other format changes aren't going on at the same time.
+
+            //Basic format checks so algorithm doesnt die, but
+            //"formal" consistency check is done with Tid comparison,
+            //which will catch races one way round or another.
+            if not Row.CheckFormatAgainstMeta(FTid, abCurrent, CC, pinEvolve) then
+              raise EMemDBConcurrencyException.Create(S_TABLE_ADJUST_CONCURRENCY_CONFLICT);
+
+            Row.RequestChange(FTid, ilReadRepeatable);
+
+            //Catch previous abortive attempts to change structure.
+            //Expect next copy to be same as current copy, and pass such tests...
+            if not Row.CheckFormatAgainstMeta(FTid, abNext, CC, pinEvolve) then
+              raise EMemDBConcurrencyException.Create(S_TABLE_ADJUST_REPEAT_FAILED);
+
+            RowFields := Row.GetNext(FTid) as TMemRowFields;
+            RowFields.Sparse := true;
+
+            Assert(Assigned(NC));
+            if NotAssignedOrSentinel(CC) then
+              CCFieldCount := 0
             else
-              FieldData := nil;
+              CCFieldCount := CC.FieldDefs.Count;
 
-            if (NC.FieldDefs.Items[i]) is TMemDeleteSentinel then
-              NxtFieldDef := nil
-            else
-              NxtFieldDef := NC.FieldDefs.Items[i] as TMemFieldDef;
-
-            if i < CCFieldCount then
+            for i := 0 to Pred(NC.FieldDefs.Count) do
             begin
-              Assert(not (CC.FieldDefs.Items[i] is TMemDeleteSentinel));
-              CurFieldDef := CC.FieldDefs.Items[i] as TMemFieldDef
-            end
-            else
-              CurFieldDef := nil;
+              //No delete sentinels in current or next at the moment....
+              if i < CCFieldCount then
+                FieldData := RowFields.Items[i] as TMemFieldData
+              else
+                FieldData := nil;
 
-            if not (((not Assigned(NxtFieldDef)) = (fctDeleted in FFieldChangesets[i]))
-              and ((not Assigned(CurFieldDef)) = (fctAdded in FFieldChangesets[i]))) then
-              raise EMemDBInternalException.Create(S_TABLE_ADJUST_FAILED_1);
+              if (NC.FieldDefs.Items[i]) is TMemDeleteSentinel then
+                NxtFieldDef := nil
+              else
+                NxtFieldDef := NC.FieldDefs.Items[i] as TMemFieldDef;
 
-            if fctDeleted in  FFieldChangesets[i] then
-            begin
-              FieldData.Release;
-              RowFields.Items[i] := TMemDeleteSentinel.Create;
-            end
-            else if fctAdded in FFieldChangesets[i] then
-            begin
-              FieldData := TMemFieldData.Create;
-              FieldData.FDataRec.FieldType :=
-                (NC.FieldDefs.Items[i] as TMemFieldDef).FieldType;
-              //Zero data OK, not explicitly representing NULL's.
+              if i < CCFieldCount then
+              begin
+                Assert(not (CC.FieldDefs.Items[i] is TMemDeleteSentinel));
+                CurFieldDef := CC.FieldDefs.Items[i] as TMemFieldDef
+              end
+              else
+                CurFieldDef := nil;
 
-              RowFields.AddNoRef(FieldData); //Ref count of 1 is what we want.
-            end
+              if not (((not Assigned(NxtFieldDef)) = (fctDeleted in FFieldChangesets[i]))
+                and ((not Assigned(CurFieldDef)) = (fctAdded in FFieldChangesets[i]))) then
+                raise EMemDBInternalException.Create(S_TABLE_ADJUST_FAILED_1);
+
+              if fctDeleted in  FFieldChangesets[i] then
+              begin
+                FieldData.Release;
+                RowFields.Items[i] := TMemDeleteSentinel.Create;
+              end
+              else if fctAdded in FFieldChangesets[i] then
+              begin
+                FieldData := TMemFieldData.Create;
+                FieldData.FDataRec.FieldType :=
+                  (NC.FieldDefs.Items[i] as TMemFieldDef).FieldType;
+                //Zero data OK, not explicitly representing NULL's.
+
+                RowFields.AddNoRef(FieldData); //Ref count of 1 is what we want.
+              end
+            end;
+            if not Row.CheckFormatAgainstMeta(FTid, abNext, NC, pinEvolve) then
+              raise EMemDbInternalException.Create(S_TABLE_ADJUST_FAILED_2);
           end;
-          if not Row.CheckFormatAgainstMeta(FTid, abNext, NC, pinEvolve) then
-            raise EMemDbInternalException.Create(S_TABLE_ADJUST_FAILED_2);
         end;
         FParentTable.FMasterRowList.GetAnotherItem(IRec);
       end;
@@ -1895,11 +1919,24 @@ end;
 procedure TTidLocal.Init(Parent: TMemDBTablePersistent; const Tid: TTransactionId);
 var
   AddRef: boolean;
+  OtherTidLocal: TTidLocal;
 begin
   FParentTable := Parent;
+{$IFDEF DEBUG_PINS}
+  GLogLog(SV_INFO, IntToHex(Uint32(self),8) + ' ' + GuidToString(Tid.G) + 'TidLocal init.');
+{$ENDIF}
+
   FTid := Tid;
   FParentTable.FTidLocalLock.Acquire;
   try
+{$IFOPT C+}
+    OtherTidLocal := FParentTable.FTidLocalStructures.FLink.Owner as TTidLocal;
+    while Assigned(OtherTidLocal) do
+    begin
+      Assert(OtherTidLocal.FTid <> Tid);
+      OtherTidLocal := OtherTidLocal.FTidLocalLinks.FLink.Owner as TTidLocal;
+    end;
+{$ENDIF}
     AddRef := DLList.DlItemIsEmpty(@FParentTable.FTidLocalStructures);
     DLList.DLListInsertTail(@FParentTable.FTidLocalStructures, @FTidLocalLinks);
   finally
@@ -1924,6 +1961,10 @@ begin
   end;
   if Release then
     FParentTable.HandleReleaseForTidLocal(self);
+
+{$IFDEF DEBUG_PINS}
+  GLogLog(SV_INFO, IntToHex(Uint32(self),8) + ' ' + GuidToString(FTid.G) + 'TidLocal destroy.');
+{$ENDIF}
 
   FIndexHelper.Free;
   FFieldHelper.Free;
@@ -1966,8 +2007,7 @@ begin
     while Assigned(IRec) do
     begin
       Row := IRec.Item as TMemDBRow;
-      if AssignedNotSentinel(Row.PinCurrent(FTid, pinEvolve)
-          as TMemDbStreamable) then
+      if Assigned(Row.PinCurrent(FTid, pinEvolve) as TMemDbStreamable) then
         Row.ToScratch(self.FTid, Stream);
       FParentTable.FMasterRowList.GetAnotherItem(IRec);
     end;
@@ -2156,7 +2196,7 @@ begin
   end;
 end;
 
-procedure TTidLocal.CheckChangedRowStructure(Reason: TMemDBTransReason);
+procedure TTidLocal.CheckChangedRowStructure;
 var
   IRec: TITemRec;
   Row: TMemDBRow;
@@ -2181,29 +2221,26 @@ begin
   while Assigned(IRec) do
   begin
     Row := IRec.Item as TMemDBRow;
-    Streamable := Row.GetPinLatest(FTid, bufSel, pinFinalCheck);
-    //Can have null rows? Not if you managed to pin it. If CPTid,
-    //then you managed to pin or create next, and that shouldn't be undone until
-    //commit / rollback, so should be assigned.
-    Assert(Assigned(Streamable));
-    if (Streamable is TMemDeleteSentinel) then
+    if Row.AnyChangesForTid(self.FTid) then
     begin
-      //Next row.
-      FCPRows.GetAnotherItem(IRec);
-      continue;
-    end;
+      Streamable := Row.GetPinLatest(FTid, bufSel, pinFinalCheck);
+      //Can have null rows? Not if you managed to pin it. If CPTid,
+      //then you managed to pin or create next, and that shouldn't be undone until
+      //commit / rollback, so should be assigned.
+      Assert(Assigned(Streamable));
+      if (Streamable is TMemDeleteSentinel) then
+      begin
+        //Next row.
+        FCPRows.GetAnotherItem(IRec);
+        continue;
+      end;
 
-    //Checks here same as before, except we don't check MetaFieldDef.FieldIndex,
-    //but that should have been checked earlier in ReGenChangesets.
-    //We also check similar arrangement of delete sentinels.
-    if not Row.CheckFormatAgainstMeta(FTid, TABSelType.abLatest, MRMeta, pinFinalCheck) then
-    begin
-      if Reason = mtrUserOp then
-        //Should never happen whilst we're generating these changes ourselves.
-        raise EMemDBInternalException.Create(S_FIELDS_NOT_SAME_AS_META)
-      else
-        //Might possibly happen by reading bad data from file.
-        raise EMemDBConsistencyException.Create(S_FIELDS_NOT_SAME_AS_META)
+      //Checks here same as before, except we don't check MetaFieldDef.FieldIndex,
+      //but that should have been checked earlier in ReGenChangesets.
+      //We also check similar arrangement of delete sentinels.
+      if not Row.CheckFormatAgainstMeta(FTid, TABSelType.abLatest, MRMeta, pinFinalCheck) then
+          raise EMemDBInternalException.Create(S_FIELDS_NOT_SAME_AS_META)
+          //Should never happen whilst we're generating these changes ourselves.
     end;
     FCPRows.GetAnotherItem(IRec);
   end;
@@ -2657,7 +2694,7 @@ begin
   end;
 end;
 
-procedure TTidLocal.MetaIndexCommit(Reason: TMemDbTransReason);
+procedure TTidLocal.MetaIndexCommit;
 var
   i: integer;
   AddOrRebuild: boolean;
@@ -2718,47 +2755,28 @@ begin
   end;
 end;
 
-procedure TTidLocal.MetaIndexRollback(Reason: TMemDbTransReason);
+function TTidLocal.DoneMetaIndexRollback: boolean;
+begin
+  result := FDoneMetaIndexRollback;
+end;
+
+procedure TTidLocal.MetaIndexRollback;
 var
   i: integer;
   Index: TMemDBIndex;
 begin
-  //FNewBuildIndices.Release;
-  //Let destructor handle it.
-
   //TODO - Multi thread speedup / swizzle for later destruction?
-  //Already in index/meta lock for parent table.
   Assert(Assigned(FParentTable.FMasterIndexes));
   for i := 0 to Pred(FParentTable.FMasterIndexes.Count) do
   begin
     Index := FParentTable.FMasterIndexes.Items[i] as TMemDBIndex;
     Index.DiscardNext;
   end;
+  FDoneMetaIndexRollback := true;
 end;
 
-procedure TTidLocal.MetaIndexLocalRollback(Reason: TMemDBTransReason);
-var
-  i: integer;
-  Index: TMemDBIndex;
-begin
-  FNewBuildIndices.Release;
-  FNewBuildIndices := nil;
 
-  //TODO - Multi thread speedup / swizzle for later destruction?
-  FParentTable.FMetaIndexLock.Acquire;
-  try
-    Assert(Assigned(FParentTable.FMasterIndexes));
-    for i := 0 to Pred(FParentTable.FMasterIndexes.Count) do
-    begin
-      Index := FParentTable.FMasterIndexes.Items[i] as TMemDBIndex;
-      Index.DiscardNext;
-    end;
-  finally
-    FParentTable.FMetaIndexLock.Release;
-  end;
-end;
-
-procedure TTidLocal.RowLocalPreCommit(Reason: TMemDBTransReason);
+procedure TTidLocal.RowLocalPreCommit;
 var
   IRec: TItemRec;
   Row: TMemDBRow;
@@ -2773,41 +2791,40 @@ begin
   while Assigned(IRec) do
   begin
     Row := IRec.Item as TMemDBRow;
-    Row.PreCommit(FTid, Reason);
+    Row.PreCommit(FTid, pcpTables);
 
-    { If next assigned:
-      - From pin which was up to date, and Nxt is still up to date (atomic).
-      - Covers changed, deleted.
-      If next not assigned,
-      - Cur pin *might* be wrong.
-        - Difference between Added and Null, except that we require
-          that RequestChange / Delete does not resurrect a row.
-          and we transitively check for atomicity, so is OK. }
-    Cur := Row.PinCurrent(FTid, pinFinalCheck);
-    Nxt := Row.GetNext(FTid);
-    Row.ChangeFlagsFromPinned(Cur, Nxt, Added, Changed, Deleted, Null);
-    if (Added and NoAdd) or (Changed and NoChange) or (Deleted and NoDelete) then
-        raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ROW_OP);
+    if Row.AnyChangesForTid(FTid) then
+    begin
+      //Combination of PreCommit and AnyChangesForTid Solves races between different versions of "current" here.
+      Cur := Row.PinCurrent(FTid, pinFinalCheck);
+      Nxt := Row.GetNext(FTid);
+      Row.ChangeFlagsFromPinned(Cur, Nxt, Added, Changed, Deleted, Null);
+      if (Added and NoAdd) or (Changed and NoChange) or (Deleted and NoDelete) then
+          raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ROW_OP);
+    end;
     FCPRows.GetAnotherItem(IRec);
   end;
 end;
 
-//TODO - Go thru all this, work out how much actually needs
-//table row lock, and/or commit lock.
-procedure TTidLocal.PreCommit(Reason: TMemDBTransReason);
+procedure TTidLocal.PreCommit;
 
 begin
+  //Check we haven't added / changed rows on the basis of out of date metadata.
+  //Pre-commit checks on metadata will check conflicts on itself.
+  if self.DataChanged then
+    FParentTable.Metadata.RequireCurrentAtomic(FTid);
+
   //Check up-to-dateness of Nxt, Pins.
-  RowLocalPreCommit(Reason);
+  RowLocalPreCommit;
   //Table row count for null cases and deleted fields.
   CheckTableRowCount;
   //Check structure of changes rows, however that happened.
-  CheckChangedRowStructure(Reason);
+  CheckChangedRowStructure;
   //Indexes not rebuit / revalidated.
   BuildCheckPartialIndexes;
 end;
 
-procedure TTidLocal.Commit(Reason: TMemDbTransReason);
+procedure TTidLocal.Commit;
 var
   Row, LastRow: TMemDBRow;
   IRec: TITemRec;
@@ -2819,7 +2836,7 @@ begin
   begin
     Row := IRec.Item as TMemDBRow;
     Assert(Row <> LastRow); //Just check the commit is removing things as it should.
-    Row.Commit(FTid, Reason);
+    Row.Commit(FTid, ccpData);
     LastRow := Row;
     IRec := FCPRows.GetAnItem;
   end;
@@ -2827,7 +2844,7 @@ begin
   FLayoutChangeRequired := false;
 end;
 
-procedure TTidLocal.Rollback(Reason: TMemDbTransReason);
+procedure TTidLocal.Rollback;
 var
   Row, LastRow: TMemDBRow;
   IRec: TITemRec;
@@ -2839,7 +2856,7 @@ begin
   begin
     Row := IRec.Item as TMemDBRow;
     Assert(Row <> LastRow); //Just check the rollback is removing things as it should.
-    Row.Rollback(FTid, Reason);
+    Row.Rollback(FTid, rbpDelayedRollback);
     LastRow := Row;
     IRec := FCPRows.GetAnItem;
   end;
@@ -3388,7 +3405,6 @@ begin
     raise EMemDBInternalException.Create(S_INTERNAL_INDEXING_ERROR);
 
   FTidLocalLock := TCriticalSection.Create;
-  FMetaIndexLock := TCriticalSection.Create;
   FMasterIndexes := TReffedList.Create;
   DLItemInitList(@FTidLocalStructures);
   DlItemInitList(@FAdditionLocks);
@@ -3414,7 +3430,6 @@ begin
   FMasterRowList.Free;
   FMasterRowLock.Free;
   FTidLocalLock.Free;
-  FMetaIndexLock.Free;
   FMasterIndexes.Release;
   FMetadata.Free;
   inherited;
@@ -3482,13 +3497,7 @@ begin
     or (Update.Pins.Pre <> Update.Pins.Post) then
   begin
     //And any of them are more "local changed" than previously
-    if Update.Changes.Post or Update.Pins.Post then
-      TidLocal := GetMakeTidLocal(Update.Tid, pinEvolve)
-    else
-    begin
-      TidLocal := GetTidLocal(Update.Tid);
-      Assert(Assigned(TidLocal));
-    end;
+    TidLocal := GetTidLocal(Update.Tid);
     TidLocal.RowCPTidHandle(Sender, Update);
   end;
 end;
@@ -3528,7 +3537,7 @@ var
   MetaChange, DataChange: boolean;
   tmpSelected: TABSelType;
 begin
-  TidLocal := GetMakeTidLocal(Tid, pinEvolve);
+  TidLocal := GetTidLocal(Tid);
   TidLocal.UpdateLayout(pinEvolve);
   //TODO - Do I absolutely need to update layout here or not?
   //I don't think so if always updated on field change.
@@ -3568,7 +3577,7 @@ procedure TMemDBTablePersistent.ToScratch(const PseudoTid: TTransactionId; Strea
 var
   TidLocal:TTidLocal;
 begin
-  TidLocal := GetMakeTidLocal(PseudoTid, pinEvolve);
+  TidLocal := GetTidLocal(PseudoTid);
   TidLocal.UpdateLayout(pinEvolve);
   //TODO - Do I absolutely need to update layout here or not?
   //I don't think so if always updated on field change.
@@ -3618,7 +3627,7 @@ begin
   //layout change is required at this point, so just have
   //to unstream data anyway.
 
-  TidLocal := GetMakeTidLocal(PseudoTid, pinEvolve);
+  TidLocal := GetTidLocal(PseudoTid);
   LookaheadHelper(Stream, MetadataInStream, DataInStream);
   if MetadataInStream then
   begin
@@ -3669,7 +3678,7 @@ begin
     FMasterRowLock.Release;
   end;
   ExpectTag(Stream, mstTableStart);
-  TidLocal := GetMakeTidLocal(PseudoTid, pinEvolve);
+  TidLocal := GetTidLocal(PseudoTid);
   FMetadata.FromScratch(PseudoTid, Stream);
   TidLocal.UpdateLayout(pinEvolve);
   TidLocal.FromScratch(Stream);
@@ -3679,15 +3688,38 @@ begin
     TidLocal.BuildValidateNewIndexesOutsideCommitLock;
 end;
 
-procedure TMemDBTablePersistent.PreCommit(const TId: TTransactionId; Reason: TMemDBTransReason);
+//Called under MetaIndex lock.
+procedure TMemDBTablePersistent.StartTransaction(const Tid: TTRansactionId);
+var
+  TidLocal: TTidLocal;
+begin
+  inherited; //Pins metadata inside MetaIndex lock.
+
+  FTidLocalLock.Acquire;
+  try
+{$IFOPT C+}
+    TidLocal := FTidLocalStructures.FLink.Owner as TTidLocal;
+    while Assigned(TidLocal) do
+    begin
+      Assert(TidLocal.FTid <> Tid);
+      TidLocal := TidLocal.FTidLocalLinks.FLink.Owner as TTidLocal;
+    end;
+{$ENDIF}
+    TidLocal := TTidLocal.Create;
+    TidLocal.Init(self, Tid);
+  finally
+    FTidLocalLock.Release;
+  end;
+  TidLocal.InitialUpdate;
+end;
+
+procedure TMemDBTablePersistent.PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase);
 var
   Cur, Next: TMemDBStreamable;
   Added, Changed, Deleted, Null: boolean;
   TidLocal: TTidLocal;
 begin
-  //TODO. Long hard head-scratch about ilRepeatable read serialisation here.
-  //Might want that TransactionStart handler ...
-  FMetadata.PreCommit(Tid, Reason);
+  inherited;
 
   Cur := META_PinCurrent(Tid, pinFinalCheck);
   Next := META_GetNext(Tid);
@@ -3699,35 +3731,41 @@ begin
   //which will have created a TidLocal if necessary.
   //All the other row checking can be done there.
 
-  //TODO - Build changed indexes later where early index build not possible.
-
   TidLocal := GetTidLocal(Tid);
-  Assert(Assigned(TidLocal));
-  try
-    //In cases where "current" changes behind our back, better to concurrency check
-    //before building / revalidating indices.
-    TidLocal.PreCommit(Reason);
-    if TidLocal.FIndexingChangeRequired then
-      TidLocal.BuildValidateNewIndexesInsideCommitLock;
-  except
-    //It's possible (and silly) for commits to raise, and then
-    //users to make mods before retrying the commit operation. In such cases,
-    //we should roll back the index changes, so they dont get totally barfed.
-
-    //TODO - What with pin reasons and all, it's debatable what changes
-    //you should / should not be allowed to make after initial commit attempt.
-    //Most people will just rollback.
-    //TODO - Check pin reasons and re-attempted commits.
-
-    //TODO - Freeing of stuff outside Commit lock for better performance.
-    TidLocal.MetaIndexLocalRollback(Reason);
-
-    raise;
-  end;
+  //In cases where "current" changes behind our back, better to concurrency check
+  //before building / revalidating indices.
+  TidLocal.PreCommit(Phase);
+  if TidLocal.FIndexingChangeRequired then
+    TidLocal.BuildValidateNewIndexesInsideCommitLock;
 end;
 
 
-procedure TMemDBTablePersistent.Commit(const TId: TTransactionId; Reason: TMemDbTransReason);
+procedure TMemDBTablePersistent.Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase);
+var
+  TidLocal: TTidLocal;
+begin
+  //Assume if metadata deleted or null, then changes have been made to data structs.
+  //Either changed layout, or deleted all the fields. Need to always commit, because
+  //CPTid clearing required.
+
+  //Don't lock master row list, instead used Tid Local, even if it has more
+  //lock acquisitions.
+
+  TidLocal := GetTidLocal(Tid);
+  case Phase of
+    ccpData: TidLocal.Commit(Phase);
+    ccpMetaIndex: begin
+      TidLocal.MetaIndexCommit;
+      inherited;
+    end;
+    ccpCleardown: begin
+      TidLocal.Free;
+      FindRmRowProhibitLock(Tid);
+    end;
+  end;
+end;
+
+procedure TMemDBTablePersistent.Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase);
 var
   TidLocal: TTidLocal;
 begin
@@ -3738,58 +3776,29 @@ begin
   //Don't lock master row list, instead used Tid Local, even if it has more
   //lock acquisitions.
   TidLocal := GetTidLocal(Tid);
-  if Assigned(TidLocal) then
-    TidLocal.Commit(Reason);
-
-  FMetaIndexLock.Acquire;
-  try
-    if Assigned(TidLocal) then
-      TidLocal.MetaIndexCommit(Reason);
-    inherited;
-  finally
-    FMetaIndexLock.Release;
+  case Phase of
+    rbpMetaIndexRollback: begin
+      if not TidLocal.DoneMetaIndexRollback then
+      begin
+        //This can't handle multiple and needs to be done atomically in lock.
+        TidLocal.MetaIndexRollback;
+        inherited; //Base can handle multiple rollback calls OK.
+      end;
+    end;
+    rbpDelayedRollback: begin
+      TidLocal.Rollback;
+      TidLocal.Free;
+      FindRmRowProhibitLock(Tid);
+    end;
   end;
-  TidLocal.Free; //TODO - Free outside commit lock for better performance.
-
-  FindRmRowProhibitLock(Tid);
-end;
-
-procedure TMemDBTablePersistent.Rollback(const TId: TTransactionId; Reason: TMemDbTransReason);
-var
-  TidLocal: TTidLocal;
-begin
-  //Assume if metadata deleted or null, then changes have been made to data structs.
-  //Either changed layout, or deleted all the fields. Need to always commit, because
-  //CPTid clearing required.
-
-  //Don't lock master row list, instead used Tid Local, even if it has more
-  //lock acquisitions.
-  TidLocal := GetTidLocal(Tid);
-  if Assigned(TidLocal) then
-    TidLocal.Rollback(Reason);
-
-  FMetaIndexLock.Acquire;
-  try
-    if Assigned(TidLocal) then
-      TidLocal.MetaIndexRollback(Reason);
-    inherited;
-  finally
-    FMetaIndexLock.Release;
-  end;
-  TidLocal.Free;  //TODO - Free outside commit lock for better performance.
-
-  FindRmRowProhibitLock(Tid);
 end;
 
 function TMemDbTablePersistent.AnyChanges(const Tid:TTransactionId): boolean;
+var
+  TidLocal: TTidLocal;
 begin
-  result := FMetadata.AnyChanges(Tid);
-  FTidLocalLock.Acquire;
-  try
-    result := result or not DLItemIsEmpty(@FTidLocalStructures);
-  finally
-    FTidLocalLock.Release;
-  end;
+  TidLocal := GetTidLocal(Tid);
+  result := FMetadata.AnyChanges(Tid) or TidLocal.DataChanged;
 end;
 
 function TMemDbTablePersistent.AnyChangesForTid(const Tid: TTransactionId): boolean;
@@ -3797,8 +3806,7 @@ var
   TidLocal: TTidLocal;
 begin
   TidLocal := GetTidLocal(Tid);
-  result := FMetadata.AnyChangesForTid(Tid) or
-   (Assigned(TidLocal) and TidLocal.DataChanged);
+  result := FMetadata.AnyChangesForTid(Tid) or TidLocal.DataChanged;
 end;
 
 function TMemDbTablePersistent.DataChangedForTid(const Tid:TTransactionId): boolean;
@@ -3806,7 +3814,7 @@ var
   TidLocal: TTidLocal;
 begin
   TidLocal := GetTidLocal(Tid);
-  result := Assigned(TidLocal) and TidLocal.DataChanged;
+  result := TidLocal.DataChanged;
 end;
 
 function TMemDbTablePersistent.LayoutChangesRequiredForTid(const Tid: TTransactionId): boolean;
@@ -3814,57 +3822,38 @@ var
   TidLocal: TTidLocal;
 begin
   TidLocal := GetTidLocal(Tid);
-  result := Assigned(TidLocal) and TidLocal.LayoutChangeRequired;
+  result := TidLocal.LayoutChangeRequired;
+end;
+
+function TMemDBTablePersistent.GetOptTidLocal(const Tid: TTransactionId): TTidLocal;
+begin
+  FTidLocalLock.Acquire;
+  try
+    result := FTidLocalStructures.FLink.Owner as TTidLocal;
+    while Assigned(result) do
+    begin
+      if result.FTid = Tid then
+        break;
+      result := result.FTidLocalLinks.FLink.Owner as TTidLocal;
+    end;
+  finally
+    FTidLocalLock.Release;
+  end;
 end;
 
 function TMemDbTablePersistent.GetTidLocal(const Tid: TTransactionId): TTidLocal;
 begin
-  FTidLocalLock.Acquire;
-  try
-    result := FTidLocalStructures.FLink.Owner as TTidLocal;
-    while Assigned(result) do
-    begin
-      if result.FTid = Tid then
-        break;
-      result := result.FTidLocalLinks.FLink.Owner as TTidLocal;
-    end;
-  finally
-    FTidLocalLock.Release;
-  end;
+  result := GetOptTidLocal(Tid);
+  if not Assigned(result) then
+    raise EMemDBInternalException.Create(S_EXPECTED_TID_LOCAL);
 end;
 
-function TMemDBTablePersistent.GetMakeTidLocal(const Tid: TTransactionId; PinReason: TPinReason): TTidLocal;
-var
-  ToCreate: boolean;
-begin
-  FTidLocalLock.Acquire;
-  try
-    result := FTidLocalStructures.FLink.Owner as TTidLocal;
-    while Assigned(result) do
-    begin
-      if result.FTid = Tid then
-        break;
-      result := result.FTidLocalLinks.FLink.Owner as TTidLocal;
-    end;
-    ToCreate := not Assigned(Result);
-    if ToCreate then
-    begin
-      result := TTidLocal.Create;
-      //Recursive lock acquire, but not a problem.
-      result.Init(self, Tid);
-    end;
-  finally
-    FTidLocalLock.Release;
-  end;
-  if ToCreate then
-    result.UpdateLayout(PinReason);
-end;
 
 function TMemDBTablePersistent.GetMakeListHelpers(const Tid: TTransactionId;
                                                    var FieldHelper: TMemDblBufListHelper;
                                                    var IndexHelper: TMemDblBufListHelper): TTidLocal;
 begin
-  result := GetMakeTidLocal(Tid, pinEvolve);
+  result := GetTidLocal(Tid);
   FieldHelper := result.FFieldHelper;
   IndexHelper := result.FIndexHelper;
 end;
@@ -3914,53 +3903,53 @@ end;
 
 function TMemDbTablePersistent.META_PinCurrent(const Tid: TTransactionId; Reason: TPinReason): TMemDBStreamable;
 begin
-  GetMakeTidLocal(Tid, Reason);
+  GetTidLocal(Tid);
   result := inherited;
 end;
 
 function TMemDbTablePersistent.META_GetPinLatest(const Tid: TTransactionId;
                         var BufSelected: TAbSelType; Reason: TPinReason): TMemDBStreamable;
 begin
-  GetMakeTidLocal(Tid, Reason);
+  GetTidLocal(Tid);
   result := inherited;
 end;
 
 procedure TMemDbTablePersistent.META_RequestChange(const Tid: TTransactionId);
 begin
-  GetMakeTidLocal(Tid, pinEvolve);
+  GetTidLocal(Tid);
   inherited;
 end;
 
 procedure TMemDbTablePersistent.META_Delete(const Tid: TTransactionId);
 begin
-  GetMakeTidLocal(Tid, pinEvolve);
+  GetTidLocal(Tid);
   inherited;
 end;
 
 function TMemDbTablePersistent.META_FieldsByNames(const AB: TBufSelector; const Names: TMDBFieldNames; var AbsIdxs: TFieldOffsets): TMemFieldDefs;
 begin
   if AB.SelType <> TAbSelType.abNext then
-    GetMakeTidLocal(AB.TId, pinEvolve);
+    GetTidLocal(AB.TId);
   result := (Metadata as TMemDbTableMetadata).FieldsByNames(AB, Names, AbsIdxs, pinEvolve);
 end;
 
 function TMemDbTablePersistent.META_FieldByName(const AB: TBufSelector; const Name: string; var AbsIndex: integer): TMemFieldDef;
 begin
   if AB.SelType <> TAbSelType.abNext then
-    GetMakeTidLocal(AB.TId, pinEvolve);
+    GetTidLocal(AB.TId);
   result := (Metadata as TMemDBTableMetadata).FieldByName(AB, Name, AbsIndex, pinEvolve);
 end;
 
 function TMemDbTablePersistent.META_IndexByName(const AB: TBufSelector; const Name: string; var AbsIndex: integer): TMemIndexDef;
 begin
   if AB.SelType <> TAbSelType.abNext then
-    GetMakeTidLocal(AB.TId, pinEvolve);
+    GetTidLocal(AB.TId);
   result := (Metadata as TMemDbTableMetadata).IndexByName(AB, Name, AbsIndex, pinEvolve);
 end;
 
 function TMemDbTablePersistent.GetUserTidLocalIndexRoot(const Tid: TTransactionId; var TidLocal: TTidLocal; var Idx: TMemIndexDef; IdxName: string): TMemDBIndex;
 begin
-  TidLocal := GetMakeTidLocal(Tid, pinEvolve);
+  TidLocal := GetTidLocal(Tid);
   result := TidLocal.GetUserIndexRoot(Idx, IdxName);
 end;
 
@@ -4040,8 +4029,7 @@ begin
   ExpectTag(Stream, mstFkEnd);
 end;
 
-
-procedure TMemDBForeignKeyPersistent.PreCommit(const Tid: TTransactionId; Reason: TMemDBTransReason);
+procedure TMemDBForeignKeyPersistent.PreCommit(const Tid: TTransactionId; Phase: TMemDBPreCommitPhase);
 var
   CP, NP: TMemDBStreamable;
   Added, Changed, Deleted, Null: boolean;
@@ -4056,10 +4044,10 @@ var
   ff: integer;
 
 begin
-  inherited;
-  //TODO. Long hard head-scratch about ilRepeatable read serialisation here.
-  //Might want that TransactionStart handler ...
-  FMetadata.PreCommit(Tid, Reason);
+  inherited; //Check Pre-commits metadata.
+  Assert(Phase = pcpFKeys);
+
+  FMetadata.RequireCurrentAtomic(Tid); //No changes in our metadata since pinned.
 
   CP := FMetadata.PinCurrent(Tid, pinFinalCheck);
   NP := FMetadata.GetNext(Tid);
@@ -4093,6 +4081,10 @@ begin
     if not (Assigned(EntityReferring) and (EntityReferring is TMemDBTablePersistent)) then
       raise EMemDBException.Create(S_FK_TABLE_NOT_FOUND);
     Meta.TableReferring := EntityReferring as TMemDBTablePersistent;
+
+    Meta.TableReferring.Metadata.RequireCurrentAtomic(Tid);
+    //TODO. Have a think about this. Probably a bit too draconian.
+
     M := Meta.TableReferring.Metadata as TMemDBTableMetadata;
     Meta.IndexDefReferring := M.IndexByName(SelLatest, FKM.IndexReferer, Meta.IndexDefReferringAbsIdx, pinFinalCheck);
     if not Assigned(Meta.IndexDefReferring) then
@@ -4108,6 +4100,10 @@ begin
     if not (Assigned(EntityReferred) and (EntityReferred is TMemDBTablePersistent)) then
       raise EMemDBException.Create(S_FK_TABLE_NOT_FOUND);
     Meta.TableReferred := EntityReferred as TMemDBTablePersistent;
+
+    Meta.TableReferred.Metadata.RequireCurrentAtomic(Tid);
+    //TODO. Have a think about this. Probably a bit too draconian.
+
     M := Meta.TableReferred.Metadata as TMemDBTableMetadata;
     Meta.IndexDefReferred := M.IndexByName(SelLatest, FKM.IndexReferred, Meta.IndexDefReferredAbsIdx, pinFinalCheck);
     if not Assigned(Meta.IndexDefReferred) then
@@ -4226,7 +4222,6 @@ type
   TProcessRowFKStruct = record
     OutList: TIndexedStoreO;
     PMeta: PMemDBFKMeta;
-    TransReason: TMemDBTransReason;
     Action: TRowProcessingAction;
   end;
   PProcessRowFKStruct = ^TProcessRowFKStruct;
@@ -5269,6 +5264,46 @@ begin
   inherited;
 end;
 
+{$IFDEF DEBUG_PINS}
+function TMemDBEntityMetadata.PinCurrent(const Tid: TTransactionId; Reason: TPinReason): TMemDBStreamable;
+begin
+  GLogLog(SV_INFO, IntToHex(Uint32(self),8) + ' ' + GuidToString(Tid.G) + 'PinCurrent.');
+  result := inherited;
+end;
+
+function TMemDBEntityMetadata.GetPinLatest(const Tid: TTransactionId;
+                        var BufSelected: TAbSelType; Reason: TPinReason): TMemDBStreamable;
+begin
+  GLogLog(SV_INFO, IntToHex(Uint32(self),8) + ' ' + GuidToString(Tid.G) + 'GetPinLatest.');
+  result := inherited;
+end;
+
+procedure TMemDBEntityMetadata.StartTransaction(const Tid: TTRansactionId);
+begin
+  GLogLog(SV_INFO, IntToHex(Uint32(self),8) + ' ' + GuidToString(Tid.G) + 'StartTransaction.');
+  inherited;
+end;
+
+procedure TMemDBEntityMetadata.PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase);
+begin
+  GLogLog(SV_INFO, IntToHex(Uint32(self),8) + ' ' + GuidToString(Tid.G) + 'PreCommit.');
+  inherited;
+end;
+
+procedure TMemDBEntityMetadata.Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase);
+begin
+  GLogLog(SV_INFO, IntToHex(Uint32(self),8) + ' ' + GuidToString(Tid.G) + 'Commit.');
+  inherited;
+end;
+
+procedure TMemDBEntityMetadata.Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase);
+begin
+  GLogLog(SV_INFO, IntToHex(Uint32(self),8) + ' ' + GuidToString(Tid.G) + 'Rollback.');
+  inherited;
+end;
+
+{$ENDIF}
+
 { TMemDbTableMetadata }
 
 procedure TMemDbTableMetadata.Init(const Tid: TTransactionId; Parent: TObject; Name:string; DSName: boolean);
@@ -5326,7 +5361,7 @@ begin
   CheckABStreamableListChange(CurI, NextI);
 end;
 
-procedure TMemDbTableMetadata.PreCommit(const Tid: TTransactionId; Reason: TMemDbTransReason);
+procedure TMemDbTableMetadata.PreCommit(const Tid: TTransactionId; Phase: TMemDBPreCommitPhase);
 begin
   inherited;
   CheckABListChanges(Tid);
@@ -5581,67 +5616,102 @@ end;
 
 { TMemDBDatabasePersistent }
 
-procedure TMemDBDatabasePersistent.PreCommit(const TId: TTransactionId; Reason: TMemDBTransReason);
+procedure TMemDBDatabasePersistent.StartTransaction(const Tid: TTRansactionId);
 var
-  i, j: integer;
-  ProxI, ProxJ: TMemDBEntityProxy;
-  ObjI, ObjJ: TMemDBEntity;
+  EntityList: TReffedList;
+  i: integer;
+  ProxI: TMemDBEntityProxy;
+  ObjI: TMemDBEntity;
+begin
+{$IFDEF DEBUG_PINS}
+  GLogLog(SV_INFO, IntToHex(Uint32(self),8) + ' ' + GuidToString(Tid.G) + 'DB Start Transaction.');
+{$ENDIF}
+  inherited;
+  EntityList := AssembleEntityList;
+  try
+    for i := 0 to Pred(EntityList.Count) do
+    begin
+      ProxI := EntityList[i] as TMemDBEntityProxy;
+      ObjI := ProxI.Proxy as TMemDbEntity;
+      //Object should do their own deleted / null checks as appropriate.
+      ObjI.StartTransaction(Tid);
+    end;
+  finally
+    EntityList.Release;
+  end;
+end;
+
+procedure TMemDBDatabasePersistent.PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase);
+var
+  i: integer;
+  ProxI: TMemDBEntityProxy;
+  ObjI: TMemDBEntity;
   EntityList: TReffedList;
   IAdded, IChanged, IDeleted, INull: boolean;
-  JAdded, JChanged, JDeleted, JNull: boolean;
-  ICur, INxt, JCur, JNxt: TMemDbStreamable;
-  ILat, JLat: TMemEntityMetadataItem;
+  ICur, INxt: TMemDbStreamable;
+  ILat: TMemEntityMetadataItem;
   SelType: TABSelType;
+  Names: TStringList;
 begin
+{$IFDEF DEBUG_PINS}
+  GLogLog(SV_INFO, IntToHex(Uint32(self),8) + ' ' + GuidToString(Tid.G) + 'DB PreCommit.');
+{$ENDIF}
+
   //Pre-commit check and no-pin goes from top to bottom.
   inherited;
   EntityList := AssembleEntityList;
   try
-    //OK. Check no dup object names,
-    for i := 0 to Pred(EntityList.Count) do
-    begin
-      ProxI := EntityList[i] as TMemDBEntityProxy;
-      ObjI := ProxI.Proxy as TMemDbEntity;
-      ICur := ObjI.META_PinCurrent(Tid, pinFinalCheck);
-      INxt := ObjI.META_GetNext(Tid);
-      ChangeFlagsFromPinned(ICur, INxt, IAdded, IChanged, IDeleted, INull);
-      if not (INull or IDeleted) then
-      begin
-        for j := Succ(i) to Pred(EntityList.Count) do
+    case Phase of
+      pcpFKeys: begin
+        for i := 0 to Pred(EntityList.Count) do
         begin
-          ProxJ := EntityList[j] as TMemDBEntityProxy;
-          ObjJ := ProxJ.Proxy as TMemDBEntity;
-          JCur := ObjJ.META_PinCurrent(Tid, pinFinalCheck);
-          JNxt := ObjJ.META_GetNext(Tid);
-          ChangeFlagsFromPinned(JCur, JNxt, JAdded, JChanged, JDeleted, JNull);
-          if not (JNull or JDeleted) then
-          begin
-            ILat := ObjI.META_GetPinLatest(Tid, SelType, pinFinalCheck) as TMemEntityMetadataItem;
-            JLat := ObjJ.META_GetPinLatest(Tid, SelType, pinFinalCheck) as TMemEntityMetadataItem;
-            if ILat.EntityName = JLat.EntityName then
-              raise EMemDBConsistencyException.Create(S_COMMMIT_CONSISTENCY_OBJS);
-          end;
+          ProxI := EntityList[i] as TMemDBEntityProxy;
+          ObjI := ProxI.Proxy as TMemDbEntity;
+          Assert((ObjI is TMemDBTablePersistent) or (ObjI is TMemDBForeignKeyPersistent));
+          if ObjI is TMemDBForeignKeyPersistent then
+            //Object should do their own deleted / null checks as appropriate.
+            ObjI.PreCommit(Tid, Phase);
         end;
       end;
-    end;
-
-    //Then pre-commit tables.
-    for i := 0 to Pred(EntityList.Count) do
-    begin
-      ProxI := EntityList[i] as TMemDBEntityProxy;
-      ObjI := ProxI.Proxy as TMemDbEntity;
-      if ObjI is TMemDBTablePersistent then
-        ObjI.PreCommit(Tid, Reason);
-    end;
-
-    //Then pre-commit FKs.
-    for i := 0 to Pred(EntityList.Count) do
-    begin
-      ProxI := EntityList[i] as TMemDBEntityProxy;
-      ObjI := ProxI.Proxy as TMemDbEntity;
-      Assert((ObjI is TMemDBTablePersistent) or (ObjI is TMemDBForeignKeyPersistent));
-      if ObjI is TMemDBForeignKeyPersistent then
-        ObjI.PreCommit(Tid, Reason);
+      pcpTables: begin
+        Names := TStringList.Create;
+        try
+          for i := 0 to Pred(EntityList.Count) do
+          begin
+            ProxI := EntityList[i] as TMemDBEntityProxy;
+            ObjI := ProxI.Proxy as TMemDbEntity;
+            ICur := ObjI.META_PinCurrent(Tid, pinFinalCheck);
+            INxt := ObjI.META_GetNext(Tid);
+            ChangeFlagsFromPinned(ICur, INxt, IAdded, IChanged, IDeleted, INull);
+            if not (INull or IDeleted) then
+            begin
+              ILat := ObjI.META_GetPinLatest(Tid, SelType, pinFinalCheck) as TMemEntityMetadataItem;
+              Names.Add(ILat.EntityName);
+            end;
+          end;
+          Names.Sort;
+          if Names.Count > 1 then
+          begin
+            for i := 0 to Pred(Pred(Names.Count)) do
+            begin
+              if Names[i] = Names[i+1] then
+                raise EMemDBConsistencyException.Create(S_COMMMIT_CONSISTENCY_OBJS);
+            end;
+          end;
+        finally
+          Names.Free;
+        end;
+        for i := 0 to Pred(EntityList.Count) do
+        begin
+          ProxI := EntityList[i] as TMemDBEntityProxy;
+          ObjI := ProxI.Proxy as TMemDbEntity;
+          if ObjI is TMemDBTablePersistent then
+            //Object should do their own deleted / null checks as appropriate.
+            ObjI.PreCommit(Tid, Phase);
+        end;
+      end;
+    else
+      Assert(false);
     end;
   finally
     EntityList.Release;
@@ -5807,6 +5877,7 @@ begin
           DBU := TMemDBForeignKey.Create;
 
         DBU.Init(PseudoTid, self, EntityName, false);
+        DBU.StartTransaction(PseudoTid);
         DBU.FromJournal(PseudoTid, Stream); //should inc ref.
         Assert(Assigned(DBU.Metadata.GetNext(PseudoTid)));
         Assert(not (DBU.Metadata.GetNext(PseudoTid) is TMemDeleteSentinel));
@@ -5871,6 +5942,7 @@ begin
           DBU := TMemDBForeignKey.Create;
 
         DBU.Init(PseudoTid, self, EntityName, false);
+        DBU.StartTransaction(PseudoTid);
         DBU.FromScratch(PseudoTid, Stream); //Should inc ref on proxy for us.
         Assert(Assigned(DBU.Metadata.GetNext(PseudoTid)));
         Assert(not (DBU.Metadata.GetNext(PseudoTid) is TMemDeleteSentinel));
@@ -5927,7 +5999,7 @@ begin
   end;
 end;
 
-procedure TMemDBDatabasePersistent.Commit(const TId: TTransactionId; Reason: TMemDbTransReason);
+procedure TMemDBDatabasePersistent.Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase);
 var
   EntityList: TReffedList;
   Proxy: TMemDBEntityProxy;
@@ -5935,20 +6007,23 @@ var
   i: integer;
 begin
   inherited;
+{$IFDEF DEBUG_PINS}
+  GLogLog(SV_INFO, IntToHex(Uint32(self),8) + ' ' + GuidToString(Tid.G) + 'DB Commit.');
+{$ENDIF}
   EntityList := AssembleEntityList;
   try
     for i := 0 to Pred(EntityList.Count) do
     begin
       Proxy := EntityList.Items[i] as TMemDBEntityProxy;
       Entity := Proxy.Proxy as TMemDBEntity;
-      Entity.Commit(Tid, Reason);
+      Entity.Commit(Tid, Phase);
     end;
   finally
     EntityList.Release;
   end;
 end;
 
-procedure TMemDBDatabasePersistent.Rollback(const TId: TTransactionId; Reason: TMemDbTransReason);
+procedure TMemDBDatabasePersistent.Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase);
 var
   EntityList: TReffedList;
   Proxy: TMemDBEntityProxy;
@@ -5956,13 +6031,16 @@ var
   i: integer;
 begin
   inherited;
+{$IFDEF DEBUG_PINS}
+  GLogLog(SV_INFO, IntToHex(Uint32(self),8) + ' ' + GuidToString(Tid.G) + 'DB Rollback.');
+{$ENDIF}
   EntityList := AssembleEntityList;
   try
     for i := 0 to Pred(EntityList.Count) do
     begin
       Proxy := EntityList.Items[i] as TMemDBEntityProxy;
       Entity := Proxy.Proxy as TMemDBEntity;
-      Entity.Rollback(Tid, Reason);
+      Entity.Rollback(Tid, Phase);
     end;
   finally
     EntityList.Release;
@@ -5973,9 +6051,6 @@ function TMemDBDatabasePersistent.AssembleEntityList: TReffedList;
 var
   Proxy: TMemDBEntityProxy;
 begin
-  //NB. Do not need PinForUnorderedContainer here, because we get all of them
-  //at once. Some of them might be going away, but
-  //later pins make them persistent enough for our transaction.
   result := TReffedList.Create;
   try
     FEntityLock.Acquire;
@@ -5998,7 +6073,6 @@ begin
   end;
 end;
 
-//TODO - Check all callers of this for addref/release.
 function TMemDBDatabasePersistent.EntitiesByName(const AB:TBufSelector; Name: string; PinReason: TPinReason): TMemDBEntity;
 var
   i: integer;
@@ -6051,6 +6125,7 @@ begin
   FInterfaced.FParent := self;
   FEntityLock := TCriticalSection.Create;
   FCommitLock := TCriticalSection.Create;
+  FMetaIndexLock := TCriticalSection.Create;
   DLItemInitList(@FEntityList);
 end;
 
@@ -6073,42 +6148,52 @@ begin
   //TODO TODO - This is the slow path delete. just to check everything
   // clears down nicely. Make a fast path,
   //where we assume no concurrency issues, dec all ref counts until zero.
+{$IFDEF FASTPATH_CLEARDOWN}
+  Assert(false);
+{$ELSE}
   NullStream := TNullStream.Create;
   try
     for FKs := True downto False do
     begin
       PseudoTid := TTransactionId.NewTransactionId(ilSerialisable);
+      StartTransaction(PseudoTid);
       EntityList := AssembleEntityList;
       try
         for i := 0 to Pred(EntityList.Count) do
         begin
           Proxy := EntityList.Items[i] as TMemDBEntityProxy;
           Entity := Proxy.Proxy as TMemDBEntity;
-          if FKs then
+          if FKs then begin
+            GLogLog(SV_INFO, 'Delete foreign keys.');
             Del := Entity is TMemDBForeignKeyPersistent
-          else
+          end else begin
+            GLogLog(SV_INFO, 'Delete tables.');
             Del := Entity is TMemDBTablePersistent;
-          if Del then
-          begin
-            Entity.Metadata.Delete(PseudoTid);
-            Entity.ToJournal(PseudoTid, NullStream);
-            Entity.PreCommit(PseudoTid, mtrUserOp);
-            Entity.Commit(PseudoTid, mtrUserOp);
-            //Should clear all pins and refs, assuming no oustanding txions.
           end;
+          if Del then
+            Entity.Metadata.Delete(PseudoTid);
+            //Should clear all pins and refs, assuming no oustanding txions.
         end;
       finally
         EntityList.Release;
       end;
+      ToJournal(PseudoTid, NullStream);
+      PreCommit(PseudoTid, pcpFKeys);
+      PreCommit(PseudoTid, pcpTables);
+      Commit(PseudoTid, ccpData);
+      Commit(PseudoTid, ccpMetaIndex);
+      Commit(PseudoTid, ccpCleardown);
     end;
   finally
     NullStream.Free;
   end;
+{$ENDIF}
   //I can see this assertion firing a few times.
-  Assert(DlItemIsEmpty(@FEntityList));
+  //Assert(DlItemIsEmpty(@FEntityList));
   FInterfaced.Free;
   FEntityLock.Free;
   FCommitLock.Free;
+  FMetaIndexLock.Free;
   inherited;
 end;
 

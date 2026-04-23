@@ -475,6 +475,7 @@ function TMemDB.StartTransaction(Mode: TMDBAccessMode;
   : TMemDBTransaction;
 var
   idx: integer;
+  API: TMemAPIDatabaseInternal;
 begin
   result := nil;
   FSessionLock.Acquire;
@@ -503,6 +504,14 @@ begin
   end;
   Assert(Mode in [amReadShared, amWriteExclusive, amWriteShared]);
   FRWWLock.Acquire(DBAccessModeToLockReason(Mode));
+
+  API := FDatabase.Interfaced.GetAPIObject(result, APIInternalCommitRollback)
+    as TMemAPIDatabaseInternal;
+  try
+    API.TransactionStartCycle;
+  finally
+    API.Free;
+  end;
 end;
 
 procedure TMemDB.RemoveSession(Session: TMemDBSession);
@@ -899,16 +908,18 @@ begin
       ChangesetStream := TMemDBTempFileStream.Create(TmpName);
       PseudoTid := TTransactionId.NewTransactionID(ilSerialisable); //if no writes, should definitley be serialisable.
       try
+        FDatabase.StartTransaction(PseudoTid);
         FDatabase.CommitLock.Acquire; //This if we don't acquire at lrSharedRead for ever.
         try
           try
             FDatabase.ToScratch(PseudoTid, ChangesetStream);
           finally
             //Because even just reading, pins stuff.
-            FDatabase.Rollback(PseudoTid, mtrUserOp);
+            FDatabase.Rollback(PseudoTid, rbpMetaIndexRollback);
           end;
         finally
           FDatabase.CommitLock.Release;
+          FDatabase.Rollback(PseudoTid, rbpDelayedRollback);
         end;
       except
         on E: Exception do
