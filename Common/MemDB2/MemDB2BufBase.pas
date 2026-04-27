@@ -76,7 +76,7 @@ TODO - Serializable.
 type
   TMemDBPreCommitPhase = (pcpFKeys, pcpTables);
   TMemDBCommitPhase = (ccpData, ccpMetaIndex, ccpCleardown);
-  TMemDBRollbackPhase = (rbpMetaIndexRollback, rbpDelayedRollback);
+  TMemDBRollbackPhase = (rbpIndexRollback, rbpMetaRollback, rbpDelayedRollback);
 
   //Object which can write changes between current and next version to journal.
 {$IFDEF USE_TRACKABLES}
@@ -278,7 +278,7 @@ type
 {$ENDIF}
 
 //TODO - May be able to optimise this structure out with
-//an extra link field in TMemDbIndexLeaf.
+//an extra link field in TMemDbIndexLeafGeneric.
 {$IFOPT C+}
   TMemDBIndexPin = class(TTrackable)
 {$ELSE}
@@ -286,7 +286,7 @@ type
 {$ENDIF}
     Link:TDLEntry;
     PinnedTid: TTransactionId;
-    INode: TMemDbIndexLeaf;
+    INode: TMemDbIndexLeafGeneric;
   end;
 {$IFOPT C+}
   PMemDBIndexPin = TMemDbIndexPin;
@@ -319,7 +319,7 @@ type
     function FindCurMultiItem: PMemDBMultiItem; inline;
     function FindNxtMultiItem(const TId: TTransactionId): PMemDBMultiItem;
     function FindPin(const TId: TTransactionId): PMemDbPinnedItem;
-    function FindIndexPin(IndexNode: TMemDBIndexLeaf): PMemDBINdexPin;
+    function FindIndexPin(IndexNode: TMemDBIndexLeafGeneric): PMemDBINdexPin;
     //First multi-item should always be current,
     //and always exists (item ptr may be null).
     //Other multi-items are pre-transaction, and item ptr should never be NULL.
@@ -327,7 +327,7 @@ type
     function NewCurrentPinInternal(const Tid:TTransactionId; Reason:TPinReason): TMemDBStreamable;
     function ReUseCurrentPinInternal(Pin: PMemDbPinnedItem; Reason: TPinReason): TMemDbStreamable;
 
-    function NewCurrentPinForINode(const Tid:TTransactionId; IPin: PMemDBIndexPin; Reason:TPinReason): TMemDBStreamable;
+    function NewCurrentPinFromINode(const Tid:TTransactionId; IPin: PMemDBIndexPin; Reason:TPinReason): TMemDBStreamable;
     function ReUseCurrentPinForINode(const Tid: TTransactionId; Pin: PMemDbPinnedItem; IPin: PMemDBIndexPin; Reason: TPinReason): TMemDbStreamable;
 
     //TODO - Move this somewhere else?
@@ -389,7 +389,7 @@ type
     //Navigated to via INode.
 
     //User traversal.
-    function PinForCursorFromInode(const Tid: TTRansactionId; INode: TMemDBIndexLeaf; Reason: TPinReason): boolean;
+    function PinForCursorFromInode(const Tid: TTRansactionId; INode: TMemDBIndexLeafGeneric; Reason: TPinReason): boolean;
     //Index maintenance.
 
     //Generally, no un-pin for data. Commit/Rollback will clear.
@@ -416,9 +416,9 @@ type
     //Connects / disconnects INode to this class atomically, but does not do any
     //tree maniupulation. See MemDBRow for that.
     function PinForIndex(const Tid: TTransactionId; ItemSel: TAbSelType;
-                         IndexNode: TMemDbIndexLeaf): boolean;
-    procedure UnpinFromIndex(IndexNode: TMemDbIndexLeaf);
-    procedure DupIndexPin(SourceNode, DestNode: TMemDBIndexLeaf);
+                         IndexNode: TMemDbIndexLeafGeneric): boolean;
+    procedure UnpinFromIndex(IndexNode: TMemDbIndexLeafGeneric);
+    procedure DupIndexPin(SourceNode, DestNode: TMemDBIndexLeafGeneric);
   end;
 
   TMemDBMultiBufferedTiny = class(TMemDbMultiBuffered)
@@ -769,7 +769,7 @@ begin
   end;
 end;
 
-function TMemDbMultiBuffered.FindIndexPin(IndexNode: TMemDBIndexLeaf): PMemDBINdexPin;
+function TMemDbMultiBuffered.FindIndexPin(IndexNode: TMemDBIndexLeafGeneric): PMemDBINdexPin;
 begin
   //Under lock.
   result := PMemDBIndexPin(FIndexPins.FLink.Owner);
@@ -1129,8 +1129,6 @@ begin
   end;
 end;
 
-//TODO - Prohibit pin mechanism requires that we pre-commit eveything before commit?
-
 procedure TMemDBMultiBuffered.Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase);
 var
   Cur, Nxt: PMemDbMultiItem;
@@ -1264,16 +1262,16 @@ begin
   //NOP.
 end;
 
-function TMemDbMultiBuffered.NewCurrentPinForINode(const Tid:TTransactionId; IPin: PMemDBIndexPin; Reason:TPinReason): TMemDBStreamable;
+function TMemDbMultiBuffered.NewCurrentPinFromINode(const Tid:TTransactionId; IPin: PMemDBIndexPin; Reason:TPinReason): TMemDBStreamable;
 var
-  INode: TMemDbIndexLeaf;
+  INode: TMemDbIndexLeafGeneric;
   Pin: PMemDbPinnedItem;
 begin
-  //OK, this is a bit different. If we don't have a current pin,
-  //we can create one from the INode pin. It's potentially older
-  //than latest current, but gives us "snapshot-like" read consistency
-  //when initially traversing by INode.
-  //Subsequent modification still has consistency requirements.
+  { OK, this is a bit different. If we don't have a current pin,
+    we can create one from the INode pin. It's potentially older
+    than latest current, but gives us "snapshot-like" read consistency
+    when initially traversing by INode.
+    Subsequent modification still has consistency requirements. }
 
   Assert(not Assigned(FindPin(Tid)));
   Assert(Assigned(IPin));
@@ -1304,7 +1302,7 @@ begin
       raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ABORT_WAR_6);
 end;
 
-function TMemDBMultiBuffered.PinForCursorFromInode(const Tid: TTRansactionId; INode: TMemDBIndexLeaf; Reason: TPinReason): boolean;
+function TMemDBMultiBuffered.PinForCursorFromInode(const Tid: TTRansactionId; INode: TMemDBIndexLeafGeneric; Reason: TPinReason): boolean;
 var
   RefUp: TReferenceUpdate;
   TidUp: TTidUpdate;
@@ -1362,7 +1360,7 @@ begin
       if Assigned(CurPin) then
         Item := ReUseCurrentPinForINode(Tid, CurPin, IPin, Reason)
       else
-        Item := NewCurrentPinForINode(Tid, IPin, Reason); //The twist is here.
+        Item := NewCurrentPinFromINode(Tid, IPin, Reason); //The twist is here.
     end;
     result := Assigned(Item);
     DCPPost(RefUp);
@@ -1376,7 +1374,7 @@ end;
 
 
 function TMemDbMultiBuffered.PinForIndex(const Tid: TTransactionId; ItemSel: TAbSelType;
-                     IndexNode: TMemDbIndexLeaf): boolean;
+                     IndexNode: TMemDbIndexLeafGeneric): boolean;
 var
   RefUp: TReferenceUpdate;
   Pin: PMemDBIndexPin;
@@ -1461,7 +1459,7 @@ begin
   DCPLazyHandle(RefUp);
 end;
 
-procedure TMemDBMultiBuffered.DupIndexPin(SourceNode, DestNode: TMemDBIndexLeaf);
+procedure TMemDBMultiBuffered.DupIndexPin(SourceNode, DestNode: TMemDBIndexLeafGeneric);
 var
   RefUp: TReferenceUpdate;
   Pin, NewPin: PMemDBIndexPin;
@@ -1498,7 +1496,7 @@ begin
 end;
 
 
-procedure TMemDBMultiBuffered.UnpinFromIndex(IndexNode: TMemDbIndexLeaf);
+procedure TMemDBMultiBuffered.UnpinFromIndex(IndexNode: TMemDbIndexLeafGeneric);
 var
   RefUp: TReferenceUpdate;
   Pin: PMemDBIndexPin;
@@ -1574,7 +1572,6 @@ begin
 
   if Assigned(Cur.Item) then
   begin
-    //New pin.
     Pin := NewPinned;
     Pin.Item := Cur.Item.AddRef as TMemDBStreamable;
     DLItemInitObj(TObject(Pin), @Pin.Link);

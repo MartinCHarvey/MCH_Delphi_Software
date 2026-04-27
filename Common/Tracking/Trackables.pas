@@ -85,13 +85,21 @@ type
     procedure FreeSelfOnly(Sender: TTracker);
   end;
 
-{$IFDEF USE_TRACKABLES}
-  TMemStreamTrackProxy = class(TTrackable)
-  end;
-  TFileStreamTrackProxy = class(TTrackable)
+  TTrackProxy = class(TTrackable)
+  protected
+    FTracked: TObject;
+    function GetExtraInfoText: string; override;
+  public
+    procedure Init(Obj: TObject);
   end;
 
-  TTrackedMemoryStream = class(TMemoryStream)
+{$IFDEF USE_TRACKABLES}
+  TMemStreamTrackProxy = class(TTrackProxy)
+  end;
+  TFileStreamTrackProxy = class(TTrackProxy)
+  end;
+
+  TTrackedMemoryStream = class(TTrackProxy)
   private
     FTrackProxy: TMemStreamTrackProxy;
   public
@@ -115,7 +123,7 @@ type
 {$IFOPT C+}
 var
   AppGlobalTracker: TTracker;
-{$ENDIF}  
+{$ENDIF}
 
 implementation
 
@@ -126,6 +134,9 @@ const
   S_INST = 'Instance of ';
   S_INST2 = ' at location 0x';
   S_INST3 = ' with extra info: ';
+  S_PROXIED_NIL = 'Proxied class is NIL!';
+  S_PROXIED_CLASS = ' proxying class at ';
+  S_PROXIED_TYPE = ' with class type ';
   S_EXCEPTION_GETTING_DETAILS =
     '<Exception getting object details - deallocated memory still registered?> ';
   S_ASKED_TO_TRACK_NIL =
@@ -380,6 +391,26 @@ begin
     DestroySelfOnly(Sender);
 end;
 
+(************************************
+ * TTrackProxy                      *
+ ************************************)
+
+function TTrackProxy.GetExtraInfoText: string;
+begin
+  if Assigned(FTracked) then
+  begin
+    result := S_PROXIED_CLASS + IntToHex(UInt64(FTracked), 16)
+               + S_PROXIED_TYPE + FTracked.ClassName;
+  end
+  else
+    result := S_PROXIED_NIL;
+end;
+
+procedure TTrackProxy.Init(Obj: TObject);
+begin
+  FTracked := Obj;
+end;
+
 (**********************************************
  * TTrackedMemoryStream, TTrackedFileStream   *
  *********************************************)
@@ -389,6 +420,7 @@ constructor TTrackedMemoryStream.Create;
 begin
   inherited;
   FTrackProxy := TMemStreamTrackProxy.Create;
+  FTrackProxy.Init(self);
 end;
 
 destructor TTrackedMemoryStream.Destroy;
@@ -401,12 +433,14 @@ constructor TTrackedFileStream.Create(const AFileName: string; Mode: Word);
 begin
   inherited Create(AFileName, Mode);
   FTrackProxy := TFileStreamTrackProxy.Create;
+  FTrackProxy.Init(self);
 end;
 
 constructor TTrackedFileStream.Create(const AFileName: string; Mode: Word; Rights: Cardinal);
 begin
   inherited Create(AFileName, Mode, Rights);
   FTrackProxy := TFileStreamTrackProxy.Create;
+  FTrackProxy.Init(self);
 end;
 
 destructor TTrackedFileStream.Destroy;
