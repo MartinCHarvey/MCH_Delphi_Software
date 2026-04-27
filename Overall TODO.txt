@@ -1,10 +1,10 @@
 
 MemDB2 TODO.
 
-- Trackable / NonTrackable reffed.
-
 - MinIso values  / require atomic. Way to make that cleaner?
 - isoSnapshot Isolation.
+
+- Refactor META_ / Pinning functions to use cached values.
 
 - Foreign Keys.
 
