@@ -1,13 +1,14 @@
-Delphi TODO.
 
-Then: MemDB changes.
+MemDB2 TODO.
 
-1: MemDB Index on multiple fields.
+- MinIso values  / require atomic. Way to make that cleaner?
+- isoSnapshot Isolation.
 
-2. Load times.
+- Refactor META_ / Pinning functions to use cached values.
 
-3. Composite ops.
+- Foreign Keys.
 
+- SQL Query engine.
 
 
 

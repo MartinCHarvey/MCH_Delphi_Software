@@ -50,6 +50,8 @@ type
   TCowTree = class;
 
   //Tree items are immutable. Once set up, should not be changed
+
+  //Not tracking individual tree items, slows stuff down too much.
   TCoWTreeItem = class(TReffed)
   private
     //Do not write to these directly.
@@ -107,7 +109,11 @@ type
     q, r: TCowTreeItem;
   end;
 
+{$IFDEF USE_TRACKABLES}
+  TCowTree = class(TTrackedReffed)
+{$ELSE}
   TCowTree = class(TReffed)
+{$ENDIF}
   private
     function DelHelper(InQR: TDoubleItemVars; var h: TChkBool; var found:TChkBool): TDoubleItemVars;
     function BalanceLeft(Inp: TCowTreeItem; dl: boolean; var h:TChkBool): TCowTreeItem;

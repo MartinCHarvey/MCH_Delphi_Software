@@ -62,11 +62,7 @@ type
 
   //Mapping to SQL standard isolations, ilCommittedRead here
   //also implies repeatable read, and serializable.
-
-  //TODO - Need to re-work this with respect to query results and row reading.
-  //TODO - Snapshot isolation support.
-  //TODO - Snapshot index read at Txion start when snapshot or serialisable.
-  TMDBIsolationLevel = (ilReadComitted, ilReadRepeatable, ilSerialisable);
+  TMDBIsolationLevel = (ilReadComitted, ilReadRepeatable, ilSnapshot, ilSerialisable);
 
 const
   //Old "Isolation" values. All transactions now read their own local data
@@ -163,7 +159,7 @@ type
   private
     FFileName: string;
 {$IFDEF USE_TRACKABLES}
-    FProxy: TTrackable;
+    FProxy: TTrackProxy;
 {$ENDIF}
   public
     constructor Create(const FileName: string);
@@ -204,7 +200,7 @@ const
                                            ftDouble,
                                            ftGuid,
                                            ftBlob];
-  MDBIsoStrings: TMDBIsoStrings = ('ilReadComitted', 'ilReadRepeatable', 'ilSerialisable');
+  MDBIsoStrings: TMDBIsoStrings = ('ilReadComitted', 'ilReadRepeatable', 'ilSnapshot', 'ilSerialisable');
   MDBABStrings: TMDBABSelTypeStrings = ('abCurrent', 'abNext', 'abLatest');
   //TODO - check all cases where this is passed around. (New value).
   MemAPIPositionStrings:TMemAPIPositionStrings
@@ -319,7 +315,8 @@ begin
   FFileName := FileName;
   inherited Create(FileName, FILE_CACHE_SIZE);
 {$IFDEF USE_TRACKABLES}
-  FProxy := TTrackable.Create;
+  FProxy := TTrackProxy.Create;
+  FProxy.Init(self);
 {$ENDIF}
 end;
 

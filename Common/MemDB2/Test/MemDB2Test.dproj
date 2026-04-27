@@ -163,7 +163,6 @@
         <DCCReference Include="..\MemDB2BufBase.pas"/>
         <DCCReference Include="..\..\Reffed\Reffed.pas"/>
         <DCCReference Include="..\..\CoWTree\CoWTree.pas"/>
-        <None Include="Performance figures.txt"/>
         <None Include="..\README_Conditionals.txt"/>
         <None Include="..\README_Ideas, and TODO.txt"/>
         <None Include="..\README_Known_Issues.txt"/>

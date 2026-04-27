@@ -42,7 +42,11 @@ type
 
   TInProgressType = (tiptNone, tiptCommitRollback);
 
+{$IFDEF USE_TRACKABLES}
+  TMemDBTransaction = class(TTrackedReffed)
+{$ELSE}
   TMemDBTransaction = class(TReffed)
+{$ENDIF}
   private
     //Links to datastructures.
     FDB: TMemDB;
@@ -914,8 +918,15 @@ begin
           try
             FDatabase.ToScratch(PseudoTid, ChangesetStream);
           finally
-            //Because even just reading, pins stuff.
-            FDatabase.Rollback(PseudoTid, rbpMetaIndexRollback);
+            //We probably shouldn't need to to this at all, but keep
+            //it here for safety.
+            FDatabase.MetaIndexLock.Acquire;
+            try
+              FDatabase.Rollback(PseudoTid, rbpIndexRollback);
+              FDatabase.Rollback(PseudoTid, rbpMetaRollback);
+            finally
+              FDatabase.MetaIndexLock.Release;
+            end;
           end;
         finally
           FDatabase.CommitLock.Release;

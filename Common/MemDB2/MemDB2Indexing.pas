@@ -36,50 +36,65 @@ uses
   MemDB2Misc, MemDB2Streamable, CowTree;
 
 type
-  TMemDbIndexLeaf = class;
-  TMemDBIndexSearchVal = class;
+  TMemDbIndexLeafGeneric = class;
 
   { Quick reminder. Indexes are *immutable* once created,
     so provided you add-ref the root, you're good }
-  TMemDBIndex = class(TCowTree)
+  TMemDBIndexGeneric = class(TCowTree)
   private
-    FParentIndex: TMemDBIndex;
-    FFinalFieldOffsets: TFieldOffsets;
-    FSparseFieldOffsets: TFieldOffsets;
-    FRoot: TMemDBIndexLeaf;
-    FNext: TMemDBIndexLeaf;
+    FParentIndex: TMemDBIndexGeneric;
+    FRoot: TMemDBIndexLeafGeneric;
+    FNext: TMemDBIndexLeafGeneric;
   protected
-    function SelToRoot(Sel: TAbSelType): TMemDBIndexLeaf;
+    function SelToRoot(Sel: TAbSelType): TMemDBIndexLeafGeneric;
   public
+    constructor Create; virtual;
     destructor Destroy; override;
-    function Clone: TMemDBIndex;
+    function Clone: TMemDBIndexGeneric; virtual;
 
     //We don't inc/dec the ref for leaves with user ops here,
     //but other cursor handling code might.
-    function Locate(Sel: TAbSelType; Pos: TMemAPIPosition; Cur: TMemDBIndexLeaf): TMemDBIndexLeaf;
-    function Find(Sel: TAbSelType; SV: TMemDBIndexSearchVal): TMemDBIndexLeaf;
-    function CheckNonAliasedPresent(Sel: TAbSelType; Node: TMemDBIndexLeaf): boolean;
+    function Locate(Sel: TAbSelType; Pos: TMemAPIPosition; Cur: TMemDBIndexLeafGeneric): TMemDBIndexLeafGeneric;
+    function CheckNonAliasedPresent(Sel: TAbSelType; Node: TMemDBIndexLeafGeneric): boolean;
 
     //Add / remove guaranteed to add or remove in the tree, but
     //you may have to do a bit of hunting to find the right node from the row.
 
     //Cloned indexes, add and remove from current (cloned) only.
     //Non-cloned indexes, add / remove from next only.
-    function Add(Sel: TAbSelType; New: TMemDBIndexLeaf): boolean;
-    function Remove(Sel: TAbSelType; Old: TMemDBIndexLeaf): boolean;
+    function Add(Sel: TAbSelType; New: TMemDBIndexLeafGeneric): boolean;
+    function Remove(Sel: TAbSelType; Old: TMemDBIndexLeafGeneric): boolean;
 
     procedure RootToNext;
     procedure CommitNextToRoot;
     procedure DiscardNext;
 
-    property ParentIndex: TMemDbIndex read FParentIndex;
+    property ParentIndex: TMemDbIndexGeneric read FParentIndex;
+  end;
+
+  TMemDBIndexGenericClass = class of TMemDBIndexGeneric;
+
+  TMemDbIndexLeaf = class;
+  TMemDBIndexSearchVal = class;
+
+  TMemDBIndex = class(TMemDBIndexGeneric)
+  private
+    FFinalFieldOffsets: TFieldOffsets;
+    FSparseFieldOffsets: TFieldOffsets;
+  public
+    function Clone: TMemDBIndexGeneric; override;
+    function Find(Sel: TAbSelType; SV: TMemDBIndexSearchVal): TMemDBIndexLeaf;
+
     property FinalFieldOffsets: TFieldOffsets read FFinalFieldOffsets write FFinalFieldOffsets;
     property SparseFieldOffsets: TFieldOffsets read FSparseFieldOffsets write FSparseFieldOffsets;
   end;
 
-  TMemDBIndexLeaf = class(TCowTreeItem)
+  TMemDBIndexInternal = class(TMemDBIndexGeneric)
+  end;
+
+  TMemDBIndexLeafGeneric = class(TCowTreeItem)
   private
-    FOriginalIndex: TMemDBIndex;
+    FOriginalIndex: TMemDBIndexGeneric;
     FPinned: TMemDBStreamable;
     FRow: TObject;
 {$IFOPT C+}
@@ -93,11 +108,9 @@ type
   public
     destructor Destroy; override;
 
-    function Compare(Other: TCoWTreeItem;
-                     AllowKeyDedupe: boolean): integer; override;
     procedure CopyFrom(Source: TCoWTreeItem); override;
 
-    property OriginalIndex: TMemDbIndex read FOriginalIndex write FOriginalIndex;
+    property OriginalIndex: TMemDbIndexGeneric read FOriginalIndex write FOriginalIndex;
 {$IFOPT C+}
     property Pinned: TMemDBStreamable read FPinned write SetPinned;
     property Row: TObject read FRow write SetRow;
@@ -105,6 +118,18 @@ type
     property Pinned: TMemDBStreamable read FPinned write FPinned;
     property Row: TObject read FRow write FRow;
 {$ENDIF}
+  end;
+
+  TMemDBIndexLeaf = class(TMemDBIndexLeafGeneric)
+  public
+    function Compare(Other: TCoWTreeItem;
+                     AllowKeyDedupe: boolean): integer; override;
+  end;
+
+  TMemDBInternalIndexLeaf = class (TMemDBIndexLeaf)
+  public
+    function Compare(Other: TCoWTreeItem;
+                     AllowKeyDedupe: boolean): integer; override;
   end;
 
   TMemDbIndexSearchVal = class(TMemDBIndexLeaf)
@@ -312,9 +337,14 @@ begin
   end;
 end;
 
-{ TMemDBIndex }
+{ TMemDBIndexGeneric }
 
-destructor TMemDBIndex.Destroy;
+constructor TMemDBIndexGeneric.Create;
+begin
+  inherited;
+end;
+
+destructor TMemDBIndexGeneric.Destroy;
 begin
   FParentIndex.Release;
   FRoot.Release;
@@ -322,43 +352,41 @@ begin
   inherited;
 end;
 
-function TMemDbIndex.Clone;
+function TMemDbIndexGeneric.Clone;
 begin
   if Assigned(FParentIndex) then
     raise EMemDBInternalException.Create(S_CANNOT_CLONE_CLONES);
   Assert(not Assigned(FParentIndex));
   //We could clone clones, but there are good reasons why we don't want to.
-  result := TMemDbIndex.Create;
+  result := TMemDBIndexGenericClass(self.ClassType).Create;
   with result do
   begin
-    FParentIndex:= self.AddRef as TMemDBIndex;
-    FFinalFieldOffsets := self.FFinalFieldOffsets;
-    FSparseFieldOffsets := self.FSparseFieldOffsets;
+    FParentIndex:= self.AddRef as TMemDBIndexGeneric;
     FRoot := self.FRoot.AddRef as TMemDbIndexLeaf;
     FNext := nil;
   end
 end;
 
-procedure TMemDbIndex.RootToNext;
+procedure TMemDbIndexGeneric.RootToNext;
 begin
   FNext.Release;
   FNext := FRoot.AddRef as TMemDBIndexLeaf;
 end;
 
-procedure TMemDbIndex.CommitNextToRoot;
+procedure TMemDbIndexGeneric.CommitNextToRoot;
 begin
   FRoot.Release;
   FRoot := FNext;
   FNext := nil;
 end;
 
-procedure TMemDbIndex.DiscardNext;
+procedure TMemDbIndexGeneric.DiscardNext;
 begin
   FNext.Release;
   FNext := nil;
 end;
 
-function TMemDBIndex.SelToRoot(Sel: TAbSelType): TMemDBIndexLeaf;
+function TMemDbIndexGeneric.SelToRoot(Sel: TAbSelType): TMemDBIndexLeafGeneric;
 begin
   case Sel of
     abCurrent: result := FRoot;
@@ -368,9 +396,9 @@ begin
   end;
 end;
 
-function TMemDBIndex.Locate(Sel: TAbSelType; Pos: TMemAPIPosition; Cur: TMemDBIndexLeaf): TMemDBIndexLeaf;
+function TMemDbIndexGeneric.Locate(Sel: TAbSelType; Pos: TMemAPIPosition; Cur: TMemDBIndexLeafGeneric): TMemDBIndexLeafGeneric;
 var
-  Root: TMemDBIndexLeaf;
+  Root: TMemDBIndexLeafGeneric;
   FoundOrigin: TChkBool;
 begin
 {$IFOPT C+}
@@ -399,19 +427,10 @@ begin
 {$ENDIF}
 end;
 
-function TMemDBIndex.Find(Sel: TAbSelType; SV: TMemDBIndexSearchVal): TMemDBIndexLeaf;
-var
-  Root: TMemDBIndexLeaf;
-begin
-  Root := SelToRoot(Sel);
-  if not Assigned(SV) then
-    raise EMemDBException.Create(S_FIND_REQUIRES_SEARCHVAL);
-  result := SearchItem(SV, Root) as TMemDbIndexLeaf;
-end;
 
-function TMemDbIndex.CheckNonAliasedPresent(Sel: TAbSelType; Node: TMemDBIndexLeaf): boolean;
+function TMemDbIndexGeneric.CheckNonAliasedPresent(Sel: TAbSelType; Node: TMemDBIndexLeafGeneric): boolean;
 var
-  Root, Leaf: TMemDbIndexLeaf;
+  Root, Leaf: TMemDbIndexLeafGeneric;
 begin
   Root := SelToRoot(Sel);
   Assert(Assigned(Node));
@@ -428,9 +447,9 @@ begin
   result := Assigned(Leaf);
 end;
 
-function TMemDBIndex.Add(Sel: TAbSelType; New: TMemDBIndexLeaf): boolean;
+function TMemDbIndexGeneric.Add(Sel: TAbSelType; New: TMemDBIndexLeafGeneric): boolean;
 var
-  Root, NewRoot: TMemDBIndexLeaf;
+  Root, NewRoot: TMemDBIndexLeafGeneric;
   SelGood: boolean;
   h, found: TChkBool;
 begin
@@ -440,7 +459,6 @@ begin
   result := false;
   try
 {$ENDIF}
-
     Root := SelToRoot(Sel);
     //Selectors: abCurrent for both cloned and original indexes.
     //abNext only for non-cloned indexes.
@@ -481,9 +499,9 @@ begin
 {$ENDIF}
 end;
 
-function TMemDBIndex.Remove(Sel: TAbSelType; Old: TMemDBIndexLeaf): boolean;
+function TMemDbIndexGeneric.Remove(Sel: TAbSelType; Old: TMemDBIndexLeafGeneric): boolean;
 var
-  Root, NewRoot: TMemDBIndexLeaf;
+  Root, NewRoot: TMemDBIndexLeafGeneric;
   SelGood: boolean;
   h, found: TChkBool;
 begin
@@ -526,9 +544,35 @@ begin
 {$ENDIF}
 end;
 
-{ TMemDbIndexLeaf }
+{ TMemDBIndex }
 
-destructor TMemDBIndexLeaf.Destroy;
+function TMemDBIndex.Clone: TMemDBIndexGeneric;
+begin
+  result := inherited;
+  if Assigned(result) then
+  begin
+    Assert(result is TMemDBIndex);
+    with result as TMemDBIndex do
+    begin
+      FFinalFieldOffsets := self.FFinalFieldOffsets;
+      FSparseFieldOffsets := self.FSparseFieldOffsets;
+    end;
+  end;
+end;
+
+function TMemDbIndex.Find(Sel: TAbSelType; SV: TMemDBIndexSearchVal): TMemDBIndexLeaf;
+var
+  Root: TMemDBIndexLeaf;
+begin
+  Root := SelToRoot(Sel) as TMemDbIndexLeaf;
+  if not Assigned(SV) then
+    raise EMemDBException.Create(S_FIND_REQUIRES_SEARCHVAL);
+  result := SearchItem(SV, Root) as TMemDbIndexLeaf;
+end;
+
+{ TMemDbIndexLeafGeneric }
+
+destructor TMemDBIndexLeafGeneric.Destroy;
 begin
   Assert(Assigned(self.FPinned) = Assigned(self.FRow));
   if Assigned(FPinned) then
@@ -539,26 +583,26 @@ begin
   inherited;
 end;
 
-function TMemDBIndexLeaf.DupNoInit(SrcTree: TCowTree): TCowTreeItem;
+function TMemDBIndexLeafGeneric.DupNoInit(SrcTree: TCowTree): TCowTreeItem;
 
 begin
   result := inherited;
 {$IFOPT C+}
-  TMemDBIndexLeaf(result).FOriginalIndex := SrcTree as TMemDbIndex;
+  TMemDBIndexLeafGeneric(result).FOriginalIndex := SrcTree as TMemDbIndexGeneric;
 {$ELSE}
-  TMemDBIndexLeaf(result).FOriginalIndex := TMemDBIndex(SrcTree);
+  TMemDBIndexLeafGeneric(result).FOriginalIndex := TMemDBIndexGeneric(SrcTree);
 {$ENDIF}
 end;
 
 {$IFOPT C+}
-procedure TMemDbIndexLeaf.SetPinned(NewPinned: TMemDBStreamable);
+procedure TMemDBIndexLeafGeneric.SetPinned(NewPinned: TMemDBStreamable);
 begin
   Assert(not FPinnedSet);
   FPinnedSet := true;
   FPinned := NewPinned;
 end;
 
-procedure TMemDBIndexLeaf.SetRow(NewRow: TObject);
+procedure TMemDBIndexLeafGeneric.SetRow(NewRow: TObject);
 begin
   Assert(not FRowSet);
   FRowSet := true;
@@ -566,16 +610,16 @@ begin
 end;
 {$ENDIF}
 
-procedure TMemDBIndexLeaf.CopyFrom(Source: TCoWTreeItem);
+procedure TMemDBIndexLeafGeneric.CopyFrom(Source: TCoWTreeItem);
 var
-  SL: TMemDbIndexLeaf;
+  SL: TMemDbIndexLeafGeneric;
 {$IFOPT C+}
   SameFamily: boolean;
-  IndexCheck: TMemDBIndex;
+  IndexCheck: TMemDBIndexGeneric;
 {$ENDIF}
 begin
-  Assert(Assigned(Source) and (Source is TMemDbIndexLeaf));
-  SL := TMemDBIndexLeaf(Source);
+  Assert(Assigned(Source) and (Source.ClassType = Self.ClassType));
+  SL := TMemDBIndexLeafGeneric(Source);
   //Leave FOriginalIndex as set in my node: nodes immutable,
   //and the new copy we're creating is in the New (changed) index.
 
@@ -599,63 +643,9 @@ begin
   Assert(self.FPinned = SL.FPinned);
 end;
 
-function TMemDbIndexLeaf.Compare(Other: TCoWTreeItem;
-                 AllowKeyDedupe: boolean): integer;
-var
-  OtherLeaf: TMemDBIndexLeaf;
-  OwnOffsets, OtherOffsets: TFieldOffsets;
-  OwnFields, OtherFields: TMemRowFields;
-  ff: integer;
-  OwnField, OtherField: TMemDBStreamable;
-  OwnFieldData, OtherFieldData: TMemFieldData;
-begin
-  OtherLeaf := TMemDbIndexLeaf(Other);
-  Assert(Assigned(OtherLeaf));
-  //Let's assume not putting deleted items in index.
-  Assert(AssignedNotsentinel(FPinned));
-  Assert(AssignedNotSentinel(OtherLeaf.FPinned));
-{$IFOPT C+}
-  OwnFields := self.FPinned as TMemRowFields;
-  OtherFields := OtherLeaf.FPinned as TMemRowFields;
-{$ELSE}
-  OwnFields := TMemRowFields(self.FPinned);
-  OtherFields := TMemRowFields(OtherLeaf.FPinned);
-{$ENDIF}
-  if OwnFields.Sparse then
-    OwnOffsets := FOriginalIndex.FSparseFieldOffsets
-  else
-    OwnOffsets := FOriginalIndex.FFinalFieldOffsets;
-  if OtherFields.Sparse then
-    OtherOffsets := OtherLeaf.FOriginalIndex.FSparseFieldOffsets
-  else
-    OtherOffsets := OtherLeaf.FOriginalIndex.FFinalFieldOffsets;
-
-  Assert(Length(OwnOffsets) = Length(OtherOffsets));
-  ff := 0;
-  result := 0;
-  while (result = 0) and (ff < Length(OwnOffsets)) do
-  begin
-    OwnField := OwnFields[OwnOffsets[ff]];
-    OtherField := OtherFields[OtherOffsets[ff]];
-    Assert(AssignedNotSentinel(OwnField));
-    Assert(AssignedNotSentinel(OtherField));
-{$IFOPT C+}
-    OwnFieldData := OwnField as TMemFieldData;
-    OtherFieldData := OtherField as TMemFieldData;
-{$ELSE}
-    OwnFieldData := TMemFieldData(OwnField);
-    OtherFieldData := TMemFieldData(OtherField);
-{$ENDIF}
-    result := CompareFields(OwnFieldData.FDataRec,
-                            OtherFieldData.FDataRec);
-    Inc(ff);
-  end;
-  if (result = 0) and AllowKeyDedupe then
-    result := ComparePointers(self.FPinned, (Other as TMemDbIndexLeaf).FPinned);
-end;
 
 {$HINTS OFF}
-class function TMemDbIndexLeaf.ComparePointers(Own, Other: Pointer): integer;
+class function TMemDbIndexLeafGeneric.ComparePointers(Own, Other: Pointer): integer;
 var
   OwnInt, OtherInt: Cardinal;
   Own64, Other64: UInt64;
@@ -687,6 +677,91 @@ begin
 end;
 {$HINTS ON}
 
+{ TMemDbIndexLeaf }
+
+function TMemDBIndexLeaf.Compare(Other: TCoWTreeItem;
+                 AllowKeyDedupe: boolean): integer;
+var
+  OtherLeaf: TMemDBIndexLeaf;
+  OwnOffsets, OtherOffsets: TFieldOffsets;
+  OwnFields, OtherFields: TMemRowFields;
+  ff: integer;
+  OwnField, OtherField: TMemDBStreamable;
+  OwnFieldData, OtherFieldData: TMemFieldData;
+  OrigIndex, OtherOrigIndex: TMemDBIndex;
+begin
+{$IFOPT C+}
+  OtherLeaf := Other as TMemDbIndexLeaf;;
+{$ELSE}
+  OtherLeaf := TMemDbIndexLeaf(Other);
+{$ENDIF}
+  Assert(Assigned(OtherLeaf));
+  //Let's assume not putting deleted items in index.
+  Assert(AssignedNotsentinel(FPinned));
+  Assert(AssignedNotSentinel(OtherLeaf.FPinned));
+{$IFOPT C+}
+  OwnFields := self.FPinned as TMemRowFields;
+  OtherFields := OtherLeaf.FPinned as TMemRowFields;
+{$ELSE}
+  OwnFields := TMemRowFields(self.FPinned);
+  OtherFields := TMemRowFields(OtherLeaf.FPinned);
+{$ENDIF}
+{$IFOPT C+}
+  OrigIndex := FOriginalIndex as TMemDbIndex;
+  OtherOrigIndex := OtherLeaf.FOriginalIndex as TMemDbIndex;
+{$ELSE}
+  OrigIndex := TMemDbIndex(FOriginalIndex);
+  OtherOrigIndex := TMemDbIndex(OtherLeaf.FOriginalIndex);
+{$ENDIF}
+  if OwnFields.Sparse then
+    OwnOffsets := OrigIndex.FSparseFieldOffsets
+  else
+    OwnOffsets := OrigIndex.FFinalFieldOffsets;
+  if OtherFields.Sparse then
+    OtherOffsets := OtherOrigIndex.FSparseFieldOffsets
+  else
+    OtherOffsets := OtherOrigIndex.FFinalFieldOffsets;
+
+  Assert(Length(OwnOffsets) = Length(OtherOffsets));
+  ff := 0;
+  result := 0;
+  while (result = 0) and (ff < Length(OwnOffsets)) do
+  begin
+    OwnField := OwnFields[OwnOffsets[ff]];
+    OtherField := OtherFields[OtherOffsets[ff]];
+    Assert(AssignedNotSentinel(OwnField));
+    Assert(AssignedNotSentinel(OtherField));
+{$IFOPT C+}
+    OwnFieldData := OwnField as TMemFieldData;
+    OtherFieldData := OtherField as TMemFieldData;
+{$ELSE}
+    OwnFieldData := TMemFieldData(OwnField);
+    OtherFieldData := TMemFieldData(OtherField);
+{$ENDIF}
+    result := CompareFields(OwnFieldData.FDataRec,
+                            OtherFieldData.FDataRec);
+    Inc(ff);
+  end;
+  if (result = 0) and AllowKeyDedupe then
+    result := ComparePointers(self.FPinned, OtherLeaf.FPinned);
+end;
+
+{ TMemDbInternalIndexLeaf }
+
+function TMemDBInternalIndexLeaf.Compare(Other: TCoWTreeItem;
+                 AllowKeyDedupe: boolean): integer;
+var
+  OtherLeaf: TMemDBInternalIndexLeaf;
+begin
+{$IFOPT C+}
+  OtherLeaf := Other as TMemDbInternalIndexLeaf;
+{$ELSE}
+  OtherLeaf := TMemDbInternalIndexLeaf(Other);
+{$ENDIF}
+  Assert(AllowKeyDedupe);
+  result := ComparePointers(self.FPinned, OtherLeaf.FPinned);
+end;
+
 { TMemDBIndexSearchVal }
 
 function TMemDBIndexSearchVal.Compare(Other: TCoWTreeItem;
@@ -697,6 +772,7 @@ var
   OtherFields: TMemRowFields;
   ff: integer;
   OtherField: TMemDBStreamable;
+  OtherOrigIndex: TMemDBIndex;
 
 begin
   OtherLeaf := TMemDbIndexLeaf(Other);
@@ -710,11 +786,16 @@ begin
 {$ELSE}
   OtherFields := TMemRowFields(OtherLeaf.FPinned);
 {$ENDIF}
+{$IFOPT C+}
+  OtherOrigIndex := OtherLeaf.FOriginalIndex as TMemDBIndex;
+{$ELSE}
+  OtherOrigIndex := TMemDBIndex(OtherLeaf.FOriginalIndex);
+{$ENDIF}
   //Own offsets just the index ff.
   if OtherFields.Sparse then
-    OtherOffsets := OtherLeaf.FOriginalIndex.FSparseFieldOffsets
+    OtherOffsets := OtherOrigIndex.FSparseFieldOffsets
   else
-    OtherOffsets := OtherLeaf.FOriginalIndex.FFinalFieldOffsets;
+    OtherOffsets := OtherOrigIndex.FFinalFieldOffsets;
 
   Assert(Length(FFieldSearchVals) = Length(OtherOffsets));
   ff := 0;

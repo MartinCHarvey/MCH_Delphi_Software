@@ -312,6 +312,7 @@ const
   S_API_INTERNAL_CHANGING_ROW = 'Internal error changing row data.';
   S_API_ROW_BAD_STRUCTURE = 'Error changing row, field layout different from table.';
   S_API_SEARCH_REQUIRES_INDEX = 'Bad index name, or index not found, comitted indices only.';
+  S_API_SEARCH_INTERNAL_INDEX_NOT_ALLOWED = 'Cannot perform a find by index on the internal index.';
   S_API_SEARCH_REQURES_CORRECT_FIELD_COUNT = 'Number of data fields supplied for search must be same as number of fields indexed.';
   S_API_NO_FIELDS_IN_TABLE_AT_APPEND_TIME = 'Cannot append a record until you have added fields to the table.';
   S_API_NO_ROW_FOR_DELETE = 'You need to navigate to a row before you can delete it.';
@@ -383,7 +384,8 @@ begin
     //a non-start for the database.
     //However, final deletion of entities should still work
     //and delete everything provided we clear the pins.
-    DB.Rollback(PseudoTid, rbpMetaIndexRollback);
+    DB.Rollback(PseudoTid, rbpIndexRollback);
+    DB.Rollback(PseudoTid, rbpMetaRollback);
     DB.Rollback(PseudoTid, rbpDelayedRollback);
     raise;
   end;
@@ -418,22 +420,22 @@ begin
         end;
         DB.Commit(T.Tid, ccpCleardown);
       except
+        //TODO - No lock acquisition needed here?
+        //temp indexes protected under commit lock.
         DB.MetaIndexLock.Acquire;
         try
-          DB.Rollback(T.Tid, rbpMetaIndexRollback);
+          DB.Rollback(T.Tid, rbpIndexRollback);
         finally
           DB.MetaIndexLock.Release;
         end;
+        raise;
       end;
     finally
       DB.CommitLock.Release;
     end;
   except
-    on Exception do
-    begin
-      result.Free;
-      raise; //Rely on later rollback etc to clear pins and such.
-    end;
+    result.Free;
+    raise; //Rely on later rollback etc to clear pins and such.
   end;
 end;
 
@@ -444,9 +446,11 @@ begin
   T := FAssociatedTransaction as TMemDBTransaction;
   Assert(Assigned(T));
 
+  //TODO - No lock acquisition needed here?
+  //meta change is TidLocal.
   DB.MetaIndexLock.Acquire;
   try
-    DB.Rollback(T.Tid, rbpMetaIndexRollback);
+    DB.Rollback(T.Tid, rbpMetaRollback);
   finally
     DB.MetaIndexLock.Release;
   end;
@@ -1493,19 +1497,20 @@ function TMemDBTable.API_DataLocate(T:TObject;
                         Pos: TMemAPIPosition;
                         IdxName: string): TMemDBCursor;
 var
-  IRoot: TMemDBIndex;
+  IRoot: TMemDBIndexGeneric;
   Idx: TMemIndexDef;
   Tr: TMemDBTransaction;
   TidLocal: TTidLocal;
 begin
   Tr := T as TMemDBTransaction;
-  if Length(IdxName) = 0 then
+  if (Length(IdxName) = 0) and (Tr.Tid.Iso < ilSnapshot) then
   begin
     IRoot := nil;
     TidLocal := GetTidLocal(Tr.Tid);
   end
   else
   begin
+    //Use internal index at snapshot iso and above.
     IRoot := GetUserTidLocalIndexRoot(Tr.Tid, TidLocal, Idx, IdxName);
     if not Assigned(IRoot) then
       raise EMemDBAPIException.Create(S_API_SEARCH_REQUIRES_INDEX);
@@ -1532,6 +1537,7 @@ function TMemDBTable.API_DataFindByIndex(T:TObject;
                             IdxName: string;
                             const DataRecs: TMemDbFieldDataRecs): TMemDbCursor; //Returns cursor
 var
+  IRootGeneric: TMemDBIndexGeneric;
   IRoot: TMemDBIndex;
   Idx: TMemIndexDef;
   Tr: TMemDBTransaction;
@@ -1547,11 +1553,15 @@ begin
   if Length(IdxName) = 0 then
     raise EMemDBAPIException.Create(S_API_SEARCH_REQUIRES_INDEX);
 
-  IRoot := GetUserTidLocalIndexRoot(Tr.Tid, TidLocal, Idx, IdxName);
-  if not Assigned(IRoot) then
+  IRootGeneric := GetUserTidLocalIndexRoot(Tr.Tid, TidLocal, Idx, IdxName);
+  if not Assigned(IRootGeneric) then
     raise EMemDBAPIException.Create(S_API_SEARCH_REQUIRES_INDEX);
 
+  if not (IRootGeneric is TMemDBIndex) then
+    raise EMemDBInternalException.Create(S_API_SEARCH_INTERNAL_INDEX_NOT_ALLOWED);
+  IRoot := IRootGeneric as TMemDBIndex;
   Assert(Assigned(Idx));
+
   META_CurIndexDefToFieldDefs(Tr.Tid, Idx, FieldDefs, FieldAbsIdxs);
   if Length(DataRecs)<> Length(FieldDefs) then
     raise EMemDBAPIException.Create(S_API_SEARCH_REQURES_CORRECT_FIELD_COUNT);
@@ -1573,6 +1583,7 @@ function TMemDBTable.API_DataFindEdgeByIndex(T: TObject;
                                              Pos: TMemAPIPosition): TMemDBCursor;
 var
   IRoot: TMemDBIndex;
+  IRootGeneric: TMemDbIndexGeneric;
   Tr: TMemDBTransaction;
   Idx: TMemIndexDef;
   TidLocal: TTidLocal;
@@ -1589,9 +1600,16 @@ begin
   if Length(IdxName) = 0 then
     raise EMemDBAPIException.Create(S_API_SEARCH_REQUIRES_INDEX);
   Tr := T as TMemDBTransaction;
-  IRoot := GetUserTidLocalIndexRoot(Tr.Tid, TidLocal, Idx, IdxName);
-  if not Assigned(Idx) then
+
+  IRootGeneric := GetUserTidLocalIndexRoot(Tr.Tid, TidLocal, Idx, IdxName);
+  if not Assigned(IRootGeneric) then
     raise EMemDBAPIException.Create(S_API_SEARCH_REQUIRES_INDEX);
+
+  if not (IRootGeneric is TMemDBIndex) then
+    raise EMemDBInternalException.Create(S_API_SEARCH_INTERNAL_INDEX_NOT_ALLOWED);
+  IRoot := IRootGeneric as TMemDBIndex;
+  Assert(Assigned(Idx));
+
   if not (Pos in [ptFirst, ptLast]) then
     raise EMemDBAPIException.Create(S_API_FIND_EDGE_FIRST_OR_LAST);
   META_CurIndexDefToFieldDefs(Tr.Tid, Idx, IndexFieldDefs, FieldAbsIdxs);

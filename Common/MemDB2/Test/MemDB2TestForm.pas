@@ -48,6 +48,7 @@ type
     procedure FKTestBase(Sender: TObject);
     procedure FKTestSameTable(Sender: TObject);
     procedure MultiRRTrans(Sender: TObject);
+    procedure BasicTraversal(Sender: TObject);
   public
     { Public declarations }
   end;
@@ -999,50 +1000,55 @@ begin
   end;
 
   //Search for an existent, and nonexistent blob.
-  Trans := FSession.StartTransaction(amRead);
-  try
-    DBAPI := Trans.GetAPI;
+  if LIMIT > 50 then
+  begin
+    Trans := FSession.StartTransaction(amRead);
     try
-      TableData := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
+      DBAPI := Trans.GetAPI;
       try
-        FillChar(SearchData, sizeof(SearchData), 0);
-        SearchData.FieldType := ftBlob;
-        SearchData.size := BLOB_SIZE;
-        GetMem(SearchData.Data, SearchData.size);
+        TableData := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
         try
-          //Search for a blob we know exists.
-          FillChar(SearchData.Data^, SearchData.size, #50);
-          PAnsiChar(SearchData.Data)^ := #42;
-          OK := TableData.FindByIndex('BlobIdx', SearchData);
-          if not OK then
-            raise Exception.Create('Blob test (4) - find blob failed');
-          //And one that we know doesn't.
-          PD := PAnsiChar(SearchData.Data);
-          for i := 0 to Pred(SearchData.size) do
-          begin
-            PD^ := AnsiChar(i);
-            Inc(PD);
-          end;
-          OK := TableData.FindByIndex('BlobIdx', SearchData);
-          if OK then
-            raise Exception.Create('Blob test (4) - find blob succeeded erroneously.');
-        finally
-          FreeMem(SearchData.Data);
           FillChar(SearchData, sizeof(SearchData), 0);
+          SearchData.FieldType := ftBlob;
+          SearchData.size := BLOB_SIZE;
+          GetMem(SearchData.Data, SearchData.size);
+          try
+            //Search for a blob we know exists.
+            FillChar(SearchData.Data^, SearchData.size, #50);
+            PAnsiChar(SearchData.Data)^ := #42;
+            OK := TableData.FindByIndex('BlobIdx', SearchData);
+            if not OK then
+              raise Exception.Create('Blob test (4) - find blob failed');
+            //And one that we know doesn't.
+            PD := PAnsiChar(SearchData.Data);
+            for i := 0 to Pred(SearchData.size) do
+            begin
+              PD^ := AnsiChar(i);
+              Inc(PD);
+            end;
+            OK := TableData.FindByIndex('BlobIdx', SearchData);
+            if OK then
+              raise Exception.Create('Blob test (4) - find blob succeeded erroneously.');
+          finally
+            FreeMem(SearchData.Data);
+            FillChar(SearchData, sizeof(SearchData), 0);
+          end;
+        finally
+          TableData.Free;
         end;
       finally
-        TableData.Free;
+        DBAPI.Free;
       end;
-    finally
-      DBAPI.Free;
+      Trans.RollbackAndFree;
+      LogTimeIncr('Blob test (4) OK');
+    except
+      Trans.RollbackAndFree;
+      LogTimeIncr('Blob test (4) Failed.');
+      raise;
     end;
-    Trans.RollbackAndFree;
-    LogTimeIncr('Blob test (4) OK');
-  except
-    Trans.RollbackAndFree;
-    LogTimeIncr('Blob test (4) Failed.');
-    raise;
-  end;
+  end
+  else
+    LogtimeIncr('Blob test (4): WARNING. Skipped test, set LIMIT to a higher value (50+).');
 end;
 
 procedure TForm1.FindEdgeTestClick(Sender: TObject);
@@ -2524,8 +2530,6 @@ begin
 
   DelTable;
 
-  //exit; //TODO - Debugging up to here.
-
   //1b) Unique values, one zero.
   //1bi) Fail case.
   Pass := false;
@@ -2832,6 +2836,233 @@ begin
   end;
 end;
 
+procedure TForm1.BasicTraversal(Sender: TObject);
+var
+  Trans: TMemDBTransaction;
+  DBAPI: TMemAPIDatabase;
+  TableMeta: TMemAPITableMetadata;
+  TableData: TMemAPITableData;
+  i: Integer;
+  DataRec: TMemDBFieldDataRec;
+  Sum, Sum2: integer;
+  FindRet: boolean;
+
+begin
+  ResetClick(Sender);
+
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      DBAPI.CreateTable('TraversalTest');
+      TableMeta := DBAPI.GetAPIObjectFromEntity('TraversalTest', APITableMetadata) as TMemAPITableMetadata;
+      try
+        TableMeta.CreateField('IntField', ftInteger);
+        TableMeta.CreateIndex('IntIndex', 'IntField', []);
+      finally
+        TableMeta.Free;
+      end
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+    LogTimeIncr('Basic Traversal 1 OK.');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('Basic Traversal 1 failed: ' + E.Message);
+      raise;
+    end;
+  end;
+
+  //Fill with data in order.
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      TableData := DBAPI.GetAPIObjectFromEntity('TraversalTest', APITableData) as TMemAPITableData;
+      try
+        FillChar(DataRec, sizeof(DataRec), 0);
+        DataRec.FieldType := ftInteger;
+        for i := 0 to LIMIT do
+        begin
+          TableData.Append;
+          DataRec.i32Val := i;
+          TableData.WriteField('IntField', DataRec);
+          TableData.Post;
+        end
+      finally
+        TableData.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+    LogTimeIncr('Basic Traversal 2 OK.');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('Basic Traversal 2 failed: ' + E.Message);
+      raise;
+    end;
+  end;
+
+  //Check basic traverse in order (no internal index).
+  Trans := FSession.StartTransaction(amRead);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      TableData := DBAPI.GetAPIObjectFromEntity('TraversalTest', APITableData) as TMemAPITableData;
+      try
+        TableData.Locate(ptFirst, '');
+        for i := 0 to LIMIT do
+        begin
+          TableData.ReadField('IntField', DataRec);
+          if (DataRec.FieldType <> ftInteger)
+            or (DataRec.i32Val <> i)then
+              raise Exception.Create('Basic traversal 3 failed (bad value)');
+          TableData.Locate(ptNext);
+        end;
+        if TableData.RowSelected then
+          raise Exception.Create('Basic traversal 3 failed (wrong # items)');
+      finally
+        TableData.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+    LogTimeIncr('Basic traversal 3 OK');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('Basic Traversal 3 failed: ' + E.Message);
+      raise;
+    end;
+  end;
+
+  //Check basic traverse via explicit index.
+  Sum := 0;
+  Trans := FSession.StartTransaction(amRead);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      TableData := DBAPI.GetAPIObjectFromEntity('TraversalTest', APITableData) as TMemAPITableData;
+      try
+        TableData.Locate(ptFirst, 'IntIndex');
+        for i := 0 to LIMIT do
+        begin
+          Inc(Sum, i);
+          TableData.ReadField('IntField', DataRec);
+          if (DataRec.FieldType <> ftInteger)
+            or (DataRec.i32Val <> i)then
+              raise Exception.Create('Basic traversal 4 failed (bad value)');
+          TableData.Locate(ptNext, 'IntIndex');
+        end;
+        if TableData.RowSelected then
+          raise Exception.Create('Basic traversal 4 failed (wrong # items)');
+      finally
+        TableData.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+    LogTimeIncr('Basic traversal 4 OK');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('Basic Traversal 4 failed: ' + E.Message);
+      raise;
+    end;
+  end;
+
+  //Check basic traverse via implicit internal index.
+  Sum2 := 0;
+  //Now read using implicit internal index at snapshot Iso.
+  Trans := FSession.StartTransaction(amRead, amLazyWrite, ilSnapshot);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      TableData := DBAPI.GetAPIObjectFromEntity('TraversalTest', APITableData) as TMemAPITableData;
+      try
+        TableData.Locate(ptFirst);
+        for i := 0 to LIMIT do
+        begin
+          TableData.ReadField('IntField', DataRec);
+          if (DataRec.FieldType <> ftInteger) then
+              raise Exception.Create('Basic traversal 5 failed (bad field type)');
+          Inc(Sum2, DataRec.i32Val);
+          TableData.Locate(ptNext);
+        end;
+        if TableData.RowSelected then
+          raise Exception.Create('Basic traversal 5 failed (wrong # items)');
+      finally
+        TableData.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    if Sum2 <> Sum then
+      raise Exception.Create('Basic traversal 5 failed. Values do not sum as expected.');
+    Trans.CommitAndFree;
+    LogTimeIncr('Basic traversal 5 OK');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('Basic Traversal 5 failed: ' + E.Message);
+      raise;
+    end;
+  end;
+
+  //Now check basic find operations.
+  Trans := FSession.StartTransaction(amRead, amLazyWrite, ilSnapshot);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      TableData := DBAPI.GetAPIObjectFromEntity('TraversalTest', APITableData) as TMemAPITableData;
+      try
+        DataRec.FieldType := ftInteger;
+        for i := -LIMIT to 2*LIMIT do
+        begin
+          DataRec.i32Val := i;
+          FindRet := TableData.FindByIndex('IntIndex', DataRec);
+          if TableData.RowSelected <> FindRet then
+            raise Exception.Create('Find return value does not agree with row selection');
+          if FindRet <> ((i >= 0) and (i <= LIMIT)) then
+          begin
+            if FindRet then
+              raise Exception.Create('Found value not expected in table: ' +IntToStr(i))
+            else
+              raise Exception.Create('Could not find expected value in table:' + IntToStr(i));
+          end;
+        end;
+      finally
+        TableData.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    if Sum2 <> Sum then
+      raise Exception.Create('Basic find 1 failed. Values do not sum as expected.');
+    Trans.CommitAndFree;
+    LogTimeIncr('Basic find 1 OK');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('Basic find 1 failed: ' + E.Message);
+      raise;
+    end;
+  end;
+
+end;
+
 //Basic test of indexing.
 procedure TForm1.IndexTestClick(Sender: TObject);
 var
@@ -2997,6 +3228,8 @@ begin
       raise;
     end;
   end;
+
+  BasicTraversal(Sender);
 end;
 
 procedure TForm1.MFFKeyTestClick(Sender: TObject);
@@ -3586,6 +3819,7 @@ begin
           Ret := TblData.Locate(ptNext, 'I64');
           Inc(i);
         end;
+        Assert(i = Succ(Limit));
         i := 1;
         Ret := TblData.Locate(ptFirst, 'IntComp');
         while Ret do
@@ -3602,6 +3836,7 @@ begin
           Ret := TblData.Locate(ptNext, 'IntComp');
           Inc(i);
         end;
+        Assert(i = Succ(Limit));
       finally
         TblData.Free;
       end;
@@ -3640,7 +3875,7 @@ begin
           DataRecs[0].FieldType := ftInteger;
           DataRecs[0].i32Val := i div 10; //First field is IntHi.
           DataRecs[1].FieldType := ftInteger;
-          DataRecs[1].i32Val := i mod 10; //First field is IntLo.
+          DataRecs[1].i32Val := i mod 10; //Second field is IntLo.
           Ret := TblData.FindByMultiFieldIndex('IntComp', DataRecs);
           if not Ret then
             Pass := false;
@@ -3676,52 +3911,57 @@ begin
   Pass := false;
   for i := 0 to 1 do
   begin
-    Trans := FSession.StartTransaction(amReadWrite);
-    try
-      DBAPI := Trans.GetAPI;
+    if LIMIT > 77 then
+    begin
+      Trans := FSession.StartTransaction(amReadWrite);
       try
-        TblData := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
+        DBAPI := Trans.GetAPI;
         try
-          SetLength(DataRecs, 2);
-          DataRecs[0].FieldType := ftInteger;
-          DataRecs[0].i32Val := 7;
-          DataRecs[1].FieldType := ftInteger;
-          DataRecs[1].i32Val := 4;
-          Ret := TblData.FindByMultiFieldIndex('IntComp', DataRecs);
-          if not Ret then
-            raise EMemDBTestException.Create('Expected find op to work.');
-          Data := DataRecs[0];
-          if i = 0 then
-            Data.i32Val := 0
-          else
-            Data.i32Val := 7;
-          TblData.WriteField('IntLo', Data);
-          TblData.WriteField('IntHi', Data);
-          TblData.Post;
+          TblData := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
+          try
+            SetLength(DataRecs, 2);
+            DataRecs[0].FieldType := ftInteger;
+            DataRecs[0].i32Val := 7;
+            DataRecs[1].FieldType := ftInteger;
+            DataRecs[1].i32Val := 4;
+            Ret := TblData.FindByMultiFieldIndex('IntComp', DataRecs);
+            if not Ret then
+              raise EMemDBTestException.Create('Expected find op to work.');
+            Data := DataRecs[0];
+            if i = 0 then
+              Data.i32Val := 0
+            else
+              Data.i32Val := 7;
+            TblData.WriteField('IntLo', Data);
+            TblData.WriteField('IntHi', Data);
+            TblData.Post;
+          finally
+            TblData.Free;
+          end;
         finally
-          TblData.Free;
+          DBAPI.Free;
         end;
-      finally
-        DBAPI.Free;
-      end;
-      Pass := true;
-      Trans.CommitAndFree;
-      LogTimeIncr('MF Index constraints failed.');
-    except
-      on E:Exception do
-      begin
-        Trans.RollbackAndFree;
-        if Pass then
+        Pass := true;
+        Trans.CommitAndFree;
+        LogTimeIncr('MF Index constraints failed.');
+      except
+        on E:Exception do
         begin
-          LogTimeIncr('MF Indexes, constraints: (' + E.Message +'): OK')
-        end
-        else
-        begin
-          LogTimeIncr('MF Indexes, constraints: (' + E.Message +'): failed.');
-          raise;
+          Trans.RollbackAndFree;
+          if Pass then
+          begin
+            LogTimeIncr('MF Indexes, constraints: (' + E.Message +'): OK')
+          end
+          else
+          begin
+            LogTimeIncr('MF Indexes, constraints: (' + E.Message +'): failed.');
+            raise;
+          end;
         end;
       end;
-    end;
+    end
+    else
+      LogTimeIncr('MF indexes: WARNING. Skipped test, set LIMIT to a higher value (78+).');
   end;
 end;
 

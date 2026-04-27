@@ -45,7 +45,11 @@ type
 
   //Streamables now subclasses of this.
 
+{$IFDEF USE_TRACKABLES}
+  TMemDBStreamable = class(TTrackedReffed)
+{$ELSE}
   TMemDBStreamable = class(TReffed)
+{$ENDIF}
   public
     constructor Create; virtual;
 

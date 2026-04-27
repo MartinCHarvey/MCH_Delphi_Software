@@ -33,17 +33,10 @@ uses
   SysUtils, Classes;
 
 type
-{$IFDEF USE_TRACKABLES}
-  TReffed = class(TTrackable)
-{$ELSE}
   TReffed = class
-{$ENDIF}
   private
     FRef: integer;
   protected
-{$IFDEF USE_TRACKABLES}
-    function GetExtraInfoText: string; override;
-{$ENDIF}
   public
     constructor Create;
 
@@ -64,7 +57,27 @@ type
     procedure Free;
   end;
 
+{$IFDEF USE_TRACKABLES}
+  TTrackedReffedProxy = class(TTrackProxy)
+  protected
+    function GetExtraInfoText: string; override;
+  end;
+
+  TTrackedReffed = class(TReffed)
+  private
+    FProxy: TTrackedReffedProxy;
+  public
+    function GetExtraInfoText: string; dynamic;
+    constructor Create;
+    destructor Destroy; override;
+  end;
+{$ENDIF}
+
+{$IFDEF USE_TRACKABLES}
+  TReffedList = class(TTrackedReffed)
+{$ELSE}
   TReffedList = class(TReffed)
+{$ENDIF}
   private
     FList: TList;
   protected
@@ -91,7 +104,11 @@ type
     property Items[idx:integer]: TReffed read GetItem write SetItem; default;
   end;
 
+{$IFDEF USE_TRACKABLES}
+  TReffedProxy = class(TTrackedReffed)
+{$ELSE}
   TReffedProxy = class(TReffed)
+{$ENDIF}
   private
     FProxy: TObject;
   public
@@ -105,20 +122,13 @@ type
 const
   S_REFFED_TEARDOWN_RACE_ADDING_REF = 'Error: Teardown race with AddRef.';
   S_REFFED_TEARDOWN_RACE_RELEASING_REF = 'Error: Teardown race with Release.';
+  S_PROX_EXTRA_INFO = ' and extra info text: ';
 
 implementation
 
 uses
   LockAbstractions;
 
-
-{$IFDEF USE_TRACKABLES}
-function TReffed.GetExtraInfoText: string;
-begin
-  result := inherited;
-  result := result + 'Refcount: ' + IntToStr(FRef);
-end;
-{$ENDIF}
 
 constructor TReffed.Create;
 begin
@@ -210,6 +220,39 @@ begin
   Assert(FRef = 1);
   Release;
 end;
+
+{ TTrackedReffedProxy }
+
+{$IFDEF USE_TRACKABLES}
+function TTrackedReffedProxy.GetExtraInfoText: string;
+begin
+  result := inherited;
+  if Assigned(FTracked) and (FTracked is TTrackedReffed) then
+    result := result + S_PROX_EXTRA_INFO + (FTracked as TTrackedReffed).GetExtraInfoText;
+end;
+{$ENDIF}
+
+{ TTrackedReffed }
+
+{$IFDEF USE_TRACKABLES}
+function TTrackedReffed.GetExtraInfoText: string;
+begin
+  result := result + 'Refcount: ' + IntToStr(FRef);
+end;
+
+constructor TTrackedReffed.Create;
+begin
+  inherited;
+  FProxy := TTrackedReffedProxy.Create;
+  FProxy.Init(self);
+end;
+
+destructor TTrackedReffed.Destroy;
+begin
+  FProxy.Free;
+  inherited;
+end;
+{$ENDIF}
 
 { TReffedList }
 
