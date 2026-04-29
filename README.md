@@ -7,6 +7,7 @@ Most recent (2026) development is in Common/MemDB2:
 - Current MemDB code is write-serialised.
 - MemDB2 is _very_ work in progress.
   - I expect _multiple_ writes/rewrites as I progress.
+    - CowTree functionally correct, some uOptimizations still possible.
     - Buffering and serialisation model will change, as I work out what runs best.
     - Expect all operations to allow parallel transactions.
     - Copy-on-write most state...
@@ -51,6 +52,7 @@ Common: Common utility code, including:
   - Open project, right click MCHComponents.bpl, select "install" to add to IDE palette.
 
 - Raw AVL tree.
+- Copy on write AVL tree (CowTree).
 - Read and Write cached memory streams.
 - Doubly linked lists.
 - HTML / JSON / CSS / Javascript parsers.
@@ -70,6 +72,7 @@ Common: Common utility code, including:
 
 Additional testapps and utility code.
 
+- CoWTree testapp: Common/CowTree/Test
 - MemDB testapp: Common/MemDB/Test/
 - Lexer testapp: Common/SoftLexer/Test/
 - Streaming system testapp: Common/StreamingSystem/Test/
