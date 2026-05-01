@@ -320,11 +320,7 @@ var
 
 procedure AppendTrailingDirSlash(var Path: string);
 
-{$IFOPT C+}
 function CompareGuids(const OtherGuid, OwnGuid: TGUID): integer;
-{$ELSE}
-function CompareGuids(const OtherGuid, OwnGuid: TGUID): integer; inline;
-{$ENDIF}
 
 implementation
 
