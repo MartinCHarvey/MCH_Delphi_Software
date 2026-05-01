@@ -1,12 +1,24 @@
 
 MemDB2 TODO.
 
-- MinIso values  / require atomic. Way to make that cleaner?
-- isoSnapshot Isolation.
+- Backport new MemDB2 tests to MemDB testapp.
 
 - Refactor META_ / Pinning functions to use cached values.
 
-- Foreign Keys.
+- Create GetCurrentInLock / GetNextInLock function for faster access under commit lock.
+  - Only where definitely possible (perhaps not GetNext as it's not an immutable part of the list).
+
+- MinIso values  / require atomic. Way to make that cleaner?
+  - More careful scrutiny on what requires meta to be atomic and when.
+
+- Parallelising table / index precommit / commit / rollback.
+
+- Any other optimizations you can think of.
+
+- Disposal outside lock: Make TidLocal have a "Recycle" bin you can add reffed classes to.
+
+- After optimising straight line performance, look at performance under contention.
+  - TinyLock may not be the correct answer ...
 
 - SQL Query engine.
 
