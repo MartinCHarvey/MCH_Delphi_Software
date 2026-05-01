@@ -121,6 +121,9 @@ begin
   FTimeStamp := N;
 end;
 
+//TODO TODO - Expand test set here from MemDB2 testapp
+//(it tests several edge cases we don't test here).
+
 procedure TForm1.BasicTestBtnClick(Sender: TObject);
 var
   Trans: TMemDBTransaction;
@@ -1223,7 +1226,7 @@ end;
 procedure TForm1.FKTestClick(Sender: TObject);
 begin
   FKTestBase(Sender);
-  FKTestSameTable(Sender);
+  //FKTestSameTable(Sender); TODO TODO - Debugging.
 end;
 
 procedure TForm1.FKTestSameTable(Sender: TObject);

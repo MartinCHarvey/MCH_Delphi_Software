@@ -372,7 +372,10 @@ begin
     if Initial then
       DB.FromScratch(PseudoTid, JournalEntry)
     else
+    begin
       DB.FromJournal(PseudoTid, JournalEntry);
+      DB.Prepare(PseudoTid);
+    end;
 
     DB.PreCommit(PseudoTid, pcpTables);
     DB.PreCommit(PseudoTid, pcpFKeys);
@@ -400,11 +403,13 @@ begin
   Assert(not Assigned(T.Changeset));
   result := MakeStream(T.Session.TempStorageMode);
   try
-    DB.ToJournal(T.Tid, result);
+    DB.Prepare(T.Tid);
 
     DB.CommitLock.Acquire;
     try
       try
+        DB.ToJournal(T.Tid, result);
+
         DB.PreCommit(T.Tid, pcpTables);
         DB.PreCommit(T.Tid, pcpFKeys);
 
@@ -418,7 +423,6 @@ begin
         finally
           DB.MetaIndexLock.Release;
         end;
-        DB.Commit(T.Tid, ccpCleardown);
       except
         //TODO - No lock acquisition needed here?
         //temp indexes protected under commit lock.
@@ -433,6 +437,8 @@ begin
     finally
       DB.CommitLock.Release;
     end;
+    //Note final cleanup outside commit lock.
+    DB.Commit(T.Tid, ccpCleardown);
   except
     result.Free;
     raise; //Rely on later rollback etc to clear pins and such.

@@ -327,14 +327,12 @@ begin
 end;
 
 procedure TForm1.BigTableClick(Sender: TObject);
-{$IFDEF MEMDB2_TEMP_REMOVE}
 var
   TabI: integer;
   FieldIndexI: integer;
   RowI: integer;
   Trans: TMemDBTransaction;
   DBAPI: TMemAPIDatabase;
-  Table, FK: TMemDBHandle;
   TMetAPI: TMemAPITableMetadata;
   TDatAPI: TMemAPITableData;
   FKAPI: TMemAPIForeignKey;
@@ -349,8 +347,8 @@ begin
     try
       for TabI := 0 to Pred(BIG_NTABLES) do
       begin
-        Table := DBAPI.CreateTable('BIGTABLE_'+InttoStr(TabI));
-        TMetAPI := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata) as TMemAPITableMetadata;
+        DBAPI.CreateTable('BIGTABLE_'+InttoStr(TabI));
+        TMetAPI := DBAPI.GetAPIObjectFromEntity('BIGTABLE_'+InttoStr(TabI), APITableMetadata) as TMemAPITableMetadata;
         try
           for FieldIndexI := 0 to Pred(BIG_NINDEXES) do
           begin
@@ -379,8 +377,7 @@ begin
     try
       for TabI := 0 to Pred(BIG_NTABLES) do
       begin
-        Table := DBAPI.OpenTableOrKey('BIGTABLE_'+IntToStr(TabI));
-        TDatAPI := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+        TDatAPI := DBAPI.GetAPIObjectFromEntity('BIGTABLE_'+IntToStr(TabI), APITableData) as TMemAPITableData;
         try
           for RowI := 0 to Pred(BIG_ROWS) do
           begin
@@ -416,8 +413,7 @@ begin
     try
       for TabI := 0 to Pred(BIG_NTABLES) do
       begin
-        Table := DBAPI.OpenTableOrKey('BIGTABLE_'+IntToStr(TabI));
-        TMetAPI := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata) as TMemAPITableMetadata;
+        TMetAPI := DBAPI.GetAPIObjectFromEntity('BIGTABLE_'+IntToStr(TabI), APITableMetadata) as TMemAPITableMetadata;
         try
           for FieldIndexI := 0 to Pred(BIG_NINDEXES) do
           begin
@@ -448,8 +444,8 @@ begin
       begin
         if (TabI > 0) then
         begin
-          FK := DBAPI.CreateForeignKey('BIGFK_'+InttoStr(TabI));
-          FKAPI := DBAPI.GetApiObjectFromHandle(FK, APIForeignKey) as TMemAPIForeignKey;
+          DBAPI.CreateForeignKey('BIGFK_'+InttoStr(TabI));
+          FKAPI := DBAPI.GetAPIObjectFromEntity('BIGFK_'+InttoStr(TabI), APIForeignKey) as TMemAPIForeignKey;
           try
             for FieldIndexI := 0 to Pred(BIG_NINDEXES) do
             begin
@@ -477,20 +473,13 @@ begin
   ElTotal := Now - Start;
   LogTimeIncr('Total time: ' + ElapsedToTimeStr(ElTotal));
 end;
-{$ELSE}
-begin
-  Assert(false); //TODO - rewrite this.
-end;
-{$ENDIF}
 
 procedure TForm1.BigTblModFast;
-{$IFDEF MEMDB2_TEMP_REMOVE}
 var
   Trans: TMemDbTransaction;
   DBAPI: TMemAPIDatabase;
   FieldIndexI: integer;
   TabI: integer;
-  Table, FK: TMemDbHandle;
   TDatAPI: TMemAPITableData;
   Found: boolean;
   Data: TMemDBFieldDataRec;
@@ -526,8 +515,7 @@ begin
     try
       for TabI := 0 to Pred(BIG_NTABLES) do
       begin
-        Table := DBAPI.OpenTableOrKey('BIGTABLE_'+IntToStr(TabI));
-        TMetAPI := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata) as TMemAPITableMetadata;
+        TMetAPI := DBAPI.GetAPIObjectFromEntity('BIGTABLE_'+IntToStr(TabI), APITableMetadata) as TMemAPITableMetadata;
         try
           for FieldIndexI := 0 to Pred(BIG_NINDEXES) do
             TMetAPI.DeleteIndex('INDEX_'+IntToStr(FieldIndexI));
@@ -554,10 +542,7 @@ begin
     try
       for TabI := 0 to Pred(BIG_NTABLES) do
       begin
-        //TODO - Yeah, could do per table locking based on API objects,
-        //if row locking turned out to be too scary.
-        Table := DBAPI.OpenTableOrKey('BIGTABLE_'+IntToStr(TabI));
-        TDatAPI := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+        TDatAPI := DBAPI.GetAPIObjectFromEntity('BIGTABLE_'+IntToStr(TabI), APITableData) as TMemAPITableData;
         try
           Found:= TDatAPI.Locate(ptFirst, '');
           while Found do
@@ -595,8 +580,7 @@ begin
     try
       for TabI := 0 to Pred(BIG_NTABLES) do
       begin
-        Table := DBAPI.OpenTableOrKey('BIGTABLE_'+IntToStr(TabI));
-        TMetAPI := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata) as TMemAPITableMetadata;
+        TMetAPI := DBAPI.GetAPIObjectFromEntity('BIGTABLE_'+IntToStr(TabI), APITableMetadata) as TMemAPITableMetadata;
         try
           for FieldIndexI := 0 to Pred(BIG_NINDEXES) do
           begin
@@ -627,8 +611,8 @@ begin
       begin
         if (TabI > 0) then
         begin
-          FK := DBAPI.CreateForeignKey('BIGFK_'+InttoStr(TabI));
-          FKAPI := DBAPI.GetApiObjectFromHandle(FK, APIForeignKey) as TMemAPIForeignKey;
+          DBAPI.CreateForeignKey('BIGFK_'+InttoStr(TabI));
+          FKAPI := DBAPI.GetAPIObjectFromEntity('BIGFK_'+InttoStr(TabI), APIForeignKey) as TMemAPIForeignKey;
           try
             for FieldIndexI := 0 to Pred(BIG_NINDEXES) do
             begin
@@ -654,18 +638,11 @@ begin
   end;
   LogTimeIncr('Big table FKeys added OK.');
 end;
-{$ELSE}
-begin
-  Assert(false); //TODO - rewrite this.
-end;
-{$ENDIF}
 
 procedure TForm1.BigTblModSlow;
-{$IFDEF MEMDB2_TEMP_REMOVE}
 var
   Trans: TMemDBTransaction;
   DBAPI: TMemAPIDatabase;
-  Table: TMemDBHandle;
   TabI: integer;
   TDatAPI: TMemAPITableData;
   Found: boolean;
@@ -679,10 +656,7 @@ begin
     try
       for TabI := 0 to Pred(BIG_NTABLES) do
       begin
-        //TODO - Yeah, could do per table locking based on API objects,
-        //if row locking turned out to be too scary.
-        Table := DBAPI.OpenTableOrKey('BIGTABLE_'+IntToStr(TabI));
-        TDatAPI := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+        TDatAPI := DBAPI.GetAPIObjectFromEntity('BIGTABLE_'+IntToStr(TabI), APITableData) as TMemAPITableData;
         try
           Found:= TDatAPI.Locate(ptFirst, '');
           while Found do
@@ -715,14 +689,8 @@ begin
     end;
   end;
 end;
-{$ELSE}
-begin
-  Assert(false); //TODO - rewrite this.
-end;
-{$ENDIF}
 
 procedure TForm1.BigTblModClick(Sender: TObject);
-{$IFDEF MEMDB2_TEMP_REMOVE}
 var
   Start, N, ElFast, ElSlow: double;
 begin
@@ -740,11 +708,6 @@ begin
   LogTimeIncr('Total time (fast): ' + ElapsedToTimeStr(ElFast));
   LogTimeIncr('Total time (slow): ' + ElapsedToTimeStr(ElSlow));
 end;
-{$ELSE}
-begin
-  Assert(false); //TODO - rewrite this.
-end;
-{$ENDIF}
 
 procedure TForm1.CheckpointBtnClick(Sender: TObject);
 begin
@@ -1537,7 +1500,7 @@ var
   TableMeta: TMemAPITableMetadata;
   TableData: TMemAPITableData;
   FKey: TMemAPIForeignKey;
-  Data: TMemDbFieldDataRec;
+  Data, Data2: TMemDbFieldDataRec;
   Pass: boolean;
   EntityNames: TStringList;
 
@@ -1634,60 +1597,155 @@ var
     end;
   end;
 
-begin
-  ResetClick(Sender);
-
-  Trans := FSession.StartTransaction(amReadWrite);
-  try
-    DBAPI := Trans.GetAPI;
+  procedure CreateBasicFKTables;
+  begin
+    Trans := FSession.StartTransaction(amReadWrite);
     try
-      EntityNames := DBAPI.GetEntityNames;
+      DBAPI := Trans.GetAPI;
       try
-        if EntityNames.IndexOf('FKTestTableMaster') < 0 then
-        begin
-          DBAPI.CreateTable('FKTestTableMaster');
-          TableMeta := DBAPI.GetAPIObjectFromEntity('FKTestTableMaster', APITableMetadata) as TMemAPITableMetadata;
-          try
-            TableMeta.CreateField('MasterKey', ftInteger);
-            TableMeta.CreateIndex('MasterKeyIdx', 'MasterKey', [iaUnique, iaNotEmpty]);
-          finally
-            TableMeta.Free;
+        EntityNames := DBAPI.GetEntityNames;
+        try
+          if EntityNames.IndexOf('FKTestTableMaster') < 0 then
+          begin
+            DBAPI.CreateTable('FKTestTableMaster');
+            TableMeta := DBAPI.GetAPIObjectFromEntity('FKTestTableMaster', APITableMetadata) as TMemAPITableMetadata;
+            try
+              TableMeta.CreateField('MasterKey', ftInteger);
+              TableMeta.CreateIndex('MasterKeyIdx', 'MasterKey', [iaUnique, iaNotEmpty]);
+            finally
+              TableMeta.Free;
+            end;
           end;
-        end;
-        if EntityNames.IndexOf('FKTestTableSub') < 0 then
-        begin
-          DBAPI.CreateTable('FKTestTableSub');
-          TableMeta := DBAPI.GetAPIObjectFromEntity('FKTestTableSub', APITableMetadata) as TMemAPITableMetadata;
-          try
-            TableMeta.CreateField('ReferringField', ftInteger);
-            TableMeta.CreateIndex('ReferringFieldIdx', 'ReferringField', [iaNotEmpty]);
-          finally
-            TableMeta.Free;
+          if EntityNames.IndexOf('FKTestTableSub') < 0 then
+          begin
+            DBAPI.CreateTable('FKTestTableSub');
+            TableMeta := DBAPI.GetAPIObjectFromEntity('FKTestTableSub', APITableMetadata) as TMemAPITableMetadata;
+            try
+              TableMeta.CreateField('ReferringField', ftInteger);
+              TableMeta.CreateIndex('ReferringFieldIdx', 'ReferringField', [iaNotEmpty]);
+            finally
+              TableMeta.Free;
+            end;
           end;
+        finally
+          EntityNames.Free;
         end;
       finally
-        EntityNames.Free;
+        DBAPI.Free;
       end;
-    finally
-      DBAPI.Free;
-    end;
-    Trans.CommitAndFree;
-  except
-    on E: Exception do
-    begin
-      Trans.RollbackAndFree;
-      LogTimeIncr('Foreign key test setup failed.');
-      raise;
+      Trans.CommitAndFree;
+    except
+      on E: Exception do
+      begin
+        Trans.RollbackAndFree;
+        LogTimeIncr('Foreign key test setup failed.');
+        raise;
+      end;
     end;
   end;
 
-  //Now delete all the rows.
-  DelRows;
+  procedure AddExtraFields;
+  begin
+    Trans := FSession.StartTransaction(amReadWrite);
+    try
+      DBAPI := Trans.GetAPI;
+      try
+        TableMeta := DBAPI.GetAPIObjectFromEntity('FKTestTableMaster', APITableMetadata) as TMemAPITableMetadata;
+        try
+          TableMeta.CreateField('MasterKey2', ftInteger);
+        finally
+          TableMeta.Free;
+        end;
+        TableMeta := DBAPI.GetAPIObjectFromEntity('FKTestTableSub', APITableMetadata) as TMemAPITableMetadata;
+        try
+          TableMeta.CreateField('ReferringField2', ftInteger);
+        finally
+          TableMeta.Free;
+        end;
+      finally
+        DBAPI.Free;
+      end;
+      Trans.CommitAndFree;
+      LogTimeIncr('FK Test 3a, master key add fields OK.');
+    except
+      on E: Exception do
+      begin
+        Trans.RollbackAndFree;
+        LogTimeIncr('FK Test 3a, master key add fields failed.');
+        raise;
+      end;
+    end;
+  end;
+
+  procedure DupFieldsNewFK;
+  begin
+    Trans := FSession.StartTransaction(amReadWrite);
+    try
+      DBAPI := Trans.GetAPI;
+      try
+        TableMeta := DBAPI.GetApiObjectFromEntity('FKTestTableMaster', APITableMetadata) as TMemAPITableMetadata;
+        TableData := DBAPI.GetApiObjectFromEntity('FKTestTableMaster', APITableData) as TMemAPITableData;
+        try
+          TableMeta.CreateIndex('MasterKey2Idx', 'MasterKey2', [iaUnique, iaNotEmpty]);
+          TableData.Locate(ptFirst, '');
+          while TableData.RowSelected do
+          begin
+            TableData.ReadField('MasterKey', Data);
+            TableData.WriteField('MasterKey2', Data);
+            TableData.Post;
+            TableData.Locate(ptNext, '');
+          end;
+        finally
+          TableMeta.Free;
+          TableData.Free;
+        end;
+        TableMeta := DBAPI.GetApiObjectFromEntity('FKTestTableSub', APITableMetadata) as TMemAPITableMetadata;
+        TableData := DBAPI.GetApiObjectFromEntity('FKTestTableSub', APITableData) as TMemAPITableData;
+        try
+          TableMeta.CreateIndex('ReferringField2Idx', 'ReferringField2', []);
+          TableData.Locate(ptFirst, '');
+          while TableData.RowSelected do
+          begin
+            TableData.ReadField('ReferringField', Data);
+            TableData.WriteField('ReferringField2', Data);
+            TableData.Post;
+            TableData.Locate(ptNext, '');
+          end;
+        finally
+          TableMeta.Free;
+          TableData.Free;
+        end;
+        DBAPI.CreateForeignKey('ForeignKey2');
+        FKey := DBAPI.GetAPIObjectFromEntity('ForeignKey2', APIForeignKey) as TMemAPIForeignKey;
+        try
+          FKey.SetReferencingChild('FKTestTableSub', 'ReferringField2Idx');
+          FKey.SetReferencedParent('FKTestTableMaster','MasterKey2Idx');
+        finally
+          FKey.Free;
+        end;
+      finally
+        DBAPI.Free;
+      end;
+      Trans.CommitAndFree;
+        LogTimeIncr('FK Test 3b, master key populate fields OK.');
+    except
+      on E: Exception do
+      begin
+        Trans.RollbackAndFree;
+        LogTimeIncr('FK Test 3b, master key populate fields failed.');
+        raise;
+      end;
+    end;
+  end;
+
+begin
+  ResetClick(Sender);
+
+  CreateBasicFKTables;
 
   //Test 1.
   //Add rows satisfying FK relationship to both tables (Base row set).
   SetBaseRowSet;
-
 
   //Add FK, check all OK.
   Trans := FSession.StartTransaction(amReadWrite);
@@ -1753,7 +1811,7 @@ begin
       finally
         TableData.Free;
       end;
-{
+
       DBAPI.CreateForeignKey('ForeignKey1');
       FKey := DBAPI.GetAPIObjectFromEntity('ForeignKey1', APIForeignKey) as TMemAPIForeignKey;
       try
@@ -1762,7 +1820,6 @@ begin
       finally
         FKey.Free;
       end;
-}
     finally
       DBAPI.Free;
     end;
@@ -2085,13 +2142,13 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-    LogTimeIncr('FK Test 2d, master key moved OK.');
+    LogTimeIncr('FK Test 2f, master key moved OK.');
   //Check fails.
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      LogTimeIncr('FK Test 2d, master key moved failed.');
+      LogTimeIncr('FK Test 2f, master key moved failed.');
       raise;
     end;
   end;
@@ -2103,97 +2160,13 @@ begin
   //Add extra fields to both tables, in preparation for...
   //Dup row contents, add indexes, and add dup foreign key.
   //Check FK checking OK, even when index being added.
-  Trans := FSession.StartTransaction(amReadWrite);
-  try
-    DBAPI := Trans.GetAPI;
-    try
-      TableMeta := DBAPI.GetAPIObjectFromEntity('FKTestTableMaster', APITableMetadata) as TMemAPITableMetadata;
-      try
-        TableMeta.CreateField('MasterKey2', ftInteger);
-      finally
-        TableMeta.Free;
-      end;
-      TableMeta := DBAPI.GetAPIObjectFromEntity('FKTestTableSub', APITableMetadata) as TMemAPITableMetadata;
-      try
-        TableMeta.CreateField('ReferringField2', ftInteger);
-      finally
-        TableMeta.Free;
-      end;
-    finally
-      DBAPI.Free;
-    end;
-    Trans.CommitAndFree;
-    LogTimeIncr('FK Test 3a, master key add fields OK.');
-  except
-    on E: Exception do
-    begin
-      Trans.RollbackAndFree;
-      LogTimeIncr('FK Test 3a, master key add fields failed.');
-      raise;
-    end;
-  end;
+  AddExtraFields;
 
   //Test 3b.
   //Extra fields now added, so ...
   //Dup row contents, add indexes, and add dup foreign key.
   //Check FK checking OK, even when index being added.
-  Trans := FSession.StartTransaction(amReadWrite);
-  try
-    DBAPI := Trans.GetAPI;
-    try
-      TableMeta := DBAPI.GetApiObjectFromEntity('FKTestTableMaster', APITableMetadata) as TMemAPITableMetadata;
-      TableData := DBAPI.GetApiObjectFromEntity('FKTestTableMaster', APITableData) as TMemAPITableData;
-      try
-        TableMeta.CreateIndex('MasterKey2Idx', 'MasterKey2', [iaUnique, iaNotEmpty]);
-        TableData.Locate(ptFirst, '');
-        while TableData.RowSelected do
-        begin
-          TableData.ReadField('MasterKey', Data);
-          TableData.WriteField('MasterKey2', Data);
-          TableData.Post;
-          TableData.Locate(ptNext, '');
-        end;
-      finally
-        TableMeta.Free;
-        TableData.Free;
-      end;
-      TableMeta := DBAPI.GetApiObjectFromEntity('FKTestTableSub', APITableMetadata) as TMemAPITableMetadata;
-      TableData := DBAPI.GetApiObjectFromEntity('FKTestTableSub', APITableData) as TMemAPITableData;
-      try
-        TableMeta.CreateIndex('ReferringField2Idx', 'ReferringField2', []);
-        TableData.Locate(ptFirst, '');
-        while TableData.RowSelected do
-        begin
-          TableData.ReadField('ReferringField', Data);
-          TableData.WriteField('ReferringField2', Data);
-          TableData.Post;
-          TableData.Locate(ptNext, '');
-        end;
-      finally
-        TableMeta.Free;
-        TableData.Free;
-      end;
-      DBAPI.CreateForeignKey('ForeignKey2');
-      FKey := DBAPI.GetAPIObjectFromEntity('ForeignKey2', APIForeignKey) as TMemAPIForeignKey;
-      try
-        FKey.SetReferencingChild('FKTestTableSub', 'ReferringField2Idx');
-        FKey.SetReferencedParent('FKTestTableMaster','MasterKey2Idx');
-      finally
-        FKey.Free;
-      end;
-    finally
-      DBAPI.Free;
-    end;
-    Trans.CommitAndFree;
-      LogTimeIncr('FK Test 3b, master key populate fields OK.');
-  except
-    on E: Exception do
-    begin
-      Trans.RollbackAndFree;
-      LogTimeIncr('FK Test 3b, master key populate fields failed.');
-      raise;
-    end;
-  end;
+  DupFieldsNewFK;
 
   //Test 3c.
   //Add data to dependent table whilst deleting fields from master.
@@ -2370,12 +2343,129 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-    LogTimeIncr('FK Test 3f, rename everything OK.');
+    LogTimeIncr('FK Test 4, rename everything OK.');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      LogTimeIncr('FK Test 3f, rename everything failed.');
+      LogTimeIncr('FK Test 4, rename everything failed.');
+      raise;
+    end;
+  end;
+
+  //OK, now check the one remaining pathological case where,
+  //we re-arrange fields (thus generating new indexes), whilst also
+  //changing fields in such a way that the addition/deletetion lists are pruned,
+  //and check that the FK relationship still holds.
+  ResetClick(Sender);
+
+  CreateBasicFKTables;
+
+  SetBaseRowSet;
+
+  AddExtraFields;
+
+  DupFieldsNewFK;
+
+  //5a Remove the old FK.
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      EntityNames := DBAPI.GetEntityNames;
+      try
+        if EntityNames.IndexOf('ForeignKey1') >= 0 then
+          DBAPI.DeleteTableOrKey('ForeignKey1');
+      finally
+        EntityNames.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+    LogTimeIncr('FK Test 5a, remove old FK (in prep for test).');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('FK Test 5a, remove old FK failed.');
+      raise;
+    end;
+  end;
+
+  //5b Remove re-add data into the master table, whilst deleting fields
+  //from child, and check still passes.
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      TableMeta := DBAPI.GetAPIObjectFromEntity('FKTestTableSub', APITableMetadata) as TMemAPITableMetadata;
+      try
+        TableMeta.DeleteIndex('ReferringFieldIdx');
+        TableMeta.DeleteField('ReferringField');
+      finally
+        TableMeta.Free;
+      end;
+      TableData := DBAPI.GetAPIObjectFromEntity('FKTestTableMaster', APITableData) as TMemAPITableData;
+      try
+        TableData.Locate(ptFirst, '');
+        TableData.ReadField('MasterKey', Data);
+        TableData.ReadField('MasterKey2', Data2);
+        TableData.Delete;
+        TableData.Append;
+        TableData.WriteField('MasterKey', Data);
+        TableData.WriteField('MasterKey2', Data2);
+        TableData.Post;
+      finally
+        TableData.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+    LogTimeIncr('FK Test 5b. Delete re-add from master whilst child fields changed OK');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('FK Test 5b. Delete re-add from master whilst child fields changed failed.');
+      raise;
+    end;
+  end;
+
+  //5c Add duplicate row in referring table, whilst deleting fields from master
+  //and check still passes.
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      TableData := DBAPI.GetAPIObjectFromEntity('FKTestTableSub', APITableData) as TMemAPITableData;
+      try
+        TableData.Locate(ptFirst, '');
+        TableData.ReadField('ReferringField2', Data);
+        TableData.Append;
+        TableData.WriteField('ReferringField2', Data);
+        TableData.Post;
+      finally
+        TableData.Free;
+      end;
+      TableMeta := DBAPI.GetAPIObjectFromEntity('FKTestTableMaster', APITableMetadata) as TMemAPITableMetadata;
+      try
+        TableMeta.DeleteIndex('MasterKeyIdx');
+        TableMeta.DeleteField('MasterKey');
+      finally
+        TableMeta.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+    LogTimeIncr('FK Test 5c. Dup add to child whilst master fields changed OK');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('FK Test 5c. Dup add to child whilst master fields changed failed');
       raise;
     end;
   end;

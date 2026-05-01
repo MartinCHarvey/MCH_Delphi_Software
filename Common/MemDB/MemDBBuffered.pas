@@ -1384,14 +1384,14 @@ procedure TMemDBDoubleBuffered.ToScratch(Stream: TStream);
 begin
   inherited;
   Assert(not Assigned(FNextCopy));
-  if AssignedNotSentinel(FCurrentCopy) then
-  begin
-    WrTag(Stream, mstDblBufferedStart);
-    WrStreamChangeType(Stream, mctAdd);
-    FCurrentCopy.ToStream(Stream);
-    WrTag(Stream, mstDblBufferedEnd);
-  end;
-  //Else a NULL item, which we won't stream.
+  //Now always stream current copy here, because enclosing class ToScratch
+  //does not check for NULL. Assumes no races determining NULLness or not.
+
+  //TODO - Retest this.
+  WrTag(Stream, mstDblBufferedStart);
+  WrStreamChangeType(Stream, mctAdd);
+  FCurrentCopy.ToStream(Stream);
+  WrTag(Stream, mstDblBufferedEnd);
 end;
 
 class procedure TMemDBDoubleBuffered.LookaheadHelperGeneric(Stream: TStream;

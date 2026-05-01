@@ -85,13 +85,16 @@ type
   TMemDBJournalCreator = class
 {$ENDIF}
   protected
+    //TODO - Check all cases where this is used, and we should be using what the
+    //*actual* change flags are.
     class procedure ChangeFlagsFromPinned(PinnedCurrent, PinnedNext: TMemDBStreamable;
       var Added:boolean;
       var Changed: boolean;
       var Deleted: boolean;
       var Null: boolean);
-
   public
+    procedure Prepare(const Tid: TTransactionId); virtual; abstract;
+
     procedure ToJournal(const Tid: TTransactionId; Stream: TStream); virtual; abstract;
     procedure ToScratch(const PseudoTid:TTransactionId; Stream: TStream); virtual; abstract;
     procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream); virtual; abstract;
@@ -355,6 +358,11 @@ type
     //Ideally tables maintain their own
     function AnyChanges(const Tid: TTransactionId): boolean; override;
 
+    procedure ChangeFlagsUnderCommitLock(const Tid: TTransactionId;
+      var Added:boolean;
+      var Changed: boolean;
+      var Deleted: boolean;
+      var Null: boolean);
 
     procedure Delete(const TId: TTransactionId;
       MinIso: TMDBIsolationLevel = Low(TMDBIsolationLevel)); override;
@@ -379,6 +387,7 @@ type
     procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream);override;
 
     procedure StartTransaction(const Tid: TTRansactionId); override;
+    procedure Prepare(const Tid: TTransactionId); override;
     procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase); override;
     procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase); override;
     procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase); override;
@@ -395,9 +404,6 @@ type
     //Generally, no un-pin for data. Commit/Rollback will clear.
     //Pins/Refs checked/ cleared at Txion time.
     function PinCurrent(const Tid: TTransactionId; Reason: TPinReason): TMemDBStreamable;
-{$IFDEF DEBUG_PINS}
-    virtual;
-{$ENDIF}
 
     //And in addition to all the ISO checking.
     procedure RequireCurrentAtomic(const Tid: TTransactionId);
@@ -405,9 +411,6 @@ type
     function GetNext(const Tid: TTransactionId): TMemDBStreamable;
     function GetPinLatest(const Tid: TTransactionId;
                             var BufSelected: TAbSelType; Reason: TPinReason): TMemDBStreamable;
-{$IFDEF DEBUG_PINS}
-    virtual;
-{$ENDIF}
 
     //Index pinning is a bit different. We can get the item based on Tid,
     //but it's pinned across transactions. No pin reason, you either add or
@@ -878,6 +881,31 @@ begin
   end;
 end;
 
+procedure TMemDbMultiBuffered.ChangeFlagsUnderCommitLock(const Tid: TTransactionId;
+  var Added:boolean;
+  var Changed: boolean;
+  var Deleted: boolean;
+  var Null: boolean);
+var
+  Cur: PMemDBMultiItem;
+  Nxt: PMemDBMultiItem;
+  CurDat, NxtDat: TMemDBStreamable;
+begin
+  LockSelf;
+  try
+    Cur := FindCurMultiItem;
+    CurDat := Cur.Item;
+    Nxt := FindNxtMultiItem(Tid);
+    if Assigned(Nxt) then
+      NxtDat := Nxt.Item
+    else
+      NxtDat := nil;
+    ChangeFlagsFromPinned(CurDat, NxtDat, Added, Changed, Deleted, Null);
+  finally
+    UnlockSelf;
+  end;
+end;
+
 procedure TMemDBMultiBuffered.Delete(const Tid: TTransactionId; MinIso: TMDBIsolationLevel);
 var
   Cur, Nxt: PMemDbMultiItem;
@@ -1074,6 +1102,13 @@ end;
 procedure TMemDBMultiBuffered.StartTransaction(const Tid: TTRansactionId);
 begin
   Assert(false); //Generally not for double buffered, but yes for entities and DB.
+  //TODO - Refactor class heirarchy in due course.
+end;
+
+procedure TMemDBMultiBuffered.Prepare(const Tid: TTransactionId);
+begin
+  Assert(false); //Generally not for double buffered, but yes for entities and DB.
+  //TODO - Refactor class heirarchy in due course.
 end;
 
 procedure TMemDBMultiBuffered.RequireCurrentAtomic(const Tid: TTransactionId);
@@ -1089,6 +1124,7 @@ begin
     if Assigned(Pin) then
     begin
       //Strict metadata currency checking.
+      //Note, checks even if Cur.Item = NIL. (Delete / resurrect races).
       if Pin.PinnedCurrentTid <> Cur.Sel.TId then
         raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ABORT_WAR_7);
     end;
@@ -1755,11 +1791,20 @@ end;
 
 procedure TMemDbMultiBuffered.ToJournal(const Tid: TTransactionId; Stream: TStream);
 var
+  Cur, Nxt: PMemDbMultiItem;
   Current, Next: TMemDbStreamable;
 begin
+  //Called under commit lock, cur/nxt should not change.
   inherited;
-  Current := PinCurrent(Tid, pinEvolve);
-  Next := GetNext(Tid);
+  LockSelf;
+  try
+    Cur := FindCurMultiItem;
+    Current := Cur.Item;
+    Nxt := FindNxtMultiItem(Tid);
+    Next := Nxt.Item;
+  finally
+    UnlockSelf;
+  end;
   ToJournalPinnedMB(Tid, Stream, Current, Next);
 end;
 
