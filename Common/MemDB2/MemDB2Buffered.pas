@@ -158,16 +158,6 @@ type
     constructor Create;
     procedure Init(const Tid: TTransactionId; Parent: TObject; Name:string; DSName: boolean); virtual;
     procedure DCPHandle(const Update: TReferenceUpdate); override;
-{$IFDEF DEBUG_PINS}
-    function PinCurrent(const Tid: TTransactionId; Reason: TPinReason): TMemDBStreamable; override;
-    function GetPinLatest(const Tid: TTransactionId;
-                            var BufSelected: TAbSelType; Reason: TPinReason): TMemDBStreamable; override;
-
-    procedure StartTransaction(const Tid: TTRansactionId); override;
-    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase); override;
-    procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase); override;
-    procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase); override;
-{$ENDIF}
   end;
 
   //Internal maintenance operations at this level.
@@ -268,12 +258,18 @@ type
   //A temp struct we pass up the stack, to let functions
   //know what's what, and where.
   TMemDBFKMeta = record
+    Tid: TTransactionId;
     TableReferring, TableReferred: TMemDbTablePersistent;
     IndexDefReferring, IndexDefReferred: TMemIndexDef;
     FieldDefsReferring, FieldDefsReferred: TMemFieldDefs;
     //IndexIdx and FieldIdx absolute in rearrangement cases.
     IndexDefReferringAbsIdx, IndexDefReferredAbsIdx: integer;
     FieldDefsReferringAbsIdx, FieldDefsReferredAbsIdx: TFieldOffsets;
+
+    //Indexes in question.
+    IndexReferring, IndexReferred: TMemDBIndex;
+    //Whether newly created, or "evolving"
+    IndexReferringLatestSel, IndexReferredLatestSel: TABSelType;
 
     Lists: TMemDBFKMetaLists;
   end;
@@ -282,27 +278,13 @@ type
   TMemDBForeignKeyPersistent = class(TMemDBEntity)
   private
   protected
-{$IFDEF MEMDB2_TEMP_REMOVE}
-    procedure SetupIndexes(var Meta: TMemDBFKMeta);
-    procedure ClearIndexes(var Meta: TMemDBFKMeta);
+    procedure CreateReferringAddedList(const Meta: TMemDBFKMeta);
+    procedure TrimReferringAddedList(const Meta: TMemDBFKMeta);
+    procedure CreateReferredDeletedList(const Meta: TMemDBFKMeta);
+    procedure TrimReferredDeletedList(const Meta: TMemDBFKMeta);
+    procedure CheckOutstandingCrossRefs(const Meta: TMemDBFKMeta);
 
-    //TODO - Check TIndexSelector, TSubIndexSelType
-    function FindIndexTag(Table: TMemDbTablePersistent;
-                          IndexDef: TMemIndexDef;
-                          var OutChangeset: TIndexChangeset;
-                          SubIndexClass: TIndexSelector): PITagStruct;
-
-    procedure ProcessRow(Row: TMemDBRow;
-                         Ref1, Ref2: TObject; TblList: TMemDbIndexedList);
-
-    procedure CreateCheckForeignKeyRowSets(var Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
-    procedure CreateReferringAddedList(const Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
-    procedure TrimReferringAddedList(const Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
-
-    procedure CreateReferredDeletedList(const Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
-    procedure TrimReferredDeletedList(const Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
-    procedure CheckOutstandingCrossRefs(const Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
-{$ENDIF}
+    procedure CreateCheckForeignKeyRowSets(const Tid: TTransactionId; var Meta: TMemDBFKMeta);
   public
     constructor Create;
     destructor Destroy; override;
@@ -311,7 +293,7 @@ type
     function AnyChangesForTid(const Tid: TTransactionId): boolean; override;
 
     procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase); override;
-
+    procedure Prepare(const Tid: TTransactionId); override;
     procedure ToJournal(const Tid: TTransactionId; Stream: TStream);override;
     procedure ToScratch(const PseudoTid:TTransactionId; Stream: TStream);override;
     procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream);override;
@@ -404,6 +386,7 @@ type
     FTid: TTransactionId;
 
     FDataChanged: boolean;
+    FDataChangePrePrepare: boolean;
     FLayoutChangeRequired: boolean;
     FIndexingChangeRequired: boolean;
 
@@ -479,6 +462,7 @@ type
     function UserWriteRowData(Cursor:TMemDbCursor; FieldList: TMemStreamableList): TMemDBCursor;
 
     property DataChanged: boolean read FDataChanged;
+    property DataChangePrePrepare: boolean read FDataChangePrePrepare write FDataChangePrePrepare;
     property LayoutChangeRequired: boolean read FLayoutChangeRequired;
   end;
 
@@ -580,6 +564,7 @@ type
     constructor Create;
     destructor Destroy; override;
 
+    procedure Prepare(const Tid: TTransactionId); override;
     procedure ToJournal(const Tid: TTransactionId; Stream: TStream); override;
     procedure ToScratch(const PseudoTid:TTransactionId; Stream: TStream); override;
     procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream); override;
@@ -645,6 +630,7 @@ type
   public
     function EntitiesByName(const AB:TBufSelector; Name: string; PinReason: TPinReason): TMemDBEntity;
 
+    procedure Prepare(const Tid: TTransactionId); override;
     procedure ToJournal(const Tid: TTransactionId; Stream: TStream); override;
     procedure ToScratch(const PseudoTid:TTransactionId; Stream: TStream); override;
     procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream); override;
@@ -761,6 +747,8 @@ function DiffLayoutFieldsSame(A: TMemStreamableList; AOffsets: TFieldOffsets;
 function AllFieldsZero(FieldList: TMemStreamableList;
                             const AbsFieldOffsets: TFieldOffsets): boolean;
 
+function FieldOffsetsSame(const A: TFieldOffsets; const B: TFieldOffsets): boolean;
+
 const
   S_TABLE_DATA_CHANGED = 'Cannot change table field layout when uncommitted data changes.';
   S_FIELD_LAYOUT_CHANGED = 'Cannot change table data when uncommited field layout changes.';
@@ -772,9 +760,6 @@ implementation
 
 uses
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
-  GlobalLog,
-{$ENDIF}
-{$IFDEF DEBUG_PINS}
   GlobalLog,
 {$ENDIF}
   SysUtils, MemDB2, NullStream, MemDB2Api;
@@ -848,7 +833,7 @@ const
   S_FK_INDEXES_DIFF_FIELDCOUNT = 'Indexes in foreign key must have same number of associated fields.';
   S_FK_FIELDS_DIFFERENT_TYPES = 'Fields in foreign key relationship must have same types.';
   S_FK_INTERNAL = 'Foreign key validation, internal error.';
-  S_FK_INTERNAL_INDEX_TAG = 'Foreign key validation, internal error: bad index tag';
+  S_FK_INTERNAL_INDEX_SEL = 'Foreign key validation, internal error: index selectors not as expected';
   S_FK_NOT_IN_REFERRED_TABLE = 'Foreign key: trying to add a key not found in referred table.';
   S_FK_IN_REFERRING_TABLE = 'Foreign key: trying to delete a key found in referring table.';
   S_FK_INTERNAL_OVERWRITE = 'Internal error: multiple rename conflicts should have been caught before this point.';
@@ -958,7 +943,48 @@ const
   S_ERROR_PINNING_INTERNAL_INDEX_ADD = 'Error adding pin during internal index modification.';
   S_ERROR_MODIFYING_INTERNAL_INDEX_ADD = 'Error adding to tree during internal index modification.';
   S_ERROR_GETTING_OFFSETS_IN_INDEX_VALIDATE = 'Error getting field defs/offsets during index validation';
+  S_OFFSETS_UNEXPECTED_VALIDATING = 'Unexpected field offsets validating existing index.';
   S_EXPECTED_TID_LOCAL = 'Expected transaction local datastructures.';
+  S_FKEYS_INTERNAL_1 = 'Foreign key checking internal error 1.';
+  S_FKEYS_INTERNAL_2 = 'Foreign key checking internal error 2.';
+  S_FKEYS_INTERNAL_3 = 'Foreign key checking internal error 3.';
+  S_FKEYS_INTERNAL_4 = 'Foreign key checking internal error 4.';
+  S_FKEYS_INTERNAL_5 = 'Foreign key checking internal error 5.';
+  S_FKEYS_INTERNAL_6 = 'Foreign key checking internal error 6.';
+  S_FKEYS_INTERNAL_7 = 'Foreign key checking internal error 7.';
+  S_FKEYS_INTERNAL_8 = 'Foreign key checking internal error 8.';
+  S_FKEYS_INTERNAL_9 = 'Foreign key checking internal error 9.';
+  S_FKEYS_INTERNAL_10 = 'Foreign key checking internal error 10.';
+  S_FKEYS_INTERNAL_11 = 'Foreign key checking internal error 11.';
+  S_FKEYS_INTERNAL_12 = 'Foreign key checking internal error 12.';
+  S_FKEYS_INTERNAL_13 = 'Foreign key checking internal error 13.';
+  S_FKEYS_INTERNAL_14 = 'Foreign key checking internal error 14.';
+  S_FKEYS_INTERNAL_15 = 'Foreign key checking internal error 15.';
+  S_FKEYS_INTERNAL_16 = 'Foreign key checking internal error 16.';
+  S_FKEYS_INTERNAL_17 = 'Foreign key checking internal error 17.';
+  S_FKEYS_INTERNAL_18 = 'Foreign key checking internal error 18.';
+  S_FKEYS_INTERNAL_19 = 'Foreign key checking internal error 19.';
+  S_FKEYS_INTERNAL_20 = 'Foreign key checking internal error 20.';
+  S_FKEYS_INTERNAL_21 = 'Foreign key checking internal error 21.';
+  S_FKEYS_INTERNAL_22 = 'Foreign key checking internal error 22.';
+  S_FKEYS_INTERNAL_23 = 'Foreign key checking internal error 23.';
+  S_FKEYS_INTERNAL_24 = 'Foreign key checking internal error 24.';
+  S_FKEYS_INTERNAL_25 = 'Foreign key checking internal error 25.';
+  S_FKEYS_INTERNAL_26 = 'Foreign key checking internal error 26.';
+  S_FKEYS_INTERNAL_27 = 'Foreign key checking internal error 27.';
+  S_FKEYS_INTERNAL_28 = 'Foreign key checking internal error 28.';
+  S_FKEYS_INTERNAL_29 = 'Foreign key checking internal error 29.';
+  S_FKEYS_INTERNAL_30 = 'Foreign key checking internal error 30.';
+  S_FKEYS_INTERNAL_31 = 'Foreign key checking internal error 31.';
+  S_FKEYS_INTERNAL_32 = 'Foreign key checking internal error 32.';
+  S_FKEYS_INTERNAL_33 = 'Foreign key checking internal error 33.';
+  S_FKEYS_INTERNAL_34 = 'Foreign key checking internal error 34.';
+  S_FKEYS_INTERNAL_35 = 'Foreign key checking internal error 35.';
+  S_FKEYS_INTERNAL_36 = 'Foreign key checking internal error 36.';
+  S_FKEYS_INTERNAL_37 = 'Foreign key checking internal error 37.';
+  S_FKEYS_INTERNAL_38 = 'Foreign key checking internal error 38.';
+  S_FKEYS_INTERNAL_39 = 'Foreign key checking internal error 39.';
+  S_FKEYS_INTERNAL_40 = 'Foreign key checking internal error 40.';
 
 { Misc Functions }
 
@@ -1114,6 +1140,26 @@ begin
       exit;
     end;
   end;
+end;
+
+function FieldOffsetsSame(const A: TFieldOffsets; const B: TFieldOffsets): boolean;
+var
+  i: integer;
+begin
+  if Length(A) <> Length(B) then
+  begin
+    result := false;
+    exit;
+  end;
+  for i := 0 to Pred(Length(A)) do
+  begin
+    if A[i] <> B[i] then
+    begin
+      result := false;
+      exit;
+    end;
+  end;
+  result := true;
 end;
 
 { TMemDBAPI }
@@ -1954,9 +2000,6 @@ var
   OtherTidLocal: TTidLocal;
 begin
   FParentTable := Parent;
-{$IFDEF DEBUG_PINS}
-  GLogLog(SV_INFO, IntToHex(Uint32(self),8) + ' ' + GuidToString(Tid.G) + 'TidLocal init.');
-{$ENDIF}
 
   FTid := Tid;
   FParentTable.FTidLocalLock.Acquire;
@@ -1993,10 +2036,6 @@ begin
   end;
   if Release then
     FParentTable.HandleReleaseForTidLocal(self);
-
-{$IFDEF DEBUG_PINS}
-  GLogLog(SV_INFO, IntToHex(Uint32(self),8) + ' ' + GuidToString(FTid.G) + 'TidLocal destroy.');
-{$ENDIF}
 
   FIndexHelper.Free;
   FFieldHelper.Free;
@@ -2575,6 +2614,7 @@ var
   i, k: integer;
   PartialIndex: boolean;
   Index: TMemDBIndexGeneric;
+  UserIndex: TMemDBIndex;
   IRec: TItemRec;
   Row: TMemDBRow;
   Cur, Nxt, Other: TMemDBStreamable;
@@ -2708,6 +2748,15 @@ begin
         for k := 0 to Pred(Length(CompactOffsets)) do
           CompactOffsets[k] := FieldDefs[k].FieldIndex;
 
+        UserIndex := Index as TMemDBIndex;
+
+        //OK, now we can have the rows being marked as sparse, but since we're
+        //not the index being rebuilt, this should not affect our offsets.
+        if not (FieldOffsetsSame(UserIndex.FinalFieldOffsets, CompactOffsets) and
+          FieldOffsetsSame(UserIndex.SparseFieldOffsets, SparseOffsets) and
+          FieldOffsetsSame(UserIndex.SparseFieldOffsets, UserIndex.FinalFieldOffsets)) then
+          raise EMemDBInternalException.Create(S_OFFSETS_UNEXPECTED_VALIDATING);
+
         IRec := FCPRows.GetAnItem;
         while Assigned(IRec) do
         begin
@@ -2724,7 +2773,7 @@ begin
               Assert(Assigned(Cur));
               Assert(Cur is TMemRowFields);
               CurFields := Cur as TMemRowFields;
-              Assert(not CurFields.Sparse); //We've previously checked sparseness building the index, just assert here.
+              //We've checked compact, sparse offsets all the same.
 
               if CCDef.IndexAttrs * [iaNotEmpty] <> [] then
               begin
@@ -2747,8 +2796,7 @@ begin
                     Assert(Assigned(Other));
                     Assert(Other is TMemRowFields);
                     OtherFields := Other as TMemRowFields;
-                    Assert(not OtherFields.Sparse);
-                    //We've previously checked sparseness building the index, just assert here.
+                    //We've checked compact, sparse offsets all the same.
                   end;
                   if Assigned(OtherFields) then
                   begin
@@ -2879,8 +2927,15 @@ begin
 
         //Swizzle new index onto master index copies.
         Assert(Assigned(FNewBuildIndices[i]));
+        //At this point we should always use final offsets to fields in index:
+        //The index might get "evolved" in the normal "nothing unusual" case,
+        //but the rows are re-marked sparse because of field rearrangements
+        //*which do not affect this specific index any more*.
+        Index := (FNewBuildIndices[i] as TMemDBIndex);
+        Index.SparseFieldOffsets := Index.FinalFieldOffsets;
+
         //FMasterIndexes might have a previous index here on re-build.
-        Index := FParentTable.FMasterIndexes[i] as TMemDBIndex;
+        Index := FParentTable.FMasterIndexes[i] as TMemDBIndex; //Old index to swizzle off.
         FParentTable.FMasterIndexes[i] := FNewBuildIndices[i];
         FNewBuildIndices[i] := Index;
       end
@@ -3720,31 +3775,40 @@ begin
   FProxy.Release;
 end;
 
-procedure TMemDBTablePersistent.ToJournal(const Tid: TTransactionId; Stream: TStream);
+procedure TMemDBTablePersistent.Prepare(const Tid: TTransactionId);
 var
   TidLocal: TTidLocal;
-  Meta: TMemDBStreamable;
-  MetaChange, DataChange: boolean;
-  tmpSelected: TABSelType;
 begin
   TidLocal := GetTidLocal(Tid);
   TidLocal.UpdateLayout(pinEvolve);
-  //TODO - Do I absolutely need to update layout here or not?
-  //I don't think so if always updated on field change.
-  MetaChange := Assigned(META_GetNext(Tid));
 
-  if TidLocal.DataChanged and TidLocal.LayoutChangeRequired then
-    raise EMemDBInternalException.Create(S_DATA_AND_LAYOUT_CHANGE_TO_JOURNAL);
+  //This is unlikely to play well with multiple attempts to commit.
+  TidLocal.DataChangePrePrepare := TidLocal.DataChanged;
 
-  DataChange := TidLocal.DataChanged;
   if TidLocal.LayoutChangeRequired then
   begin
+    if TidLocal.DataChanged then
+      raise EMemDBInternalException.Create(S_DATA_AND_LAYOUT_CHANGE_TO_JOURNAL);
+
     TidLocal.AdjustTableStructureForMetadata;
     if TidLocal.FIndexingChangeRequired then
       TidLocal.BuildValidateNewIndexesOutsideCommitLock;
   end;
+end;
 
-  if MetaChange or DataChange then
+procedure TMemDBTablePersistent.ToJournal(const Tid: TTransactionId; Stream: TStream);
+var
+  TidLocal: TTidLocal;
+  Meta: TMemDBStreamable;
+  MetaChange: boolean;
+  tmpSelected: TABSelType;
+begin
+  TidLocal := GetTidLocal(Tid);
+  //TODO - Do I absolutely need to update layout here or not?
+  //I don't think so if always updated on field change.
+  MetaChange := FMetadata.AnyChangesForTid(Tid);
+
+  if MetaChange or TidLocal.DataChangePrePrepare then
   begin
     WrTag(Stream, mstTableStart);
     if MetaChange then
@@ -3755,7 +3819,7 @@ begin
       Meta := META_GetPinLatest(Tid, tmpSelected, pinEvolve);
       WrStreamString(Stream, (Meta as TMemEntityMetadataItem).EntityName);
     end;
-    if DataChange then
+    if TidLocal.DataChangePrePrepare then
     begin
       TidLocal.ToJournal(Stream);
     end;
@@ -3842,12 +3906,7 @@ begin
 
   ExpectTag(Stream, mstTableEnd);
 
-  if TidLocal.LayoutChangeRequired then
-  begin
-    TidLocal.AdjustTableStructureForMetadata;
-    if TidLocal.FIndexingChangeRequired then
-      TidLocal.BuildValidateNewIndexesOutsideCommitLock;
-  end;
+  //Prepare will be called after this.
 end;
 
 procedure TMemDBTablePersistent.FromScratch(const PseudoTid: TTransactionId; Stream: TStream);
@@ -3876,6 +3935,8 @@ begin
   //Do not expect any contention and all rows modded this txion.
   if TidLocal.FIndexingChangeRequired then
     TidLocal.BuildValidateNewIndexesOutsideCommitLock;
+
+  //Prepare will not be called after this.
 end;
 
 //Called under MetaIndex lock.
@@ -3947,10 +4008,10 @@ begin
     ccpMetaIndex: begin
       TidLocal.IndexCommit;
       inherited;
+      FindRmRowProhibitLock(Tid);
     end;
     ccpCleardown: begin
       TidLocal.Free;
-      FindRmRowProhibitLock(Tid);
     end;
   end;
 end;
@@ -4167,6 +4228,11 @@ begin
   result := FMetadata.AnyChangesForTid(Tid);
 end;
 
+procedure TMemDBForeignKeyPersistent.Prepare(const Tid: TTransactionId);
+begin
+  //NOP.
+end;
+
 procedure TMemDBForeignKeyPersistent.ToJournal(const Tid: TTransactionId; Stream: TStream);
 begin
   if FMetadata.AnyChangesForTid(Tid) then
@@ -4232,10 +4298,12 @@ var
   Meta: TMemDBFKMeta;
   CCMeta: TMemDBFKMeta;
   ff: integer;
+  TidLocal: TTidLocal;
 
 begin
   inherited; //Check Pre-commits metadata.
-  Assert(Phase = pcpFKeys);
+  if not (Phase = pcpFKeys) then
+    raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_1);
 
   FMetadata.RequireCurrentAtomic(Tid); //No changes in our metadata since pinned.
 
@@ -4245,6 +4313,7 @@ begin
 
   if Deleted or Null then
     exit;
+
   FillChar(Meta, sizeof(Meta), 0);
   //Very basic metadata checking.
   (Metadata as TMemDBForeignKeyMetadata).ConsistencyCheck(Tid);
@@ -4256,9 +4325,11 @@ begin
     FKM := CP as TMemForeignKeyMetadataItem
   else
     FKM := nil;
-  Assert(AssignedNotSentinel(FKM));
 
-  //Referring index.
+  if NotAssignedOrsentinel(FKM) then
+    raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_2);
+
+  //Metadata latest selector.
   SelLatest := MakeLatestBufSelector(Tid);
 
   EntityReferring := nil;
@@ -4266,14 +4337,17 @@ begin
   CCEntityReferring := nil;
   CCEntityReferred := nil;
 
+  Meta.Tid := Tid;
+
   try
+    //ReferringIndex.
     EntityReferring := ParentDB.EntitiesByName(SelLatest, FKM.TableReferer, pinFinalCheck);
     if not (Assigned(EntityReferring) and (EntityReferring is TMemDBTablePersistent)) then
       raise EMemDBException.Create(S_FK_TABLE_NOT_FOUND);
     Meta.TableReferring := EntityReferring as TMemDBTablePersistent;
 
     Meta.TableReferring.Metadata.RequireCurrentAtomic(Tid);
-    //TODO. Have a think about this. Probably a bit too draconian.
+    //TODO - Loosen restrictions on atomicity?
 
     M := Meta.TableReferring.Metadata as TMemDBTableMetadata;
     Meta.IndexDefReferring := M.IndexByName(SelLatest, FKM.IndexReferer, Meta.IndexDefReferringAbsIdx, pinFinalCheck);
@@ -4283,7 +4357,59 @@ begin
     Meta.FieldDefsReferring := M.FieldsByNames(SelLatest, Meta.IndexDefReferring.FieldArray, Meta.FieldDefsReferringAbsIdx, pinFinalCheck);
     if Length(Meta.FieldDefsReferring) = 0 then
       raise EMemDBInternalException.Create(S_FK_INDEX_FIELD_INTERNAL);
-    Assert(Length(Meta.FieldDefsReferring) = Length(Meta.FieldDefsReferringAbsIdx));
+
+    if (Length(Meta.FieldDefsReferring) <> Length(Meta.FieldDefsReferringAbsIdx)) then
+      raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_3);
+
+    //Setup Meta struct for index referring.
+    TidLocal := Meta.TableReferring.GetTidLocal(Tid);
+    if (Length(TidLocal.FIndexChangesets) <= Meta.IndexDefReferringAbsIdx)
+      or (TidLocal.FIndexChangesets[Meta.IndexDefReferringAbsIdx] * [ictAdded, ictChangedFieldNumber] = []) then
+    begin
+      //Evolving index, not newly created.
+      Meta.IndexReferring :=
+        Meta.TableReferring.FMasterIndexes[Meta.IndexDefReferringAbsIdx] as TMemDBIndex;
+      Assert(Assigned(Meta.IndexReferring));
+
+      Meta.IndexReferringLatestSel := abNext; //Evolving current to next.
+
+      //Should be using final offsets which agree with abx idxs.
+      if not (FieldOffsetsSame(Meta.IndexReferring.FinalFieldOffsets,
+          Meta.FieldDefsReferringAbsIdx)) then
+          raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_33);
+
+      //Even if row is temporarily marked as sparse for some later field
+      //rearrangement for some later index, it should not affect this idx.
+      if not (FieldOffsetsSame(Meta.IndexReferring.SparseFieldOffsets,
+          Meta.FieldDefsReferringAbsIdx)) then
+          raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_34);
+    end
+    else
+    begin
+      Assert(TidLocal.FNewBuildIndices.Count > Meta.IndexDefReferringAbsIdx);
+      Meta.IndexReferring := TidLocal.FNewBuildIndices[Meta.IndexDefReferringAbsIdx] as TMemDBIndex;
+      Assert(Assigned(Meta.IndexReferring));
+
+      Meta.IndexReferringLatestSel := abCurrent; //Newly created.
+
+      //Okaaaaay. If newly created, we might or might not be using the sparse offsets,
+      //depending on whether index only added, or index added due to field
+      //rearrangement.
+      if TidLocal.LayoutChangeRequired then
+      begin
+        //Expect index to be using sparse offsets.
+        if not (FieldOffsetsSame(Meta.IndexReferring.SparseFieldOffsets,
+            Meta.FieldDefsReferringAbsIdx)) then
+            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_35);
+        //Don't check final offsets here, we're not worried about them.
+      end
+      else
+      begin
+        if not (FieldOffsetsSame(Meta.IndexReferring.FinalFieldOffsets,
+            Meta.FieldDefsReferringAbsIdx)) then
+            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_36);
+      end;
+    end;
 
     //Referred index.
     EntityReferred := ParentDB.EntitiesByName(SelLatest, FKM.TableReferred, pinFinalCheck);
@@ -4292,7 +4418,7 @@ begin
     Meta.TableReferred := EntityReferred as TMemDBTablePersistent;
 
     Meta.TableReferred.Metadata.RequireCurrentAtomic(Tid);
-    //TODO. Have a think about this. Probably a bit too draconian.
+    //TODO - Loosen restrictions on atomicity?
 
     M := Meta.TableReferred.Metadata as TMemDBTableMetadata;
     Meta.IndexDefReferred := M.IndexByName(SelLatest, FKM.IndexReferred, Meta.IndexDefReferredAbsIdx, pinFinalCheck);
@@ -4302,7 +4428,60 @@ begin
     Meta.FieldDefsReferred := M.FieldsByNames(SelLatest, Meta.IndexDefReferred.FieldArray, Meta.FieldDefsReferredAbsIdx, pinFinalCheck);
     if Length(Meta.FieldDefsReferred) = 0 then
       raise EMemDBInternalException.Create(S_FK_INDEX_FIELD_INTERNAL);
-    Assert(Length(Meta.FieldDefsReferred) = Length(Meta.FieldDefsReferredAbsIdx));
+
+    if (Length(Meta.FieldDefsReferred) <> Length(Meta.FieldDefsReferredAbsIdx)) then
+      raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_4);
+
+
+    //Setup Meta struct for index referred.
+    TidLocal := Meta.TableReferred.GetTidLocal(Tid);
+    if (Length(TidLocal.FIndexChangesets) <= Meta.IndexDefReferredAbsIdx)
+      or (TidLocal.FIndexChangesets[Meta.IndexDefReferredAbsIdx] * [ictAdded, ictChangedFieldNumber] = []) then
+    begin
+      //Evolving index, not newly created.
+      Meta.IndexReferred :=
+        Meta.TableReferred.FMasterIndexes[Meta.IndexDefReferredAbsIdx] as TMemDBIndex;
+      Assert(Assigned(Meta.IndexReferred));
+
+      Meta.IndexReferredLatestSel := abNext; //Evolving current to next.
+
+      //Should be using final offsets which agree with abx idxs.
+      if not (FieldOffsetsSame(Meta.IndexReferred.FinalFieldOffsets,
+          Meta.FieldDefsReferredAbsIdx)) then
+          raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_37);
+
+      //Even if row is temporarily marked as sparse for some later field
+      //rearrangement for some later index, it should not affect this idx.
+      if not (FieldOffsetsSame(Meta.IndexReferred.SparseFieldOffsets,
+          Meta.FieldDefsReferredAbsIdx)) then
+          raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_38);
+    end
+    else
+    begin
+      Assert(TidLocal.FNewBuildIndices.Count > Meta.IndexDefReferredAbsIdx);
+      Meta.IndexReferred := TidLocal.FNewBuildIndices[Meta.IndexDefReferredAbsIdx] as TMemDBIndex;
+      Assert(Assigned(Meta.IndexReferred));
+
+      Meta.IndexReferredLatestSel := abCurrent; //Newly created.
+
+      //Okaaaaay. If newly created, we might or might not be using the sparse offsets,
+      //depending on whether index only added, or index added due to field
+      //rearrangement.
+      if TidLocal.LayoutChangeRequired then
+      begin
+        //Expect index to be using sparse offsets.
+        if not (FieldOffsetsSame(Meta.IndexReferred.SparseFieldOffsets,
+            Meta.FieldDefsReferredAbsIdx)) then
+            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_39);
+        //Don't check final offsets here, we're not worried about them.
+      end
+      else
+      begin
+        if not (FieldOffsetsSame(Meta.IndexReferred.FinalFieldOffsets,
+            Meta.FieldDefsReferredAbsIdx)) then
+            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_40);
+      end;
+    end;
 
     //Index uniqueness
     if not (iaUnique in Meta.IndexDefReferred.IndexAttrs) then
@@ -4332,7 +4511,9 @@ begin
 
       FillChar(CCMeta, sizeof(CCMeta), 0);
       FKMCC := CP as TMemForeignKeyMetadataItem;
-      Assert(AssignedNotSentinel(FKMCC));
+      if NotAssignedOrSentinel(FKMCC) then
+        raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_5);
+
       //If we have a current copy (not added), then it must have referred to
       //existing table objects, and those existing table objects must have
       //been present in same copy as CC of our metadata.
@@ -4388,10 +4569,8 @@ begin
       end;
     end;
 
-{$IFDEF MEMDB2_TEMP_REMOVE}
     //And now the grunt work of checking the relation.
-    CreateCheckForeignKeyRowSets(Meta,Reason);
-{$ENDIF}
+    CreateCheckForeignKeyRowSets(Tid, Meta);
   finally
     if Assigned(EntityReferring) then
       EntityReferring.FProxy.Release;
@@ -4404,17 +4583,6 @@ begin
   end;
 end;
 
-type
-  TRowProcessingAction = (rpaReferringAddedFieldsToList,
-                          rpaReferredDeletedFieldsToList,
-                          rpaReferredAddedFieldsToList);
-
-  TProcessRowFKStruct = record
-    OutList: TIndexedStoreO;
-    PMeta: PMemDBFKMeta;
-    Action: TRowProcessingAction;
-  end;
-  PProcessRowFKStruct = ^TProcessRowFKStruct;
 
 {$IFDEF MEMDB2_TEMP_REMOVE}
 
@@ -4541,186 +4709,362 @@ begin
   end;
 end;
 
-procedure TMemDBForeignKeyPersistent.CreateReferringAddedList(const Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
+{$ENDIF}
+
+procedure TMemDBForeignKeyPersistent.CreateReferringAddedList(const Meta: TMemDBFKMeta);
 var
-  PStruct: TProcessRowFKStruct;
-  IRec: TItemRec;
-  RV: TIsRetVal;
+  MasterRows: boolean;
+  CC, NC: TMemDBStreamable;
+  CF, NF: TMemRowFields;
+  Added, Changed, Deleted, Null: boolean;
+  TidLocal: TTidLocal;
+  IRec, IRecAdd: TItemRec;
+  Row: TMemDBRow;
+  AddToList: boolean;
+  IRet: TIsRetVal;
 begin
-  with PStruct do
-  begin
-    OutList := Meta.Lists.FReferringAdded;
-    PMeta := @Meta;
-    Action := rpaReferringAddedFieldsToList;
-    TransReason := Reason;
-  end;
-  if FMetadata.Added then
-  begin
-    //All rows in referring table, even if layout change. (Arrrgh!)
-    IRec := Meta.TableReferring.Data.Store.GetAnItem;
-    while Assigned(IRec) do
-    begin
-      Assert((IRec.Item as TMemDBRow).FStoreBackRec = IRec);
-      ProcessRow(IRec.Item as TMemDBRow, @PStruct, nil, Meta.TableReferring.Data);
-      RV := Meta.TableReferring.Data.Store.GetAnotherItem(IRec);
-      Assert(RV in [rvOK, rvNotFound]);
-    end;
-  end
+  //We know meta is up to date.
+  CC := FMetadata.PinCurrent(Meta.Tid, pinFinalCheck);
+  NC := FMetadata.GetNext(Meta.Tid);
+  FMetadata.ChangeFlagsFromPinned(CC, NC, Added, Changed, Deleted, Null);
+
+  MasterRows := Added;
+  TidLocal := Meta.TableReferring.GetTidLocal(Meta.Tid);
+  if MasterRows then
+    IRec := Meta.TableReferring.FMasterRowList.GetAnItem
+  else if not TidLocal.LayoutChangeRequired then //Layout change -> No rows added.
+    IRec := TidLocal.FCPRows.GetAnItem
   else
+    IRec := nil; //Skip if layout change.
+
+  while Assigned(IRec) do
   begin
-    Assert(Reason <> mtrReplayFromScratch);
-    //Changed rows in referring table unless layout change.
-    if not Meta.TableReferring.LayoutChangeRequired then
-      Meta.TableReferring.Data.ForEachChangedRow(ProcessRow, @PStruct, nil);
+    Row := IRec.Item as TMemDBRow;
+    if MasterRows or Row.AnyChangesForTid(Meta.Tid) then
+    begin
+      CC := Row.PinCurrent(Meta.Tid, pinFinalCheck);
+      NC := Row.GetNext(Meta.Tid);
+
+      Row.ChangeFlagsFromPinned(CC, NC, Added, Changed, Deleted, Null);
+      Row.RequireCurrentAtomic(Meta.Tid); //TODO - Atomicity.
+      if not (Deleted or Null) then
+      begin
+        if Changed then
+        begin
+          AddToList := MasterRows;
+          if not AddToList then
+          begin
+            //We're pinning here not from an index, but "raw".
+            //Need up to date fields. Can be out of date and not caught
+            //by row local pre-commit if iso < repeatable read.
+
+            CF := CC as TMemRowFields;
+            NF := NC as TMemRowFields;
+            //Not TidLocal.LayoutChangeRequired, so neither of these fields
+            //should be sparse.
+            if CF.Sparse or NF.Sparse then
+              raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_6);
+            AddToList := not SameLayoutFieldsSame(CF, NF,
+              Meta.IndexReferring.FinalFieldOffsets);
+          end;
+        end
+        else
+        begin
+          //Must be row added, or MasterRows (meta added, add all rows).
+          if not (Added or MasterRows) then
+            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_7);
+          AddToList := true;
+        end;
+        if AddToList then
+        begin
+          IRet := Meta.Lists.FReferringAdded.AddItem(Row, IRecAdd);
+          if (IRet <> rvOK) then
+            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_14);
+        end;
+      end;
+    end;
+    if MasterRows then
+      Meta.TableReferring.FMasterRowList.GetAnotherItem(IRec)
+    else
+      TidLocal.FCPRows.GetAnotherItem(IRec);
   end;
 end;
 
+
 // N.B This trim is sorta optional:
 // We create list of added rows, and trim those that were already there.
+// This is the case because the index on the referring does not need to be unique,
+// so added is "not really" if it was already there.
+
 // For those which were already there, we know the FK relationships holds,
 // and that value would be re-checked if deleted from referred table.
 //
 // Add after previous ambiguity.
 // If we did not do this trim, it wouldn't affect the results of the FK check.
-procedure TMemDBForeignKeyPersistent.TrimReferringAddedList(const Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
+procedure TMemDBForeignKeyPersistent.TrimReferringAddedList(const Meta: TMemDBFKMeta);
 var
   LookasideRV: TISRetVal;
   LookasideIRec, NextLookasideIRec: TItemRec;
   LookupRow: TMemDbRow;
-  LookupFields: TMemStreamableList;
+  LookupFields: TMemRowFields;
   LookupFieldRecs: TMemDbFieldDataRecs;
-  SearchVal: TMemDBIndexNodeSearchVal;
-  IndexChangeset: TIndexChangeSet;
-  ITag: PITagStruct;
-  DataRV: TISRetVal;
-  DataIRec: TITemRec;
+  SearchVal: TMemDbIndexSearchVal;
+  INode: TMemDBIndexLeaf;
 {$IFOPT C+}
-  DataRow: TMemDBRow;
-  DataFields: TMemStreamableList;
+  DataFields: TMemRowFields;
 {$ENDIF}
+  CC, NC: TMemDBStreamable;
+  Added, Changed, Deleted, Null: boolean;
+  TidLocal: TTidLocal;
+  BufSel: TABSelType;
 begin
-  if not FMetadata.Added then
-  begin
-    if not Meta.TableReferring.LayoutChangeRequired then
-    begin
-      //If table changing layout, no good information about what was there before.
+  CC := FMetadata.PinCurrent(Meta.Tid, pinFinalCheck);
+  NC := FMetadata.GetNext(Meta.Tid);
+  FMetadata.ChangeFlagsFromPinned(CC, NC, Added, Changed, Deleted, Null);
 
+  if not Added then //No trim if relation newly added, all rows considered.
+  begin
+    //If layout change, then no trimming to do, either list is empty,
+    //(no data changed), or list contains all rows (newly added).
+    TidLocal := Meta.TableReferring.GetTidLocal(Meta.Tid);
+
+    if not TidLocal.LayoutChangeRequired then
+    begin
       //We can trim from the list all those items that can be found
       //in the *current* index of the table.
-      SearchVal := TMemDBIndexNodeSearchVal.Create;
-      try
-        //What's the index tag we need to search on?
-        ITag := FindIndexTag(Meta.TableReferring,
-                             Meta.IndexDefReferring,
-                             IndexChangeset,
-                             sicCurrent);
-        if not Assigned(ITag) then
-          raise EMemDBInternalException.Create(S_FK_INTERNAL_INDEX_TAG);
 
-        if ictChangedFieldNumber in IndexChangeset then
-          raise EMemDBInternalException.Create(S_FK_INTERNAL) //Layout changed, should not be here at all.
-        else if ictAdded in IndexChangeset then
-          //What a pity, index only newly calculated, can't use to trim, because
-          //we don't know what was there before.
-          exit;
+      //Cannot encounter newly added index here:
+      //If index newly added this commit then either
+      //a) FK must be newly added, should not get here.
+      //b) LayoutChange has caused newly added index, in which case, no trim.
+      if Meta.IndexReferringLatestSel <> abNext then
+        raise EMemDBInternalException.Create(S_FK_INTERNAL_INDEX_SEL);
+
+      SearchVal := TMemDbIndexSearchVal.Create;
+      try
+        //No fancy calculation of index tag required
+        //Don't need to worry about ChangedFieldNumber or Added, because
+        //LatestSel checks index has been around for at least one commit.
+
+        //Hoist meta check out of loop.
+        if not FieldOffsetsSame(Meta.FieldDefsReferringAbsIdx,
+               Meta.IndexReferring.FinalFieldOffsets) then
+          raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_9);
 
         LookasideIRec := Meta.Lists.FReferringAdded.GetAnItem;
         while Assigned(LookasideIRec) do
         begin
           LookupRow := LookasideIRec.Item as TMemDbRow;
-          LookupFields := LookupRow.ABData[abLatest] as  TMemStreamableList;
-          //Added rows contain latest data always in latest.
-          //And we're gonna be brave and use the AbsIdx we think is always correct.
+          LookupFields := LookupRow.GetPinLatest(Meta.Tid, bufSel, pinFinalCheck) as  TMemRowFields;
+
+          if bufSel = abCurrent then
+            LookupRow.RequireCurrentAtomic(Meta.Tid);
+          //TODO - Atomicity of current, go via IPin from master index instead?
+
+          //As we assume that Index has current and latest, we also assume
+          //fields are not sparse, because no layout change required.
+          if LookupFields.Sparse then
+            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_8);
+
           LookupFieldRecs := BuildMultiDataRecs(LookupFields,
-            Meta.FieldDefsReferringAbsIdx);
-          SearchVal.FieldSearchVals := LookupFieldRecs;
-          DataRV := Meta.TableReferring.Data.Store.FindByIndex(
-            ITag, SearchVal, DataIRec);
-          if DataRV = rvOK then
+            Meta.IndexReferring.FinalFieldOffsets);
+          SearchVal.FFieldSearchVals := LookupFieldRecs;
+
+          //Now find in current version of index.
+          INode := Meta.IndexReferring.Find(abCurrent, SearchVal);
+          if Assigned(INode) then
           begin
 {$IFOPT C+}
             //Let's just check.
-            DataRow := DataIRec.Item as TMemDBRow;
-            DataFields := DataRow.ABData[abCurrent] as TMemStreamableList;
-            Assert(SameLayoutFieldsSame(LookupFields, DataFields,
-              Meta.FieldDefsReferringAbsIdx));
+            DataFields := INode.Pinned as TMemRowFields;
+            if DataFields.Sparse then
+              raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_10);
+            if not SameLayoutFieldsSame(LookupFields, DataFields,
+              Meta.IndexReferring.FinalFieldOffsets) then
+              raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_11);
 {$ENDIF}
           end;
           NextLookasideIRec := LookasideIRec;
           LookasideRV := Meta.Lists.FReferringAdded.GetAnotherItem(NextLookasideIRec);
-          Assert(LookasideRV in [rvOK, rvNotFound]);
-          if DataRV = rvOK then
+          if not (LookasideRV in [rvOK, rvNotFound]) then
+            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_12);
+          if Assigned(INode) then
           begin
             LookasideRV := Meta.Lists.FReferringAdded.RemoveItem(LookasideIRec);
-            Assert(LookasideRV in [rvOK]);
+            if LookasideRV <> rvOK then
+              raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_13);
           end;
           LookasideIRec := NextLookasideIRec;
         end;
       finally
-        SearchVal.Free;
+        SearchVal.Release;
       end;
     end;
   end;
 end;
 
 
-procedure TMemDBForeignKeyPersistent.CreateReferredDeletedList(const Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
+procedure TMemDBForeignKeyPersistent.CreateReferredDeletedList(const Meta: TMemDBFKMeta);
 var
-  PStruct: TProcessRowFKStruct;
+  CC, NC: TMemDbStreamable;
+  Added, Changed, Deleted, Null: boolean;
+  TidLocal: TTidLocal;
+  IRec, IRecAdd: TItemRec;
+  RV: TIsRetVal;
+  Row: TMemDBRow;
+  AddToList: boolean;
+  CurFields, NxtFields: TMemRowFields;
 begin
-  if not FMetadata.Added then
+  CC := FMetadata.PinCurrent(Meta.Tid, pinFinalCheck);
+  NC := FMetadata.GetNext(Meta.Tid);
+  FMetadata.ChangeFlagsFromPinned(CC, NC, Added, Changed, Deleted, Null);
+  if not Added then
   begin
-    if not Meta.TableReferred.LayoutChangeRequired then
+    TidLocal := Meta.TableReferred.GetTidLocal(Meta.Tid);
+    if not TidLocal.LayoutChangeRequired then
     begin
-      with PStruct do
+      //Hoist meta check out of loop.
+      if not FieldOffsetsSame(Meta.IndexReferred.FinalFieldOffsets,
+        Meta.FieldDefsReferredAbsIdx) then
+        raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_15);
+
+      IRec := TidLocal.FCPRows.GetAnItem;
+      while Assigned(IRec) do
       begin
-        OutList := Meta.Lists.FReferredDeleted;
-        PMeta := @Meta;
-        Action := rpaReferredDeletedFieldsToList;
-        TransReason := Reason;
+        Row := IRec.Item as TMemDBRow;
+        if Row.AnyChangesForTid(Meta.Tid) then
+        begin
+          CC := Row.PinCurrent(Meta.Tid, pinFinalCheck);
+          NC := Row.GetNext(Meta.Tid);
+          //Already caught at all Isos >= ilRepeatableRead, however...
+          Row.RequireCurrentAtomic(Meta.Tid); //TODO - Atomicity.
+          Row.ChangeFlagsFromPinned(CC, NC, Added, Changed, Deleted, Null);
+          if not Added then
+          begin
+            if Deleted then
+              AddToList := true
+            else if Changed then
+            begin
+              CurFields := CC as TMemRowFields;
+              NxtFields := NC as TMemRowFields;
+              //Deleted rows / value sets cannot be sparse, previous changes
+              //must have been committed.
+              if CurFields.Sparse or NxtFields.Sparse then
+                raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_16);
+
+              AddToList := not SameLayoutFieldsSame(CurFields, NxtFields,
+                Meta.IndexReferred.FinalFieldOffsets);
+            end
+            else //Should always be added, deleted or changed.
+              raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_17);
+
+            if AddToList then
+            begin
+              RV := Meta.Lists.FReferredDeleted.AddItem(Row, IRecAdd);
+              if RV <> rvOK then
+                raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_18);
+            end;
+          end;
+        end;
+        TidLocal.FCPRows.GetAnotherItem(IRec);
       end;
-      Meta.TableReferred.Data.ForEachChangedRow(ProcessRow, @PStruct, nil);
     end;
   end;
 end;
+
 
 // N.B. This trim is not quite so optional.
 //
 // We make a note of all rows deleted, but then trim those, where another
 // row with the same value has simultaneously been re-added into the table.
+// In this case, the index is unique, so deleted is "not really"
+// if re-added somewhere else.
 //
 // If we removed this trim, then a simultaneous delete-readd would fail the FK
 // relationship, where arguably, it shouldn't.
 // Issue of semantics as to whether you allow a delete,re-add on rows which
 // are depended on by another table.
-procedure TMemDBForeignKeyPersistent.TrimReferredDeletedList(const Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
+procedure TMemDBForeignKeyPersistent.TrimReferredDeletedList(const Meta: TMemDBFKMeta);
 var
-  PStruct: TProcessRowFKStruct;
-  DeletedRV, AddedRV: TISRetVal;
-  DelRow:TMemDBRow;
-  DeletedIRec, NextDeletedIRec, AddedIRec: TItemRec;
-  DelDel: boolean;
   SearchVal: TMemDBRowLookasideSearchVal;
-  DelFields: TMemDbFieldDataRecs;
 {$IFOPT C+}
   AddRow: TMemDBRow;
+  AddRowFields: TMemRowFields;
 {$ENDIF}
+  CC, NC: TMemDBStreamable;
+  Added, Changed, Deleted, Null: boolean;
+  TidLocal: TTidLocal;
+  IRec, IRecAdd: TItemRec;
+  Row: TMemDBRow;
+  AddToList: boolean;
+  CurFields, NextFields: TMemRowFields;
+  RV, AddedRV, DeletedRV: TIsRetVal;
+  DeletedIRec, NextDeletedIRec, AddedIRec: TItemRec;
+  DelRow: TMemDBRow;
+  DelRowFields: TMemRowFields;
+  DelFields: TMemDBFieldDataRecs;
+  DelDel: boolean;
+
 begin
-  if not FMetadata.Added then
+  CC := FMetadata.PinCurrent(Meta.Tid, pinFinalCheck);
+  NC := FMetadata.GetNext(Meta.Tid);
+  FMetadata.ChangeFlagsFromPinned(CC, NC, Added, Changed, Deleted, Null);
+
+  if not Added then //If newly added, referred deleted list empty.
   begin
-    if not Meta.TableReferred.LayoutChangeRequired then
+    TidLocal := Meta.TableReferred.GetTidLocal(Meta.Tid);
+
+    if not TidLocal.LayoutChangeRequired then //If layout change required, referred deleted list empty.
     begin
       SearchVal := TMemDBRowLookasideSearchVal.Create;
       try
-        //Create a referred added list if applicable, and difference the lists.
-        with PStruct do
+        //Hoist meta check out of loop, we'll need this index in a bit.
+        if not FieldOffsetsSame(Meta.FieldDefsReferredAbsIdx,
+               Meta.IndexReferred.FinalFieldOffsets) then
+          raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_19);
+
+        IRec := TidLocal.FCPRows.GetAnItem;
+        //Created referred added list.
+        while Assigned(IRec) do
         begin
-          OutList := Meta.Lists.FReferredAdded;
-          PMeta := @Meta;
-          Action := rpaReferredAddedFieldsToList;
-          TransReason := Reason;
+          Row := IRec.Item as TMemDBRow;
+          if Row.AnyChangesForTid(Meta.Tid) then
+          begin
+            CC :=  Row.PinCurrent(Meta.Tid, pinFinalCheck);
+            NC := Row.GetNext(Meta.Tid);
+
+            Row.RequireCurrentAtomic(Meta.Tid); //TODO - Atomicity.
+            Row.ChangeFlagsFromPinned(CC, NC, Added, Changed, Deleted, Null);
+            if not Deleted then
+            begin
+              if Added or Changed then
+              begin
+                AddToList := Added;
+                if not AddToList then
+                begin
+                  CurFields := CC as TMemRowFields;
+                  NextFields := NC as TMemRowFields;
+
+                  if CurFields.Sparse or NextFields.Sparse then
+                    raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_20);
+
+                  AddToList := not SameLayoutFieldsSame(CurFields, NextFields,
+                    Meta.FieldDefsReferredAbsIdx);
+                end;
+              end
+              else //Do not expect unchanged rows here.
+                raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_21);
+              //OK, add to lookaside.
+              if AddToList then
+              begin
+                RV := Meta.Lists.FReferredAdded.AddItem(Row, IRecAdd);
+                if not (RV in [rvOK, rvDuplicateKey]) then
+                  raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_22);
+              end;
+            end;
+          end;
+          TidLocal.FCPRows.GetAnotherItem(IRec);
         end;
-        Meta.TableReferred.Data.ForEachChangedRow(ProcessRow, @PStruct, nil);
 
         //Now do a bit of differencing.
 
@@ -4730,23 +5074,45 @@ begin
         while Assigned(DeletedIRec) do
         begin
           DelRow := DeletedIRec.Item as TMemDBRow;
-          DelFields := BuildMultiDataRecs(DelRow.ABData[abCurrent] as TMemStreamableList,
-            Meta.FieldDefsReferredAbsIdx);
+
+          CC := DelRow.PinCurrent(Meta.Tid, pinFinalCheck);
+          //Row already in lookaside, concurrency checks done.
+          //Row is deleted row, so no further type checking needed.
+          DelRowFields := CC as TMemRowFields;
+          DelFields := BuildMultiDataRecs(DelRowFields, Meta.FieldDefsReferredAbsIdx);
+
           SearchVal.FieldSearchVals := DelFields;
+
           AddedRV := Meta.Lists.FReferredAdded.FindByIndex(
-            @Meta.Lists.TagReferredAddedNext, SearchVal, AddedIRec);
-          Assert(AddedRV in [rvOK, rvNotFound]);
+            @Meta, SearchVal, AddedIRec);
+          if not (AddedRV in [rvOK, rvNotFound]) then
+            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_23);
+          //DelDel => Entry in referred deleted also in referred added.
           DelDel := AddedRV = rvOK;
 
+          //Next IRec round the loop.
           NextDeletedIRec := DeletedIRec;
           DeletedRV := Meta.Lists.FReferredDeleted.GetAnotherItem(NextDeletedIRec);
-          Assert(DeletedRV in [rvOK, rvNotFound]);
+          if not (DeletedRV in [rvOK, rvNotFound]) then
+            raise EMemDbInternalException.Create(S_FKEYS_INTERNAL_24);
+
           if DelDel then
           begin
 {$IFOPT C+}
+            //AddRow is the referred added item we seached for to determine
+            //deleted row is not really deleted.
             AddRow := AddedIRec.Item as TMemDBRow;
-            Assert(SameLayoutFieldsSame(AddRow.ABData[abNext] as TMemStreamableList,
-              DelRow.ABData[abCurrent] as TMemStreamableList, Meta.FieldDefsReferredAbsIdx));
+            //Debug check that row we're not really deleting is indeed same as
+            //newly added row.
+            // Deleted row fields in DelRowFields.
+            AddRowFields := AddRow.GetNext(Meta.Tid) as TMemRowFields;
+
+            //No fields sparse: if layout change no lists here to trim.
+            if AddRowFields.Sparse or DelRowFields.Sparse then
+              raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_25);
+
+            Assert(SameLayoutFieldsSame(AddRowFields,
+              DelRowFields, Meta.FieldDefsReferredAbsIdx));
 {$ENDIF}
             DeletedRV := Meta.Lists.FReferredDeleted.RemoveItem(DeletedIRec);
             Assert(DeletedRV = rvOK);
@@ -4760,185 +5126,131 @@ begin
   end;
 end;
 
-function TMemDBForeignKeyPersistent.FindIndexTag(Table: TMemDbTablePersistent;
-                          IndexDef: TMemIndexDef;
-                          var OutChangeset: TIndexChangeset;
-                          SubIndexClass: TSubIndexClass): PITagStruct;
+
+procedure TMemDBForeignKeyPersistent.CheckOutstandingCrossRefs(const Meta: TMemDBFKMeta);
 var
-  LatestTableMeta: TMemTableMetadataItem;
-  idx: integer;
-  IndexOffset: integer;
-  TagData: TMemDBITagData;
-
-begin
-  //Calculate index tag for referring / referred.
-  IndexOffset := -1;
-  //Latest metadata even though current index.
-  LatestTableMeta := Table.Metadata.ABData[abLatest] as TMemTableMetadataItem;
-  //Find the absolute index offset
-  for idx := 0 to Pred(LatestTableMeta.IndexDefs.Count) do
-  begin
-    if LatestTableMeta.IndexDefs.Items[idx] = IndexDef then
-    begin
-      IndexOffset := idx;
-      break;
-    end;
-  end;
-  if IndexOffset < 0 then
-  begin
-    OutChangeset := [];
-    result := nil;
-  end
-  else
-  begin
-    //Get the index changeset attributes.
-    Assert((Length(Table.FIndexChangesets) = 0)
-      or (IndexOffset < Length(Table.FIndexChangesets)));
-
-    if Length(Table.FIndexChangesets) > 0 then
-      OutChangeset := Table.FIndexChangesets[IndexOffset]
-    else
-      OutChangeset := [];
-
-    TagData := Table.FTagDataList[IndexOffset];
-    if ictChangedFieldNumber in OutChangeset then
-    begin
-      Table.CheckTagAgreesWithMetadata(IndexOffset, TagData, tciTemporaryAgreesBoth, tcpProgrammed);
-      result := TagData.TagStructs[SubIndexClass];
-    end
-    else if ictAdded in OutChangeset then
-    begin
-      Table.CheckTagAgreesWithMetadata(IndexOffset, TagData, tciTemporaryAgreesNextOnly, tcpProgrammed);
-      result := TagData.TagStructs[SubIndexClass];
-    end
-    else
-    begin
-      Table.CheckTagAgreesWithMetadata(IndexOffset, TagData, tciPermanentAgreesCurrent, tcpProgrammed);
-      result := TagData.TagStructs[SubIndexClass];
-    end;
-  end;
-end;
-
-procedure TMemDBForeignKeyPersistent.CheckOutstandingCrossRefs(const Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
-var
-  SearchVal: TMemDBIndexNodeSearchVal;
-  ListRetVal, DataRetVal: TISRetVal;
-  ListIRec, DataIRec: TItemRec;
-  ITag: PITagStruct;
-  IndexChangeset: TIndexChangeset;
+  SearchVal: TMemDBIndexSearchVal;
+  ListIRec: TItemRec;
   ListRow: TMemDbRow;
+  ListRowFields: TMemRowFields;
   ListDataRecs: TMemDbFieldDataRecs;
+  Offsets: TFieldOffsets;
+  LeafRet: TMemDbIndexLeaf;
 {$IFOPT C+}
-  DataRow: TMemDBRow;
+  SearchRow: TMemDBRow;
+  SearchRowFields: TMemRowFields;
+  SearchOffsets: TFieldOffsets;
 {$ENDIF}
-
+  bufSel: TABSelType;
 begin
   //OK, so we now need to check:
   //1. That for every item in Referrer added, there is an entry in referred table.
   //2. That for every entry in Referred deleted, there is no entry in referrer table.
-  SearchVal := TMemDBIndexNodeSearchVal.Create;
+
+  //Check referring added values in referred.
+  SearchVal := TMemDBIndexSearchVal.Create;
   try
-    //Check new vales in referrer exist in referred.
-    ITag := FindIndexTag(Meta.TableReferred,
-                         Meta.IndexDefReferred,
-                         IndexChangeset,
-                         sicLatest);
-    if not Meta.TableReferred.Data.Store.HasIndex(ITag) then
-      raise EMemDBInternalException.Create(S_FK_INTERNAL);
     ListIRec := Meta.Lists.FReferringAdded.GetAnItem;
     while Assigned(ListIRec) do
     begin
       ListRow := ListIRec.Item as TMemDbRow;
+      //Row in lookaside lists, concurrency and sentinel checking done,
+      ListRowFields := ListRow.GetPinLatest(Meta.Tid, bufSel, pinFinalCheck) as TMemRowFields;
+
+      //However, fields can be sparse in added list.
+      if ListRowFields.Sparse then
+        Offsets := Meta.IndexReferring.SparseFieldOffsets
+      else
+        Offsets := Meta.IndexReferring.FinalFieldOffsets;
+
+      if not FieldOffsetsSame(Offsets, Meta.FieldDefsReferringAbsIdx) then
+        raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_26);
+
       //Referring added, new values in abLatest, cos can add from scratch too.
-      ListDataRecs := BuildMultiDataRecs(ListRow.ABData[abLatest] as TMemStreamableList,
+      ListDataRecs := BuildMultiDataRecs(ListRowFields,
         Meta.FieldDefsReferringAbsIdx);
-      SearchVal.FieldSearchVals := ListDataRecs;
-      DataRetVal := Meta.TableReferred.Data.Store
-        .FindByIndex(TObject(ITag), SearchVal, DataIRec);
-      Assert(DataRetVal in [rvOK, rvNotFound]);
-      if DataRetVal <> rvOK then
+
+      SearchVal.FFieldSearchVals := ListDataRecs;
+
+      //Now look in referred table latest index for something in referrer.
+      LeafRet := Meta.IndexReferred.Find(Meta.IndexReferredLatestSel, SearchVal);
+      if not Assigned(LeafRet) then
         raise EMemDBConsistencyException.Create(S_FK_NOT_IN_REFERRED_TABLE);
+
 {$IFOPT C+}
-        //Just check the fields really match.
-        DataRow := DataIRec.Item as TMemDBRow;
-        Assert(DiffLayoutFieldsSame(ListRow.ABData[abLatest] as TMemStreamableList,
-                             Meta.FieldDefsReferringAbsIdx,
-                             DataRow.ABData[abLatest] as TMemStreamableList,
-                             Meta.FieldDefsReferredAbsIdx));
+      //OK, check fields match.
+      SearchRow := LeafRet.Row as TMemDBRow;
+      SearchRowFields := SearchRow.GetPinLatest(Meta.Tid, bufSel, pinFinalCheck) as TMemRowFields;
+
+      //General offsets, can be sparse.
+      if SearchRowFields.Sparse then
+        SearchOffsets := Meta.IndexReferred.SparseFieldOffsets
+      else
+        SearchOffsets := Meta.IndexReferred.FinalFieldOffsets;
+
+      if not FieldOffsetsSame(SearchOffsets, Meta.FieldDefsReferredAbsIdx) then
+        raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_27);
+
+      if not (DiffLayoutFieldsSame(ListRowFields, Offsets,
+                                   SearchRowFields, SearchOffsets)) then
+        raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_28);
 {$ENDIF}
-      ListRetVal := Meta.Lists.FReferringAdded.GetAnotherItem(ListIRec);
-      Assert(ListRetVal in [rvOK, rvNotFound]);
+      Meta.Lists.FReferringAdded.GetAnotherItem(ListIRec);
     end;
-    //Check deleted values in referred not in referrer.
-    ITag := FindIndexTag(Meta.TableReferring,
-                         Meta.IndexDefReferring,
-                         IndexChangeset, sicLatest);
-    if not Meta.TableReferring.Data.Store.HasIndex(ITag) then
-      raise EMemDBInternalException.Create(S_FK_INTERNAL);
+
+    //Check deleted values in referred not in referring.
+
     ListIRec := Meta.Lists.FReferredDeleted.GetAnItem;
     while Assigned(ListIRec) do
     begin
       ListRow := ListIrec.Item as TMemDBRow;
       //Referred deleted, old values in abCurrent.
-      ListDataRecs := BuildMultiDataRecs(ListRow.ABData[abCurrent] as TMemStreamableList,
-        Meta.FieldDefsReferredAbsIdx);
-      SearchVal.FieldSearchVals := ListDataRecs;
-      DataRetVal := Meta.TableReferring.Data.Store
-        .FindByIndex(TObject(ITag), SearchVal, DataIRec);
-      Assert(DataRetVal in [rvOK, rvNotFound]);
-      if DataRetVal = rvOK then
+      ListRowFields := ListRow.PinCurrent(Meta.Tid, pinFinalCheck) as TMemRowFields;
+
+      //Referred deleted not sparse.
+      if ListRowFields.Sparse then
+        raise EMemDbInternalException.Create(S_FKEYS_INTERNAL_29);
+
+      Offsets := Meta.IndexReferred.FinalFieldOffsets;
+      if not FieldOffsetsSame(Offsets, Meta.FieldDefsReferredAbsIdx) then
+        raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_30);
+
+      ListDataRecs := BuildMultiDataRecs(ListRowFields, Meta.IndexReferred.FinalFieldOffsets);
+
+      SearchVal.FFieldSearchVals := ListDataRecs;
+
+      //Now look in referring table latest index for something in referred.
+      LeafRet := Meta.IndexReferring.Find(Meta.IndexReferringLatestSel, SearchVal);
+      if Assigned(LeafRet) then
       begin
 {$IFOPT C+}
         //Just check the fields really match.
-        DataRow := DataIRec.Item as TMemDBRow;
-        Assert(DiffLayoutFieldsSame(ListRow.ABData[abCurrent] as TMemStreamableList,
-            Meta.FieldDefsReferredAbsIdx,
-            DataRow.ABData[abLatest] as TMemStreamableList,
-            Meta.FieldDefsReferringAbsIdx));
+        SearchRow := LeafRet.Row as TMemDBRow;
+        SearchRowFields := SearchRow.GetPinLatest(Meta.Tid, bufSel, pinFinalCheck) as TMemRowFields;
+
+        //General offsets, can be sparse.
+        if SearchRowFields.Sparse then
+          SearchOffsets := Meta.IndexReferring.SparseFieldOffsets
+        else
+          SearchOffsets := Meta.IndexReferring.FinalFieldOffsets;
+
+        if not FieldOffsetsSame(SearchOffsets, Meta.FieldDefsReferringAbsIdx) then
+          raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_31);
+
+        if not DiffLayoutFieldsSame(ListRowFields, Offsets,
+                                    SearchRowFields, SearchOffsets) then
+          raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_32);
 {$ENDIF}
         raise EMemDBConsistencyException.Create(S_FK_IN_REFERRING_TABLE);
       end;
-      ListRetVal := Meta.Lists.FReferredDeleted.GetAnotherItem(ListIRec);
-      Assert(ListRetVal in [rvOK, rvNotFound]);
+
+      Meta.Lists.FReferredDeleted.GetAnotherItem(ListIRec);
     end;
   finally
-    SearchVal.Free;
+    SearchVal.Release;
   end;
 end;
 
-
-procedure TMemDbForeignKeyPersistent.SetupIndexes(var Meta: TMemDBFkMeta);
-var
-  RV: TIsRetVal;
-begin
-  with Meta.Lists do
-  begin
-    TagReferredAddedNext.abBuf := abNext;
-    TagReferredAddedNext.FieldAbsIdxs := CopyFieldOffsets(Meta.FieldDefsReferredAbsIdx);
-    SyncFastOffsets(TagReferredAddedNext.FieldAbsIdxs, TagReferredAddedNext.FieldAbsIdxsFast);
-
-    FReferringAdded := TIndexedStoreO.Create;
-    FReferredDeleted := TIndexedStoreO.Create;
-    FReferredAdded := TIndexedStoreO.Create;
-    RV := FReferredAdded.AddIndex(TMemDBRowLookasideIndexNode, @TagReferredAddedNext, false);
-    Assert(RV = rvOK);
-  end;
-end;
-
-procedure TMemDbForeignKeyPersistent.ClearIndexes(var Meta: TMemDBFkMeta);
-begin
-  with Meta.Lists do
-  begin
-    FReferringAdded.Free;
-    FReferredDeleted.Free;
-    FReferredAdded.Free;
-    FReferringAdded := nil;
-    FReferredDeleted := nil;
-    FReferredAdded := nil;
-    SetLength(TagReferredAddedNext.FieldAbsIdxs, 0);
-    SyncFastOffsets(TagReferredAddedNext.FieldAbsIdxs, TagReferredAddedNext.FieldAbsIdxsFast);
-  end;
-end;
 
   //Referential integrity is violated when:
   //1. Rows / data are added to the Referring that do not exist in the referred.
@@ -4973,24 +5285,39 @@ end;
   //For each item left in referring added list, there should be a row in the referrer table.
   //For each item left in the referred deleted list, there should not be a row in the referring table.
 
-procedure TMemDBForeignKeyPersistent.CreateCheckForeignKeyRowSets(var  Meta: TMemDBFKMeta; Reason: TMemDBTransReason);
+
+procedure TMemDBForeignKeyPersistent.CreateCheckForeignKeyRowSets(const Tid: TTransactionId; var  Meta: TMemDBFKMeta);
+var
+  TidLocal: TTidLocal;
+  RV: TISRetVal;
 begin
-  //Create some "lookaside lists" of values that have been added / deleted.
-  //The store contains TMemFieldData items.
+  with Meta.Lists do
+  begin
+    FReferringAdded := TIndexedStoreO.Create;
+    FReferredDeleted := TIndexedStoreO.Create;
+    FReferredAdded := TIndexedStoreO.Create;
+    RV := FReferredAdded.AddIndex(TMemDBRowLookasideIndexNode, @Meta, false);
+    if RV <> rvOK then
+      raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_19);
+  end;
+
   try
     //N.B. Indexed store gives us a "duplicate key" error code, which we should use.
-    SetupIndexes(Meta);
-    CreateReferringAddedList(Meta, Reason);
-    TrimReferringAddedList(Meta, Reason);
-    CreateReferredDeletedList(Meta, Reason);
-    TrimReferredDeletedList(Meta, Reason);
-    CheckOutstandingCrossRefs(Meta, Reason);
+    CreateReferringAddedList(Meta);
+    TrimReferringAddedList(Meta);
+    CreateReferredDeletedList(Meta);
+    TrimReferredDeletedList(Meta);
+    CheckOutstandingCrossRefs(Meta);
   finally
-    ClearIndexes(Meta);
+    with Meta.Lists do
+    begin
+      FReferringAdded.Free;
+      FReferredDeleted.Free;
+      FReferredAdded.Free;
+    end;
   end;
 end;
 
-{$ENDIF}
 
 //TODO - This can be optimised considerably if API only deals in latest names etc.
 function TMemDBForeignKeyPersistent.HandleAPITableRename(const Sel: TBufSelector; OldName, NewName: string): boolean;
@@ -5232,12 +5559,9 @@ end;
 
 procedure TMemDBRow.ToJournal(const Tid: TTransactionId; Stream: TStream);
 var
-  Current, Next: TMemDbStreamable;
   Added, Changed, Deleted, Null: boolean;
 begin
-  Current := PinCurrent(Tid, pinEvolve);
-  Next := GetNext(Tid);
-  ChangeFlagsFromPinned(Current, Next, Added, Changed, Deleted, Null);
+  ChangeFlagsUnderCommitLock(Tid, Added, Changed, Deleted, Null);
   if Added or Changed or Deleted then
   begin
     WrTag(Stream, mstRowStartV2);
@@ -5464,47 +5788,6 @@ begin
   FEntity.MetadataDCPHandle(self, Update);
   inherited;
 end;
-
-{$IFDEF DEBUG_PINS}
-function TMemDBEntityMetadata.PinCurrent(const Tid: TTransactionId; Reason: TPinReason): TMemDBStreamable;
-begin
-  //TODO - MinIso / RequireAtomic for metadata pinning.
-  GLogLog(SV_INFO, IntToHex(Uint32(self),8) + ' ' + GuidToString(Tid.G) + 'PinCurrent.');
-  result := inherited;
-end;
-
-function TMemDBEntityMetadata.GetPinLatest(const Tid: TTransactionId;
-                        var BufSelected: TAbSelType; Reason: TPinReason): TMemDBStreamable;
-begin
-  GLogLog(SV_INFO, IntToHex(Uint32(self),8) + ' ' + GuidToString(Tid.G) + 'GetPinLatest.');
-  result := inherited;
-end;
-
-procedure TMemDBEntityMetadata.StartTransaction(const Tid: TTRansactionId);
-begin
-  GLogLog(SV_INFO, IntToHex(Uint32(self),8) + ' ' + GuidToString(Tid.G) + 'StartTransaction.');
-  inherited;
-end;
-
-procedure TMemDBEntityMetadata.PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase);
-begin
-  GLogLog(SV_INFO, IntToHex(Uint32(self),8) + ' ' + GuidToString(Tid.G) + 'PreCommit.');
-  inherited;
-end;
-
-procedure TMemDBEntityMetadata.Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase);
-begin
-  GLogLog(SV_INFO, IntToHex(Uint32(self),8) + ' ' + GuidToString(Tid.G) + 'Commit.');
-  inherited;
-end;
-
-procedure TMemDBEntityMetadata.Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase);
-begin
-  GLogLog(SV_INFO, IntToHex(Uint32(self),8) + ' ' + GuidToString(Tid.G) + 'Rollback.');
-  inherited;
-end;
-
-{$ENDIF}
 
 { TMemDbTableMetadata }
 
@@ -5825,9 +6108,6 @@ var
   ProxI: TMemDBEntityProxy;
   ObjI: TMemDBEntity;
 begin
-{$IFDEF DEBUG_PINS}
-  GLogLog(SV_INFO, IntToHex(Uint32(self),8) + ' ' + GuidToString(Tid.G) + 'DB Start Transaction.');
-{$ENDIF}
   inherited;
   EntityList := AssembleEntityList;
   try
@@ -5855,10 +6135,6 @@ var
   SelType: TABSelType;
   Names: TStringList;
 begin
-{$IFDEF DEBUG_PINS}
-  GLogLog(SV_INFO, IntToHex(Uint32(self),8) + ' ' + GuidToString(Tid.G) + 'DB PreCommit.');
-{$ENDIF}
-
   //Pre-commit check and no-pin goes from top to bottom.
   inherited;
   EntityList := AssembleEntityList;
@@ -5998,6 +6274,26 @@ begin
     raise EMemDBException.Create(S_DATABASE_LOOKAHEAD_FAILED + IntToStr(Ord(Tag)));
   end;
   Stream.Seek(Pos, TSeekOrigin.soBeginning);
+end;
+
+procedure TMemDBDatabasePersistent.Prepare(const Tid: TTransactionId);
+var
+  EntityList: TReffedList;
+  Prox: TMemDBEntityProxy;
+  Entity: TMemDBEntity;
+  i: integer;
+begin
+  EntityList := AssembleEntityList;
+  try
+    for i := 0 to Pred(EntityList.Count) do
+    begin
+      Prox := EntityList.Items[i] as TMemDBEntityProxy;
+      Entity := Prox.Proxy as TMemDBEntity;
+      Entity.Prepare(Tid);
+    end;
+  finally
+    EntityList.Release;
+  end;
 end;
 
 procedure TMemDBDatabasePersistent.ToJournal(const Tid: TTransactionId; Stream: TStream);
@@ -6209,9 +6505,6 @@ var
   i: integer;
 begin
   inherited;
-{$IFDEF DEBUG_PINS}
-  GLogLog(SV_INFO, IntToHex(Uint32(self),8) + ' ' + GuidToString(Tid.G) + 'DB Commit.');
-{$ENDIF}
   EntityList := AssembleEntityList;
   try
     for i := 0 to Pred(EntityList.Count) do
@@ -6233,9 +6526,6 @@ var
   i: integer;
 begin
   inherited;
-{$IFDEF DEBUG_PINS}
-  GLogLog(SV_INFO, IntToHex(Uint32(self),8) + ' ' + GuidToString(Tid.G) + 'DB Rollback.');
-{$ENDIF}
   EntityList := AssembleEntityList;
   try
     for i := 0 to Pred(EntityList.Count) do
@@ -6377,6 +6667,7 @@ begin
       finally
         EntityList.Release;
       end;
+      Prepare(PseudoTid);
       ToJournal(PseudoTid, NullStream);
       PreCommit(PseudoTid, pcpFKeys);
       PreCommit(PseudoTid, pcpTables);

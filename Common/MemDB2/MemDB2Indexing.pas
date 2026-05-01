@@ -33,7 +33,7 @@ uses
 {$IFDEF USE_TRACKABLES}
   Trackables,
 {$ENDIF}
-  MemDB2Misc, MemDB2Streamable, CowTree;
+  MemDB2Misc, MemDB2Streamable, CowTree, IndexedStore;
 
 type
   TMemDbIndexLeafGeneric = class;
@@ -140,9 +140,6 @@ type
     procedure CopyFrom(Source: TCoWTreeItem); override;
   end;
 
-{$IFDEF MEMDB2_TEMP_REMOVE}
-type
-
   //FK change-list indexing.
   TMemDBRowLookasideIndexNode = class(TDuplicateValIndexNode)
   protected
@@ -159,7 +156,6 @@ type
     property FieldSearchVals: TMemDbFieldDataRecs read FFieldSearchVals write FFieldSearchVals;
   end;
 
-{$ENDIF}
 
 function CompareFields(const OwnRec: TMemDbFieldDataRec; const OtherRec: TMemDbFieldDataRec): integer;
 
@@ -435,13 +431,10 @@ begin
   Root := SelToRoot(Sel);
   Assert(Assigned(Node));
   Leaf := SearchNode(Node, Root) as TMemDBIndexLeaf;
-  //Unfortunately, it all turns into attack of the clones ...
-  //The indexes de-dupe on key, and identity of key item (pinned data).
-  //Local index clones can be easily separated from the originals, but for
-  //a-b index modification, it's easy to find an alias in "the other" tree.
-  //We can't de-dupe on index nodes themselves, as they change when bits
-  //of the tree get rebalanced. Best I can find is to search for the node
-  //key, and then check it is the same node object.
+
+  //Don't allow aliases. Their data may be identical, but their lifetime may not be.
+  //could allow specific (local / non-local) optimizations for certain cases,
+  //but that's a whole class of hard-to-repro bugs which I'd rather not deal with.
   if Assigned(Leaf) and (Leaf <> Node) then
     Leaf := nil;
   result := Assigned(Leaf);
@@ -821,71 +814,23 @@ begin
   Assert(false);
 end;
 
-
-{ TMemDbIndexNode }
-
-{ Two separate cases:
-  1. Changing data:
-    a) Current Copy should be either NIL or valid.
-    b) Next copy is Valid or delete sentinel
-
-  - CurrentIndex always deals with CurrentCopy,
-    sufficient to put NIL's at one end (low / high) of the index.
-
-  - NextData deals with most recent copy,
-    - might have both NIL in current and delete sentinel if added and
-      deleted new row.
-
-  - Don't distinguish between NIL and delete sentinel once we've finished
-    resolving the field list
-
-    - For the moment, don't skip delete sentinels on fields,
-      we'll assume the index tags are up to date and valid.
-
-  2. Changing field lists.
-
-   - Items gets removed and re-added.
-
-     - We encode the current field, and the next field in the "extra field",
-       current field is used on tree removal, and next field on re-insertion,
-       in cases where metadata changed.
-
-       Current and next are the same for existing indices when items removed
-       from the tree for modification via metadata changes, so no index tag
-       re-name required.
-
-       However, upon re-insertion into the tree (with delete sentinels),
-       the current and next are different, the next value being used
-       just after commit time, when the delete sentinels have been removed.
-
-}
-
-//TODO - Consider some radical hack whereby we don't need to adjust the indexes
-//to temporary values at all.
-
-var
-  GoodTagsRead: integer = 0;
-
 { TMemDBRowLookasideIndexNode}
 
-{$IFDEF MEMDB2_TEMP_REMOVE}
 function TMemDBRowLookasideIndexNode.CompareItems(OwnItem: TObject; OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 var
-  Tag: PMemDBMetaTags;
-  OwnFieldList, OtherFieldList: TMemStreamableList;
   OwnRow, OtherRow: TMemDbRow;
+  OwnS, OtherS: TMemDBStreamable;
+  OwnFields, OtherFields: TMemRowFields;
   OwnField, OtherField: TMemDBStreamable;
-  ff: integer;
-  PtrFieldOffset: PFieldOffset;
+  ff, FieldCount: integer;
+  PMeta: PMemDBFKMeta;
 
 begin
   Assert(Assigned(OwnItem));
   Assert(Assigned(OtherItem));
   Assert(OwnItem is TMemDBRow);
   Assert(OtherItem is TMemDBRow);
-  Tag := PMemDBMetaTags(IndexTag);
 
-  //First off, deal with NULL abData cases.
 {$IFOPT C+}
   OwnRow := OwnItem as TMemDBRow;
   OtherRow := OtherItem as TMemDbRow;
@@ -894,127 +839,102 @@ begin
   OtherRow := TMemDBRow(OtherItem);
 {$ENDIF}
 
-  if AssignedNotSentinel(OwnRow.ABData[Tag.abBuf]) then
-  begin
-{$IFOPT C+}
-    OwnFieldList := OwnRow.ABData[Tag.abBuf] as TMemStreamableList;
-{$ELSE}
-    OwnFieldList := TMemStreamableList(OwnRow.ABData[Tag.abBuf]);
-{$ENDIF}
-  end
-  else
-    OwnFieldList := nil;
+  PMeta := PMemDBFKMeta(IndexTag);
+  OwnS := OwnRow.GetNext(PMeta.Tid);
+  OtherS := OtherRow.GetNext(PMeta.Tid);
 
-  if AssignedNotSentinel(OtherRow.ABData[Tag.abBuf]) then
-  begin
-{$IFOPT C+}
-    OtherFieldList := OtherRow.ABData[Tag.abBuf] as TMemStreamableList;
-{$ELSE}
-    OtherFieldList := TMemStreamableList(OtherRow.ABData[Tag.abBuf]);
-{$ENDIF}
-  end
-  else
-    OtherFieldList := nil;
+  Assert(AssignedNotSentinel(OwnS));
+  Assert(AssignedNotSentinel(OtherS));
 
-  if not (Assigned(OwnFieldList) or Assigned(OtherFieldList)) then
-    result := 0
-  else if not (Assigned(OwnFieldList) and Assigned(OtherFieldList)) then
+  OwnFields := OwnS as TMemRowFields;
+  OtherFields := OtherS as TMemRowFields;
+
+  //Field offsets.
+  //We can get here in various change situations, but not when the fields are sparse.
+  Assert(not OwnFields.Sparse);
+  Assert(not OtherFields.Sparse);
+
+  Assert(FieldOffsetsSame(PMeta.FieldDefsReferredAbsIdx,
+    PMeta.IndexReferred.FinalFieldOffsets));
+
+  FieldCount := Length(PMeta.IndexReferred.FinalFieldOffsets);
+  Assert(FieldCount > 0);
+
+  result := 0;
+  ff := 0;
+  while (result = 0) and (ff < FieldCount) do
   begin
-    if Assigned(OwnFieldList) then
-      result := 1
-    else
-      result := -1;
-  end
-  else //Both assigned.
-  begin
-      Assert(Tag.FieldAbsIdxsFast.Count > 0);
-      result := 0;
-      ff := 0;
-      PtrFieldOffset := Tag.FieldAbsIdxsFast.PtrFirst;
-      while (result = 0) and (ff < Tag.FieldAbsIdxsFast.Count) do
-      begin
-        Assert(PtrFieldOffset^ < OwnFieldList.Count);
-        Assert(PtrFieldOffset^ < OtherFieldList.Count);
-        OwnField := OwnFieldList.Items[PtrFieldOffset^];
-        OtherField := OtherFieldList.Items[PtrFieldOffset^];
-        Assert(not (OwnField is TMemDeleteSentinel));
-        Assert(not (OtherField is TMemDeleteSentinel));
+    OwnField := OwnFields.Items[PMeta.IndexReferred.FinalFieldOffsets[ff]];
+    OtherField := OtherFields.Items[PMeta.IndexReferred.FinalFieldOffsets[ff]];
+    Assert(not (OwnField is TMemDeleteSentinel));
+    Assert(not (OtherField is TMemDeleteSentinel));
 {$IFOPT C+}
-        result := CompareFields((OwnField as TMemFieldData).FDataRec,
-                                (OtherField as TMemFieldData).FDataRec);
+    result := CompareFields((OwnField as TMemFieldData).FDataRec,
+                            (OtherField as TMemFieldData).FDataRec);
 {$ELSE}
-        result := CompareFields(TMemFieldData(OwnField).FDataRec,
-                                TMemFieldData(OtherField).FDataRec);
+    result := CompareFields(TMemFieldData(OwnField).FDataRec,
+                            TMemFieldData(OtherField).FDataRec);
 {$ENDIF}
-        Inc(ff);
-        Inc(PtrFieldOffset);
-      end;
+    Inc(ff);
   end;
 end;
-{$ENDIF}
 
 { TMemDBRowLookasideSearchVal }
 
-{$IFDEF MEMDB2_TEMP_REMOVE}
 function TMemDBRowLookasideSearchVal.CompareItems(OwnItem: TObject; OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer;
 var
-  Tag: PMemDBMetaTags;
-  OtherFieldList: TMemStreamableList;
+  OtherS: TMemDBStreamable;
+  OtherFieldList: TMemRowFields;
   OtherRow: TMemDbRow;
   OtherField: TMemDBStreamable;
-  ff: integer;
-  PtrFieldOffset: PFieldOffset;
+  ff, FieldCount: integer;
+  PMeta: PMemDBFKMeta;
 
 begin
   Assert(not Assigned(OwnItem));
   Assert(Assigned(OtherItem));
   Assert(OtherItem is TMemDBRow);
-  Tag := PMemDBMetaTags(IndexTag);
 
-  //First off, deal with NULL abData cases.
 {$IFOPT C+}
   OtherRow := OtherItem as TMemDbRow;
 {$ELSE}
-  OtherRow := TMemDbRow(OtherItem);
+  OtherRow := TMemDBRow(OtherItem);
 {$ENDIF}
 
-  if AssignedNotSentinel(OtherRow.ABData[Tag.abBuf]) then
-  begin
-{$IFOPT C+}
-    OtherFieldList := OtherRow.ABData[Tag.abBuf] as TMemStreamableList
-{$ELSE}
-    OtherFieldList := TMemStreamableList(OtherRow.ABData[Tag.abBuf]);
-{$ENDIF}
-  end
-  else
-    OtherFieldList := nil;
+  PMeta := PMemDBFKMeta(IndexTag);
+  OtherS := OtherRow.GetNext(PMeta.Tid);
 
-  if not Assigned(OtherFieldList) then
-      result := 1
-  else //Both assigned.
+  Assert(AssignedNotSentinel(OtherS));
+
+  OtherFieldList := OtherS as TMemRowFields;
+
+  //Field offsets.
+  //We can get here in various change situations, but not when the fields are sparse.
+  Assert(not OtherFieldList.Sparse);
+
+  Assert(FieldOffsetsSame(PMeta.FieldDefsReferredAbsIdx,
+    PMeta.IndexReferred.FinalFieldOffsets));
+
+  FieldCount := Length(PMeta.IndexReferred.FinalFieldOffsets);
+  Assert(FieldCount > 0);
+  Assert(FieldCount = Length(FFieldSearchVals));
+
+  result := 0;
+  ff := 0;
+  while (result = 0) and (ff < FieldCount) do
   begin
-      Assert(Tag.FieldAbsIdxsFast.Count > 0);
-      Assert(Tag.FieldAbsIdxsFast.Count = Length(FFieldSearchVals));
-      result := 0;
-      ff := 0;
-      PtrFieldOffset := Tag.FieldAbsIdxsFast.PtrFirst;
-      while (result = 0) and (ff < Tag.FieldAbsIdxsFast.Count) do
-      begin
-        Assert(PtrFieldOffset^ < OtherFieldList.Count);
-        OtherField := OtherFieldList.Items[PtrFieldOffset^];
-        Assert(not (OtherField is TMemDeleteSentinel));
+    OtherField := OtherFieldList.Items[PMeta.IndexReferred.FinalFieldOffsets[ff]];
+    Assert(not (OtherField is TMemDeleteSentinel));
 {$IFOPT C+}
-        result := CompareFields(FFieldSearchVals[ff],
-                                (OtherField as TMemFieldData).FDataRec);
+    result := CompareFields(FFieldSearchVals[ff],
+                            (OtherField as TMemFieldData).FDataRec);
 {$ELSE}
-        result := CompareFields(FFieldSearchVals[ff],
-                                TMemFieldData(OtherField).FDataRec);
+    result := CompareFields(FFieldSearchVals[ff],
+                            TMemFieldData(OtherField).FDataRec);
 {$ENDIF}
-        Inc(ff);
-        Inc(PtrFieldOffset);
-      end;
+    Inc(ff);
   end;
 end;
-{$ENDIF}
+
 
 end.
