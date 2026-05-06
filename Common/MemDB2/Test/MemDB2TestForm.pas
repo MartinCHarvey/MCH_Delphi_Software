@@ -24,6 +24,7 @@ type
     BigTblMod: TButton;
     TstBlobs: TButton;
     MultiTrans: TButton;
+    LeakTrans: TButton;
     procedure BasicTestBtnClick(Sender: TObject);
     procedure ResetClick(Sender: TObject);
     procedure IndexTestClick(Sender: TObject);
@@ -39,6 +40,7 @@ type
     procedure BigTblModClick(Sender: TObject);
     procedure TstBlobsClick(Sender: TObject);
     procedure MultiTransClick(Sender: TObject);
+    procedure LeakTransClick(Sender: TObject);
   private
     { Private declarations }
     FTimeStamp: TDateTime;
@@ -70,7 +72,7 @@ uses
 const
   LIMIT = 1000;
   TRANS_LIMIT = 65535;
-  BIG_ROWS = 128 * 1024;
+  BIG_ROWS = 256 * 1024;
   BIG_NTABLES = 5;
   BIG_NINDEXES = 5;
   BLOB_SIZE = 1024;
@@ -107,6 +109,12 @@ begin
     result := '('+ IntToStr(MSecsElapsed) + ' msecs)'
   else
     result := '('+ InttoStr(SecsElapsed) + '.' + IntToStr(MSecsElapsed) + ' secs)';
+end;
+
+procedure TForm1.LeakTransClick(Sender: TObject);
+begin
+  FSession.StartTransaction(amRead);
+  //Check with debugger is cleared down at app quit time.
 end;
 
 procedure TForm1.LogTimeIncr(S: string);
@@ -4320,6 +4328,6 @@ initialization
   FDB.InitDB(DB_LOCATION, jtV2);
   FSession := FDB.StartSession;
 finalization
-  FSession.Free;
+//  FSession.Free;
   FDB.Free;
 end.

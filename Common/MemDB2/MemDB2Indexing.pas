@@ -62,7 +62,10 @@ type
 
     //Cloned indexes, add and remove from current (cloned) only.
     //Non-cloned indexes, add / remove from next only.
-    function Add(Sel: TAbSelType; New: TMemDBIndexLeafGeneric): boolean;
+
+    //Index addition can end up consuming new index leaf both in success, and
+    //some exception cases (freeing partially built new tree).
+    function Add(Sel: TAbSelType; var New: TMemDBIndexLeafGeneric): boolean;
     function Remove(Sel: TAbSelType; Old: TMemDBIndexLeafGeneric): boolean;
 
     procedure RootToNext;
@@ -440,7 +443,7 @@ begin
   result := Assigned(Leaf);
 end;
 
-function TMemDbIndexGeneric.Add(Sel: TAbSelType; New: TMemDBIndexLeafGeneric): boolean;
+function TMemDbIndexGeneric.Add(Sel: TAbSelType; var New: TMemDBIndexLeafGeneric): boolean;
 var
   Root, NewRoot: TMemDBIndexLeafGeneric;
   SelGood: boolean;
@@ -467,10 +470,17 @@ begin
       raise EMemDBException.Create(S_ADD_REQUIRES_NODE);
 
     New.FOriginalIndex := self;
-    NewRoot := SearchAndInsert(New, Root, h, found) as TMemDBIndexLeaf;
+    try
+      NewRoot := SearchAndInsert(New, Root, h, found) as TMemDBIndexLeaf;
+    except
+      New := nil; //Unfortunately consumed as part of clean-up
+      raise;
+    end;
     result := not RdCk(found);
     if Result then
     begin
+      New := nil; //Consumed with good addition.
+
       //Mods are serialised. No clever interlocked roots.
       case Sel of
         abCurrent: begin
