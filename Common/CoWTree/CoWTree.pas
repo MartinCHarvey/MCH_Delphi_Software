@@ -407,12 +407,10 @@ begin
         Assert(Assigned(Tmp));
         CallP := Tmp;
         Retp := BalanceLeft(CallP, false, h);
-        if RetP <> CallP then
-        begin
-          Tmp.Release;  //Release newly created temp.
-          Tmp := RetP;
-          RetP := nil;
-        end;
+        Assert(RetP <> CallP);
+        Tmp.Release;  //Release newly created temp.
+        Tmp := RetP;
+        RetP := nil;
       end;
     end
     else if comparison < 0 then
@@ -441,12 +439,10 @@ begin
         Assert(Assigned(Tmp));
         CallP := Tmp;
         Retp := BalanceRight(CallP, false, h);
-        if RetP <> CallP then
-        begin
-          Tmp.Release;  //Release newly created temp.
-          Tmp := RetP;
-          RetP := nil;
-        end;
+        Assert(RetP <> CallP);
+        Tmp.Release;  //Release newly created temp.
+        Tmp := RetP;
+        RetP := nil;
       end;
     end
     else
@@ -459,13 +455,12 @@ begin
 
     Result := Tmp;
     Tmp := nil;
-
-  finally
-    //These releases will normally do nothing
-    NewNode.Release;
+  except
+    NewNode.Release; //Releases newly created subtree, *including supplied node* on exception.
     Tmp.Release;
-    //And now can disambiguate between exception and insert fail.
     RetP.Release;
+    //Releases newly created subtree, *including supplied node* on exception.
+    raise;
   end;
 end;
 
@@ -619,12 +614,12 @@ begin
 
     Result := NewRoot;
     NewRoot := nil; // transfer ownership
-  finally
-    //These releases will normally do nothing
+  except
     NewRoot.Release;
     NewP.Release;
     NewP1.Release;
     NewP2.Release;
+    raise;
   end;
 end;
 
@@ -784,12 +779,12 @@ begin
 
     Result := NewRoot;
     NewRoot := nil;
-  finally
-    //These releases will normally do nothing
+  except
     NewRoot.Release;
     NewP.Release;
     NewP1.Release;
     NewP2.Release;
+    raise;
   end;
 end;
 
@@ -816,31 +811,28 @@ begin
       CallQR.q := InQR.q;
 
       RetQR := DelHelper(CallQR, h, found);
-      //TODO Always modifies return? could optimise this out.
-      if RetQR.r <> CallQR.r then
-      begin
-        Tmp := InQR.r.DupInit(self);
+
+      Assert(RetQR.r <> CallQr.r);
+
+      Tmp := InQR.r.DupInit(self);
 {$IFOPT C+}
-        Tmp.left := InQR.r.left.AddRef as TCoWTreeItem;
+      Tmp.left := InQR.r.left.AddRef as TCoWTreeItem;
 {$ELSE}
-        Tmp.left := TCowTreeItem(InQR.r.left.AddRef);
+      Tmp.left := TCowTreeItem(InQR.r.left.AddRef);
 {$ENDIF}
-        Tmp.bal := InQR.r.bal;
-        Tmp.right := RetQR.r; //Transfer back up from recursion.
-        RetQR.r := Tmp;
-        Tmp := nil;
-      end;
+      Tmp.bal := InQR.r.bal;
+      Tmp.right := RetQR.r; //Transfer back up from recursion.
+      RetQR.r := Tmp;
+      Tmp := nil;
 
       if RdCk(h) then
       begin
         CallP := RetQR.r;
         RetP := balanceLeft(CallP, True, h);
-        if RetP <> CallP then
-        begin
-          //InQR.r changed to new value, was tmp.
-          RetQR.r.Release; //Release old tmp.
-          RetQR.r := RetP;
-        end;
+        Assert(RetP <> CallP);
+        //InQR.r changed to new value, was tmp.
+        RetQR.r.Release; //Release old tmp.
+        RetQR.r := RetP;
       end;
       Result := RetQR;
       RetQR.q := nil;
@@ -873,11 +865,12 @@ begin
       RetQR.q := nil;
       RetQR.r := nil;
     end;
-  finally
+  except
     //These releases will normally do nothing
     Tmp.Release;
     RetQR.q.Release; //Release newly created node on exception.
     RetQR.r.Release; //Release newly modified subtree on exception.
+    raise;
   end;
 end;
 
@@ -939,11 +932,9 @@ begin
       begin
         CallP := Tmp;
         RetP := balanceRight(CallP, True, h);
-        if RetP <> CallP then
-        begin
-          Tmp := RetP; //Rebalance has done all the copying for us.
-          CallP.Release; //Release the tmp generated above.
-        end;
+        Assert(RetP <> CallP);
+        Tmp := RetP; //Rebalance has done all the copying for us.
+        CallP.Release; //Release the tmp generated above.
       end;
     end
     else if comparison < 0 then
@@ -976,11 +967,9 @@ begin
       begin
         CallP := Tmp;
         RetP := balanceLeft(CallP, True, h);
-        if RetP <> CallP then
-        begin
-          Tmp := RetP; //Rebalance has done all the copying for us.
-          CallP.Release;
-        end;
+        Assert(RetP <> CallP);
+        Tmp := RetP; //Rebalance has done all the copying for us.
+        CallP.Release;
       end;
     end
     else
@@ -1046,21 +1035,20 @@ begin
           //Del helper modified q.left (also p.left)
           //InP set to its replacement, which is guaranteed a new node.
           RetP := balanceRight(CallP, True, h);
-          if RetP <> CallP then
-          begin
-            //Rebalance has modified it again, and its guaranteed a temp creation.
-            Tmp.Release;
-            Tmp := RetP;
-          end;
+          Assert(RetP <> CallP);
+          //Rebalance has modified it again, and its guaranteed a temp creation.
+          Tmp.Release;
+          Tmp := RetP;
         end;
       end;
     end;
     Result := Tmp;
     Tmp := nil;
-  finally
+  except
     Tmp.Release;
     RetQR.q.Release;
     RetQR.r.Release;
+    raise;
   end;
 end;
 

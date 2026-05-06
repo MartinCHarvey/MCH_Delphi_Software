@@ -47,6 +47,7 @@ type
     FCrit: TCriticalSection;
     FTree: TBinTree;
     FTraversalRef: TObject;
+    FDelTrackItem: TObject;
     procedure TraversePrintItem(Tree: TBinTree; Item: TBinTreeItem; Level:
       integer);
     procedure TraverseDeregister(Tree: TBinTree; Item: TBinTreeItem; Level:
@@ -74,6 +75,9 @@ type
 {$ENDIF}
 {$ENDIF}
     FTracker: TTracker;
+    //Unfortunately, out of memory exceptions here are a thing,
+    //and the destructor runs on partially created objects.
+    FLocalTracked, FGlobalTracked: boolean;
   protected
     function GetExtraInfoText: string; dynamic;
     procedure TrackerDeregister(Tracker: TTracker);
@@ -180,10 +184,10 @@ begin
   FCrit.Acquire;
   try
     Assert(Assigned(inst), S_ASKED_TO_TRACK_NIL);
-    TrackItem := TTrackItem.Create;
-    TrackItem.FItem := inst;
     if StartTracking then
     begin
+      TrackItem := TTrackItem.Create;
+      TrackItem.FItem := inst;
       if not FTree.Add(TrackItem) then
       begin
         Assert(false, S_TRACKER_TREE_ADD_FAILED);
@@ -192,10 +196,9 @@ begin
     end
     else
     begin
-      if not FTree.Remove(TrackItem) then
+      (FDelTrackItem as TTrackItem).FItem := inst;
+      if not FTree.Remove(FDelTrackItem as TTrackItem) then
         Assert(false, S_TRACKER_TREE_REMOVE_FAILED);
-    //Removal is by value equivalence, so free our temp item.
-      TrackItem.Free;
     end;
   finally
     FCrit.Release;
@@ -314,12 +317,14 @@ begin
   inherited;
   FCrit := TCriticalSection.Create;
   FTree := TBinTree.Create;
+  FDelTrackItem := TTrackItem.Create;
 end;
 
 destructor TTracker.Destroy;
 begin
   FTree.Free;
   FCrit.Free;
+  FDelTrackItem.Free;
   inherited;
 end;
 
@@ -334,7 +339,10 @@ begin
 {$IFDEF MAGIC_CHECKS}
   Magic := MAGIC1;
 {$ENDIF}
+  //Unfortunately, out of memory exceptions here are a thing,
+  //and the destructor runs on partially created objects.
   AppGlobalTracker.TrackInstance(self, true);
+  FGlobalTracked := true;
 {$ENDIF}
 end;
 
@@ -342,12 +350,16 @@ constructor TTrackable.CreateWithTracker(Tracker: TTracker);
 begin
   inherited Create();
   FTracker := Tracker;
+  //Unfortunately, out of memory exceptions here are a thing,
+  //and the destructor runs on partially created objects.
   FTracker.TrackInstance(self, true);
+  FLocalTracked := true;
 {$IFOPT C+}
 {$IFDEF MAGIC_CHECKS}
   Magic := MAGIC2;
 {$ENDIF}
   AppGlobalTracker.TrackInstance(self, true);
+  FGlobalTracked := true;
 {$ENDIF}
 end;
 
@@ -360,13 +372,14 @@ end;
 
 destructor TTrackable.Destroy;
 begin
-  if Assigned(FTracker) then
+  if Assigned(FTracker) and FLocalTracked then
     FTracker.TrackInstance(self, false);
 {$IFOPT C+}
 {$IFDEF MAGIC_CHECKS}
   Assert((Magic = MAGIC1) or (Magic = MAGIC2));
 {$ENDIF}
-  AppGlobalTracker.TrackInstance(self, false);
+  if FGlobalTracked then
+    AppGlobalTracker.TrackInstance(self, false);
 {$ENDIF}
   inherited;
 end;

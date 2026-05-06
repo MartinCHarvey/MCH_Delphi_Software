@@ -1346,7 +1346,7 @@ begin
     FParentDB.FEntityLock.Release;
   end;
   FInterfaced.Free;
-  //Proxy is freeing us.
+  //Proxy is always freeing us, teardown refs or no.
   inherited;
 end;
 
@@ -2445,7 +2445,6 @@ begin
             TreeRet := NewIndex.Add(abCurrent, INode);
             if not TreeRet then
               raise EMemDBInternalException.Create(S_INSERT_FAILED_DURING_INDEX_BUILD);
-            INode := nil;
           end;
           //All done, next row.
           if LocalIter then
@@ -2541,7 +2540,6 @@ begin
           TreeRet := NewIndex.Add(abCurrent, INode);
           if not TreeRet then
             raise EMemDBInternalException.Create(S_INSERT_FAILED_DURING_INTERNAL_INDEX_BUILD);
-          INode := nil;
         end;
         //All done, next row.
         if LocalIter then
@@ -2621,8 +2619,7 @@ var
   CurFields, OtherFields: TMemRowFields;
   Added, Deleted, Changed, Null: boolean;
   IPin: PMemDbIndexPin;
-  NewINode: TMemDbIndexLeaf;
-  OtherNode: TMemDBIndexLeafGeneric;
+  NewINode, OtherNode: TMemDBIndexLeafGeneric;
   Pos: TMemAPIPosition;
   Ret: boolean;
   C: TMemDBStreamable;
@@ -2722,9 +2719,8 @@ begin
 
               if not Index.Add(abNext, NewINode) then
                 raise EMemDBInternalexception.Create(S_ERROR_MODIFYING_INDEX_ADD);
-            except
+            finally
               NewINode.Release; //Will unpin if necessary.
-              raise;
             end;
           end;
         end;
@@ -2890,9 +2886,8 @@ begin
 
             if not Index.Add(abNext, NewINode) then
               raise EMemDBInternalexception.Create(S_ERROR_MODIFYING_INTERNAL_INDEX_ADD);
-          except
+          finally
             NewINode.Release; //Will unpin if necessary.
-            raise;
           end;
         end;
       end;
@@ -3656,7 +3651,25 @@ begin
 end;
 
 destructor TMemDBTablePersistent.Destroy;
+{$IFNDEF CHECK_TEARDOWN_REFS}
+var
+  Row: TMemDBRow;
+  IRec: TItemRec;
+{$ENDIF}
 begin
+  //TidLocal structure should always be empty.
+  FTidLocalLock.Acquire;
+  try
+    Assert(DlItemIsEmpty(@FTidLocalStructures));
+  finally
+    FTidLocalLock.Release;
+  end;
+
+  //Release indexes first before unceromoniously removing rows underneath them.
+  FMasterIndexes.Release;
+  FMasterInternalIndex.Release;
+
+{$IFDEF CHECK_TEARDOWN_REFS}
   //If referencing works correctly, then all should be empty by the time we destroy.
   FMasterRowLock.Acquire;
   try
@@ -3665,17 +3678,30 @@ begin
   finally
     FMasterRowLock.Release;
   end;
-  FTidLocalLock.Acquire;
+{$ELSE}
+  FMasterRowLock.Acquire;
   try
-    Assert(DlItemIsEmpty(@FTidLocalStructures));
+    //Addition locks should be empty (session / txion auto clearup).
+    Assert(DLItemIsEmpty(@FAdditionLocks));
+
+    IRec := FMasterRowList.GetAnItem;
+    while Assigned(IRec) do
+    begin
+      Row := IRec.Item as TMemDBRow;
+      while Row.FProxy.TryRelease do ;
+      //Row does not DCP handle in destructor.
+
+      FMasterRowList.RemoveItem(IRec);
+      IRec := FMasterRowList.GetAnItem;
+    end;
   finally
-    FTidLocalLock.Release;
+    FMasterRowLock.Release;
   end;
+{$ENDIF}
+
   FMasterRowList.Free;
   FMasterRowLock.Free;
   FTidLocalLock.Free;
-  FMasterIndexes.Release;
-  FMasterInternalIndex.Release;
   FMetadata.Free;
   inherited;
 end;
@@ -4027,13 +4053,17 @@ begin
   //Don't lock master row list, instead used Tid Local, even if it has more
   //lock acquisitions.
   TidLocal := GetTidLocal(Tid);
-  case Phase of
-    rbpIndexRollback: TidLocal.IndexRollback;
-    rbpMetaRollback: inherited;
-    rbpDelayedRollback: begin
-      TidLocal.Rollback;
-      TidLocal.Free;
-      FindRmRowProhibitLock(Tid);
+  if Assigned(TidLocal) then
+  begin
+    //Some very pathalogical cases involve rollback for nonexistent Tid.
+    case Phase of
+      rbpIndexRollback: TidLocal.IndexRollback;
+      rbpMetaRollback: inherited;
+      rbpDelayedRollback: begin
+        TidLocal.Rollback;
+        TidLocal.Free;
+        FindRmRowProhibitLock(Tid);
+      end;
     end;
   end;
 end;
@@ -5053,7 +5083,10 @@ begin
                 end;
               end
               else //Do not expect unchanged rows here.
+              begin
                 raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_21);
+                AddToList := false; //Placate compiler.
+              end;
               //OK, add to lookaside.
               if AddToList then
               begin
@@ -5288,7 +5321,6 @@ end;
 
 procedure TMemDBForeignKeyPersistent.CreateCheckForeignKeyRowSets(const Tid: TTransactionId; var  Meta: TMemDBFKMeta);
 var
-  TidLocal: TTidLocal;
   RV: TISRetVal;
 begin
   with Meta.Lists do
@@ -5762,8 +5794,8 @@ begin
         raise EMemDbInternalException.Create(S_LOCAL_INDEX_INSERTION_BAD_1);
       if not Index.Add(abCurrent, INode) then
         raise EMemDbInternalException.Create(S_LOCAL_INDEX_INSERTION_BAD_2);
-    except
-      on E: Exception do INode.Release;
+    finally
+      INode.Release;
     end;
   end;
 end;
@@ -6526,6 +6558,7 @@ var
   i: integer;
 begin
   inherited;
+  //TODO - Entity list allocation during rollback of out-of-memory cases.
   EntityList := AssembleEntityList;
   try
     for i := 0 to Pred(EntityList.Count) do
@@ -6623,26 +6656,17 @@ end;
 
 destructor TMemDBDatabasePersistent.Destroy;
 var
-  PseudoTid: TTransactionId;
   EntityList: TReffedList;
   i: integer;
   Proxy: TMemDBEntityProxy;
+{$IFDEF CHECK_TEARDOWN_REFS}
+  PseudoTid: TTransactionId;
   Entity: TMemDbEntity;
   NullStream: TNullStream;
   FKs, Del: boolean;
+{$ENDIF}
 begin
-  //OK, to check at some point:
-  //All Ref reasons (transactions, API objects, pins etc deleted).
-
-  //So all we have to do now is delete the metadata copies, do a commit,
-  //and refs should return to zero.
-
-  //TODO TODO - This is the slow path delete. just to check everything
-  // clears down nicely. Make a fast path,
-  //where we assume no concurrency issues, dec all ref counts until zero.
-{$IFDEF FASTPATH_CLEARDOWN}
-  Assert(false);
-{$ELSE}
+{$IFDEF CHECK_TEARDOWN_REFS}
   NullStream := TNullStream.Create;
   try
     for FKs := True downto False do
@@ -6678,9 +6702,23 @@ begin
   finally
     NullStream.Free;
   end;
+{$ELSE}
+  EntityList := AssembleEntityList;
+  try
+    for i := 0 to Pred(EntityList.Count) do
+    begin
+      Proxy := EntityList.Items[i] as TMemDBEntityProxy;
+      //Refcount should be 1 (has metadata),
+      //expect no client code running.
+      while Proxy.TryRelease do ;
+      EntityList.Items[i] := nil;
+    end;
+  finally
+    EntityList.Release;
+  end;
 {$ENDIF}
   //I can see this assertion firing a few times.
-  //Assert(DlItemIsEmpty(@FEntityList));
+  Assert(DlItemIsEmpty(@FEntityList));
   FInterfaced.Free;
   FEntityLock.Free;
   FCommitLock.Free;

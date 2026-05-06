@@ -146,4 +146,13 @@ object Form1: TForm1
     Width = 80.000000000000000000
     OnClick = MultiTransClick
   end
+  object LeakTrans: TButton
+    Height = 22.000000000000000000
+    Position.X = 184.000000000000000000
+    Position.Y = 72.000000000000000000
+    TabOrder = 15
+    Text = 'Leak Txion'
+    Width = 80.000000000000000000
+    OnClick = LeakTransClick
+  end
 end

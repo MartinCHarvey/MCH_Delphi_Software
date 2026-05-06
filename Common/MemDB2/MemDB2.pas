@@ -62,6 +62,7 @@ type
     FFlushFinishedEvent: TEvent;
     FApiObjects: TList;
     FApiObjectLock: TCriticalSection;
+    FCRInterface: TMemAPIDatabaseInternal;
   protected
   public
     procedure CommitAndFree;
@@ -135,6 +136,7 @@ type
     FInitWait: TEvent;
     FClientWait: TEvent;
     FPersistWait: TEvent;
+    FRunningTeardown: boolean;
     FJournal: TMemDbDefaultJournal;
     FDatabase: TMemDbDatabasePersistent;
     FPhase: TMemDBPhase;
@@ -164,7 +166,7 @@ type
     function InitDB(RootLocation: string;
                     JournalType: TMemDBJournalType = jtV2;
                     Async: boolean = false): boolean;
-    procedure StopDB;
+    procedure StopDB(Force: boolean = false);
     function Checkpoint: boolean;
     function StartSession: TMemDBSession;
 
@@ -183,6 +185,7 @@ uses IoUtils, Types
 const
   S_DB_CLOSING_OR_NOT_OPEN = 'DB closing, or not open: ';
   S_DB_SESSION_NOT_FOUND = 'Session not found';
+  S_DB_HAS_SESSIONS = 'DB has open sessions.';
   S_DB_SESSION_HAS_TRANSACTIONS = 'Session has open transactions';
   S_DB_TRANSACTION_NOT_FOUND = 'Transaction not found';
   S_COMMIT_ROLLBACK_IN_PROGRESS = 'Commit, rollback or mini-op for this transaction already in progress.';
@@ -246,41 +249,48 @@ end;
 
 procedure TMemDbTransaction.CheckNoDanglingTransactionRefs(CanRaise: boolean);
 var
-  TmpList: TList;
+  Tmp: TObject;
   i: Integer;
 begin
   if CanRaise then
   begin
     FApiObjectLock.Acquire;
     try
-      if FApiObjects.Count > 0 then
-        raise EMemDBAPIException.Create(S_TRANSACTION_HAS_API_OBJECTS);
+      //Expect only API object to be that of the FCR interface.
+      for i := 0 to Pred(FApiObjects.Count) do
+      begin
+        if FApiObjects.Items[i] <> FCRInterface then
+          raise EMemDBAPIException.Create(S_TRANSACTION_HAS_API_OBJECTS);
+      end;
     finally
       FApiObjectLock.Release;
     end;
   end
   else
   begin
-    //I am going to quietly clear down API objects for this transaction.
+    //I am going to quietly clear down non-internal API objects for this transaction.
     //This allows us in error / shutdown cases to quietly rollback all txions,
     //remove API's, delete sessions, and have a chance at refcounts returning to zero.
 
-    //TODO - Further cleardown cases aroundabout session/db destruction.
-    //Depends how carefully client code handles its session and tranactions.
-    //Current assumption is it keeps track of sessions and txions.
-    TmpList := TList.Create;
-    try
+    //Don't allocate any memory in quiet clear-up case
+    //Out of memory here is a distinct possibility.
+    repeat
       FApiObjectLock.Acquire;
       try
-        TmpList.Assign(FApiObjects, laCopy);
+        Tmp := nil;
+        for i := 0 to Pred(FApiObjects.Count) do
+        begin
+          if FApiObjects.Items[i] <> FCRInterface then
+          begin
+            Tmp := FApiObjects.Items[i];
+            break;
+          end;
+        end;
       finally
         FApiObjectLock.Release;
       end;
-      for i := 0 to Pred(TmpList.Count) do
-        TMemDbAPI(TmpList.Items[i]).Free;
-    finally
-      TmpList.Free;
-    end;
+      Tmp.Free;
+    until not Assigned(Tmp);
   end;
 end;
 
@@ -288,6 +298,7 @@ destructor TMemDBTransaction.Destroy;
 begin
   if not FCommitedOrRolledBack then
     raise EMemDBAPIException.Create(S_COMMIT_OR_ROLLBACK_BEFORE_FREE);
+  FCRInterface.Free;
   FChangeset.Free;
   Assert(FAPIObjects.Count = 0);
   FApiObjects.Free;
@@ -344,9 +355,11 @@ procedure TMemDB.RemoveTransaction(Transaction: TMemDBTransaction; Commit: boole
 var
   idx: integer;
   WaitJournalDone: boolean;
-  API: TMemAPIDatabaseInternal;
   AsyncError: boolean;
   CommitStream: TStream;
+
+  label txion_remove;
+
 begin
   WaitJournalDone := false;
   AsyncError := false; //Placate compiler.
@@ -364,9 +377,16 @@ begin
   finally
     FSessionLock.Release;
   end;
+
   //DB hosed is DB hosed.
   if AsyncError then
-    raise EMemDBException.Create(S_ERRORPHASE_COMMIT_ERROR + FLastError);
+  begin
+    if Commit then
+      raise EMemDBException.Create(S_ERRORPHASE_COMMIT_ERROR + FLastError)
+    else
+    //Allow DB force close / rollback cases to quietly clear up as much as they can.
+      goto txion_remove;
+  end;
 
   try
     //Things get referenced from the API objects ...
@@ -382,11 +402,10 @@ begin
       Commit := false;
     end;
 
-    //Database interfaced not refcounted, but could move this inside
-    //"not async error".
-    API := FDatabase.Interfaced.GetAPIObject(Transaction, APIInternalCommitRollback)
-      as TMemAPIDatabaseInternal;
-    try
+    //Some pathalogical error cases, will have allocated txion,
+    //and added to list, but not got transaction commit/rollback API object.
+    if Assigned(Transaction.FCRInterface) then
+    begin
       if Commit then
       begin
         if FJournal.NeedFlowControl then
@@ -394,7 +413,7 @@ begin
 
         //This may raise exceptions if pre-commit checks fail.
         //Arranges streams in transaction for final journalling;
-        CommitStream := API.UserCommitCycleV3;
+        CommitStream := Transaction.FCRInterface.UserCommitCycleV3;
 
         //Exceptions after here less likely / not expected.
         Assert(not Assigned(Transaction.Changeset));
@@ -415,7 +434,7 @@ begin
         try
           //Since everything is multi-buffered, barring out of memory
           //exceptions we do not expect this to fail.
-          API.UserRollbackCycleV3;
+          Transaction.FCRInterface.UserRollbackCycleV3;
           //We really need rollback to work to clear pins and refcounts.
           //If it doesn't then something's very very broken.
         except
@@ -438,8 +457,6 @@ begin
           end;
         end;
       end;
-    finally
-      API.Free;
     end;
   finally
     FSessionLock.Acquire;
@@ -458,11 +475,15 @@ begin
 
   if WaitJournalDone then
     Transaction.FlushFinishedEvent.WaitFor(INFINITE);
+
+txion_remove:
+
   FSessionLock.Acquire;
   try
     idx := Transaction.FSession.FSessionTransactions.IndexOf(Transaction);
     Assert(idx >= 0);
     Transaction.FCommitedOrRolledBack := true;
+    Transaction.FCommitRollbackInProgress := tiptNone;
     Transaction.FSession.FSessionTransactions.Delete(idx);
     idx := FTransactionList.IndexOf(Transaction);
     Assert(idx >= 0);
@@ -482,63 +503,82 @@ var
   API: TMemAPIDatabaseInternal;
 begin
   result := nil;
-  FSessionLock.Acquire;
   try
-    idx := FSessionList.IndexOf(Session);
-    if idx < 0 then
-      raise EMemDBException.Create(S_DB_SESSION_NOT_FOUND);
-    if FPhase <> mdbRunning then
-    begin
-      //DB hosed is DB hosed.
-      if FPhase = mdbError then
-        raise EMemDBException.Create(S_ERRORPHASE_ERROR + FLastError)
-      else
-        raise EMemDBException.Create(S_BADPHASE_ERROR + FLastError)
+    FSessionLock.Acquire;
+    try
+      idx := FSessionList.IndexOf(Session);
+      if idx < 0 then
+        raise EMemDBException.Create(S_DB_SESSION_NOT_FOUND);
+      if FPhase <> mdbRunning then
+      begin
+        //DB hosed is DB hosed.
+        if FPhase = mdbError then
+          raise EMemDBException.Create(S_ERRORPHASE_ERROR + FLastError)
+        else
+          raise EMemDBException.Create(S_BADPHASE_ERROR + FLastError)
+      end;
+      try
+        result := TMemDBTransaction.Create;
+        result.FDB := self;
+        result.FSession := Session;
+        result.FMode := Mode;
+        result.FSync := Sync;
+        result.FTid := TTransactionId.NewTransactionID(Iso);
+      except
+        if Assigned(result) then
+        begin
+          result.FCommitedOrRolledBack := true; //just got make dtor OK.
+          result.Release;
+          result := nil;
+          raise;
+        end;
+      end;
+      Session.FSessionTransactions.Add(result);
+      FTransactionList.Add(result);
+    finally
+      FSessionLock.Release;
     end;
-    result := TMemDBTransaction.Create;
-    result.FDB := self;
-    result.FSession := Session;
-    result.FMode := Mode;
-    result.FSync := Sync;
-    result.FTid := TTransactionId.NewTransactionID(Iso);
-    Session.FSessionTransactions.Add(result);
-    FTransactionList.Add(result);
-  finally
-    FSessionLock.Release;
-  end;
-  Assert(Mode in [amReadShared, amWriteExclusive, amWriteShared]);
-  FRWWLock.Acquire(DBAccessModeToLockReason(Mode));
+    Assert(Mode in [amReadShared, amWriteExclusive, amWriteShared]);
+    FRWWLock.Acquire(DBAccessModeToLockReason(Mode));
 
-  API := FDatabase.Interfaced.GetAPIObject(result, APIInternalCommitRollback)
-    as TMemAPIDatabaseInternal;
-  try
-    API.TransactionStartCycle;
-  finally
-    API.Free;
+    result.FCRInterface := FDatabase.Interfaced.GetAPIObject(result, APIInternalCommitRollback)
+      as TMemAPIDatabaseInternal;
+
+    result.FCRInterface.TransactionStartCycle;
+  except
+    if Assigned(result) then
+    begin
+      result.RollbackAndFree;
+      raise;
+    end;
   end;
 end;
 
 procedure TMemDB.RemoveSession(Session: TMemDBSession);
 var
   idx: integer;
+  Tr: TMemDBTransaction;
 begin
   FSessionLock.Acquire;
   try
     idx := FSessionList.IndexOf(Session);
     if not(idx >= 0) then
       raise EMemDBException.Create(S_DB_SESSION_NOT_FOUND);
-    //Allow the session removal if valid session even if dangling transactions,
-    //However, throw back into the calling thread.
-    //This to allow a cleanup-case where things have got badly out of sync
-    //or threads blocked/hung.
-    //It's a pretty nasty error case however you do it.
 
-    //TODO - Think a bit more here about force clear-down of txions,
-    //allowing us to get refcounts back to zero.
-    //StopDB case?
     try
+{$IF COMPLAIN_LEAKED_TXIONS}
       if Session.FSessionTransactions.Count > 0 then
         raise EMemDBException.Create(S_DB_SESSION_HAS_TRANSACTIONS);
+{$ELSE}
+      //Quietly clear the transactions down for this session.
+      //Can do this recursively acquiring the session lock.
+      //Not pretty, but works, and is safe.
+      while Session.FSessionTransactions.Count > 0 do
+      begin
+        Tr := TMemDBTransaction(Session.FSessionTransactions.Items[0]);
+        Tr.RollbackAndFree;
+      end;
+{$ENDIF}
     finally
       FSessionList.Delete(idx);
       CheckClientsDone;
@@ -569,6 +609,7 @@ begin
     result := TMemDBSession.Create;
     result.FDB := self;
     FSessionList.Add(result);
+    //View out of memory exceptions here as v. unlikely.
   finally
     FSessionLock.Release;
   end;
@@ -600,8 +641,7 @@ end;
 
 destructor TMemDB.Destroy;
 begin
-  //TODO - Stopping DB when in phase error, and can't clear everything down.
-  StopDB;
+  StopDB(true);
   Assert(FPhase in [mdbNull, mdbClosed, mdbError]);
   Assert(FSessionList.Count = 0);
   Assert(FTransactionList.Count = 0);
@@ -754,8 +794,6 @@ begin
           FDatabase := TMemDBDatabase.Create;
           FSessionLock.Release;
 
-          //TODO TODO - Check this reset of DB state is the same
-          //as it was in MemDB1.
           DBTmp.Free;
           try
             FPersistWait.WaitFor(INFINITE);
@@ -776,11 +814,38 @@ begin
   end;
 end;
 
-procedure TMemDB.StopDB;
+procedure TMemDB.StopDB(Force: boolean);
+var
+  Session: TMemDBSession;
 begin
   FSessionLock.Acquire;
   try
-    StopDBLocked;
+    if not Force then
+    begin
+{$IF COMPLAIN_LEAKED_SESSIONS}
+      if Session.FSessionTransactions.Count > 0 then
+        raise EMemDBException.Create(S_DB_HAS_SESSIONS);
+{$ENDIF}
+      //Otherwise will wait for sessions / txions to complete.
+    end
+    else
+    begin
+      while FSessionList.Count > 0 do
+      begin
+        Session := self.FSessionList.Items[0];
+        Session.Free;
+      end;
+    end;
+    try
+      if not FRunningTeardown then
+      begin
+        //User might well try stop, followed by force stop...
+        FRunningTeardown := true;
+        StopDBLocked;
+      end;
+    finally
+      FRunningTeardown := false;
+    end;
   finally
     FSessionLock.Release;
   end;

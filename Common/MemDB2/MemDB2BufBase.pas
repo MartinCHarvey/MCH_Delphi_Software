@@ -1751,6 +1751,10 @@ var
 begin
   LockSelf;
   try
+{$IFDEF CHECK_TEARDOWN_REFS}
+    Assert(DlItemIsEmpty(@FPinnedItems));
+    Assert(DlItemIsEmpty(@FIndexPins));
+{$ENDIF}
     //Check for and avoid multiple frees for pinned items.
     Item := PMemDbMultiItem(FMultiItems.FLink.Owner);
     while Assigned(Item) do
@@ -1763,7 +1767,6 @@ begin
       Item := PMemDbMultiItem(FMultiItems.FLink.Owner);
     end;
     //For the moment, be cautious and assert no pins / changes / etc etc.
-    Assert(DlItemIsEmpty(@FPinnedItems));
     Pin := PMemDBPinnedItem(FPinnedItems.FLink.Owner);
     while Assigned(Pin) do
     begin
@@ -1772,8 +1775,6 @@ begin
       DisposePinned(Pin);
       Pin := PMemDBPinnedItem(FPinnedItems.FLink.Owner);
     end;
-
-    Assert(DlItemIsEmpty(@FIndexPins));
     IdxPin := PMemDBIndexPin(FIndexPins.FLink.Owner);
     while Assigned(IdxPin) do
     begin

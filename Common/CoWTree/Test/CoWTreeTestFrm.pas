@@ -493,7 +493,7 @@ end;
 procedure TCoWTreeTestForm.PerformanceClick(Sender: TObject);
 var
   EndTime, StartTime: Int64;
-  Count: integer;
+  Count, Done: integer;
   i: Integer;
   NewItem: TTrivialDataItem;
   RV: TIsRetVal;
@@ -513,18 +513,22 @@ begin
     Reset;
     NotSoRandSeed := FirstSeed;
     QueryPerformanceCounter(StartTime);
+    Done := count;
     for i := 0 to Pred(Count) do
     begin
       NewItem := TTrivialDataItem.Create;
       NewItem.Key := NotSoRandom;
       RV := FOriginalAdditionStore.AddItem(NewItem, IRec);
       if rv = rvDuplicateKey then
+      begin
+        Done := i;
         break;
+      end;
     end;
     QueryPerformanceCounter(EndTime);
 
     ToSecMsec(EndTime, StartTime, Sec, MSec);
-    ToPerSec(Count, EndTime, StartTime, PerSec);
+    ToPerSec(Done, EndTime, StartTime, PerSec);
 
     Memo1.Lines.Add('IStore Add' + IntToStr(Count) +': ' +
                      IntToStr(Sec) + '.' + IntToStr(MSec) + 'sec, ' +
@@ -534,12 +538,16 @@ begin
     try
       NotSoRandSeed := FirstSeed;
       QueryPerformanceCounter(StartTime);
+      Done := Count;
       for i := 0 to Pred(Count) do
       begin
         SV.SearchKey := NotSoRandom;
         RV := FOriginalAdditionStore.FindByIndex(Pointer(1), SV, IRec);
         if RV = rvNotFound then
+        begin
+          Done := i;
           break;
+        end;
         Item := IRec.Item;
         FOriginalAdditionStore.RemoveItem(IRec);
         Item.Free;
@@ -551,7 +559,7 @@ begin
     end;
 
     ToSecMsec(EndTime, StartTime, Sec, MSec);
-    ToPerSec(Count, EndTime, StartTime, PerSec);
+    ToPerSec(Done, EndTime, StartTime, PerSec);
 
     Memo1.Lines.Add('IStore Remove' + IntToStr(Count) +': ' +
                      IntToStr(Sec) + '.' + IntToStr(MSec) + 'sec, ' +
@@ -561,6 +569,7 @@ begin
 
     NotSoRandSeed := FirstSeed;
     QueryPerformanceCounter(StartTime);
+    Done := Count;
     for i := 0 to Pred(Count) do
     begin
       Node := TCowTestItem.Create;
@@ -568,6 +577,7 @@ begin
       OK := FCowTree.Add(Node, abMain, abMain);
       if not OK then
       begin
+        Done := i;
         Node.Release;
         break;
       end;
@@ -575,7 +585,7 @@ begin
     QueryPerformanceCounter(EndTime);
 
     ToSecMsec(EndTime, StartTime, Sec, MSec);
-    ToPerSec(Count, EndTime, StartTime, PerSec);
+    ToPerSec(Done, EndTime, StartTime, PerSec);
 
     Memo1.Lines.Add('CoW Tree Add' + IntToStr(Count) +': ' +
                      IntToStr(Sec) + '.' + IntToStr(MSec) + 'sec, ' +
@@ -585,12 +595,16 @@ begin
     try
       NotSoRandSeed := FirstSeed;
       QueryPerformanceCounter(StartTime);
+      Done := Count;
       for i := 0 to Pred(Count) do
       begin
         Node.Key := NotSoRandom;
         OK := FCowTree.Remove(Node, abMain, abMain);
         if not OK then
+        begin
+          Done := i;
           break;
+        end;
       end;
       QueryPerformanceCounter(EndTime);
 
@@ -599,7 +613,7 @@ begin
     end;
 
     ToSecMsec(EndTime, StartTime, Sec, MSec);
-    ToPerSec(Count, EndTime, StartTime, PerSec);
+    ToPerSec(Done, EndTime, StartTime, PerSec);
 
     Memo1.Lines.Add('CoW Tree Remove' + IntToStr(Count) +': ' +
                      IntToStr(Sec) + '.' + IntToStr(MSec) + 'sec, ' +
