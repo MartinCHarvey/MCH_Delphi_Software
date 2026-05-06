@@ -787,14 +787,14 @@ begin
         end;
       mdbClosingWaitPersist:
         begin
+          //Don't destroy DB here.
+          //Transactions can have API refs into DB up until
+          //all persistence ops have finished.
           //All client ops basically finished, waiting for journal to flush.
           //Now would be a good time to free up our actual data, so
           //restarts start with a fresh copy of TMemDBPersistent.
-          DBTmp := FDatabase;
-          FDatabase := TMemDBDatabase.Create;
-          FSessionLock.Release;
 
-          DBTmp.Free;
+          FSessionLock.Release;
           try
             FPersistWait.WaitFor(INFINITE);
           finally

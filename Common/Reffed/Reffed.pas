@@ -308,9 +308,13 @@ procedure TReffedList.ReleaseAndClear;
 var
   i: integer;
 begin
-  for i := 0 to Pred(Count) do
-    Items[i].Release;
-  Clear;
+  //Out of memory dtor, FList might be NIL.
+  if Assigned(FList) then
+  begin
+    for i := 0 to Pred(Count) do
+      Items[i].Release;
+    Clear;
+  end;
 end;
 
 { TReffedProxy }
