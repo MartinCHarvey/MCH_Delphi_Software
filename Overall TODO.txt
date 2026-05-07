@@ -1,7 +1,16 @@
 
 MemDB2 TODO.
 
-- Backport new MemDB2 tests to MemDB testapp.
+- Out of memory entity list handling.
+
+- Snapshot navigation. (Pins from INode pinning next?)
+
+- VTune straight line performance, determine what else needs optimising.
+
+- Row addition locks of serialisable:
+  - Abort own txion? Abort Other txion?
+
+- Test out of memory cases when *deleting* rows (& index items).
 
 - Refactor META_ / Pinning functions to use cached values.
 
