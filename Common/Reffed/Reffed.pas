@@ -37,6 +37,11 @@ type
   private
     FRef: integer;
   protected
+{$IFOPT C+}
+    function TryReleaseInt: integer;
+{$ELSE}
+    function TryReleaseInt: integer; inline;
+{$ENDIF}
   public
     constructor Create;
 
@@ -44,7 +49,7 @@ type
     function Unitary: boolean;
     function AddRef: TReffed;  //Where you know there shouldn't be a race conditon.
     function TryAddRef: TReffed; //Where you know there will be.
-    function TryRelease: boolean;
+    function TryRelease: boolean; //Returns whether object still live.
     procedure Release;
 {$ELSE}
     function Unitary: boolean; inline;
@@ -177,34 +182,36 @@ begin
 end;
 
 procedure TReffed.Release;
+var
+  Ret: integer;
 begin
-  if Assigned(Self) then
-  begin
-    if not TryRelease then
-      raise EReffedError.Create(S_REFFED_TEARDOWN_RACE_RELEASING_REF);
-  end;
+  if TryReleaseInt <= 0 then
+    raise EReffedError.Create(S_REFFED_TEARDOWN_RACE_RELEASING_REF);
 end;
 
 function TReffed.TryRelease: boolean;
+begin
+  result := TryReleaseInt > 1;
+end;
+
+function TReffed.TryReleaseInt: integer;
 var
-  Existing: integer;
   GoodExchange: boolean;
 begin
-  result := false;
+  result := 1;
   if Assigned(self) then
   begin
     repeat
-      Existing := FRef;
-      if Existing <= 0 then
+      result := FRef;
+      if result <= 0 then
       begin
-        Assert(Existing = 0);
+        Assert(result = 0);
         exit;
       end;
       GoodExchange := InterlockedCompareExchange(FRef,
-                        Pred(Existing), Existing) = Existing;
+                        Pred(result), result) = result;
     until GoodExchange;
-    result := true;
-    if Existing = 1 then
+    if result = 1 then
       inherited Free;
   end;
 end;
