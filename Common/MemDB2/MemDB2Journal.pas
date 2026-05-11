@@ -491,7 +491,7 @@ begin
     Action.ActionType := jatCommitTransaction;
     Action.ActionObj := T;
     FActionsPendingQueue.AddTailObj(Action);
-    Assert(T.Mode = amReadWrite); //No read-only transactions here plz!
+    Assert(T.Mode in [amWriteExclusive, amReadWriteShared]); //No read-only transactions here plz!
     if T.Sync = amFlushBuffers then
     begin
       //Needs to happen rapidly.
@@ -854,7 +854,7 @@ begin
       for Idx := 0 to Pred(Transactions.Count) do
       begin
         Transaction := TMemDbTransaction(Transactions[idx]);
-        Assert(Transaction.Mode = amReadWrite);
+        Assert(Transaction.Mode in [amWriteExclusive, amReadWriteShared]);
         DoFlush := DoFlush or (Transaction.Sync = amFlushBuffers);
         CopyTransactionStreamToOutput;
       end;

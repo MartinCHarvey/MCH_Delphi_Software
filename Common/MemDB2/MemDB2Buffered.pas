@@ -762,6 +762,9 @@ uses
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
   GlobalLog,
 {$ENDIF}
+{$IFDEF DEBUG_SNAPSHOT}
+  GlobalLog,
+{$ENDIF}
   SysUtils, MemDB2, NullStream, MemDB2Api;
 
 const
@@ -1168,7 +1171,7 @@ procedure TMemDBAPI.CheckWriteTransaction;
 begin
   if not
     ((FAssociatedTransaction as TMemDBTransaction).Mode
-     in [amWriteShared, amWriteExclusive]) then
+     in [amReadWriteShared, amWriteExclusive]) then
     raise EMemDBAPIException.Create(S_API_TRANSACTION_IS_RO);
 end;
 
@@ -2401,6 +2404,14 @@ begin
           CompactOffsets[j] := FieldDefs[j].FieldIndex;
 
         NewIndex := TMemDBIndex.Create;
+
+{$IFDEF DEBUG_SNAPSHOT}
+        GLogLog(SV_INFO, 'T: ' + IntToStr(NativeUInt(FParentTable)) +
+                ' Build New UIdx [' +IntToStr(i) + '] ' +
+                '(' + IntToStr(NativeUint(NewIndex)) + ')' +
+                'Outside lock: ' +BoolToStr(LocalIter));
+{$ENDIF}
+
         with NewIndex as TMemDBIndex do
         begin
           FinalFieldOffsets := CompactOffsets;
@@ -2513,6 +2524,13 @@ begin
     begin
       Assert(not Assigned(FInternalIndexCopy)); //Not retrieved from initial index clone.
       NewIndex := TMemDBIndexInternal.Create;
+
+{$IFDEF DEBUG_SNAPSHOT}
+        GLogLog(SV_INFO, 'T: ' + IntToStr(NativeUInt(FParentTable)) +
+                ' Build New IntIdx [' +IntToStr(-1) + '] ' +
+                '(' + IntToStr(NativeUint(NewIndex)) + ')' +
+                'Outside lock: ' +BoolToStr(LocalIter));
+{$ENDIF}
 
       if LocalIter then
         IRec := FCPRows.GetAnItem
@@ -2661,6 +2679,12 @@ begin
       //First, index modification:
       Index := FParentTable.FMasterIndexes[i] as TMemDbIndex;
       Index.RootToNext; //All manipulation here in abNext copy of index.
+
+{$IFDEF DEBUG_SNAPSHOT}
+      GLogLog(SV_INFO, 'T: ' + IntToStr(NativeUInt(FParentTable)) +
+              ' Evolve UIdx [' +IntToStr(i) + '] ' +
+              '(' + IntToStr(NativeUint(Index)) + ')');
+{$ENDIF}
 
       //TidLocal row set will not change under commit lock.
       IRec := FCPRows.GetAnItem;
@@ -2837,6 +2861,12 @@ begin
     Index := FParentTable.FMasterInternalIndex;
     Index.RootToNext; //All manipulation here in abNext copy of index.
 
+{$IFDEF DEBUG_SNAPSHOT}
+    GLogLog(SV_INFO, 'T: ' + IntToStr(NativeUInt(FParentTable)) +
+            ' Evolve IntIdx [' +IntToStr(-1) + '] ' +
+            '(' + IntToStr(NativeUint(Index)) + ')');
+{$ENDIF}
+
     //TidLocal row set will not change under commit lock.
     IRec := FCPRows.GetAnItem;
     while Assigned(IRec) do
@@ -2929,6 +2959,12 @@ begin
         Index := (FNewBuildIndices[i] as TMemDBIndex);
         Index.SparseFieldOffsets := Index.FinalFieldOffsets;
 
+{$IFDEF DEBUG_SNAPSHOT}
+        GLogLog(SV_INFO, 'T: ' + IntToStr(NativeUInt(FParentTable)) +
+                ' Commit new build UIdx [' +IntToStr(i) + '] ' +
+                '(' + IntToStr(NativeUint(Index)) + ')');
+{$ENDIF}
+
         //FMasterIndexes might have a previous index here on re-build.
         Index := FParentTable.FMasterIndexes[i] as TMemDBIndex; //Old index to swizzle off.
         FParentTable.FMasterIndexes[i] := FNewBuildIndices[i];
@@ -2942,6 +2978,13 @@ begin
         //Swizzle old master index onto local list for later destruction.
         Assert(not Assigned(FNewBuildIndices[i]));
         Assert(Assigned(FParentTable.FMasterIndexes[i]));
+
+{$IFDEF DEBUG_SNAPSHOT}
+        GLogLog(SV_INFO, 'T: ' + IntToStr(NativeUInt(FParentTable)) +
+                ' Delete old UIdx [' +IntToStr(i) + '] ' +
+                '(' + IntToStr(NativeUint(FParentTable.FMasterIndexes[i])) + ')');
+{$ENDIF}
+
         FNewBuildIndices[i] := FParentTable.FMasterIndexes[i];
         FParentTable.FMasterIndexes[i] := nil;
       end
@@ -2949,6 +2992,13 @@ begin
       begin
         //No large scale manipulation, commit index to next iteration.
         Index := FParentTable.FMasterIndexes[i] as TMemDbIndex;
+
+{$IFDEF DEBUG_SNAPSHOT}
+        GLogLog(SV_INFO, 'T: ' + IntToStr(NativeUInt(FParentTable)) +
+                ' Commit evolved UIdx (1)[' +IntToStr(i) + '] ' +
+                '(' + IntToStr(NativeUint(Index)) + ')');
+{$ENDIF}
+
         Index.CommitNextToRoot;
       end;
     end;
@@ -2960,10 +3010,18 @@ begin
     Assert(FInternalIndexChangeset * [ictChangedFieldNumber] = []);
     Delete := FInternalIndexChangeset * [ictDeleted] <> [];
     Assert(not (AddOrRebuild and Delete));
+
     if AddOrRebuild then
     begin
       Assert(not Assigned(FParentTable.FMasterInternalIndex));
       Assert(Assigned(FInternalIndexCopy));
+
+{$IFDEF DEBUG_SNAPSHOT}
+      GLogLog(SV_INFO, 'T: ' + IntToStr(NativeUInt(FParentTable)) +
+              ' Commit new build IntIdx [' +IntToStr(-1) + '] ' +
+              '(' + IntToStr(NativeUint(FInternalIndexCopy)) + ')');
+{$ENDIF}
+
       FParentTable.FMasterInternalIndex := FInternalIndexCopy;
       FInternalIndexCopy := nil;
     end
@@ -2972,8 +3030,31 @@ begin
       Assert(Assigned(FParentTable.FMasterInternalIndex));
       Assert(Assigned(FInternalIndexCopy));
       Assert(not Assigned(FTmpDeleting));
+
+{$IFDEF DEBUG_SNAPSHOT}
+        GLogLog(SV_INFO, 'T: ' + IntToStr(NativeUInt(FParentTable)) +
+                ' Delete old IntIdx [' +IntToStr(-1) + '] ' +
+                '(' + IntToStr(NativeUint(FParentTable.FMasterInternalIndex)) + ')');
+{$ENDIF}
+
       FTmpDeleting := FParentTable.FMasterInternalIndex;
       FParentTable.FMasterInternalIndex := nil;
+    end
+    else
+    begin
+      //Generally expect this to be assigned, but we'll be careful and
+      //check all the same. Post-delete commit gets this far?
+      //TODO - Check with dangling txion.
+      Assert(Assigned(FParentTable.FMasterInternalIndex));
+      if Assigned(FParentTable.FMasterInternalIndex) then
+      begin
+{$IFDEF DEBUG_SNAPSHOT}
+        GLogLog(SV_INFO, 'T: ' + IntToStr(NativeUInt(FParentTable)) +
+                '*** Commit evolved IntIdx [' +IntToStr(-1) + '] ' +
+                '(' + IntToStr(NativeUint(FParentTable.FMasterInternalIndex)) + ')');
+{$ENDIF}
+        FParentTable.FMasterInternalIndex.CommitNextToRoot;
+      end;
     end;
   end
   else
@@ -2981,11 +3062,28 @@ begin
     for i := 0 to Pred(FParentTable.FMasterIndexes.Count) do
     begin
       Index := FParentTable.FMasterIndexes[i] as TMemDbIndex;
+
+{$IFDEF DEBUG_SNAPSHOT}
+        GLogLog(SV_INFO, 'T: ' + IntToStr(NativeUInt(FParentTable)) +
+                ' Commit evolved UIdx (2)[' +IntToStr(i) + '] ' +
+                '(' + IntToStr(NativeUint(Index)) + ')');
+{$ENDIF}
+
       Index.CommitNextToRoot;
     end;
-    //Master internal index always assigned if not indexing change.
+    //Generally expect this to be assigned, but we'll be careful and
+    //check all the same. Post-delete commit gets this far?
+    //TODO - Check with dangling txion.
     Assert(Assigned(FParentTable.FMasterInternalIndex));
-    FParentTable.FMasterInternalIndex.CommitNextToRoot;
+    if Assigned(FParentTable.FMasterInternalIndex) then
+    begin
+{$IFDEF DEBUG_SNAPSHOT}
+        GLogLog(SV_INFO, 'T: ' + IntToStr(NativeUInt(FParentTable)) +
+                ' Commit evolved IntIdx [' +IntToStr(-1) + '] ' +
+                '(' + IntToStr(NativeUint(FParentTable.FMasterInternalIndex)) + ')');
+{$ENDIF}
+      FParentTable.FMasterInternalIndex.CommitNextToRoot;
+    end;
   end;
 end;
 
@@ -2994,17 +3092,29 @@ var
   i: integer;
   Index: TMemDBIndex;
 begin
-  //TODO TODO - Handle rollback in case where master indexes are NIL?
-  //TODO - Multi thread speedup / swizzle for later destruction?
   Assert(Assigned(FParentTable.FMasterIndexes));
   for i := 0 to Pred(FParentTable.FMasterIndexes.Count) do
   begin
     Index := FParentTable.FMasterIndexes.Items[i] as TMemDBIndex;
+
+{$IFDEF DEBUG_SNAPSHOT}
+    GLogLog(SV_INFO, 'T: ' + IntToStr(NativeUInt(FParentTable)) +
+            ' Rollback UIdx [' +IntToStr(i) + '] ' +
+            '(' + IntToStr(NativeUint(Index)) + ')');
+{$ENDIF}
+
     Index.DiscardNext;
   end;
   //Master internal index not always assigned in rollback case (new index build).
   if Assigned(FParentTable.FMasterInternalIndex) then
+  begin
+{$IFDEF DEBUG_SNAPSHOT}
+    GLogLog(SV_INFO, 'T: ' + IntToStr(NativeUInt(FParentTable)) +
+            ' Rollback IntIdx [' +IntToStr(-1) + '] ' +
+            '(' + IntToStr(NativeUint(FParentTable.FMasterInternalIndex)) + ')');
+{$ENDIF}
     FParentTable.FMasterInternalIndex.DiscardNext;
+  end;
   //Else new build master index not swizzled on yet, TidLocal destroy will clean it up.
 end;
 
@@ -3404,8 +3514,14 @@ begin
       else
         result := nil;
     end;
-    Cursor.Row.RemoveFromLocalIndices(self);
-    Cursor.Row.Delete(FTid);
+    try
+      Cursor.Row.RemoveFromLocalIndices(self);
+      Cursor.Row.Delete(FTid);
+    except
+      //Unfortunately have to alloc new cursor before delete.
+      result.Free;
+      raise;
+    end;
   finally
     Tmp.Free;
   end;
@@ -3448,6 +3564,7 @@ begin
       result.SetPinned;
     except
       result.Free;
+      raise;
     end;
   end
   else
@@ -3476,6 +3593,7 @@ begin
       result.SetPinned;
     except
       result.Free;
+      raise;
     end;
   end;
 end;
@@ -6590,11 +6708,8 @@ begin
       FEntityLock.Release;
     end;
   except
-    on Exception do
-    begin
-      result.Release;
-      raise;
-    end;
+    result.Release;
+    raise;
   end;
 end;
 

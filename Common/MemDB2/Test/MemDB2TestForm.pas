@@ -5,7 +5,7 @@ interface
 uses
   System.SysUtils, System.Types, System.UITypes, System.Rtti, System.Classes,
   System.Variants, FMX.Types, FMX.Controls, FMX.Forms, FMX.Dialogs,
-  FMX.StdCtrls, MemDB2, FMX.Layouts, FMX.Memo;
+  FMX.StdCtrls, MemDB2, MemDB2Misc, FMX.Layouts, FMX.Memo, FMX.ListBox;
 
 type
   TForm1 = class(TForm)
@@ -25,6 +25,12 @@ type
     TstBlobs: TButton;
     MultiTrans: TButton;
     LeakTrans: TButton;
+    RModeCombo: TComboBox;
+    WModeCombo: TComboBox;
+    IsoCombo: TComboBox;
+    Label1: TLabel;
+    Label2: TLabel;
+    Label3: TLabel;
     procedure BasicTestBtnClick(Sender: TObject);
     procedure ResetClick(Sender: TObject);
     procedure IndexTestClick(Sender: TObject);
@@ -41,9 +47,15 @@ type
     procedure TstBlobsClick(Sender: TObject);
     procedure MultiTransClick(Sender: TObject);
     procedure LeakTransClick(Sender: TObject);
+    procedure RModeComboChange(Sender: TObject);
+    procedure WModeComboChange(Sender: TObject);
+    procedure IsoComboChange(Sender: TObject);
   private
     { Private declarations }
     FTimeStamp: TDateTime;
+    RMode: TMDBAccessMode;
+    WMode: TMDBAccessMode;
+    Iso: TMDBIsolationLevel;
     procedure LogTimeIncr(S: string);
     procedure BigTblModFast;
     procedure BigTblModSlow;
@@ -67,7 +79,7 @@ implementation
 {$R *.fmx}
 
 uses
-  IOUtils, MemDB2Misc, MemDB2API, Math, MemDB2Buffered, SyncObjs;
+  IOUtils, MemDB2API, Math, MemDB2Buffered, SyncObjs;
 
 const
   LIMIT = 1000;
@@ -113,7 +125,7 @@ end;
 
 procedure TForm1.LeakTransClick(Sender: TObject);
 begin
-  FSession.StartTransaction(amRead);
+  FSession.StartTransaction(RMode, amLazyWrite, Iso);
   //Check with debugger is cleared down at app quit time.
 end;
 
@@ -145,7 +157,7 @@ var
   LF, LN: TMemApiPosition;
 begin
   ResetClick(Sender);
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -170,7 +182,8 @@ begin
         Trans.CommitAndFree;
         LogTimeIncr('Table create OK');
 
-        Trans := FSession.StartTransaction(amReadWrite, amLazyWrite, ilDirtyRead);
+        { Do not do this at snapshot or higher, depends on intrinsic row order }
+        Trans := FSession.StartTransaction(WMode, amLazyWrite, ilReadRepeatable);
         DBAPI := Trans.GetAPI;
         Assert(Assigned(DBAPI));
         TableData := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
@@ -302,7 +315,8 @@ begin
     LogTimeIncr('Table add/delete/navigate OK');
 
     //OK, now check rows as expected in separate transaction.
-    Trans := FSession.StartTransaction(amRead);
+    //Lower isolation (not snapshot) to get rows in expected native order.
+    Trans := FSession.StartTransaction(RMode, amLazyWrite, ilReadRepeatable);
     DBAPI := Trans.GetAPI;
     try
       TableData := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
@@ -349,7 +363,7 @@ var
 begin
   ResetClick(Sender);
   Start := Now;
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -379,7 +393,7 @@ begin
     end;
   end;
   LogTimeIncr('Big table structure setup OK.');
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -415,7 +429,7 @@ begin
     end;
   end;
   LogTimeIncr('Big tables filled OK.');
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -444,7 +458,7 @@ begin
     end;
   end;
   LogTimeIncr('Big table indexes added OK.');
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -495,7 +509,7 @@ var
   FKAPI: TMemAPIForeignKey;
 begin
   FTimeStamp := Now;
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -517,7 +531,7 @@ begin
     end;
   end;
   LogTimeIncr('Big table dropped FKs OK.');
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -544,7 +558,7 @@ begin
     end;
   end;
   LogTimeIncr('Big table dropped indices OK.');
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -582,7 +596,7 @@ begin
     end;
   end;
   LogTimeIncr('Big table data modded OK.');
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -611,7 +625,7 @@ begin
     end;
   end;
   LogTimeIncr('Big table indexes added OK.');
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -658,7 +672,7 @@ var
   Data: TMemDBFieldDataRec;
 begin
   FTimeStamp := Now;
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -745,7 +759,7 @@ var
 begin
   ResetClick(Sender);
   //Create a table with the right structure.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -782,7 +796,7 @@ begin
   end;
 
   //Add some data.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -796,6 +810,11 @@ begin
           TableData.WriteField('Int', Data);
           TableData.Post;
         end;
+        //TODO - Bugfix here. Need to allow navigation on user indexes, where
+        //posted, but not yet fully comitted, Tid checking needs mod.
+
+        //TODO TODO - Additional bugfix here. Not sure about ownership,
+        //content, modification of blob data, needs rechecking.
         try
           FillChar(Data, sizeof(Data), 0);
           OK := TableData.Locate(ptFirst, '');
@@ -830,7 +849,7 @@ begin
   end;
 
   //Modify a byte in the blobs to check replay from journal.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -912,7 +931,7 @@ begin
 
   //Now check that the blob data is as we expect, after commited
   //all the way back AB buffers, and re-read.
-  Trans := FSession.StartTransaction(amRead);
+  Trans := FSession.StartTransaction(RMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -973,7 +992,7 @@ begin
   //Search for an existent, and nonexistent blob.
   if LIMIT > 50 then
   begin
-    Trans := FSession.StartTransaction(amRead);
+    Trans := FSession.StartTransaction(RMode, amLazyWrite, Iso);
     try
       DBAPI := Trans.GetAPI;
       try
@@ -1022,6 +1041,7 @@ begin
     LogtimeIncr('Blob test (4): WARNING. Skipped test, set LIMIT to a higher value (50+).');
 end;
 
+
 procedure TForm1.FindEdgeTestClick(Sender: TObject);
 
 const
@@ -1039,7 +1059,7 @@ begin
   ResetClick(Sender);
 
   //Create a table with the right structure.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -1070,7 +1090,7 @@ begin
   end;
 
   //Add some data.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -1101,7 +1121,7 @@ begin
     raise;
   end;
 
-  Trans := FSession.StartTransaction(amRead);
+  Trans := FSession.StartTransaction(RMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -1187,7 +1207,7 @@ begin
 
   //Delete all the rows, and append new data for a slightly different
   //test. Test more thorough navigation through deleted rows.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -1224,7 +1244,10 @@ begin
 
   //Now just check that we can delete 2 rows out of 3, and still iterate
   //through on an index, and also the null index (row order) OK.
-  Trans := FSession.StartTransaction(amReadWrite);
+
+  //Do *not* run this at ilSnapshot or higher - depends on intrinsic row order,
+  //which snapshot iso does not give us.
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, ilReadRepeatable);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -1316,7 +1339,7 @@ procedure TForm1.FKTestSameTable(Sender: TObject);
     DBAPI: TMemAPIDatabase;
     TableMeta: TMemAPITableMetadata;
   begin
-    Trans := FSession.StartTransaction(amReadWrite);
+    Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
     try
       DBAPI := Trans.GetAPI;
       try
@@ -1357,7 +1380,7 @@ procedure TForm1.FKTestSameTable(Sender: TObject);
     TableData: TMemAPITableData;
   begin
     //Delete all existing rows, but keep table intact and present.
-    Trans := FSession.StartTransaction(amReadWrite, amLazyWrite, ilDirtyRead);
+    Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
     try
       DBAPI := Trans.GetAPI;
       try
@@ -1398,7 +1421,7 @@ procedure TForm1.FKTestSameTable(Sender: TObject);
     FKey: TMemAPIForeignKey;
 
   begin
-    Trans := FSession.StartTransaction(amReadWrite);
+    Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
     try
       DBAPI := Trans.GetAPI;
       try
@@ -1442,7 +1465,7 @@ procedure TForm1.FKTestSameTable(Sender: TObject);
     for BreakReferred := Low(BreakReferred) to High(BreakReferred) do
     begin
       Pass := false;
-      Trans := FSession.StartTransaction(amReadWrite);
+      Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
       try
         DBAPI := Trans.GetAPI;
         try
@@ -1515,7 +1538,7 @@ var
   procedure DelRows;
   begin
     //Delete all existing rows, but keep table intact and present.
-    Trans := FSession.StartTransaction(amReadWrite, amLazyWrite, ilDirtyRead);
+    Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
     try
       DBAPI := Trans.GetAPI;
       try
@@ -1560,7 +1583,7 @@ var
     Data: TMemDbFieldDataRec;
   begin
     //Delete all existing rows, but keep table intact and present.
-    Trans := FSession.StartTransaction(amReadWrite, amLazyWrite, ilDirtyRead);
+    Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
     try
       DBAPI := Trans.GetAPI;
       try
@@ -1607,7 +1630,7 @@ var
 
   procedure CreateBasicFKTables;
   begin
-    Trans := FSession.StartTransaction(amReadWrite);
+    Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
     try
       DBAPI := Trans.GetAPI;
       try
@@ -1654,7 +1677,7 @@ var
 
   procedure AddExtraFields;
   begin
-    Trans := FSession.StartTransaction(amReadWrite);
+    Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
     try
       DBAPI := Trans.GetAPI;
       try
@@ -1687,7 +1710,7 @@ var
 
   procedure DupFieldsNewFK;
   begin
-    Trans := FSession.StartTransaction(amReadWrite);
+    Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
     try
       DBAPI := Trans.GetAPI;
       try
@@ -1756,7 +1779,7 @@ begin
   SetBaseRowSet;
 
   //Add FK, check all OK.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -1784,7 +1807,7 @@ begin
 
   //Test 1a.
   //Remove FK.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -1805,7 +1828,7 @@ begin
 
   //Add extra row in Referring, re-add FK (all in same transaction).
   Pass := false;
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -1857,7 +1880,7 @@ begin
   SetBaseRowSet;
 
   Pass := false;
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -1905,7 +1928,7 @@ begin
   DelRows;
   SetBaseRowSet;
   //Add FK, check all OK.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -1935,7 +1958,7 @@ begin
   //Add a row to referring (different key).
   //Try to commit, check fails.
   Pass := false;
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -1976,7 +1999,7 @@ begin
   //Remove a row from master,
   //Try to commit, check fails.
   Pass := false;
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -2014,7 +2037,7 @@ begin
   //Change referring row to something else (different key)
   //Try to commit, check fails.
   Pass := false;
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -2055,7 +2078,7 @@ begin
   //Test 2d. Change a master row to something else (key not in referring)
   //Try to commit, check fails.
   Pass := false;
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -2097,7 +2120,7 @@ begin
   //Add duplicate row in referring table,
   //check addition set pruned (debugger),
   //FK relationship still satisfied.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -2131,7 +2154,7 @@ begin
   //but add new row with same key.
   //check deletion set pruned (debugger).
   //FK relation still holds.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -2176,10 +2199,14 @@ begin
   //Check FK checking OK, even when index being added.
   DupFieldsNewFK;
 
+  //TODO TODO Temp.
+  //Just checking 3c does not bork the index, it does not.
+{$IFDEF TMP_DEBUGGING_REMOVE}
+
   //Test 3c.
   //Add data to dependent table whilst deleting fields from master.
   Pass := false;
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -2230,10 +2257,12 @@ begin
     end;
   end;
 
+{$ENDIF}
+
   //Test 3d.
   //Delete data from master table whilst deleting fields from child.
   Pass := false;
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -2254,7 +2283,15 @@ begin
       end;
       TableData := DBAPI.GetAPIObjectFromEntity('FKTestTableMaster', APITableData) as TMemAPITableData;
       try
+{$IFDEF TEMP_DEBUGGING_REMOVE}
         TableData.Locate(ptFirst, '');
+{$ELSE}
+        //Quick check whether interation by non master index here is also
+        //broken.
+        TableData.Locate(ptFirst, 'MasterKeyIdx');
+        //OK, this is specifically an internal indec iteration problem.
+        //it's not being kept up to date in some cases.
+{$ENDIF}
         TableData.Delete;
       finally
         TableData.Free;
@@ -2284,7 +2321,7 @@ begin
   //3e.
   //Do same set of deletes without changing data rows
   //check OK.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -2326,7 +2363,7 @@ begin
 
   //Test4.
   //Check table / index renames - rename *everything*.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -2376,7 +2413,7 @@ begin
   DupFieldsNewFK;
 
   //5a Remove the old FK.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -2403,7 +2440,7 @@ begin
 
   //5b Remove re-add data into the master table, whilst deleting fields
   //from child, and check still passes.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -2443,7 +2480,7 @@ begin
 
   //5c Add duplicate row in referring table, whilst deleting fields from master
   //and check still passes.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -2481,9 +2518,57 @@ end;
 
 
 procedure TForm1.FormCreate(Sender: TObject);
+var
+  Item: TListBoxItem;
 begin
   FTimeStamp := DBStartTime;
   LogTimeIncr('DB load time.');
+
+  Item := TListBoxItem.Create(RModeCombo);
+  Item.Text := MDBAccessModeStrings[amReadShared];
+  Item.Tag := Ord(amReadShared);
+  RModeCombo.AddObject(Item);
+
+  Item := TListBoxItem.Create(RModeCombo);
+  Item.Text := MDBAccessModeStrings[amReadWriteShared];
+  Item.Tag := Ord(amReadWriteShared);
+  RModeCombo.AddObject(Item);
+
+  RModeCombo.ItemIndex := 0; //amReadShared.
+
+  Item := TListBoxItem.Create(WModeCombo);
+  Item.Text := MDBAccessModeStrings[amReadWriteShared];
+  Item.Tag := Ord(amReadWriteShared);
+  WModeCombo.AddObject(Item);
+
+  Item := TListBoxItem.Create(WModeCombo);
+  Item.Text := MDBAccessModeStrings[amWriteExclusive];
+  Item.Tag := Ord(amWriteExclusive);
+  WModeCombo.AddObject(Item);
+
+  WModeCombo.ItemIndex := 1; //amWriteExclusive;
+
+  Item := TListBoxItem.Create(IsoCombo);
+  Item.Text := MDBIsoStrings[ilReadComitted];
+  Item.Tag := Ord(ilReadComitted);
+  IsoCombo.AddObject(Item);
+
+  Item := TListBoxItem.Create(IsoCombo);
+  Item.Text := MDBIsoStrings[ilReadRepeatable];
+  Item.Tag := Ord(ilReadRepeatable);
+  IsoCombo.AddObject(Item);
+
+  Item := TListBoxItem.Create(IsoCombo);
+  Item.Text := MDBIsoStrings[ilSnapshot];
+  Item.Tag := Ord(ilSnapshot);
+  IsoCombo.AddObject(Item);
+
+  Item := TListBoxItem.Create(IsoCombo);
+  Item.Text := MDBIsoStrings[ilSerialisable];
+  Item.Tag := Ord(ilSerialisable);
+  IsoCombo.AddObject(Item);
+
+  IsoCombo.ItemIndex := 1; //ilReadRepeatable
 end;
 
 procedure TForm1.IndexTest2Click(Sender: TObject);
@@ -2500,7 +2585,7 @@ var
   var
     Names: TStringList;
   begin
-    Trans := FSession.StartTransaction(amReadWrite);
+    Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
     try
       DBAPI := Trans.GetAPI;
       try
@@ -2532,7 +2617,7 @@ var
   procedure DelRows;
   begin
     //Delete all existing rows, but keep table intact and present.
-    Trans := FSession.StartTransaction(amReadWrite, amLazyWrite, ilDirtyRead);
+    Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
     try
       DBAPI := Trans.GetAPI;
       try
@@ -2568,7 +2653,7 @@ begin
   //1. Test Index constraint checking on newly created table with added index.
   //1a) Unique values nonzero.
   //1ai) Pass case.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -2592,7 +2677,7 @@ begin
       raise;
     end;
   end;
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -2631,7 +2716,7 @@ begin
   //1b) Unique values, one zero.
   //1bi) Fail case.
   Pass := false;
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -2657,7 +2742,7 @@ begin
     end;
   end;
 
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -2704,7 +2789,7 @@ begin
   //1c) A duplicate value.
   //1ci) Fail case.
   Pass := false;
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -2729,7 +2814,7 @@ begin
       raise;
     end;
   end;
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -2782,7 +2867,7 @@ begin
   //1d
   //Now, create the index (we expected previous test to fail).
   //... and leave it in place.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -2809,7 +2894,7 @@ begin
   //2. Test Index constraint checking on updated table with previously added index.
   //2a) Unique values nonzero.
   //2ai) Pass case.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -2845,7 +2930,7 @@ begin
   //2b) Unique values, one zero.
   //2bii) Fail case.
   Pass := false;
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -2889,7 +2974,7 @@ begin
   //2c) A duplicate value.
   //2cii) Fail case.
   Pass := false;
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -2948,7 +3033,7 @@ var
 begin
   ResetClick(Sender);
 
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -2975,7 +3060,7 @@ begin
   end;
 
   //Fill with data in order.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -3008,7 +3093,8 @@ begin
   end;
 
   //Check basic traverse in order (no internal index).
-  Trans := FSession.StartTransaction(amRead);
+  //Lower isolation value to get native row order.
+  Trans := FSession.StartTransaction(RMode, amLazyWrite, ilReadRepeatable);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -3044,7 +3130,7 @@ begin
 
   //Check basic traverse via explicit index.
   Sum := 0;
-  Trans := FSession.StartTransaction(amRead);
+  Trans := FSession.StartTransaction(RMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -3082,7 +3168,7 @@ begin
   //Check basic traverse via implicit internal index.
   Sum2 := 0;
   //Now read using implicit internal index at snapshot Iso.
-  Trans := FSession.StartTransaction(amRead, amLazyWrite, ilSnapshot);
+  Trans := FSession.StartTransaction(RMode, amLazyWrite, ilSnapshot);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -3119,7 +3205,7 @@ begin
   end;
 
   //Now check basic find operations.
-  Trans := FSession.StartTransaction(amRead, amLazyWrite, ilSnapshot);
+  Trans := FSession.StartTransaction(RMode, amLazyWrite, ilSnapshot);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -3171,7 +3257,7 @@ var
   Data: TMemDbFieldDataRec;
 begin
   BasicTestBtnClick(Sender);
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -3235,7 +3321,7 @@ begin
     end;
   end;
 
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -3268,7 +3354,7 @@ begin
 
 
     //Delete index and associated field.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -3294,7 +3380,7 @@ begin
   end;
 
     //Delete field whilst adding indices.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -3607,7 +3693,7 @@ var
 begin
   ResetClick(Sender);
   try
-    Trans := FSession.StartTransaction(amReadWrite);
+    Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
     try
       CreateTablesInTransaction;
       CreateFKeysInTransaction;
@@ -3616,7 +3702,7 @@ begin
       Trans.RollbackAndFree;
       raise;
     end;
-    Trans := FSession.StartTransaction(amReadWrite);
+    Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
     try
       PopulateRowsInTransaction;
       Trans.CommitAndFree;
@@ -3635,7 +3721,7 @@ begin
 
   ResetClick(Sender);
   try
-    Trans := FSession.StartTransaction(amReadWrite);
+    Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
     try
       CreateTablesInTransaction;
       Trans.CommitAndFree;
@@ -3643,7 +3729,7 @@ begin
       Trans.RollbackAndFree;
       raise;
     end;
-    Trans := FSession.StartTransaction(amReadWrite);
+    Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
     try
       PopulateRowsInTransaction;
       CreateFKeysInTransaction;
@@ -3662,7 +3748,7 @@ begin
   end;
 
   //3. Add item in referred, unique from all others. Expect OK.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     AddMasterUnique;
     Trans.CommitAndFree;
@@ -3677,7 +3763,7 @@ begin
   end;
 
   //4. Remove new unique item. Expect OK.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     RemoveMasterUnique;
     Trans.CommitAndFree;
@@ -3692,7 +3778,7 @@ begin
   end;
 
   //5. Add item in referred, already present, expect fail.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   Pass := false;
   try
     AddMasterDup;
@@ -3716,7 +3802,7 @@ begin
   end;
 
   //6. Re-add new unique item, Expect OK.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     AddMasterUnique;
     Trans.CommitAndFree;
@@ -3731,7 +3817,7 @@ begin
   end;
 
   //7. Remove item in referred, already present, expect FK fail.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   Pass := false;
   try
     RemoveMasterDup;
@@ -3755,7 +3841,7 @@ begin
   end;
 
   //8. Add item in referring same as already present, expect OK.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     AddSubPresent;
     Trans.CommitAndFree;
@@ -3770,7 +3856,7 @@ begin
   end;
 
   //9. Add item in referring same as new unique, expect OK.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     AddSubNewUnique;
     Trans.CommitAndFree;
@@ -3785,7 +3871,7 @@ begin
   end;
 
   //10. Add item in referring diff from all in master, expect fail.
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   Pass := false;
   try
     AddSubUtterlyUnique;
@@ -3823,7 +3909,7 @@ var
 
 begin
   ResetClick(Sender);
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -3854,7 +3940,7 @@ begin
       raise;
     end;
   end;
-  Trans := FSession.StartTransaction(amReadWrite);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -3895,7 +3981,7 @@ begin
   end;
   //Check basic indexing traversal.
   Pass := true;
-  Trans := FSession.StartTransaction(amRead);
+  Trans := FSession.StartTransaction(RMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -3960,7 +4046,7 @@ begin
   end;
   //Check couple of random index find. examples.
   Pass := true;
-  Trans := FSession.StartTransaction(amRead);
+  Trans := FSession.StartTransaction(RMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -4011,7 +4097,7 @@ begin
   begin
     if LIMIT > 77 then
     begin
-      Trans := FSession.StartTransaction(amReadWrite);
+      Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
       try
         DBAPI := Trans.GetAPI;
         try
@@ -4066,6 +4152,8 @@ end;
 type
   TRRThread = class(TThread)
     WaitHandle: TEvent;
+    RMode: TMDBAccessMode;
+    Iso: TMDBIsolationLevel;
     procedure Execute; override;
   end;
 
@@ -4081,7 +4169,7 @@ begin
   WaitHandle.WaitFor(INFINITE);
   for i := 1 to LIMIT do
   begin
-    T := FSession.StartTransaction(amRead);
+    T := FSession.StartTransaction(RMode, amLazyWrite, Iso);
     try
       DBAPI := T.GetAPI;
       try
@@ -4128,6 +4216,8 @@ procedure TForm1.MultiRRTrans(Sender: TObject);
       begin
         Threads[i] := TRRThread.Create(true);
         Threads[i].WaitHandle := Evt;
+        Threads[i].RMode := self.RMode;
+        Threads[i].Iso := self.Iso;
         Threads[i].Resume;
       end;
       Evt.SetEvent;
@@ -4153,7 +4243,7 @@ procedure TForm1.MultiRRTrans(Sender: TObject);
     DataRec: TMemDbFieldDataRec;
   begin
     ResetClick(Sender);
-    T := FSession.StartTransaction(amReadWrite);
+    T := FSession.StartTransaction(WMode, amLazyWrite, Iso);
     try
       DBAPI := T.GetAPI;
       try
@@ -4183,7 +4273,7 @@ procedure TForm1.MultiRRTrans(Sender: TObject);
         raise;
       end;
     end;
-    T := FSession.StartTransaction(amReadWrite);
+    T := FSession.StartTransaction(WMode, amLazyWrite, Iso);
     try
       DBAPI := T.GetAPI;
       try
@@ -4242,7 +4332,7 @@ var
   i: integer;
 begin
   FTimeStamp := Now;
-  Trans := FSession.StartTransaction(amReadWrite, amLazyWrite, ilCommittedRead);
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
     try
@@ -4288,6 +4378,30 @@ begin
   end;
 end;
 
+procedure TForm1.RModeComboChange(Sender: TObject);
+var
+  Item: TListBoxItem;
+begin
+  Item := RModeCombo.Selected;
+  RMode := TMDBAccessMode(Item.Tag);
+end;
+
+procedure TForm1.WModeComboChange(Sender: TObject);
+var
+  Item: TListBoxItem;
+begin
+  Item := WModeCombo.Selected;
+  WMode := TMDBAccessMode(Item.Tag);
+end;
+
+procedure TForm1.IsoComboChange(Sender: TObject);
+var
+  Item: TListBoxItem;
+begin
+  Item := IsoCombo.Selected;
+  Iso := TMDBIsolationLevel(Item.Tag);
+end;
+
 procedure TForm1.SmallTransClick(Sender: TObject);
 var
   idx: integer;
@@ -4297,7 +4411,7 @@ begin
   try
     for Idx := 0 to Pred(TRANS_LIMIT) do
     begin
-      Trans := FSession.StartTransaction(amReadWrite);
+      Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
       try
         Trans.CommitAndFree;
       except

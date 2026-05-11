@@ -394,7 +394,7 @@ begin
     //If it's a rollback then I won't, and will clean up for you.
     Transaction.CheckNoDanglingTransactionRefs(Commit);
 
-    if not (Transaction.FMode in [amWriteShared, amWriteExclusive]) then
+    if not (Transaction.FMode in [amReadWriteShared, amWriteExclusive]) then
     begin
       if FDatabase.AnyChangesForTid(Transaction.Tid) then
         raise EMemDBInternalException.Create(S_READONLY_HAS_CHANGED_DATA);
@@ -470,7 +470,7 @@ begin
   //If good commit, drop the lock.
   //If failed rollback, DB in error, exception swallowed, and drop the R/W lock.
 
-  Assert(Transaction.FMode in [amReadShared, amWriteExclusive, amWriteShared]);
+  Assert(Transaction.FMode in [amReadShared, amWriteExclusive, amReadWriteShared]);
   FRWWLock.Release(DBAccessModeToLockReason(Transaction.FMode));
 
   if WaitJournalDone then
@@ -500,7 +500,6 @@ function TMemDB.StartTransaction(Mode: TMDBAccessMode;
   : TMemDBTransaction;
 var
   idx: integer;
-  API: TMemAPIDatabaseInternal;
 begin
   result := nil;
   try
@@ -538,7 +537,7 @@ begin
     finally
       FSessionLock.Release;
     end;
-    Assert(Mode in [amReadShared, amWriteExclusive, amWriteShared]);
+    Assert(Mode in [amReadShared, amWriteExclusive, amReadWriteShared]);
     FRWWLock.Acquire(DBAccessModeToLockReason(Mode));
 
     result.FCRInterface := FDatabase.Interfaced.GetAPIObject(result, APIInternalCommitRollback)
@@ -744,8 +743,6 @@ begin
 end;
 
 procedure TMemDB.StopDBLocked;
-var
-  DBTmp: TMemDbDatabasePersistent;
 begin
   while not(FPhase in [mdbNull, mdbClosed, mdbError]) do
   begin

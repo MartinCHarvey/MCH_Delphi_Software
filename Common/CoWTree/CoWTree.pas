@@ -469,12 +469,11 @@ function TCowTree.BalanceRight(InP: TCowTreeItem;
                               dl: boolean; var h:TChkBool): TCowTreeItem;
 var
   p, p1, p2: TCowTreeItem;
-  NewRoot, NewP, NewP1, NewP2: TCowTreeItem;
+  NewRoot, NewP, NewP1: TCowTreeItem;
 begin
   NewRoot := nil;
   NewP := nil;
   NewP1 := nil;
-  NewP2 := nil;
   result := nil;
   p := InP;
   try
@@ -587,26 +586,13 @@ begin
               NewRoot.right.bal := +1
             else
               NewRoot.right.bal := 0;
-            if dl then
-              NewRoot.bal := 0
-            else
-              NewRoot.bal := p2.bal;
+
+            NewRoot.bal := 0;
           end;
+
           if not dl then
           begin
-            // final rebalance overwrite
-            NewP2 := NewRoot.DupInit(self);
-{$IFOPT C+}
-            NewP2.left := NewRoot.left.AddRef as TCowTreeItem;
-            NewP2.right := NewRoot.right.AddRef as TCowTreeItem;
-{$ELSE}
-            NewP2.left := TCowTreeItem(NewRoot.left.AddRef);
-            NewP2.right := TCowTreeItem(NewRoot.right.AddRef);
-{$ENDIF}
-            NewP2.bal := 0;
-            NewRoot.Release; // discard old root
-            NewRoot := NewP2;
-            NewP2 := nil;
+            Assert(NewRoot.bal = 0);
             WrCk(h, false);
           end;
         end;
@@ -618,7 +604,6 @@ begin
     NewRoot.Release;
     NewP.Release;
     NewP1.Release;
-    NewP2.Release;
     raise;
   end;
 end;
@@ -627,12 +612,11 @@ function TCowTree.BalanceLeft(InP: TCowTreeItem;
                              dl: boolean; var h:TChkBool): TCowTreeItem;
 var
   p, p1, p2: TCowTreeItem;
-  NewRoot, NewP, NewP1, NewP2: TCowTreeItem;
+  NewRoot, NewP, NewP1: TCowTreeItem;
 begin
   NewRoot := nil;
   NewP := nil;
   NewP1 := nil;
-  NewP2 := nil;
   result := nil;
   p := InP;
   try
@@ -750,28 +734,12 @@ begin
             else
               NewRoot.left.bal := 0;
 
-            if dl then
-              NewRoot.bal := 0
-            else
-              NewRoot.bal := p2.bal;
+            NewRoot.bal := 0;
           end;
 
           if not dl then
           begin
-            NewP2 := NewRoot.DupInit(self);
-{$IFOPT C+}
-            NewP2.left := NewRoot.left.AddRef as TCowTreeItem;
-            NewP2.right := NewRoot.right.AddRef as TCowTreeItem;
-{$ELSE}
-            NewP2.left := TCowTreeItem(NewRoot.left.AddRef);
-            NewP2.right := TCowTreeItem(NewRoot.right.AddRef);
-{$ENDIF}
-            NewP2.bal := 0;
-
-            NewRoot.Release;
-            NewRoot := NewP2;
-            NewP2 := nil;
-
+            Assert(NewRoot.bal = 0);
             WrCk(h, false);
           end;
         end;
@@ -783,7 +751,6 @@ begin
     NewRoot.Release;
     NewP.Release;
     NewP1.Release;
-    NewP2.Release;
     raise;
   end;
 end;
