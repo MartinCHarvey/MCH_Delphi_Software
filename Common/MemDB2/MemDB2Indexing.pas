@@ -746,7 +746,12 @@ begin
     Inc(ff);
   end;
   if (result = 0) and AllowKeyDedupe then
-    result := ComparePointers(self.FPinned, OtherLeaf.FPinned);
+  begin
+    //Similar to internal index, use RowID to ensure a stable sort even when
+    //pinned data items change.
+    result := CompareGuids((OtherLeaf.Row as TMemDBRow).RowId,
+                           (self.Row as TMemDBRow).RowId);
+  end;
 end;
 
 { TMemDbInternalIndexLeaf }
@@ -762,7 +767,11 @@ begin
   OtherLeaf := TMemDbInternalIndexLeaf(Other);
 {$ENDIF}
   Assert(AllowKeyDedupe);
-  result := ComparePointers(self.FPinned, OtherLeaf.FPinned);
+  //OK, we now need to de-dupe the rows in a way which is stable,
+  //such that if we mod / unpin / repin the comparison does not
+  //change.
+  result := CompareGuids((OtherLeaf.Row as TMemDBRow).RowId,
+                         (self.Row as TMemDBRow).RowId);
 end;
 
 { TMemDBIndexSearchVal }

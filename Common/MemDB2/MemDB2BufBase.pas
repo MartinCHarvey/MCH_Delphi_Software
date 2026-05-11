@@ -923,6 +923,10 @@ begin
     Cur := FindCurMultiItem;
     Assert(Assigned(Cur));
     CurPin := FindPin(Tid);
+{$IFDEF DEBUG_SNAPSHOT}
+    //TODO - Move this back down below pin checking
+    Nxt := FindNxtMultiItem(Tid);
+{$ENDIF}
     if Assigned(CurPin) then
     begin
       //Less stringent checking (repeatable read), where we read, modify, write
@@ -931,7 +935,9 @@ begin
           raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ABORT_WAR_2);
     end;
 
+{$IFNDEF DEBUG_SNAPSHOT}
     Nxt := FindNxtMultiItem(Tid);
+{$ENDIF}
     if Assigned(Cur.Item) or Assigned(Nxt) then
     begin
       if not Assigned(Nxt) then
@@ -1377,6 +1383,9 @@ begin
       //We could just run with it, and provide next, but then PreCommit check would fail,
       //and set of rows found by index not consistent with set of rows found
       //by non-index traversal.
+
+      //Alternatively we could check against Nxt.ParentTid rather than Cur.Sel.Tid,
+      //which would still be consistent, but I'm going for the stronger check here.
       if Tid.Iso >= ilReadRepeatable then
         if IPin.PinnedTid <> Cur.Sel.TId then
           raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ABORT_WAR_5);

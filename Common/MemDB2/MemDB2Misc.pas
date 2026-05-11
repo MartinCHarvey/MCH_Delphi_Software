@@ -49,12 +49,16 @@ type
   //N.B. If you add to this exception list, then
   //please update MemDBXLateExceptions
 
-  TMDBAccessMode = (amReadShared, amWriteExclusive, amWriteShared);
+  TMDBAccessMode = (amReadShared, amWriteExclusive, amReadWriteShared);
+  TMDBAccessModeStrings = array[TMDBAccessMode] of string;
 
 const //Compatibility modes - map onto new modes, but deprecated for
       //new DB code.
-  amRead = amReadShared;
-  amReadWrite = amWriteExclusive;
+      //amWriteShared will let you do all you want in parallel,
+      //but you may then need to consider TMDBIsolationLevel.
+
+  amRead = amReadShared deprecated;
+  amReadWrite = amWriteExclusive deprecated;
 
 type
   TMDBSyncMode = (amLazyWrite, amFlushBuffers);
@@ -67,8 +71,8 @@ type
 const
   //Old "Isolation" values. All transactions now read their own local data
   //preferentially.
-  ilCommittedRead = ilReadRepeatable;
-  ilDirtyRead = ilReadRepeatable;
+  ilCommittedRead = ilReadRepeatable deprecated;
+  ilDirtyRead = ilReadRepeatable deprecated;
 
 type
   TMDBFieldType = (ftInteger, ftCardinal, ftInt64, ftUint64,
@@ -206,6 +210,9 @@ const
   MemAPIPositionStrings:TMemAPIPositionStrings
     = ('ptFirst', 'ptLast', 'ptNext', 'ptPrevious', 'ptInvalid');
 
+  MDBAccessModeStrings: TMDBAccessModeStrings =
+    ( 'amReadShared', 'amWriteExclusive', 'amReadWriteShared');
+
 var
   AllIndexAttrs: TMDBIndexAttrs;
   MemDBXlateExceptions: TExceptionHandlerChain;
@@ -246,7 +253,7 @@ begin
   case Am of
     amReadShared: result := lrSharedRead;
     amWriteExclusive: result := lrExclusiveWrite;
-    amWriteShared: result := lrSharedWrite;
+    amReadWriteShared: result := lrSharedWrite;
   else
     Assert(false);
     result := lrExclusiveWrite;

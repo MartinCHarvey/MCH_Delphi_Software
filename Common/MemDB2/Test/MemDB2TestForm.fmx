@@ -155,4 +155,52 @@ object Form1: TForm1
     Width = 80.000000000000000000
     OnClick = LeakTransClick
   end
+  object RModeCombo: TComboBox
+    DisableFocusEffect = False
+    Height = 22.000000000000000000
+    Position.X = 48.000000000000000000
+    Position.Y = 160.000000000000000000
+    TabOrder = 16
+    Width = 132.000000000000000000
+    OnChange = RModeComboChange
+  end
+  object WModeCombo: TComboBox
+    DisableFocusEffect = False
+    Height = 22.000000000000000000
+    Position.X = 216.000000000000000000
+    Position.Y = 160.000000000000000000
+    TabOrder = 17
+    Width = 132.000000000000000000
+    OnChange = WModeComboChange
+  end
+  object IsoCombo: TComboBox
+    DisableFocusEffect = False
+    Height = 22.000000000000000000
+    Position.X = 384.000000000000000000
+    Position.Y = 160.000000000000000000
+    TabOrder = 18
+    Width = 124.000000000000000000
+    OnChange = IsoComboChange
+  end
+  object Label1: TLabel
+    Height = 17.000000000000000000
+    Position.X = 16.000000000000000000
+    Position.Y = 160.000000000000000000
+    Text = 'Read:'
+    Width = 65.000000000000000000
+  end
+  object Label2: TLabel
+    Height = 17.000000000000000000
+    Position.X = 184.000000000000000000
+    Position.Y = 160.000000000000000000
+    Text = 'Write:'
+    Width = 65.000000000000000000
+  end
+  object Label3: TLabel
+    Height = 17.000000000000000000
+    Position.X = 360.000000000000000000
+    Position.Y = 160.000000000000000000
+    Text = 'Iso:'
+    Width = 49.000000000000000000
+  end
 end
