@@ -112,7 +112,7 @@ type
   public
     function StartTransaction(Mode: TMDBAccessMode;
                               Sync: TMDBSyncMode = amLazyWrite;
-                              Iso: TMDBIsolationLevel = ilSnapshot): TMemDBTransaction;
+                              Iso: TMDBIsolationLevel = ilReadRepeatable): TMemDBTransaction;
     constructor Create;
     destructor Destroy; override;
     property ParentDB: TMemDB read FDB;
