@@ -315,6 +315,7 @@ type
     procedure CPTidPre(const Tid: TTransactionId; var Update:TTidUpdate);
     procedure CPTidPost(const Tid: TTransactionId; var Update:TTidUpdate);
 
+    function LockInit: boolean; virtual; abstract;
     procedure LockSelf; virtual; abstract;
     procedure UnlockSelf; virtual; abstract;
 
@@ -428,6 +429,7 @@ type
   private
     FLock: TTinyLock;
   protected
+    function LockInit: boolean; override;
     procedure LockSelf; override;
     procedure UnlockSelf; override;
   end;
@@ -436,6 +438,7 @@ type
   private
     FLock: TCriticalSection;
   protected
+    function LockInit: boolean; override;
     procedure LockSelf; override;
     procedure UnlockSelf; override;
   public
@@ -1373,39 +1376,39 @@ begin
     //so have a change and no current pin, or current pin not reached from iNode.
     Nxt := FindNxtMultiItem(Tid);
     Cur := FindCurMultiItem;
+
+    //OK, indexes can pin next, current or be old.
     if Assigned(Nxt) then
     begin
-      //Consistency requirements => Transitive,
-      //from INode, to CurPin, to Cur.Sel.Tid.
-      //INode Tid must be same as Cur.Sel.Tid
-      //If we have next at all, then CurPin, Cur.Sel.Tid has already been checked.
-
-      //We could just run with it, and provide next, but then PreCommit check would fail,
-      //and set of rows found by index not consistent with set of rows found
-      //by non-index traversal.
-
-      //Alternatively we could check against Nxt.ParentTid rather than Cur.Sel.Tid,
-      //which would still be consistent, but I'm going for the stronger check here.
-      if Tid.Iso >= ilReadRepeatable then
-        if IPin.PinnedTid <> Cur.Sel.TId then
-          raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ABORT_WAR_5);
-
       Assert(Assigned(Nxt.Item));
+      if IPin.PinnedTid <> Nxt.Sel.TId then
+      begin
+        //Because we have a change outstanding, must check transitive consistency.
+        //Could check pins, but we'll just check Cur.
+        if Tid.Iso >= ilReadRepeatable then
+          if IPin.PinnedTid <> Cur.Sel.TId then
+            raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ABORT_WAR_5);
+      end;
+      // Else IPin.PinnedTid = Nxt.Sel.TId
+      // Local index has pinned next item, run with it,
+      // don't change current pins at all, no consistency checking
+      // required.
+      Item := Nxt.Item;
+      //OK, now just check we haven't pinned a delete sentinel, and we're
+      //not gonna allow the cursor to be positioned on a deleted row.
       Assert(not (INode.Pinned is TMemDeleteSentinel));
-      if not (Nxt.Item is TMemDeleteSentinel) then
-        Item := Nxt.Item
-      else
+      if (Item is TMemDeleteSentinel) then
         Item := nil;
     end
     else
     begin
-      //Again, make set of rows found by index traversal same as set of
-      //rows found by non-index traversal.
+      //OK, Whatever index has pinned, it's not Nxt.
+      //Can re-use pin if Tid's match, else can create new (possibly old) pin.
       CurPin := FindPin(Tid);
       if Assigned(CurPin) then
         Item := ReUseCurrentPinForINode(Tid, CurPin, IPin, Reason)
       else
-        Item := NewCurrentPinFromINode(Tid, IPin, Reason); //The twist is here.
+        Item := NewCurrentPinFromINode(Tid, IPin, Reason);
     end;
     result := Assigned(Item);
     DCPPost(RefUp);
@@ -1758,43 +1761,46 @@ var
   Pin: PMemDBPinnedItem;
   IdxPin: PMemDBIndexPin;
 begin
-  LockSelf;
-  try
-{$IFDEF CHECK_TEARDOWN_REFS}
-    Assert(DlItemIsEmpty(@FPinnedItems));
-    Assert(DlItemIsEmpty(@FIndexPins));
-{$ENDIF}
-    //Check for and avoid multiple frees for pinned items.
-    Item := PMemDbMultiItem(FMultiItems.FLink.Owner);
-    while Assigned(Item) do
-    begin
-       //For the moment, be cautious and assert no pins / changes / etc etc.
-      Assert(Item.Sel.SelType = TABSelType.abCurrent);
-      Item.Item.Release;
-      DLListRemoveObj(@Item.Link);
-      DisposeMulti(Item);
+  if LockInit then
+  begin
+    LockSelf;
+    try
+  {$IFDEF CHECK_TEARDOWN_REFS}
+      Assert(DlItemIsEmpty(@FPinnedItems));
+      Assert(DlItemIsEmpty(@FIndexPins));
+  {$ENDIF}
+      //Check for and avoid multiple frees for pinned items.
       Item := PMemDbMultiItem(FMultiItems.FLink.Owner);
-    end;
-    //For the moment, be cautious and assert no pins / changes / etc etc.
-    Pin := PMemDBPinnedItem(FPinnedItems.FLink.Owner);
-    while Assigned(Pin) do
-    begin
-      Pin.Item.Release;
-      DLListRemoveObj(@Pin.Link);
-      DisposePinned(Pin);
+      while Assigned(Item) do
+      begin
+         //For the moment, be cautious and assert no pins / changes / etc etc.
+        Assert(Item.Sel.SelType = TABSelType.abCurrent);
+        Item.Item.Release;
+        DLListRemoveObj(@Item.Link);
+        DisposeMulti(Item);
+        Item := PMemDbMultiItem(FMultiItems.FLink.Owner);
+      end;
+      //For the moment, be cautious and assert no pins / changes / etc etc.
       Pin := PMemDBPinnedItem(FPinnedItems.FLink.Owner);
-    end;
-    IdxPin := PMemDBIndexPin(FIndexPins.FLink.Owner);
-    while Assigned(IdxPin) do
-    begin
-      //Oh dear. Index pins depend on tree ref counting, which seems to
-      //have gone awry. We can't fix that here, just clean up memory and exit.
-      DLListRemoveObj(@IdxPin.Link);
-      DisposeIndexPin(IdxPin);
+      while Assigned(Pin) do
+      begin
+        Pin.Item.Release;
+        DLListRemoveObj(@Pin.Link);
+        DisposePinned(Pin);
+        Pin := PMemDBPinnedItem(FPinnedItems.FLink.Owner);
+      end;
       IdxPin := PMemDBIndexPin(FIndexPins.FLink.Owner);
+      while Assigned(IdxPin) do
+      begin
+        //Oh dear. Index pins depend on tree ref counting, which seems to
+        //have gone awry. We can't fix that here, just clean up memory and exit.
+        DLListRemoveObj(@IdxPin.Link);
+        DisposeIndexPin(IdxPin);
+        IdxPin := PMemDBIndexPin(FIndexPins.FLink.Owner);
+      end;
+    finally
+      UnlockSelf;
     end;
-  finally
-    UnlockSelf;
   end;
   inherited;
 end;
@@ -1947,6 +1953,11 @@ end;
 
 {  TMemDBMultiBufferedTiny }
 
+function TMemDBMultiBufferedTiny.LockInit: boolean;
+begin
+  result := true;
+end;
+
 procedure TMemDbMultiBufferedTiny.LockSelf;
 begin
   AcquireTinyLock(FLock);
@@ -1958,6 +1969,11 @@ begin
 end;
 
 { TMemDbMultiBufferedCrit }
+
+function TMemDBMultiBufferedCrit.LockInit: boolean;
+begin
+  result := Assigned(FLock);
+end;
 
 constructor TMemDbMultiBufferedCrit.Create;
 begin

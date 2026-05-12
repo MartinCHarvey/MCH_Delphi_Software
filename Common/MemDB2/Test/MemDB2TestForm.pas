@@ -742,6 +742,14 @@ begin
   begin
     LogTimeIncr('Cannot checkpoint at this time')
   end;
+  FSession.Free;
+  LogTimeIncr('Session closed...');
+  FDB.StopDB;
+  LogTimeIncr('DB stopped...');
+  FDB.InitDB(DB_LOCATION, jtV2);
+  LogTimeIncr('DB started...');
+  FSession := FDB.StartSession;
+  LogTimeIncr('Session running.');
 end;
 
 procedure TForm1.TstBlobsClick(Sender: TObject);
@@ -810,11 +818,6 @@ begin
           TableData.WriteField('Int', Data);
           TableData.Post;
         end;
-        //TODO - Bugfix here. Need to allow navigation on user indexes, where
-        //posted, but not yet fully comitted, Tid checking needs mod.
-
-        //TODO TODO - Additional bugfix here. Not sure about ownership,
-        //content, modification of blob data, needs rechecking.
         try
           FillChar(Data, sizeof(Data), 0);
           OK := TableData.Locate(ptFirst, '');

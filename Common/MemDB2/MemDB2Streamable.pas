@@ -409,7 +409,8 @@ end;
 
 destructor TMemStreamableList.Destroy;
 begin
-  ReleaseAndClear;
+  if Assigned(FList) then
+    ReleaseAndClear;
   FList.Free;
   inherited;
 end;

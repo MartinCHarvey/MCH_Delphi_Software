@@ -300,7 +300,7 @@ begin
     raise EMemDBAPIException.Create(S_COMMIT_OR_ROLLBACK_BEFORE_FREE);
   FCRInterface.Free;
   FChangeset.Free;
-  Assert(FAPIObjects.Count = 0);
+  Assert((not Assigned(FApiObjects)) or (FAPIObjects.Count = 0));
   FApiObjects.Free;
   FApiObjectLock.Free;
   inherited;
@@ -336,8 +336,9 @@ end;
 
 destructor TMemDBSession.Destroy;
 begin
-  FDB.RemoveSession(self);
-  Assert(FSessionTransactions.Count = 0);
+  if Assigned(FDB) then
+    FDB.RemoveSession(self);
+  Assert((not Assigned(FSessionTransactions)) or (FSessionTransactions.Count = 0));
   FSessionTransactions.Free;
   inherited;
 end;
@@ -425,6 +426,13 @@ begin
           Assert(not Assigned(Transaction.FlushFinishedEvent));
           Transaction.FFlushFinishedEvent := TEvent.Create(nil, true, false, '');
         end;
+
+        //Now remove internal API object for transaction:
+        //No longer needed, db restart case frees underlying DB obejcts.
+
+        Transaction.FCRInterface.Free;
+        Transaction.FCRInterface := nil;
+
         //And now journal it.
         Transaction.AddRef;
         FJournal.TransactionCommitChangeset(Transaction);
@@ -529,8 +537,8 @@ begin
           result.FCommitedOrRolledBack := true; //just got make dtor OK.
           result.Release;
           result := nil;
-          raise;
         end;
+        raise;
       end;
       Session.FSessionTransactions.Add(result);
       FTransactionList.Add(result);
@@ -546,10 +554,8 @@ begin
     result.FCRInterface.TransactionStartCycle;
   except
     if Assigned(result) then
-    begin
       result.RollbackAndFree;
-      raise;
-    end;
+    raise;
   end;
 end;
 
@@ -743,6 +749,8 @@ begin
 end;
 
 procedure TMemDB.StopDBLocked;
+var
+  DBTmp: TMemDbDatabasePersistent;
 begin
   while not(FPhase in [mdbNull, mdbClosed, mdbError]) do
   begin
@@ -784,14 +792,14 @@ begin
         end;
       mdbClosingWaitPersist:
         begin
-          //Don't destroy DB here.
-          //Transactions can have API refs into DB up until
-          //all persistence ops have finished.
-          //All client ops basically finished, waiting for journal to flush.
-          //Now would be a good time to free up our actual data, so
-          //restarts start with a fresh copy of TMemDBPersistent.
+          //Can free DB here provided transactions having state journalled have
+          //freed all API objects.
 
+          DBTmp := FDatabase;
+          FDatabase := TMemDBDatabase.Create;
           FSessionLock.Release;
+          DBTmp.Free;
+
           try
             FPersistWait.WaitFor(INFINITE);
           finally
@@ -995,12 +1003,9 @@ begin
           FDatabase.Rollback(PseudoTid, rbpDelayedRollback);
         end;
       except
-        on E: Exception do
-        begin
-          ChangesetStream.Free;
-          DeleteFile(TmpName);
-          raise;
-        end;
+        ChangesetStream.Free;
+        DeleteFile(TmpName);
+        raise;
       end;
       FJournal.Checkpoint(ChangesetStream);
     finally
