@@ -98,11 +98,11 @@ type
   TMemDBIndexLeafGeneric = class(TCowTreeItem)
   private
     FOriginalIndex: TMemDBIndexGeneric;
-    FPinned: TMemDBStreamable;
+    FPin: Pointer; //PMemDBIndexPin;
     FRow: TObject;
 {$IFOPT C+}
-    FPinnedSet, FRowSet: boolean;
-    procedure SetPinned(NewPinned: TMemDBStreamable);
+    FPinSet, FRowSet: boolean;
+    procedure SetPin(NewPin: Pointer);
     procedure SetRow(NewRow: TObject);
 {$ENDIF}
   protected
@@ -115,10 +115,10 @@ type
 
     property OriginalIndex: TMemDbIndexGeneric read FOriginalIndex write FOriginalIndex;
 {$IFOPT C+}
-    property Pinned: TMemDBStreamable read FPinned write SetPinned;
+    property Pin: Pointer read FPin write SetPin;
     property Row: TObject read FRow write SetRow;
 {$ELSE}
-    property Pinned: TMemDBStreamable read FPinned write FPinned;
+    property Pin: Pointer read FPin write FPin;
     property Row: TObject read FRow write FRow;
 {$ENDIF}
   end;
@@ -180,7 +180,7 @@ uses
 {$ELSE}
   Classes,
 {$ENDIF}
-  MemDB2Buffered, SysUtils, Reffed;
+  MemDB2Buffered, SysUtils, Reffed, MemDB2BufBase;
 
 { Misc functions }
 
@@ -577,12 +577,11 @@ end;
 
 destructor TMemDBIndexLeafGeneric.Destroy;
 begin
-  Assert(Assigned(self.FPinned) = Assigned(self.FRow));
-  if Assigned(FPinned) then
+  Assert(Assigned(self.FPin) = Assigned(self.FRow));
+  if Assigned(FPin) then
     (FRow as TMemDBRow).UnpinFromIndex(self);
-  FPinned.Release;
   FRow := nil;
-  FPinned := nil; //Protect against too much freeing in exception handlers.
+  FPin := nil; //Protect against too much freeing in exception handlers.
   inherited;
 end;
 
@@ -598,11 +597,11 @@ begin
 end;
 
 {$IFOPT C+}
-procedure TMemDBIndexLeafGeneric.SetPinned(NewPinned: TMemDBStreamable);
+procedure TMemDBIndexLeafGeneric.SetPin(NewPin: pointer);
 begin
-  Assert(not FPinnedSet);
-  FPinnedSet := true;
-  FPinned := NewPinned;
+  Assert(not FPinSet);
+  FPinSet := true;
+  FPin := NewPin;
 end;
 
 procedure TMemDBIndexLeafGeneric.SetRow(NewRow: TObject);
@@ -643,7 +642,7 @@ begin
   (SL.Row as TMemDBRow).DupIndexPin(SL, self);
   //Now we need a key de-dupe which is invariant even when we copy nodes,
   //otherwise very bad things happen...
-  Assert(self.FPinned = SL.FPinned);
+  Assert(PMemDBIndexPin(self.FPin).PinnedItem = PMemDBIndexPin(SL.FPin).PinnedItem);
 end;
 
 
@@ -700,14 +699,17 @@ begin
 {$ENDIF}
   Assert(Assigned(OtherLeaf));
   //Let's assume not putting deleted items in index.
-  Assert(AssignedNotsentinel(FPinned));
-  Assert(AssignedNotSentinel(OtherLeaf.FPinned));
+  Assert(AssignedNotsentinel(FPin));
+  Assert(AssignedNotSentinel(OtherLeaf.FPin));
 {$IFOPT C+}
-  OwnFields := self.FPinned as TMemRowFields;
-  OtherFields := OtherLeaf.FPinned as TMemRowFields;
+  Assert(TObject(FPin) is PMemDBIndexPin);
+  Assert(TObject(OtherLeaf.FPin) is PMemDBIndexPin);
+
+  OwnFields := PMemDBIndexPin(self.Pin).PinnedItem as TMemRowFields;
+  OtherFields := PMemDBIndexPin(OtherLeaf.Pin).PinnedItem as TMemRowFields;
 {$ELSE}
-  OwnFields := TMemRowFields(self.FPinned);
-  OtherFields := TMemRowFields(OtherLeaf.FPinned);
+  OwnFields := TMemRowFields(PMemDBIndexPin(self.Pin).PinnedItem);
+  OtherFields := TMemRowFields(PMemDBIndexPin(OtherLeaf.Pin).PinnedItem);
 {$ENDIF}
 {$IFOPT C+}
   OrigIndex := FOriginalIndex as TMemDbIndex;
@@ -790,13 +792,15 @@ begin
   OtherLeaf := TMemDbIndexLeaf(Other);
   Assert(Assigned(OtherLeaf));
   //Let's assume not putting deleted items in index.
-  Assert(not Assigned(FPinned));
+  Assert(not Assigned(FPin));
   Assert(not Assigned(FOriginalIndex));
-  Assert(AssignedNotSentinel(OtherLeaf.FPinned));
+  Assert(AssignedNotSentinel(OtherLeaf.FPin));
 {$IFOPT C+}
-  OtherFields := OtherLeaf.FPinned as TMemRowFields;
+  Assert(TObject(OtherLeaf.FPin) is PMemDBIndexPin);
+
+  OtherFields := PMemDBIndexPin(OtherLeaf.Pin).PinnedItem as TMemRowFields;
 {$ELSE}
-  OtherFields := TMemRowFields(OtherLeaf.FPinned);
+  OtherFields := TMemRowFields(PMemDBIndexPin(OtherLeaf.Pin).PinnedItem);
 {$ENDIF}
 {$IFOPT C+}
   OtherOrigIndex := OtherLeaf.FOriginalIndex as TMemDBIndex;

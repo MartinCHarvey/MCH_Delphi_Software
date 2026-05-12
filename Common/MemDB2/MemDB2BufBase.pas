@@ -290,6 +290,7 @@ type
     Link:TDLEntry;
     PinnedTid: TTransactionId;
     INode: TMemDbIndexLeafGeneric;
+    PinnedItem: TMemDBStreamable;
   end;
 {$IFOPT C+}
   PMemDBIndexPin = TMemDbIndexPin;
@@ -323,7 +324,6 @@ type
     function FindCurMultiItem: PMemDBMultiItem; inline;
     function FindNxtMultiItem(const TId: TTransactionId): PMemDBMultiItem;
     function FindPin(const TId: TTransactionId): PMemDbPinnedItem;
-    function FindIndexPin(IndexNode: TMemDBIndexLeafGeneric): PMemDBINdexPin;
     //First multi-item should always be current,
     //and always exists (item ptr may be null).
     //Other multi-items are pre-transaction, and item ptr should never be NULL.
@@ -772,18 +772,6 @@ begin
     if result.PinnedBy = Tid then
       exit;
     result := PMemDbPinnedItem(result.Link.FLink.Owner);
-  end;
-end;
-
-function TMemDbMultiBuffered.FindIndexPin(IndexNode: TMemDBIndexLeafGeneric): PMemDBINdexPin;
-begin
-  //Under lock.
-  result := PMemDBIndexPin(FIndexPins.FLink.Owner);
-  while Assigned(result) do
-  begin
-    if result.INode = IndexNode then
-      exit;
-    result := PMemDBIndexPin(result.Link.FLink.Owner);
   end;
 end;
 
@@ -1309,7 +1297,6 @@ end;
 
 function TMemDbMultiBuffered.NewCurrentPinFromINode(const Tid:TTransactionId; IPin: PMemDBIndexPin; Reason:TPinReason): TMemDBStreamable;
 var
-  INode: TMemDbIndexLeafGeneric;
   Pin: PMemDbPinnedItem;
 begin
   { OK, this is a bit different. If we don't have a current pin,
@@ -1320,13 +1307,14 @@ begin
 
   Assert(not Assigned(FindPin(Tid)));
   Assert(Assigned(IPin));
-  INode := IPin.INode;
-  Assert(Assigned(INode));
-  Assert(Assigned(INode.Pinned));
 
   Pin := NewPinned;
   DLItemInitObj(TObject(Pin), @Pin.Link);
-  Pin.Item := INode.Pinned.AddRef as TMemDbStreamable;
+{$IFOPT C+}
+  Pin.Item := IPin.PinnedItem.AddRef as TMemDBStreamable;
+{$ELSE}
+  Pin.Item := TMemDBStreamable(IPin.PinnedItem.AddRef);
+{$ENDIF}
   Assert(AssignedNotSentinel(Pin.Item));
   Pin.PinnedCurrentTid := IPin.PinnedTid;
   Pin.PinnedBy := Tid;
@@ -1364,9 +1352,13 @@ begin
     Assert(Tid <> TTransactionId.Empty);
     //First things first, check the INode is actually one of ours.
     if not ((Assigned(INode)) and (Assigned(INode.Row))
-       and (Assigned(INode.Pinned)) and (INode.Row = self)) then
+       and (Assigned(INode.Pin)) and (INode.Row = self)) then
       raise EMemDbInternalException.Create(S_ERROR_BAD_INODE_DURING_PIN);
-    IPin := FindIndexPin(INode);
+{$IFOPT C+}
+    Assert(TObject(INode.Pin) is PMemDBIndexPin);
+{$ENDIF}
+    IPin := PMemDBIndexPin(INode.Pin);
+
     if not (Assigned(IPin) and (IPin.INode = INode)) then
       raise EMemDBInternalException.Create(S_ERROR_BAD_IPIN_DURING_PIN);
 
@@ -1396,7 +1388,7 @@ begin
       Item := Nxt.Item;
       //OK, now just check we haven't pinned a delete sentinel, and we're
       //not gonna allow the cursor to be positioned on a deleted row.
-      Assert(not (INode.Pinned is TMemDeleteSentinel));
+      Assert(not (IPin.PinnedItem is TMemDeleteSentinel));
       if (Item is TMemDeleteSentinel) then
         Item := nil;
     end
@@ -1434,9 +1426,8 @@ begin
   LockSelf;
   try
     DCPPre(RefUp);
-    if Assigned(IndexNode.Pinned) or Assigned(IndexNode.Row) then
+    if Assigned(IndexNode.Pin) or Assigned(IndexNode.Row) then
       raise EMemDbInternalException.Create(S_INDEX_ALREADY_PINNED);
-    Assert(not Assigned(FindIndexPin(IndexNode)));
     //Always pin with respect to current, next or latest, regardless of
     //other pins / links.
     case ItemSel of
@@ -1494,11 +1485,16 @@ begin
 
     Pin.INode := IndexNode; //No add-ref, node owns pin and will remove it.
     Pin.PinnedTid := PinTid;
-    IndexNode.Pinned := Item.AddRef as TMemDBStreamable;
+{$IFOPT C+}
+    Pin.PinnedItem := Item.AddRef as TMemDBStreamable;
+{$ELSE}
+    Pin.PinnedItem := TMemDBStreamable(Item.AddRef);
+{$ENDIF}
+    IndexNode.Pin := Pin;
     IndexNode.Row := self;
 
     DLListInsertTail(@FIndexPins, @Pin.Link);
-    Assert(Assigned(FindIndexPin(IndexNode)));
+
     DCPPost(RefUp);
     result := true;
   finally
@@ -1521,21 +1517,29 @@ begin
     DCPPre(RefUp);
     //Check existing pin is all wired up good.
     Assert(SourceNode.Row = Self);
-    Pin := FindIndexPin(SourceNode);
+{$IFOPT C+}
+    Assert(TObject(SourceNode.Pin) is PMemDbIndexPin);
+{$ENDIF}
+    Pin := PMemDBIndexPin(SourceNode.Pin);
     Assert(Assigned(Pin));
     Assert(Pin.INode = SourceNode);
-    Assert(Assigned(SourceNode.Pinned));
+    Assert(Assigned(Pin.PinnedItem));
 
     //New pin which is just like the existing pin.
     NewPin := NewIndexPin;
     DLItemInitObj(TObject(NewPin), @NewPin.Link);
     NewPin.INode := DestNode;
     NewPin.PinnedTid := Pin.PinnedTid;
-    DestNode.Pinned := SourceNode.Pinned.AddRef as TMemDBStreamable;
+{$IFOPT C+}
+    NewPin.PinnedItem := Pin.PinnedItem.AddRef as TMemDBStreamable;
+{$ELSE}
+    NewPin.PinnedItem := TMemDbStreamable(Pin.PinnedItem.AddRef);
+{$ENDIF}
     DestNode.Row := self;
+    DestNode.Pin := NewPin;
 
     DLListInsertTail(@FIndexPins, @NewPin.Link);
-    Assert(FindIndexPin(DestNode) = NewPin);
+
     DCPPost(RefUp);
   finally
     UnlockSelf;
@@ -1552,9 +1556,11 @@ begin
   LockSelf;
   try
     DCPPre(RefUp);
-    Pin := FindIndexPin(IndexNode);
-    if not Assigned(Pin) then
+    if not Assigned(IndexNode.Pin) then
       raise EMemDBInternalException.Create(S_INDEX_PIN_NOT_FOUND);
+    Pin := PMemDBIndexPin(IndexNode.Pin);
+    Pin.PinnedItem.Release;
+    Pin.PinnedItem := nil;
     Pin.INode := nil;  ///Belt and braces.
     DLListRemoveObj(@Pin.Link);
     DisposeIndexPin(Pin);
@@ -1794,6 +1800,9 @@ begin
       begin
         //Oh dear. Index pins depend on tree ref counting, which seems to
         //have gone awry. We can't fix that here, just clean up memory and exit.
+        IdxPin.PinnedItem.Release;
+        IdxPin.PinnedItem := nil;
+        IdxPin.INode := nil;  ///Belt and braces.
         DLListRemoveObj(@IdxPin.Link);
         DisposeIndexPin(IdxPin);
         IdxPin := PMemDBIndexPin(FIndexPins.FLink.Owner);

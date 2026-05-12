@@ -359,7 +359,14 @@ begin
           begin
             OK := PerformInitialLoad(Action, AnyFiles, CreateCheckpoint, ErrMsg);
             HighPriorityDone;
-            DoJournalInitialized(OK, AnyFiles, CreateCheckpoint, ErrMsg);
+            try
+              DoJournalInitialized(OK, AnyFiles, CreateCheckpoint, ErrMsg);
+            except
+              on E:Exception do
+              begin
+                DoJournalError(E.Message);
+              end;
+            end;
           end;
           jatCommitTransaction:
           begin

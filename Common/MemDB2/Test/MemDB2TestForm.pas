@@ -31,6 +31,7 @@ type
     Label1: TLabel;
     Label2: TLabel;
     Label3: TLabel;
+    OOMemory: TButton;
     procedure BasicTestBtnClick(Sender: TObject);
     procedure ResetClick(Sender: TObject);
     procedure IndexTestClick(Sender: TObject);
@@ -50,6 +51,7 @@ type
     procedure RModeComboChange(Sender: TObject);
     procedure WModeComboChange(Sender: TObject);
     procedure IsoComboChange(Sender: TObject);
+    procedure OOMemoryClick(Sender: TObject);
   private
     { Private declarations }
     FTimeStamp: TDateTime;
@@ -4324,6 +4326,231 @@ end;
 procedure TForm1.MultiTransClick(Sender: TObject);
 begin
   MultiRRTrans(Sender);
+end;
+
+procedure TForm1.OOMemoryClick(Sender: TObject);
+const
+  OO_BATCH = 8192;
+var
+  Trans: TMemDBTransaction;
+  DBAPI: TMemAPIDatabase;
+  TableMeta: TMemAPITableMetadata;
+  TableData: TMemAPiTableData;
+
+  procedure SetupTable;
+  begin
+    Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
+    try
+      DBAPI := Trans.GetAPI;
+      try
+        DBAPI.CreateTable('ExhaustMemTbl');
+        TableMeta := DBAPI.GetAPIObjectFromEntity('ExhaustMemTbl', APITableMetadata) as TMemAPITableMetadata;
+        try
+          TableMeta.CreateField('Field1', ftInteger);
+          TableMeta.CreateField('Field2', ftInteger);
+          TableMeta.CreateField('Field3', ftInteger);
+          TableMeta.CreateField('Field4', ftInteger);
+          TableMeta.CreateIndex('Index1', 'Field1', []);
+          TableMeta.CreateIndex('Index2', 'Field2', []);
+          TableMeta.CreateIndex('Index3', 'Field3', []);
+          TableMeta.CreateIndex('Index4', 'Field4', []);
+        finally
+          TableMeta.Free;
+        end;
+      finally
+        DBAPI.Free;
+      end;
+      Trans.CommitAndFree;
+      LogTimeIncr('Created Exhaust memory table OK.');
+    except
+      on E: Exception do
+      begin
+        Trans.RollbackAndFree;
+        LogTimeIncr('Exhaust memory table, create failed: ' + E.Message);
+      end;
+    end;
+  end;
+
+  procedure SlowFill;
+  var
+    Iter, i: integer;
+    DataRec: TMemDbFieldDataRec;
+  begin
+    Iter := 0;
+    while true do
+    begin
+      Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
+      try
+        DBAPI := Trans.GetAPI;
+        try
+          TableData := DBAPI.GetAPIObjectFromEntity('ExhaustMemTbl', APITableData) as TMemAPITableData;
+          try
+            for i  := 0 to Pred(OO_BATCH) do
+            begin
+              DataRec.FieldType := ftInteger;
+              DataRec.i32Val := (OO_BATCH * Iter) + i;
+              TableData.Append;
+              TableData.WriteField('Field1', DataRec);
+              Inc(DataRec.i32Val);
+              TableData.WriteField('Field2', DataRec);
+              Inc(DataRec.i32Val);
+              TableData.WriteField('Field3', DataRec);
+              Inc(DataRec.i32Val);
+              TableData.WriteField('Field4', DataRec);
+              TableData.Post;
+            end;
+          finally
+            TableData.Free;
+          end;
+        finally
+          DBAPI.Free;
+        end;
+        Trans.CommitAndFree;
+        Inc(Iter);
+      except
+       on E: EOutOfMemory do
+       begin
+        Trans.RollbackAndFree;
+        LogtimeIncr('Exhaust memory table fill done, ' + IntToStr(Iter) + ' iterations');
+        exit;
+       end;
+       on E: Exception do
+       begin
+         Trans.RollbackAndFree;
+         LogtimeIncr('Exhaust memory table fill unexpected failed: ' + E.Message);
+         raise;
+       end;
+      end;
+    end;
+  end;
+
+  procedure BigRowDelete;
+  begin
+    Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
+    try
+      DBAPI := Trans.GetAPI;
+      try
+        TableData := DBAPI.GetAPIObjectFromEntity('ExhaustMemTbl', APITableData) as TMemAPITableData;
+        try
+          TableData.Locate(ptFirst, '');
+          while TableData.RowSelected do
+            TableData.Delete(true);
+        finally
+          TableData.Free;
+        end;
+      finally
+        DBAPI.Free;
+      end;
+      Trans.CommitAndFree;
+      LogtimeIncr('Exhaust memory delete all rows: amazingly, worked OK!!');
+    except
+     on E: EOutOfMemory do
+     begin
+      Trans.RollbackAndFree;
+      LogtimeIncr('Exhaust memory delete all rows: Expected memory exhaustion, OK.');
+      exit;
+     end;
+     on E: Exception do
+     begin
+       Trans.RollbackAndFree;
+       LogtimeIncr('Exhaust memory table delete all rows unexpected failed: ' + E.Message);
+       raise;
+     end;
+    end;
+  end;
+
+  procedure BlocTableDelete;
+  begin
+    Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
+    try
+      DBAPI := Trans.GetAPI;
+      try
+        DBAPI.DeleteTableOrKey('ExhaustMemTbl');
+      finally
+        DBAPI.Free;
+      end;
+      Trans.CommitAndFree;
+      LogtimeIncr('Exhaust memory bloc delete: amazingly, worked OK!!');
+    except
+      on E: EOutOfMemory do
+      begin
+        Trans.RollbackAndFree;
+        LogtimeIncr('Exhaust memory bloc delete: Expected memory exhaustion, OK.');
+        exit;
+      end;
+      on E: Exception do
+      begin
+        Trans.RollbackAndFree;
+        LogtimeIncr('Exhaust memory bloc delete unexpected failed: ' + E.Message);
+        raise;
+      end;
+    end;
+  end;
+
+  procedure CarefulRowDelete;
+  var
+    BlocSize, BlocLeft: integer;
+  begin
+    BlocSize := 1;
+    while true do
+    begin
+      Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
+      try
+        BlocLeft := BlocSize;
+        TableData := DBAPI.GetAPIObjectFromEntity('ExhaustMemTbl', APITableData) as TMemAPITableData;
+        try
+          TableData.Locate(ptFirst, '');
+          while (BlocLeft > 0) and TableData.RowSelected do
+          begin
+            Dec(BlocLeft);
+            TableData.Delete;
+          end;
+        finally
+          TableData.Free;
+        end;
+        Trans.CommitAndFree;
+        if BlocLeft > 0 then
+          exit; //All rows deleted.
+
+        if BlocSize < (OO_BATCH div 2) then
+          BlocSize := BlocSize * 2
+        else
+          BlocSize := (BlocSize * 5) div 4;
+      except
+        on E: Exception do
+        begin
+          Trans.RollbackAndFree;
+          LogtimeIncr('Exhaust memory bloc delete unexpected failed: ' + E.Message);
+          raise;
+        end;
+      end;
+    end;
+  end;
+
+begin
+  if sizeof(Pointer) > 4 then
+  begin
+    LogTimeIncr('Don''t run this on > 32 bit process (machine will grind to a halt).');
+    exit;
+  end;
+  ResetClick(Sender);
+
+  //First up (obvious), create the table.
+  SetupTable;
+
+  //Second up, slowly fill it in batches of 1k until we run out of ram,
+  //so we have about enough ram to modify 1024 rows.
+  SlowFill;
+
+  //Now try to delete all the rows individually in the table (expect failure).
+  BigRowDelete;
+
+  //Now try to delete the table en-bloc, (not sure if this will work).
+  BlocTableDelete;
+
+  //Now slowly back the table out a few rows at a time.
+  CarefulRowDelete;
+
 end;
 
 procedure TForm1.ResetClick(Sender: TObject);

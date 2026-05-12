@@ -2481,7 +2481,11 @@ begin
             //Don't bother pinning code here, get straight from the INode.
             //We are validating what the index really is,
             //not any local pinned view of things.
-            PinFields := ValINode.Pinned;
+            Assert(Assigned(ValINode.Pin));
+{$IFOPT C+}
+            Assert(TObject(ValINode.Pin) is PMemDBIndexPin);
+{$ENDIF}
+            PinFields := PMemDBIndexPin(ValINode.Pin).PinnedItem;
 
             if NotAssignedOrSentinel(PinFields) then
               raise EMemDBInternalException.Create(S_PIN_FIELDS_FAILURE_DURING_INDEX_VALIDATE);
@@ -2710,7 +2714,7 @@ begin
               //Don't go thru standard pinning mechanism,
               //we're under commit lock, and we know these indexes evolve
               //in a thread-safe unitary fashion under that lock.
-              Cur := IPin.INode.Pinned;
+              Cur := IPin.PinnedItem;
             end;
             //And after all that hassle for Cur, Nxt is a breeze.
             Nxt := Row.GetNext(FTid);
@@ -2796,7 +2800,7 @@ begin
               //Again, no pinning with row here, just validating what's
               //well and truly in the index.
 
-              Cur := IPin.INode.Pinned;
+              Cur := IPin.PinnedItem;
               Assert(Assigned(Cur));
               Assert(Cur is TMemRowFields);
               CurFields := Cur as TMemRowFields;
@@ -2819,7 +2823,12 @@ begin
                   if Assigned(OtherNode) then
                   begin
                     //No pinning with row here.
-                    Other := OtherNode.Pinned;
+                    Assert(Assigned(OtherNode.Pin));
+{$IFOPT C+}
+                    Assert(TObject(OtherNode.Pin) is PMemDBIndexPin);
+{$ENDIF}
+                    Other := PMemDbIndexPin(OtherNode.Pin).PinnedItem;
+
                     Assert(Assigned(Other));
                     Assert(Other is TMemRowFields);
                     OtherFields := Other as TMemRowFields;
@@ -2887,7 +2896,7 @@ begin
         Cur := nil;
         try
           if Assigned(IPin) then
-            Cur := IPin.INode.Pinned;
+            Cur := IPin.PinnedItem;
 
           Nxt := Row.GetNext(FTid);
           Row.ChangeFlagsFromPinned(Cur, Nxt, Added, Changed, Deleted, Null);
@@ -3818,10 +3827,15 @@ begin
       while Assigned(IRec) do
       begin
         Row := IRec.Item as TMemDBRow;
+
+        //N.B. Ordering here looks a bit nasty.
+        //Removing from master list first (because IStore index changes
+        //require access to row.
+        FMasterRowList.RemoveItem(IRec);
+
         while Row.FProxy.TryRelease do ;
         //Row does not DCP handle in destructor.
 
-        FMasterRowList.RemoveItem(IRec);
         IRec := FMasterRowList.GetAnItem;
       end;
     finally
@@ -5037,7 +5051,9 @@ begin
           begin
 {$IFOPT C+}
             //Let's just check.
-            DataFields := INode.Pinned as TMemRowFields;
+            Assert(Assigned(INode.Pin));
+            Assert(TObject(INode.Pin) is PMemDBIndexPin);
+            DataFields := PMemDBIndexPin(INode.Pin).PinnedItem as TMemRowFields;
             if DataFields.Sparse then
               raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_10);
             if not SameLayoutFieldsSame(LookupFields, DataFields,

@@ -41,10 +41,20 @@ uses
 
 type
   //Exceptions, modes, indexing.
+
+  //General errors, should not see: DB failed load, corrupted data,
+  //general badness.
   EMemDBException = class(Exception);
+  //Internal errors, definitely should not see, almost definitely a code bug.
   EMemDBInternalException = class(EMemDBException);
+  //Index and foreign key constraints violated, could see if you write bad
+  //data in, or concurrent conflict, and should handle.
   EMemDBConsistencyException = class(EMemDBException);
+  //API's invoked with bad parameters / wrong modes etc.
   EMemDBAPIException = class(EMemDBException);
+  //Race condition detected. If running read/write/shared txion modes, then
+  //aborts are expected/possible: retry. (at read-shared or  write-exclusive?).
+  //If not running txions in parallel, then possibly a bug.
   EMemDBConcurrencyException = class(EMemDBException);
   //N.B. If you add to this exception list, then
   //please update MemDBXLateExceptions
@@ -52,11 +62,8 @@ type
   TMDBAccessMode = (amReadShared, amWriteExclusive, amReadWriteShared);
   TMDBAccessModeStrings = array[TMDBAccessMode] of string;
 
-const //Compatibility modes - map onto new modes, but deprecated for
-      //new DB code.
-      //amWriteShared will let you do all you want in parallel,
-      //but you may then need to consider TMDBIsolationLevel.
-
+const
+  //Old read-write modes, now deprecated.
   amRead = amReadShared deprecated;
   amReadWrite = amWriteExclusive deprecated;
 
@@ -64,13 +71,11 @@ type
   TMDBSyncMode = (amLazyWrite, amFlushBuffers);
   TMemDBJournalType = (jtV2);
 
-  //Mapping to SQL standard isolations, ilCommittedRead here
-  //also implies repeatable read, and serializable.
+  //Mapping to SQL standard isolations
   TMDBIsolationLevel = (ilReadComitted, ilReadRepeatable, ilSnapshot, ilSerialisable);
 
 const
-  //Old "Isolation" values. All transactions now read their own local data
-  //preferentially.
+  //Old isolation values, now deprecated.
   ilCommittedRead = ilReadRepeatable deprecated;
   ilDirtyRead = ilReadRepeatable deprecated;
 
@@ -85,7 +90,6 @@ type
 
   TMDBChangeType = (mctNone, mctAdd, mctChange, mctDelete);
 
-  //TODO - Proper checking for new invalid value.
   TMemAPIPosition = (ptFirst, ptLast, ptNext, ptPrevious, ptInvalid);
 
   TABSelType = (abCurrent, abNext, abLatest);
