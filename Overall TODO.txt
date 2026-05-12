@@ -3,14 +3,12 @@ MemDB2 TODO.
 
 - Out of memory entity list handling.
 
-- Snapshot navigation. (Pins from INode pinning next?)
+- Test out of memory cases when *deleting* rows (& index items).
 
-- VTune straight line performance, determine what else needs optimising.
-
-- Row addition locks of serialisable:
+- Row addition locks of snapshot / serialisable:
   - Abort own txion? Abort Other txion?
 
-- Test out of memory cases when *deleting* rows (& index items).
+- VTune straight line performance, determine what else needs optimising.
 
 - Refactor META_ / Pinning functions to use cached values.
 

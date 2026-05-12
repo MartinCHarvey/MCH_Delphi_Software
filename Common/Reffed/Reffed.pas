@@ -182,8 +182,6 @@ begin
 end;
 
 procedure TReffed.Release;
-var
-  Ret: integer;
 begin
   if TryReleaseInt <= 0 then
     raise EReffedError.Create(S_REFFED_TEARDOWN_RACE_RELEASING_REF);
@@ -271,7 +269,8 @@ end;
 
 destructor TReffedList.Destroy;
 begin
-  ReleaseAndClear;
+  if Assigned(FList) then
+    ReleaseAndClear;
   FList.Free;
   inherited;
 end;

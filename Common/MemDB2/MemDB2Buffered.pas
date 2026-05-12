@@ -1184,7 +1184,8 @@ end;
 
 destructor TMemDBAPI.Destroy;
 begin
-  FInterfacedObject.PutAPIObjectLocal(self);
+  if Assigned(FInterfacedObject) then
+    FInterfacedObject.PutAPIObjectLocal(self);
   inherited;
 end;
 
@@ -1199,7 +1200,7 @@ end;
 
 destructor TMemDBAPIInterfacedObject.Destroy;
 begin
-  Assert(FAPIObjects.Count = 0);
+  Assert((not Assigned(FApiObjects)) or (FAPIObjects.Count = 0));
   FAPIObjects.Free;
   FAPIListLock.Free;
   inherited;
@@ -1342,11 +1343,14 @@ end;
 
 destructor TMemDBEntity.Destroy;
 begin
-  FParentDB.FEntityLock.Acquire;
-  try
-    DLListRemoveObj(@FProxy.FSiblings);
-  finally
-    FParentDB.FEntityLock.Release;
+  if Assigned(FParentDB) then
+  begin
+    FParentDB.FEntityLock.Acquire;
+    try
+      DLListRemoveObj(@FProxy.FSiblings);
+    finally
+      FParentDB.FEntityLock.Release;
+    end;
   end;
   FInterfaced.Free;
   //Proxy is always freeing us, teardown refs or no.
@@ -2028,17 +2032,20 @@ destructor TTidLocal.Destroy;
 var
   Release: boolean;
 begin
-  Assert(FCPRows.Count = 0);
+  Assert((not Assigned(FCPRows)) or (FCPRows.Count = 0));
   FCPRows.Free;
-  FParentTable.FTidLocalLock.Acquire;
-  try
-    DLList.DLListRemoveObj(@FTidLocalLinks);
-    Release := DLList.DlItemIsEmpty(@FParentTable.FTidLocalStructures);
-  finally
-    FParentTable.FTidLocalLock.Release;
+  if Assigned(FParentTable) then
+  begin
+    FParentTable.FTidLocalLock.Acquire;
+    try
+      DLList.DLListRemoveObj(@FTidLocalLinks);
+      Release := DLList.DlItemIsEmpty(@FParentTable.FTidLocalStructures);
+    finally
+      FParentTable.FTidLocalLock.Release;
+    end;
+    if Release then
+      FParentTable.HandleReleaseForTidLocal(self);
   end;
-  if Release then
-    FParentTable.HandleReleaseForTidLocal(self);
 
   FIndexHelper.Free;
   FFieldHelper.Free;
@@ -3776,46 +3783,52 @@ var
 {$ENDIF}
 begin
   //TidLocal structure should always be empty.
-  FTidLocalLock.Acquire;
-  try
-    Assert(DlItemIsEmpty(@FTidLocalStructures));
-  finally
-    FTidLocalLock.Release;
+  if Assigned(FTidLocalLock) then
+  begin
+    FTidLocalLock.Acquire;
+    try
+      Assert(DlItemIsEmpty(@FTidLocalStructures));
+    finally
+      FTidLocalLock.Release;
+    end;
   end;
 
   //Release indexes first before unceromoniously removing rows underneath them.
   FMasterIndexes.Release;
   FMasterInternalIndex.Release;
 
-{$IFDEF CHECK_TEARDOWN_REFS}
-  //If referencing works correctly, then all should be empty by the time we destroy.
-  FMasterRowLock.Acquire;
-  try
-    Assert(FMasterRowList.Count = 0);
-    Assert(DLItemIsEmpty(@FAdditionLocks));
-  finally
-    FMasterRowLock.Release;
-  end;
-{$ELSE}
-  FMasterRowLock.Acquire;
-  try
-    //Addition locks should be empty (session / txion auto clearup).
-    Assert(DLItemIsEmpty(@FAdditionLocks));
-
-    IRec := FMasterRowList.GetAnItem;
-    while Assigned(IRec) do
-    begin
-      Row := IRec.Item as TMemDBRow;
-      while Row.FProxy.TryRelease do ;
-      //Row does not DCP handle in destructor.
-
-      FMasterRowList.RemoveItem(IRec);
-      IRec := FMasterRowList.GetAnItem;
+  if Assigned(FMasterRowLock) and Assigned(FMasterRowList) then
+  begin
+  {$IFDEF CHECK_TEARDOWN_REFS}
+    //If referencing works correctly, then all should be empty by the time we destroy.
+    FMasterRowLock.Acquire;
+    try
+      Assert(FMasterRowList.Count = 0);
+      Assert(DLItemIsEmpty(@FAdditionLocks));
+    finally
+      FMasterRowLock.Release;
     end;
-  finally
-    FMasterRowLock.Release;
+  {$ELSE}
+    FMasterRowLock.Acquire;
+    try
+      //Addition locks should be empty (session / txion auto clearup).
+      Assert(DLItemIsEmpty(@FAdditionLocks));
+
+      IRec := FMasterRowList.GetAnItem;
+      while Assigned(IRec) do
+      begin
+        Row := IRec.Item as TMemDBRow;
+        while Row.FProxy.TryRelease do ;
+        //Row does not DCP handle in destructor.
+
+        FMasterRowList.RemoveItem(IRec);
+        IRec := FMasterRowList.GetAnItem;
+      end;
+    finally
+      FMasterRowLock.Release;
+    end;
+  {$ENDIF}
   end;
-{$ENDIF}
 
   FMasterRowList.Free;
   FMasterRowLock.Free;
@@ -6818,6 +6831,7 @@ begin
     NullStream.Free;
   end;
 {$ELSE}
+  //TODO - Harden this to handle out of memory conditions.
   EntityList := AssembleEntityList;
   try
     for i := 0 to Pred(EntityList.Count) do
