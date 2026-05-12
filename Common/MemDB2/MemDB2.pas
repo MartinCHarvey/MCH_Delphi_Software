@@ -899,8 +899,9 @@ procedure TMemDB.HandleJournalError(Sender: TObject; ErrMsg:string);
 begin
   FSessionLock.Acquire;
   try
-    Assert(FPhase = mdbRunning);
+    //Assert(FPhase = mdbRunning);
     FPhase := mdbError;
+    //TODO - Unblock all threads waiting for cleardown?
     FLastError := ErrMsg;
   finally
     FSessionLock.Release;
