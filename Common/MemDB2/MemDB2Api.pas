@@ -352,11 +352,33 @@ var
 begin
   T := FAssociatedTransaction as TMemDBTransaction;
   Assert(Assigned(T));
-  DB.MetaIndexLock.Acquire;
-  try
-    DB.StartTransaction(T.Tid);
-  finally
-    DB.MetaIndexLock.Release;
+  if T.Tid.Iso >= ilSerialisable then
+  begin
+    //Require master row list also consistent with state of index trees,
+    //at point where we add table row-locks.
+
+    //TODO, One day this will be improved with predicate locks?
+    DB.CommitLock.Acquire;
+    try
+      DB.MetaIndexLock.Acquire;
+      try
+        DB.StartTransaction(T.Tid);
+      finally
+        DB.MetaIndexLock.Release;
+      end;
+    finally
+      DB.CommitLock.Release;
+    end;
+  end
+  else
+  begin
+    //Only require meta and index snapshots consistent.
+    DB.MetaIndexLock.Acquire;
+    try
+      DB.StartTransaction(T.Tid);
+    finally
+      DB.MetaIndexLock.Release;
+    end;
   end;
 end;
 

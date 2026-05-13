@@ -1,16 +1,13 @@
 
 MemDB2 TODO.
 
-- Out of memory entity list handling.
+- VTune straight line performance. Okay, but not fab.
+  Unfortunately locking does kinda slow stuff down, unavoidable.
 
-- Test out of memory cases when *deleting* rows (& index items).
-
-- Row addition locks of snapshot / serialisable:
-  - Abort own txion? Abort Other txion?
-
-- VTune straight line performance, determine what else needs optimising.
+- Parallelise.
 
 - Refactor META_ / Pinning functions to use cached values.
+  - Todo: Debug bad multi-reader performance, see if this is indeed the cause.
 
 - Create GetCurrentInLock / GetNextInLock function for faster access under commit lock.
   - Only where definitely possible (perhaps not GetNext as it's not an immutable part of the list).
@@ -18,11 +15,15 @@ MemDB2 TODO.
 - MinIso values  / require atomic. Way to make that cleaner?
   - More careful scrutiny on what requires meta to be atomic and when.
 
-- Parallelising table / index precommit / commit / rollback.
+  Change "big table" tests to:
+  - Assign different threads to mod different tables.
+  - Assign different threads to mod odd / even rows :-)
+    - Should improve performance despite locking once made mods above.
 
 - Any other optimizations you can think of.
 
 - Disposal outside lock: Make TidLocal have a "Recycle" bin you can add reffed classes to.
+  - But might not play well with parallelization of cleardown.
 
 - After optimising straight line performance, look at performance under contention.
   - TinyLock may not be the correct answer ...

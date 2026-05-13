@@ -1,10 +1,10 @@
-unit MemDBIndexing;
+ï»¿unit MemDBIndexing;
 {
 
-Copyright © 2020 Martin Harvey <martin_c_harvey@hotmail.com>
+Copyright ï¿½ 2020 Martin Harvey <martin_c_harvey@hotmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the “Software”), to deal in
+this software and associated documentation files (the ï¿½Softwareï¿½), to deal in
 the Software without restriction, including without limitation the rights to
 use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
 of the Software, and to permit persons to whom the Software is furnished to do
@@ -13,7 +13,7 @@ so, subject to the following conditions:
 The above copyright notice and this permission notice shall be included in
 all copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+THE SOFTWARE IS PROVIDED ï¿½AS ISï¿½, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
@@ -92,11 +92,54 @@ uses
 
 { Misc functions }
 
+//Unfortunately no BSF / BSR ASM in 64 bit code.
+function TrailingZeros64(x: UInt64): Integer;
+begin
+  Result := 0;
+
+  if (x and $FFFFFFFF) = 0 then
+  begin
+    Inc(Result, 32);
+    x := x shr 32;
+  end;
+
+  if (x and $FFFF) = 0 then
+  begin
+    Inc(Result, 16);
+    x := x shr 16;
+  end;
+
+  if (x and $FF) = 0 then
+  begin
+    Inc(Result, 8);
+    x := x shr 8;
+  end;
+
+  if (x and $F) = 0 then
+  begin
+    Inc(Result, 4);
+    x := x shr 4;
+  end;
+
+  if (x and $3) = 0 then
+  begin
+    Inc(Result, 2);
+    x := x shr 2;
+  end;
+
+  if (x and $1) = 0 then
+    Inc(Result);
+end;
+
 function CompareFields(const OwnRec: TMemDbFieldDataRec; const OtherRec: TMemDbFieldDataRec): integer;
 var
   OwnP, OtherP: PByte;
   OwnB, OtherB: Byte;
+  Own64, Other64: UInt64;
   Cnt: Uint64;
+  diff: UInt64;
+  idx: Integer;
+  shift: Integer;
 begin
   if OwnRec.FieldType <> OtherRec.FieldType then
     raise EMemDBInternalException.Create(S_INDEXING_INTERNAL_FIELD_TYPE_1);
@@ -150,13 +193,36 @@ begin
         result := 0;
         if Assigned(OwnRec.Data) then
         begin
-          //Slow byte compare, but correct.
-          //Not in the mood to deal with endian today.
-          //Write a loop unroll another day.
           OwnP := OwnRec.Data;
           OtherP := OtherRec.Data;
           Cnt := OwnRec.size;
           while (result = 0) and (Cnt > 0) do
+          begin
+            if Cnt >= sizeof(Uint64) then
+            begin
+              Own64 := PUint64(OwnP)^;
+              Other64 := PUint64(OtherP)^;
+
+              diff := Own64 xor Other64;
+
+              if diff <> 0 then
+              begin
+                // Find index of first differing bit (LSB = byte 0)
+                idx := TrailingZeros64(diff);  // Delphi intrinsic
+                // Convert bit index â†’ byte index (0..7)
+                shift := idx and not 7;  // round down to multiple of 8
+                OwnB := (Own64 shr shift) and $FF;
+                OtherB := (Other64 shr shift) and $FF;
+                if OtherB > OwnB then
+                  result := 1
+                else
+                  result := -1;
+              end;
+              Inc(OwnP, sizeof(Uint64));
+              Inc(OtherP, sizeof(Uint64));
+              Dec(Cnt, sizeof(Uint64));
+            end
+            else
           begin
             OwnB := OwnP^;
             OtherB := OtherP^;
@@ -167,6 +233,7 @@ begin
             Inc(OwnP);
             Inc(OtherP);
             Dec(Cnt);
+            end
           end;
         end;
       end;

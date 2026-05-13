@@ -54,7 +54,7 @@ type
 {$ELSE}
     function Unitary: boolean; inline;
     function AddRef: TReffed; inline;
-    function TryAddRef: TReffed;
+    function TryAddRef: TReffed; inline;
     function TryRelease: boolean; inline;
     procedure Release; inline;
 {$ENDIF}
@@ -140,6 +140,10 @@ begin
   inherited;
   FRef := 1;
 end;
+
+// N.B. InterlockedCompareExchange loops can be significantly worse than
+// InterlockedIncrement / InterlockedDecrement under cache line contention.
+// However, we really do want to catch the error before changing the RefCount.
 
 function TReffed.AddRef: TReffed;
 begin
