@@ -70,7 +70,7 @@ type
   end;
 
 const
-  DB_LOCATION = 'c:\temp\MemDB';
+  DB_LOCATION = 'c:\temp\MemDB2';
 
 var
   Form1: TForm1;
@@ -86,7 +86,7 @@ uses
 const
   LIMIT = 1000;
   TRANS_LIMIT = 65535;
-  BIG_ROWS = 256 * 1024;
+  BIG_ROWS = 128 * 1024;
   BIG_NTABLES = 5;
   BIG_NINDEXES = 5;
   BLOB_SIZE = 1024;
@@ -765,6 +765,7 @@ var
   OK: boolean;
   PD: PAnsiChar;
   Names: TStringList;
+  LclBlobSize: integer;
 
 begin
   ResetClick(Sender);
@@ -827,11 +828,16 @@ begin
           begin
             IData.FieldType := ftInteger;
             TableData.ReadField('Int', IData);
+            if (IData.i32Val mod 2) = 0 then
+              LclBlobSize := BLOB_SIZE
+            else
+              LclBlobSize := BLOB_SIZE div 2;
+
             Data.FieldType := ftBlob;
-            Data.size := BLOB_SIZE;
+            Data.size := LclBlobSize;
             if not Assigned(Data.Data) then
-              GetMem(Data.Data, BLOB_SIZE);
-            FillChar(Data.Data^, BLOB_SIZE, IData.i32Val);
+              GetMem(Data.Data, LclBlobSize);
+            FillChar(Data.Data^, LclBlobSize, IData.i32Val);
             TableData.WriteField('Blob', Data);
             TableData.Post;
             OK := TableData.Locate(ptNext, '');
@@ -1005,6 +1011,7 @@ begin
         try
           FillChar(SearchData, sizeof(SearchData), 0);
           SearchData.FieldType := ftBlob;
+          // #50 divides by 2, so BLOB_SIZE alloc needed.
           SearchData.size := BLOB_SIZE;
           GetMem(SearchData.Data, SearchData.size);
           try
