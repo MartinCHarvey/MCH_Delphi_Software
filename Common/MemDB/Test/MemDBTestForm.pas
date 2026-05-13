@@ -48,6 +48,7 @@ type
     procedure FKTestBase(Sender: TObject);
     procedure FKTestSameTable(Sender: TObject);
     procedure MultiRRTrans(Sender: TObject);
+    procedure BasicTraversal(Sender: TObject);
   public
     { Public declarations }
   end;
@@ -121,9 +122,6 @@ begin
   FTimeStamp := N;
 end;
 
-//TODO TODO - Expand test set here from MemDB2 testapp
-//(it tests several edge cases we don't test here).
-
 procedure TForm1.BasicTestBtnClick(Sender: TObject);
 var
   Trans: TMemDBTransaction;
@@ -136,7 +134,8 @@ var
   FieldIncrement: integer;
   DataI64: Int64;
   NavOK: boolean;
-  i,j: integer;
+  i,j,k: integer;
+  LF, LN: TMemApiPosition;
 begin
   ResetClick(Sender);
   Trans := FSession.StartTransaction(amReadWrite);
@@ -161,6 +160,7 @@ begin
         DBAPI.Free;
         Trans.CommitAndFree;
         LogTimeIncr('Table create OK');
+
         Trans := FSession.StartTransaction(amReadWrite, amLazyWrite, ilDirtyRead);
         DBAPI := Trans.GetAPI;
         Assert(Assigned(DBAPI));
@@ -190,19 +190,31 @@ begin
           end;
 
           // 3) Test row navigation by indernal index and field modification.
+          k := 0;
           for DirectionUp := High(boolean) downto Low(boolean) do
           begin
             if DirectionUp then
-              FieldIncrement := 1
+            begin
+              FieldIncrement := 1;
+              LF := ptFirst;
+              LN := ptNext;
+              i := 0;
+            end
             else
+            begin
               FieldIncrement := -1;
+              LF := ptLast;
+              LN := ptPrevious;
+              i := LIMIT;
+            end;
 
-            i := 0;
-            NavOK := TableData.Locate(ptFirst, '');
+            NavOK := TableData.Locate(LF, '');
             while NavOK do
             begin
+              if DirectionUp then
               Inc(i);
               TableData.ReadField('Int', Data);
+              Assert(Data.i32Val = i + k);
               Data.i32Val := Data.i32Val + FieldIncrement;
               TableData.WriteField('Int', Data);
 
@@ -210,28 +222,66 @@ begin
               //Do the arithmetic signed, and no don't range check the
               //type conversion or sign extension.
               DataI64 := Int64(Data.u64Val);
+              Assert(DataI64 = Int64(i) + Int64(k));
               DataI64 := DataI64 + FieldIncrement;
               Data.u64Val := UInt64(DataI64);
               TableData.WriteField('U64', Data);
 
               TableData.ReadField('String', Data);
               j := StrToInt(Data.sVal);
+              Assert(j = i + k);
               Data.sVal := IntToStr(j + FieldIncrement);
               TableData.WriteField('String', Data);
 
               TableData.ReadField('Double', Data);
+              Assert(Trunc(Data.dVal) = i + k);
               Data.dVal := Data.dVal + FieldIncrement;
               TableData.WriteField('Double', Data);
 
               TableData.ReadField('Guid', Data);
               j := Integer(Data.gVal.D1);
+              Assert(j = i + k);
               Inc(j, FieldIncrement);
               Data.gVal := TestGuidFromInt(j);
+              TableData.WriteField('Guid', Data);
               TableData.Post;
+              NavOK := TableData.Locate(LN, '');
+              if not DirectionUp then
+                Dec(i);
+            end;
+            Inc(k, FieldIncrement);
+            if DirectionUp then
+              Assert(i = LIMIT)
+            else
+              Assert(i = 0);
+          end;
+
+          //OK, now delete alternate rows, and check cursor nav as expected.
+          //Check Autoincrement.
+          NavOK := TableData.Locate(ptFirst, '');
+          i := 0;
+          while NavOK do
+          begin
+            Inc(i);
+            if (i mod 2) = 0 then
+            begin
+              TableData.Delete;
+              NavOK := TableData.RowSelected;
+            end
+            else
               NavOK := TableData.Locate(ptNext, '');
             end;
-            Assert(i = LIMIT);
+
+          NavOK := TableData.Locate(ptFirst, '');
+          i := 1;
+          while NavOK do
+          begin
+            TableData.ReadField('Int', Data);
+            Assert(Data.i32Val = i);
+            NavOK := TableData.Locate(ptNext, '');
+            Inc(i, 2);
           end;
+
         finally
           TableData.Free;
         end;
@@ -240,7 +290,32 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-    LogTimeIncr('Table add data OK');
+    LogTimeIncr('Table add/delete/navigate OK');
+
+    //OK, now check rows as expected in separate transaction.
+    Trans := FSession.StartTransaction(amRead);
+    DBAPI := Trans.GetAPI;
+    try
+      Table := DBAPI.OpenTableOrKey('Test table');
+      TableData := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
+      try
+        NavOK := TableData.Locate(ptFirst, '');
+        i := 1;
+        while NavOK do
+        begin
+          TableData.ReadField('Int', Data);
+          Assert(Data.i32Val = i);
+          NavOK := TableData.Locate(ptNext, '');
+          Inc(i, 2);
+        end;
+      finally
+        TableData.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+    LogTimeIncr('Table recheck rows OK');
   except
     on E: Exception do
     begin
@@ -472,8 +547,6 @@ begin
     try
       for TabI := 0 to Pred(BIG_NTABLES) do
       begin
-        //TODO - Yeah, could do per table locking based on API objects,
-        //if row locking turned out to be too scary.
         Table := DBAPI.OpenTableOrKey('BIGTABLE_'+IntToStr(TabI));
         TDatAPI := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
         try
@@ -591,8 +664,6 @@ begin
     try
       for TabI := 0 to Pred(BIG_NTABLES) do
       begin
-        //TODO - Yeah, could do per table locking based on API objects,
-        //if row locking turned out to be too scary.
         Table := DBAPI.OpenTableOrKey('BIGTABLE_'+IntToStr(TabI));
         TDatAPI := DBAPI.GetApiObjectFromHandle(Table, APITableData) as TMemAPITableData;
         try
@@ -671,6 +742,7 @@ var
   i, j: integer;
   OK: boolean;
   PD: PAnsiChar;
+  LclBlobSize: integer;
 
 begin
   ResetClick(Sender);
@@ -727,11 +799,16 @@ begin
           begin
             IData.FieldType := ftInteger;
             TableData.ReadField('Int', IData);
+            if (IData.i32Val mod 2) = 0 then
+              LclBlobSize := BLOB_SIZE
+            else
+              LclBlobSize := BLOB_SIZE div 2;
+
             Data.FieldType := ftBlob;
-            Data.size := BLOB_SIZE;
+            Data.size := LclBlobSize;
             if not Assigned(Data.Data) then
-              GetMem(Data.Data, BLOB_SIZE);
-            FillChar(Data.Data^, BLOB_SIZE, IData.i32Val);
+              GetMem(Data.Data, LclBlobSize);
+            FillChar(Data.Data^, LclBlobSize, IData.i32Val);
             TableData.WriteField('Blob', Data);
             TableData.Post;
             OK := TableData.Locate(ptNext, '');
@@ -897,6 +974,8 @@ begin
   end;
 
   //Search for an existent, and nonexistent blob.
+  if LIMIT > 50 then
+  begin
   Trans := FSession.StartTransaction(amRead);
   try
     DBAPI := Trans.GetAPI;
@@ -906,6 +985,7 @@ begin
       try
         FillChar(SearchData, sizeof(SearchData), 0);
         SearchData.FieldType := ftBlob;
+          // #50 divides by 2, so BLOB_SIZE alloc needed.
         SearchData.size := BLOB_SIZE;
         GetMem(SearchData.Data, SearchData.size);
         try
@@ -942,6 +1022,9 @@ begin
     LogTimeIncr('Blob test (4) Failed.');
     raise;
   end;
+  end
+  else
+    LogtimeIncr('Blob test (4): WARNING. Skipped test, set LIMIT to a higher value (50+).');
 end;
 
 procedure TForm1.FindEdgeTestClick(Sender: TObject);
@@ -960,6 +1043,7 @@ var
   OK: boolean;
 begin
   ResetClick(Sender);
+
   //Create a table with the right structure.
   Trans := FSession.StartTransaction(amReadWrite);
   try
@@ -1223,10 +1307,11 @@ begin
   end;
 end;
 
+
 procedure TForm1.FKTestClick(Sender: TObject);
 begin
   FKTestBase(Sender);
-  //FKTestSameTable(Sender); TODO TODO - Debugging.
+  FKTestSameTable(Sender);
 end;
 
 procedure TForm1.FKTestSameTable(Sender: TObject);
@@ -1437,7 +1522,7 @@ var
   Tbl: TMemDBHandle;
   FK: TMemDBHandle;
   FKey: TMemAPIForeignKey;
-  Data: TMemDbFieldDataRec;
+  Data, Data2: TMemDbFieldDataRec;
   Pass: boolean;
 
   procedure DelRows;
@@ -1537,9 +1622,8 @@ var
     end;
   end;
 
-begin
-  ResetClick(Sender);
-
+  procedure CreateBasicFKTables;
+  begin
   Trans := FSession.StartTransaction(amReadWrite);
   try
     DBAPI := Trans.GetAPI;
@@ -1578,11 +1662,112 @@ begin
       Trans.RollbackAndFree;
       LogTimeIncr('Foreign key test setup failed.');
       raise;
+      end;
     end;
   end;
 
-  //Now delete all the rows.
-  DelRows;
+  procedure AddExtraFields;
+  begin
+    Trans := FSession.StartTransaction(amReadWrite);
+    try
+      DBAPI := Trans.GetAPI;
+      try
+        Tbl := DBAPI.OpenTableOrKey('FKTestTableMaster');
+        TableMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
+        try
+          TableMeta.CreateField('MasterKey2', ftInteger);
+        finally
+          TableMeta.Free;
+        end;
+        Tbl := DBAPI.OpenTableOrKey('FKTestTableSub');
+        TableMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
+        try
+          TableMeta.CreateField('ReferringField2', ftInteger);
+        finally
+          TableMeta.Free;
+        end;
+      finally
+        DBAPI.Free;
+      end;
+      Trans.CommitAndFree;
+      LogTimeIncr('FK Test 3a, master key add fields OK.');
+    except
+      on E: Exception do
+      begin
+        Trans.RollbackAndFree;
+        LogTimeIncr('FK Test 3a, master key add fields failed.');
+        raise;
+      end;
+    end;
+  end;
+
+  procedure DupFieldsNewFK;
+  begin
+    Trans := FSession.StartTransaction(amReadWrite);
+    try
+      DBAPI := Trans.GetAPI;
+      try
+        Tbl := DBAPI.OpenTableOrKey('FKTestTableMaster');
+        TableMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
+        TableData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+        try
+          TableMeta.CreateIndex('MasterKey2Idx', 'MasterKey2', [iaUnique, iaNotEmpty]);
+          TableData.Locate(ptFirst, '');
+          while TableData.RowSelected do
+          begin
+            TableData.ReadField('MasterKey', Data);
+            TableData.WriteField('MasterKey2', Data);
+            TableData.Post;
+            TableData.Locate(ptNext, '');
+          end;
+        finally
+          TableMeta.Free;
+          TableData.Free;
+        end;
+        Tbl := DBAPI.OpenTableOrKey('FKTestTableSub');
+        TableMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
+        TableData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+        try
+          TableMeta.CreateIndex('ReferringField2Idx', 'ReferringField2', []);
+          TableData.Locate(ptFirst, '');
+          while TableData.RowSelected do
+          begin
+            TableData.ReadField('ReferringField', Data);
+            TableData.WriteField('ReferringField2', Data);
+            TableData.Post;
+            TableData.Locate(ptNext, '');
+          end;
+        finally
+          TableMeta.Free;
+          TableData.Free;
+        end;
+        FK := DBAPI.CreateForeignKey('ForeignKey2');
+        FKey := DBAPI.GetApiObjectFromHandle(FK, APIForeignKey) as TMemAPIForeignKey;
+        try
+          FKey.SetReferencingChild('FKTestTableSub', 'ReferringField2Idx');
+          FKey.SetReferencedParent('FKTestTableMaster','MasterKey2Idx');
+        finally
+          FKey.Free;
+        end;
+      finally
+        DBAPI.Free;
+      end;
+      Trans.CommitAndFree;
+        LogTimeIncr('FK Test 3b, master key populate fields OK.');
+    except
+      on E: Exception do
+      begin
+        Trans.RollbackAndFree;
+        LogTimeIncr('FK Test 3b, master key populate fields failed.');
+        raise;
+      end;
+    end;
+  end;
+
+begin
+  ResetClick(Sender);
+
+  CreateBasicFKTables;
 
   //Test 1.
   //Add rows satisfying FK relationship to both tables (Base row set).
@@ -1635,6 +1820,7 @@ begin
     end;
   end;
 
+
   //Add extra row in Referring, re-add FK (all in same transaction).
   Pass := false;
   Trans := FSession.StartTransaction(amReadWrite);
@@ -1685,6 +1871,7 @@ begin
   //Test 1b.
   //Remove row in master, re-add FK (all in same transaction)
   DelRows;
+
   SetBaseRowSet;
 
   Pass := false;
@@ -1988,13 +2175,13 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-    LogTimeIncr('FK Test 2d, master key moved OK.');
+    LogTimeIncr('FK Test 2f, master key moved OK.');
   //Check fails.
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      LogTimeIncr('FK Test 2d, master key moved failed.');
+      LogTimeIncr('FK Test 2f, master key moved failed.');
       raise;
     end;
   end;
@@ -2006,101 +2193,13 @@ begin
   //Add extra fields to both tables, in preparation for...
   //Dup row contents, add indexes, and add dup foreign key.
   //Check FK checking OK, even when index being added.
-  Trans := FSession.StartTransaction(amReadWrite);
-  try
-    DBAPI := Trans.GetAPI;
-    try
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableMaster');
-      TableMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
-      try
-        TableMeta.CreateField('MasterKey2', ftInteger);
-      finally
-        TableMeta.Free;
-      end;
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableSub');
-      TableMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
-      try
-        TableMeta.CreateField('ReferringField2', ftInteger);
-      finally
-        TableMeta.Free;
-      end;
-    finally
-      DBAPI.Free;
-    end;
-    Trans.CommitAndFree;
-    LogTimeIncr('FK Test 3a, master key add fields OK.');
-  except
-    on E: Exception do
-    begin
-      Trans.RollbackAndFree;
-      LogTimeIncr('FK Test 3a, master key add fields failed.');
-      raise;
-    end;
-  end;
+  AddExtraFields;
 
   //Test 3b.
   //Extra fields now added, so ...
   //Dup row contents, add indexes, and add dup foreign key.
   //Check FK checking OK, even when index being added.
-  Trans := FSession.StartTransaction(amReadWrite);
-  try
-    DBAPI := Trans.GetAPI;
-    try
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableMaster');
-      TableMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
-      TableData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
-      try
-        TableMeta.CreateIndex('MasterKey2Idx', 'MasterKey2', [iaUnique, iaNotEmpty]);
-        TableData.Locate(ptFirst, '');
-        while TableData.RowSelected do
-        begin
-          TableData.ReadField('MasterKey', Data);
-          TableData.WriteField('MasterKey2', Data);
-          TableData.Post;
-          TableData.Locate(ptNext, '');
-        end;
-      finally
-        TableMeta.Free;
-        TableData.Free;
-      end;
-      Tbl := DBAPI.OpenTableOrKey('FKTestTableSub');
-      TableMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
-      TableData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
-      try
-        TableMeta.CreateIndex('ReferringField2Idx', 'ReferringField2', []);
-        TableData.Locate(ptFirst, '');
-        while TableData.RowSelected do
-        begin
-          TableData.ReadField('ReferringField', Data);
-          TableData.WriteField('ReferringField2', Data);
-          TableData.Post;
-          TableData.Locate(ptNext, '');
-        end;
-      finally
-        TableMeta.Free;
-        TableData.Free;
-      end;
-      FK := DBAPI.CreateForeignKey('ForeignKey2');
-      FKey := DBAPI.GetApiObjectFromHandle(FK, APIForeignKey) as TMemAPIForeignKey;
-      try
-        FKey.SetReferencingChild('FKTestTableSub', 'ReferringField2Idx');
-        FKey.SetReferencedParent('FKTestTableMaster','MasterKey2Idx');
-      finally
-        FKey.Free;
-      end;
-    finally
-      DBAPI.Free;
-    end;
-    Trans.CommitAndFree;
-      LogTimeIncr('FK Test 3b, master key populate fields OK.');
-  except
-    on E: Exception do
-    begin
-      Trans.RollbackAndFree;
-      LogTimeIncr('FK Test 3b, master key populate fields failed.');
-      raise;
-    end;
-  end;
+  DupFieldsNewFK;
 
   //Test 3c.
   //Add data to dependent table whilst deleting fields from master.
@@ -2274,16 +2373,134 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-    LogTimeIncr('FK Test 3f, rename everything OK.');
+    LogTimeIncr('FK Test 4, rename everything OK.');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      LogTimeIncr('FK Test 3f, rename everything failed.');
+      LogTimeIncr('FK Test 4, rename everything failed.');
+      raise;
+    end;
+  end;
+
+  //OK, now check the one remaining pathological case where,
+  //we re-arrange fields (thus generating new indexes), whilst also
+  //changing fields in such a way that the addition/deletetion lists are pruned,
+  //and check that the FK relationship still holds.
+  ResetClick(Sender);
+
+  CreateBasicFKTables;
+
+  SetBaseRowSet;
+
+  AddExtraFields;
+
+  DupFieldsNewFK;
+
+  //5a Remove the old FK.
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      FK := DBAPI.OpenTableOrKey('ForeignKey1');
+      if Assigned(FK) then
+        DBAPI.DeleteTableOrKey('ForeignKey1');
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+    LogTimeIncr('FK Test 5a, remove old FK (in prep for test).');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('FK Test 5a, remove old FK failed.');
+      raise;
+  end;
+end;
+
+  //5b Remove re-add data into the master table, whilst deleting fields
+  //from child, and check still passes.
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      Tbl := DBAPI.OpenTableOrKey('FKTestTableSub');
+      TableMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
+      try
+        TableMeta.DeleteIndex('ReferringFieldIdx');
+        TableMeta.DeleteField('ReferringField');
+      finally
+        TableMeta.Free;
+      end;
+      Tbl := DBAPI.OpenTableOrKey('FKTestTableMaster');
+      TableData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+      try
+        TableData.Locate(ptFirst, '');
+        TableData.ReadField('MasterKey', Data);
+        TableData.ReadField('MasterKey2', Data2);
+        TableData.Delete;
+        TableData.Append;
+        TableData.WriteField('MasterKey', Data);
+        TableData.WriteField('MasterKey2', Data2);
+        TableData.Post;
+      finally
+        TableData.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+    LogTimeIncr('FK Test 5b. Delete re-add from master whilst child fields changed OK');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('FK Test 5b. Delete re-add from master whilst child fields changed failed.');
+      raise;
+    end;
+  end;
+
+  //5c Add duplicate row in referring table, whilst deleting fields from master
+  //and check still passes.
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      Tbl := DBAPI.OpenTableOrKey('FKTestTableSub');
+      TableData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+      try
+        TableData.Locate(ptFirst, '');
+        TableData.ReadField('ReferringField2', Data);
+        TableData.Append;
+        TableData.WriteField('ReferringField2', Data);
+        TableData.Post;
+      finally
+        TableData.Free;
+      end;
+      Tbl := DBAPI.OpenTableOrKey('FKTestTableMaster');
+      TableMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
+      try
+        TableMeta.DeleteIndex('MasterKeyIdx');
+        TableMeta.DeleteField('MasterKey');
+      finally
+        TableMeta.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+    LogTimeIncr('FK Test 5c. Dup add to child whilst master fields changed OK');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('FK Test 5c. Dup add to child whilst master fields changed failed');
       raise;
     end;
   end;
 end;
+
 
 procedure TForm1.FormCreate(Sender: TObject);
 begin
@@ -2370,6 +2587,7 @@ begin
   try
     DBAPI := Trans.GetAPI;
     try
+      LogTimeIncr('Creating: IndexTest');
       Table := DBAPI.CreateTable('IndexTest');
       TableMeta := DBAPI.GetApiObjectFromHandle(Table, APITableMetadata) as TMemAPITableMetadata;
       try
@@ -2385,7 +2603,7 @@ begin
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      LogTimeIncr('Index test 1ai failed.');
+      LogTimeIncr('Index test 1a failed.');
       raise;
     end;
   end;
@@ -2427,7 +2645,7 @@ begin
   DelTable;
 
   //1b) Unique values, one zero.
-  //1bii) Fail case.
+  //1bi) Fail case.
   Pass := false;
   Trans := FSession.StartTransaction(amReadWrite);
   try
@@ -2444,14 +2662,16 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
+    LogTimeIncr('Index test 1b OK.');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      LogTimeIncr('Index test 1bi failed.');
+      LogTimeIncr('Index test 1b failed.');
       raise;
     end;
   end;
+
   Trans := FSession.StartTransaction(amReadWrite);
   try
     DBAPI := Trans.GetAPI;
@@ -2478,7 +2698,7 @@ begin
     end;
     Pass := true;
     Trans.CommitAndFree;
-    LogTimeIncr('Index test 1bi failed.');
+    LogTimeIncr('Index test 1bi failed. (commited OK when shouldn''t)');
   except
     on E:Exception do
     begin
@@ -2489,7 +2709,7 @@ begin
       end
       else
       begin
-        LogTimeIncr('Index test 1bi failed.');
+        LogTimeIncr('Index test 1bi failed. (failed before commit)');
         raise;
       end;
     end;
@@ -2498,7 +2718,7 @@ begin
   DelTable;
 
   //1c) A duplicate value.
-  //1cii) Fail case.
+  //1ci) Fail case.
   Pass := false;
   Trans := FSession.StartTransaction(amReadWrite);
   try
@@ -2515,11 +2735,12 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
+    LogTimeIncr('Index test 1c OK.');
   except
     on E: Exception do
     begin
       Trans.RollbackAndFree;
-      LogTimeIncr('Index test 1ci failed.');
+      LogTimeIncr('Index test 1c failed.');
       raise;
     end;
   end;
@@ -2554,7 +2775,7 @@ begin
     end;
     Pass := true;
     Trans.CommitAndFree;
-    LogTimeIncr('Index test 1ci failed.');
+    LogTimeIncr('Index test 1ci failed. (commited OK when shouldn''t)');
   except
     on E:Exception do
     begin
@@ -2565,7 +2786,7 @@ begin
       end
       else
       begin
-        LogTimeIncr('Index test 1ci failed.');
+        LogTimeIncr('Index test 1ci failed.  (failed before commit)');
         raise;
       end;
     end;
@@ -2574,6 +2795,7 @@ begin
 
   DelRows;
 
+  //1d
   //Now, create the index (we expected previous test to fail).
   //... and leave it in place.
   Trans := FSession.StartTransaction(amReadWrite);
@@ -2591,12 +2813,12 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-    LogTimeIncr('Index test, add permanent index OK');
+    LogTimeIncr('Index test 1d OK');
   except
     on E:Exception do
     begin
       Trans.RollbackAndFree;
-      LogTimeIncr('Index test, add permanent index failed');
+      LogTimeIncr('Index test 1d failed');
       raise;
     end;
   end;
@@ -2626,11 +2848,11 @@ begin
       DBAPI.Free;
     end;
     Trans.CommitAndFree;
-    LogTimeIncr('Index test 2ai OK.');
+    LogTimeIncr('Index test 2a OK.');
   except
     on E:Exception do
     begin
-      LogTimeIncr('Index test 2ai failed.');
+      LogTimeIncr('Index test 2a failed.');
       Trans.RollbackAndFree;
       raise;
     end;
@@ -2664,7 +2886,7 @@ begin
     end;
     Pass := true;
     Trans.CommitAndFree;
-    LogTimeIncr('Index test 2bi failed.');
+    LogTimeIncr('Index test 2bi failed. (commited OK when shouldn''t)');
   except
     on E:Exception do
     begin
@@ -2675,7 +2897,7 @@ begin
       end
       else
       begin
-        LogTimeIncr('Index test 2bi failed.');
+        LogTimeIncr('Index test 2bi failed.  (failed before commit)');
         raise;
       end;
     end;
@@ -2714,7 +2936,7 @@ begin
     end;
     Pass := true;
     Trans.CommitAndFree;
-    LogTimeIncr('Index test 2ci failed.');
+    LogTimeIncr('Index test 2ci failed. (commited OK when shouldn''t)');
   except
     on E:Exception do
     begin
@@ -2725,11 +2947,199 @@ begin
       end
       else
       begin
-        LogTimeIncr('Index test 2ci failed.');
+        LogTimeIncr('Index test 2ci failed.  (failed before commit)');
         raise;
       end;
     end;
   end;
+end;
+
+procedure TForm1.BasicTraversal(Sender: TObject);
+var
+  Trans: TMemDBTransaction;
+  DBAPI: TMemAPIDatabase;
+  Tbl: TMemDBHandle;
+  TableMeta: TMemAPITableMetadata;
+  TableData: TMemAPITableData;
+  i: Integer;
+  DataRec: TMemDBFieldDataRec;
+  FindRet: boolean;
+
+begin
+  ResetClick(Sender);
+
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      Tbl := DBAPI.CreateTable('TraversalTest');
+      TableMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
+      try
+        TableMeta.CreateField('IntField', ftInteger);
+        TableMeta.CreateIndex('IntIndex', 'IntField', []);
+      finally
+        TableMeta.Free;
+      end
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+    LogTimeIncr('Basic Traversal 1 OK.');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('Basic Traversal 1 failed: ' + E.Message);
+      raise;
+    end;
+  end;
+
+  //Fill with data in order.
+  Trans := FSession.StartTransaction(amReadWrite);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      Tbl := DBAPI.OpenTableOrKey('TraversalTest');
+      TableData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+      try
+        FillChar(DataRec, sizeof(DataRec), 0);
+        DataRec.FieldType := ftInteger;
+        for i := 0 to LIMIT do
+        begin
+          TableData.Append;
+          DataRec.i32Val := i;
+          TableData.WriteField('IntField', DataRec);
+          TableData.Post;
+        end
+      finally
+        TableData.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+    LogTimeIncr('Basic Traversal 2 OK.');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('Basic Traversal 2 failed: ' + E.Message);
+      raise;
+    end;
+  end;
+
+  //Check basic traverse in order (no internal index).
+  Trans := FSession.StartTransaction(amRead);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      Tbl := DBAPI.OpenTableOrKey('TraversalTest');
+      TableData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+      try
+        TableData.Locate(ptFirst, '');
+        for i := 0 to LIMIT do
+        begin
+          TableData.ReadField('IntField', DataRec);
+          if (DataRec.FieldType <> ftInteger)
+            or (DataRec.i32Val <> i)then
+              raise Exception.Create('Basic traversal 3 failed (bad value)');
+          TableData.Locate(ptNext);
+        end;
+        if TableData.RowSelected then
+          raise Exception.Create('Basic traversal 3 failed (wrong # items)');
+      finally
+        TableData.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+    LogTimeIncr('Basic traversal 3 OK');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('Basic Traversal 3 failed: ' + E.Message);
+      raise;
+    end;
+  end;
+
+  //Check basic traverse via explicit index.
+  Trans := FSession.StartTransaction(amRead);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      Tbl := DBAPI.OpenTableOrKey('TraversalTest');
+      TableData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+      try
+        TableData.Locate(ptFirst, 'IntIndex');
+        for i := 0 to LIMIT do
+        begin
+          TableData.ReadField('IntField', DataRec);
+          if (DataRec.FieldType <> ftInteger)
+            or (DataRec.i32Val <> i)then
+              raise Exception.Create('Basic traversal 4 failed (bad value)');
+          TableData.Locate(ptNext, 'IntIndex');
+        end;
+        if TableData.RowSelected then
+          raise Exception.Create('Basic traversal 4 failed (wrong # items)');
+      finally
+        TableData.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+    LogTimeIncr('Basic traversal 4 OK');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('Basic Traversal 4 failed: ' + E.Message);
+      raise;
+    end;
+  end;
+
+  //Now check basic find operations.
+  Trans := FSession.StartTransaction(amRead);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      Tbl := DBAPI.OpenTableOrKey('TraversalTest');
+      TableData := DBAPI.GetApiObjectFromHandle(Tbl, APITableData) as TMemAPITableData;
+      try
+        DataRec.FieldType := ftInteger;
+        for i := -LIMIT to 2*LIMIT do
+        begin
+          DataRec.i32Val := i;
+          FindRet := TableData.FindByIndex('IntIndex', DataRec);
+          if TableData.RowSelected <> FindRet then
+            raise Exception.Create('Find return value does not agree with row selection');
+          if FindRet <> ((i >= 0) and (i <= LIMIT)) then
+          begin
+            if FindRet then
+              raise Exception.Create('Found value not expected in table: ' +IntToStr(i))
+            else
+              raise Exception.Create('Could not find expected value in table:' + IntToStr(i));
+          end;
+        end;
+      finally
+        TableData.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+    LogTimeIncr('Basic find 1 OK');
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('Basic find 1 failed: ' + E.Message);
+      raise;
+    end;
+  end;
+
 end;
 
 //Basic test of indexing.
@@ -2905,10 +3315,11 @@ begin
       raise;
     end;
   end;
+
+  BasicTraversal(Sender);
 end;
 
 procedure TForm1.MFFKeyTestClick(Sender: TObject);
-
 var
   Trans:TMemDBTransaction;
   Pass: boolean;
@@ -3500,6 +3911,7 @@ begin
           Ret := TblData.Locate(ptNext, 'I64');
           Inc(i);
         end;
+        Assert(i = Succ(Limit));
         i := 1;
         Ret := TblData.Locate(ptFirst, 'IntComp');
         while Ret do
@@ -3516,6 +3928,7 @@ begin
           Ret := TblData.Locate(ptNext, 'IntComp');
           Inc(i);
         end;
+        Assert(i = Succ(Limit));
       finally
         TblData.Free;
       end;
@@ -3555,7 +3968,7 @@ begin
           DataRecs[0].FieldType := ftInteger;
           DataRecs[0].i32Val := i div 10; //First field is IntHi.
           DataRecs[1].FieldType := ftInteger;
-          DataRecs[1].i32Val := i mod 10; //First field is IntLo.
+          DataRecs[1].i32Val := i mod 10; //Second field is IntLo.
           Ret := TblData.FindByMultiFieldIndex('IntComp', DataRecs);
           if not Ret then
             Pass := false;
@@ -3590,6 +4003,8 @@ begin
   //Check index Nonzero constraint, and unique constraints.
   Pass := false;
   for i := 0 to 1 do
+  begin
+    if LIMIT > 77 then
   begin
     Trans := FSession.StartTransaction(amReadWrite);
     try
@@ -3638,6 +4053,9 @@ begin
         end;
       end;
     end;
+    end
+    else
+      LogTimeIncr('MF indexes: WARNING. Skipped test, set LIMIT to a higher value (78+).');
   end;
 end;
 
@@ -3839,6 +4257,7 @@ begin
           begin
             TestAPI.Free;
             DBAPI.DeleteTableOrKey(Strings[i]);
+            LogTimeIncr('Reset deleted: ' + Strings[i]);
           end;
         end;
         //And now the tables.
@@ -3850,6 +4269,7 @@ begin
           begin
             TestAPI.Free;
             DBAPI.DeleteTableOrKey(Strings[i]);
+            LogTimeIncr('Reset deleted: ' + Strings[i]);
           end;
         end;
       finally
