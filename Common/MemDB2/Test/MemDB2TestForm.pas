@@ -127,8 +127,13 @@ end;
 
 procedure TForm1.LeakTransClick(Sender: TObject);
 begin
-  FSession.StartTransaction(RMode, amLazyWrite, Iso);
-  //Check with debugger is cleared down at app quit time.
+  if RMode <> amReadWriteShared then
+    LogTimeIncr('Suggest you leak this transaction in amReadWriteShared. Done nothing.')
+  else
+  begin
+    LogTimeIncr('Deliberately leaked transaction at amReadWriteShared. Stick with that mode for subsequent testing.');
+    FSession.StartTransaction(RMode, amLazyWrite, Iso);
+  end;
 end;
 
 procedure TForm1.LogTimeIncr(S: string);

@@ -54,7 +54,7 @@ type
 {$ELSE}
     function Unitary: boolean; inline;
     function AddRef: TReffed; inline;
-    function TryAddRef: TReffed;
+    function TryAddRef: TReffed; inline;
     function TryRelease: boolean; inline;
     procedure Release; inline;
 {$ENDIF}

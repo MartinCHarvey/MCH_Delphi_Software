@@ -66,12 +66,11 @@ Some notes on pinning and consistency / isolation:
     - Can make *older* pin which keeps read  / preducate / set consistency.
     - Same checking when it comes to modify time.
 
-TODO - Serializable.
-
 3. Serializable isolation:
-  - Need row addition/change lock from start of Txion:
-    To prevent phantoms & keep index traversal consistent.
-  - Need all meta/index pinning to happen atomically at Txion start.
+  - Require all reads *still* to be up to date.
+  - MemDBTable has row addition locks to prevent phantoms / predicate sets
+    consistent.
+  - Meta/index pinning to happens atomically at Txion start.
 }
 type
   TMemDBPreCommitPhase = (pcpFKeys, pcpTables);
@@ -143,43 +142,13 @@ type
       MinIso: TMDBIsolationLevel = Low(TMDBIsolationLevel)); virtual; abstract;
   end;
 
-  //OK, let's think about what referencing information we need, when
-  //determining how long / when to keep things alive.
-
-  //Metadata:
-  //
-  // Needed for referencing:
-  // - Has data or changes or pins.
-  //
-  // Needed for change / other tracking.
-  // - None needed, always precommit / commit / rollback
-
-  //Row data:
-  //
-  // Needed for referencing (global):
-  // - Has data or changes or pins.
-
-  //
-  // Needed for row management: (Which rows to commit / rollback / clear pins).
-  // - Has changes or pins for a Tid.
-
-  //Locking and timing of posting events.
-  //
-  // Assemble before and after under lock.
-  // Can post events out of lock? Would like to because TTinyLock not recursive.
-
-  // Row management definitely can, because change/pin for Tid definitely
-  // occurs in context of thread handling that tid.
-
-  // Referencing, think also can (ish), because notified before returned to caller.
-  // there's just enough synchronization around that we're not gonna get
-  // notification events out of order.
-
+  // Whether I contain any non NULL: Data / Changes / Pins.
   TReferenceUpdate = record
    Pre: boolean;
    Post: boolean;
   end;
 
+  // Whether any Changes / Pins for this specific Tid.
   TTidUpdate = record
     Changes: TReferenceUpdate;
     Pins: TReferenceUpdate;
@@ -187,6 +156,7 @@ type
   end;
 
 {$IFOPT C+}
+  //Just a bit of debug checking to prevent duplicate / unmatched notifications.
   TTidReference = class(TTrackable)
    Link: TDLEntry;
    Tid: TTransactionId;
@@ -194,7 +164,7 @@ type
   PTidReference = TTidReference;
 {$ENDIF}
 
-  //Assumed all these except the final handler and destructor under lock.
+  //Assume all these except the final handler and destructor under lock.
   TMemDBReferenceReporter = class(TMemDbChangeable)
   private
 {$IFOPT C+}
@@ -239,9 +209,7 @@ type
   - Tid's used for pinning consistency and Next buffers.
   - Local lightweight lock.
 
-  - Also needs pre-commit to commit lock in DB, but used *only* because
-    pinning is insufficient to check global consistency
-    (although may have per-key locking later...)
+  - Index pinning and unpinning determined by refcounting of index nodes.
 }
 
 {$IFOPT C+}
@@ -960,9 +928,6 @@ begin
   DCPLazyHandle(RefUp);
 end;
 
-//TODO - This atomically works when updating
-//Need to check the Row append case where there is no initial data.
-
 procedure TMemDBMultiBuffered.RequestChangeInternal(const Tid: TTransactionId; DupType: TBufCloneType; MinIso: TMDBIsolationLevel);
 var
   Cur, Nxt: PMemDbMultiItem;
@@ -1299,7 +1264,7 @@ function TMemDbMultiBuffered.NewCurrentPinFromINode(const Tid:TTransactionId; IP
 var
   Pin: PMemDbPinnedItem;
 begin
-  { OK, this is a bit different. If we don't have a current pin,
+  { If we don't have a current pin,
     we can create one from the INode pin. It's potentially older
     than latest current, but gives us "snapshot-like" read consistency
     when initially traversing by INode.
@@ -1510,7 +1475,7 @@ var
 
 begin
   //No race condition here: both nodes are known to exist in a tree
-  //which is undergoing manipulation, and the dop is called at the point
+  //which is undergoing manipulation, and the dup is called at the point
   //where both are known to exist.
   LockSelf;
   try

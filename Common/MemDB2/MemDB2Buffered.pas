@@ -374,13 +374,6 @@ type
   TTidLocal = class
 {$ENDIF}
   private
-    //TODO - Do I need a lock here? I don't think so.
-    //TODO - Race conditions will involve metadata/data access outside
-    //commit lock - need to check row formats etc etc.
-
-    //TODO - Check handles multiple format changes back and forth ...
-    //(row addition still handled by addition lock).
-
     FTidLocalLinks: TDLEntry;
     FParentTable: TMemDBTablePersistent;
     FTid: TTransactionId;
@@ -490,6 +483,8 @@ type
     FSiblings: TDLEntry;
     Tid: TTransactionId;
     ProhibitAdd, ProhibitChange, ProhibitDelete: boolean;
+    AbortOther: boolean;
+    NeedAbort: boolean;
   end;
 {$IFOPT C+}
   PRowChangeLock = TRowChangeLock;
@@ -502,7 +497,7 @@ type
   private
     //TODO - Determine and check some locking order.
     FMasterRowLock: TCriticalSection;
-    FAdditionLocks: TDLEntry;
+    FRowChangeLocks: TDLEntry;
     //Addition locks possibly the first of many smaller scale locks, but
     //at the moment, it's still doing FK's and indices under the
     //master commit lock. This area will be improved in future.
@@ -517,17 +512,26 @@ type
     FMasterInternalIndex: TMemDBIndexInternal;
 
   protected
-    //Returns newly added for this tid.
-    function AddAllRowProhibitInCrit(const Tid: TTRansactionId;
-      ProhibitAdd, ProhibitChange, ProhibitDelete: boolean): boolean;
 
-    procedure GetProhibitions(const Tid: TTRansactionId;
-                             var AddProhibited: boolean;
-                             var ChangeProhibited: boolean;
-                             var DeleteProhibited: boolean);
+    //Returns whether Row lock newly created; Called Under master row lock.
+    function AddAllRowProhibitForTableMod(const Tid:TTransactionId): boolean;
+    //Returns whether Row lock newly created; Called Under master row lock.
+    function AddRowAddProhibitForSerialisable(const Tid: TTransactionId): boolean;
 
-    function FindRowProhibitLock(const Tid: TTransactionId): PRowChangeLock;
-    procedure FindRmRowProhibitLock(const Tid: TTransactionId);
+    //Returns whether Row lock newly created; Called Under master row lock.
+    function AddRowProhibitLock(const Tid: TTransactionId;
+      ProhibitAdd, ProhibitChange, ProhibitDelete, AbortOther: boolean): boolean;
+
+    procedure CheckRowProhibitOps(const Tid: TTransactionId);
+
+    procedure HandleRowProhibitOp(const Tid: TTRansactionId;
+                                  Added, Changed, Deleted: boolean);
+
+    function FindRowProhibitLock(const Tid: TTransactionId; AbortOther: boolean): PRowChangeLock;
+    procedure FindRmRowProhibitLock(const Tid: TTransactionId; AbortOther: boolean);
+    procedure FindRmRowProhibitLocks(const Tid: TTransactionId);
+
+
     function NewRowProhibitLock: PRowChangeLock;
     procedure DisposeRowProhibitLock(Lock: PRowChangeLock);
 
@@ -887,6 +891,7 @@ const
   S_ROW_MAINT_INTERNAL = 'Row maintenance: Expect commit/rollback from lookaside in order.';
   S_CONCURRENT_MODIFY_DURING_REPLAY = 'Unexpected concurrent journal modification during replay.';
   S_MODIFIED_CONCURRENT_ROW_OP = 'Aborted. Concurrency conflict. (Changing rows whilst other tx changes layout). Retry?';
+  S_MODIFIED_CONCURRENT_ROW_OP2 = 'Aborted. Concurrency conflict (2). (Other Tx added rows, but we are ilSerialisable). Retry?';
   S_INTERNAL_REGEN_CHANGESETS_1 = 'Internal error regenating changesets (1).';
   S_INTERNAL_REGEN_CHANGESETS_2 = 'Internal error regenating changesets (2).';
   S_INTERNAL_REGEN_CHANGESETS_3 = 'Internal error regenating changesets (3).';
@@ -1490,10 +1495,6 @@ begin
   FFieldHelper.OnChangeRequest := HandleHelperChangeRequest;
   FEmptyList := TMemStreamableList.Create;
 
-  //First metadata pin for a Txion has to be atomic with index clone.
-  //TODO - Foreign key metadata first pin.
-  //TODO TODO - Require metadata up to date at commit time.
-  //Pin absolute??
   M := FParentTable.FMetadata.PinCurrent(FTid, pinEvolve);
   if Assigned(M) then
   begin
@@ -1893,7 +1894,7 @@ begin
   try
     try
       //Need addition lock whether in batches or not - not atomic with commit/rollback.
-      if not FParentTable.AddAllRowProhibitInCrit(FTid, true, true, true) then
+      if not FParentTable.AddAllRowProhibitForTableMod(FTid) then
         exit; //Already adjusted table structure, perhaps previous abortive commit attempt
 
       //NB. If/when traveral locks work, IRec is valid between master lock acquisitions.
@@ -1985,7 +1986,7 @@ begin
       //better that, (and it be rediscovered on next commit attempt),
       //than keep prohibit lock and hence not try to
       //adjust / finish adjusting structure when we should.
-      FParentTable.FindRmRowProhibitLock(FTid);
+      FParentTable.FindRmRowProhibitLock(FTid, true);
       raise;
     end;
   finally
@@ -2368,7 +2369,7 @@ begin
     if LocalIter then
     begin
       //Check that we hold a concurrent row modification lock.
-      ProhibitLock := FParentTable.FindRowProhibitLock(FTid);
+      ProhibitLock := FParentTable.FindRowProhibitLock(FTid, true);
       Assert(Assigned(ProhibitLock));
       Assert(ProhibitLock.ProhibitAdd);
       Assert(ProhibitLock.ProhibitChange);
@@ -3140,11 +3141,13 @@ var
   Row: TMemDBRow;
   Cur, Nxt: TMemDBStreamable;
   Added, Changed, Deleted, Null: boolean;
-  NoAdd, NoChange, NoDelete: boolean;
-
+  AddAcc, ChangeAcc, DelAcc: boolean;
 begin
-  FParentTable.GetProhibitions(FTid, NoAdd, NoChange, NoDelete);
   //No locking, this is TidLocal.
+  AddAcc := false;
+  ChangeAcc := false;
+  DelAcc := false;
+
   IRec := FCPRows.GetAnItem;
   while Assigned(IRec) do
   begin
@@ -3157,11 +3160,13 @@ begin
       Cur := Row.PinCurrent(FTid, pinFinalCheck);
       Nxt := Row.GetNext(FTid);
       Row.ChangeFlagsFromPinned(Cur, Nxt, Added, Changed, Deleted, Null);
-      if (Added and NoAdd) or (Changed and NoChange) or (Deleted and NoDelete) then
-          raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ROW_OP);
+      AddAcc := AddAcc or Added;
+      ChangeAcc := ChangeAcc or Changed;
+      DelAcc := DelAcc or Deleted;
     end;
     FCPRows.GetAnotherItem(IRec);
   end;
+  FParentTable.HandleRowProhibitOp(FTid, AddAcc, ChangeAcc, DelAcc);
 end;
 
 procedure TTidLocal.PreCommit;
@@ -3645,15 +3650,26 @@ end;
 
 { TMemDBTablePersistent }
 
-function TMemDBTablePersistent.AddAllRowProhibitInCrit(const Tid: TTRansactionId;
-  ProhibitAdd, ProhibitChange, ProhibitDelete: boolean): boolean;
+function TMemDBTablePersistent.AddAllRowProhibitForTableMod(const Tid:TTransactionId): boolean;
+begin
+  result := AddRowProhibitLock(Tid, true, true, true, true);
+end;
+
+function TMemDBTablePersistent.AddRowAddProhibitForSerialisable(const Tid: TTransactionId): boolean;
+begin
+  //Row changes caught by individual row checking.
+  result := AddRowProhibitLock(Tid, true, false, false, false);
+end;
+
+function TMemDBTablePersistent.AddRowProhibitLock(const Tid: TTransactionId;
+  ProhibitAdd, ProhibitChange, ProhibitDelete, AbortOther: boolean): boolean;
 var
   Lock: PRowChangeLock;
 begin
-  Lock := PRowChangeLock(FAdditionLocks.FLink.Owner);
+  Lock := PRowChangeLock(FRowChangeLocks.FLink.Owner);
   while Assigned(Lock) do
   begin
-    if Lock.Tid = Tid then
+    if (Lock.Tid = Tid) and (Lock.AbortOther = AbortOther) then
     begin
       result := false;
       Lock.ProhibitAdd := Lock.ProhibitAdd or ProhibitAdd;
@@ -3668,49 +3684,72 @@ begin
   Lock.ProhibitAdd := ProhibitAdd;
   Lock.ProhibitChange := ProhibitChange;
   Lock.ProhibitDelete := ProhibitDelete;
+  Lock.AbortOther := AbortOther;
   Lock.Tid := Tid;
-  DLListInsertTail(@FAdditionLocks, @Lock.FSiblings);
+  DLListInsertTail(@FRowChangeLocks, @Lock.FSiblings);
 end;
 
-procedure TMemDbTablePersistent.GetProhibitions(const Tid: TTRansactionId;
-                         var AddProhibited: boolean;
-                         var ChangeProhibited: boolean;
-                         var DeleteProhibited: boolean);
+procedure TMemDBTablePersistent.CheckRowProhibitOps(const Tid: TTransactionId);
 var
-  PLock: PRowChangeLock;
+  Lock: PRowChangeLock;
 begin
-  AddProhibited := false;
-  ChangeProhibited := false;
-  DeleteProhibited := false;
   FMasterRowLock.Acquire;
   try
-    PLock := PRowChangeLock(FAdditionLocks.FLink.Owner);
-    while Assigned(PLock) do
+    Lock := PRowChangeLock(FRowChangeLocks.FLink.Owner);
+    while Assigned(Lock) do
     begin
-      if PLock.Tid <> Tid then
-      begin
-        AddProhibited := AddProhibited or PLock.ProhibitAdd;
-        ChangeProhibited := ChangeProhibited or PLock.ProhibitChange;
-        DeleteProhibited := DeleteProhibited or PLock.ProhibitDelete;
-        exit;
-      end;
-      PLock :=  PRowChangeLock(PLock.FSiblings.FLink.Owner);
+      if (Lock.Tid = Tid) and
+         (not Lock.AbortOther) and
+         (Lock.NeedAbort) then
+        raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ROW_OP2);
+      Lock :=  PRowChangeLock(Lock.FSiblings.FLink.Owner);
     end;
   finally
-     FMasterRowLock.Release;
+    FMasterRowLock.Release;
   end;
 end;
 
-function TMemDbTablePersistent.FindRowProhibitLock(const Tid: TTransactionId): PRowChangeLock;
+procedure TMemDBTablePersistent.HandleRowProhibitOp(const Tid: TTRansactionId;
+                              Added, Changed, Deleted: boolean);
+var
+  Lock: PRowChangeLock;
+begin
+  FMasterRowLock.Acquire;
+  try
+    Lock := PRowChangeLock(FRowChangeLocks.FLink.Owner);
+    while Assigned(Lock) do
+    begin
+      if Lock.Tid <> Tid then
+      begin //Locks involve operations in other txions.
+        if (Lock.ProhibitAdd and Added) or
+           (Lock.ProhibitChange and Changed) or
+           (Lock.ProhibitDelete and Deleted) then
+        begin
+          //We are doing something that some other transaction cannot allow
+          //concurrently.
+          if Lock.AbortOther then
+            raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ROW_OP)
+          else
+            Lock.NeedAbort := true;
+        end;
+      end;
+      Lock :=  PRowChangeLock(Lock.FSiblings.FLink.Owner);
+    end;
+  finally
+    FMasterRowLock.Release;
+  end;
+end;
+
+function TMemDbTablePersistent.FindRowProhibitLock(const Tid: TTransactionId; AbortOther: boolean): PRowChangeLock;
 var
   PLock: PRowChangeLock;
 begin
   FMasterRowLock.Acquire;
   try
-    PLock := PRowChangeLock(FAdditionLocks.FLink.Owner);
+    PLock := PRowChangeLock(FRowChangeLocks.FLink.Owner);
     while Assigned(PLock) do
     begin
-      if PLock.Tid = Tid then
+      if (PLock.Tid = Tid) and (PLock.AbortOther = AbortOther) then
       begin
         result := PLock;
         exit;
@@ -3723,21 +3762,41 @@ begin
   result := nil;
 end;
 
-procedure TMemDBTablePersistent.FindRmRowProhibitLock(const Tid: TTransactionId);
+procedure TMemDBTablePersistent.FindRmRowProhibitLock(const Tid: TTransactionId; AbortOther: boolean);
 var
-  PLock: PRowChangeLock;
+  PLock, NextLock: PRowChangeLock;
 begin
   FMasterRowLock.Acquire;
   try
-    PLock := PRowChangeLock(FAdditionLocks.FLink.Owner);
+    PLock := PRowChangeLock(FRowChangeLocks.FLink.Owner);
     while Assigned(PLock) do
     begin
-      if PLock.Tid = Tid then
+      NextLock :=  PRowChangeLock(PLock.FSiblings.FLink.Owner);
+      if (PLock.Tid = Tid) and (PLock.AbortOther = AbortOther) then
       begin
         DisposeRowProhibitLock(PLock);
         exit;
       end;
-      PLock :=  PRowChangeLock(PLock.FSiblings.FLink.Owner);
+      PLock := NextLock;
+    end;
+  finally
+     FMasterRowLock.Release;
+  end;
+end;
+
+procedure TMemDBTablePersistent.FindRmRowProhibitLocks(const Tid: TTransactionId);
+var
+  PLock, NextLock: PRowChangeLock;
+begin
+  FMasterRowLock.Acquire;
+  try
+    PLock := PRowChangeLock(FRowChangeLocks.FLink.Owner);
+    while Assigned(PLock) do
+    begin
+      NextLock :=  PRowChangeLock(PLock.FSiblings.FLink.Owner);
+      if PLock.Tid = Tid then  //Both abort other and non-abort other.
+        DisposeRowProhibitLock(PLock);
+      PLock := NextLock;
     end;
   finally
      FMasterRowLock.Release;
@@ -3750,6 +3809,7 @@ begin
   result := TRowChangeLock.Create;
 {$ELSE}
   New(Result);
+  FillChar(result^, sizeof(result^), 0);
 {$ENDIF}
   DLItemInitObj(TObject(result), @result.FSiblings);
 end;
@@ -3780,7 +3840,7 @@ begin
   FMasterIndexes := TReffedList.Create;
   //Master internal index not always assigned before initial build.
   DLItemInitList(@FTidLocalStructures);
-  DlItemInitList(@FAdditionLocks);
+  DlItemInitList(@FRowChangeLocks);
   FMetadata := TMemDbTableMetadata.Create;
 end;
 
@@ -3813,7 +3873,7 @@ begin
     FMasterRowLock.Acquire;
     try
       Assert(FMasterRowList.Count = 0);
-      Assert(DLItemIsEmpty(@FAdditionLocks));
+      Assert(DLItemIsEmpty(@FRowChangeLocks));
     finally
       FMasterRowLock.Release;
     end;
@@ -3821,7 +3881,7 @@ begin
     FMasterRowLock.Acquire;
     try
       //Addition locks should be empty (session / txion auto clearup).
-      Assert(DLItemIsEmpty(@FAdditionLocks));
+      Assert(DLItemIsEmpty(@FRowChangeLocks));
 
       IRec := FMasterRowList.GetAnItem;
       while Assigned(IRec) do
@@ -4092,7 +4152,7 @@ begin
        or (FMasterRowList.Count > 0) then
       raise EMemDBInternalException.Create(S_FROM_SCRATCH_REQUIRES_EMPTY_OBJ);
 
-      Newly := AddAllRowProhibitInCrit(PseudoTid, true, true, true);
+      Newly := AddAllRowProhibitForTableMod(PseudoTid);
       Assert(Newly);
   finally
     FMasterRowLock.Release;
@@ -4110,7 +4170,7 @@ begin
   //Prepare will not be called after this.
 end;
 
-//Called under MetaIndex lock.
+//Called under MetaIndex lock, possibly also commit lock.
 procedure TMemDBTablePersistent.StartTransaction(const Tid: TTRansactionId);
 var
   TidLocal: TTidLocal;
@@ -4133,6 +4193,19 @@ begin
     FTidLocalLock.Release;
   end;
   TidLocal.InitialUpdate;
+
+  //If Serialisable then called under both DB commit lock, and also
+  //meta index lock, so that master rows guaranteed atomic with state
+  //of indices.
+  if Tid.Iso >= ilSerialisable then
+  begin
+    FMasterRowLock.Acquire;
+    try
+        AddRowAddProhibitForSerialisable(Tid);
+    finally
+      FMasterRowLock.Release;
+    end;
+  end;
 end;
 
 procedure TMemDBTablePersistent.PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase);
@@ -4148,6 +4221,8 @@ begin
   ChangeFlagsFromPinned(Cur, Next, Added, Changed, Deleted, Null);
   if Null then
     exit; //Deleted case, still check all the rows have been deleted.
+
+  CheckRowProhibitOps(Tid);
 
   //ToJournal / FromJournal has handled the layout change case,
   //which will have created a TidLocal if necessary.
@@ -4179,7 +4254,7 @@ begin
     ccpMetaIndex: begin
       TidLocal.IndexCommit;
       inherited;
-      FindRmRowProhibitLock(Tid);
+      FindRmRowProhibitLocks(Tid);
     end;
     ccpCleardown: begin
       TidLocal.Free;
@@ -4207,7 +4282,7 @@ begin
       rbpDelayedRollback: begin
         TidLocal.Rollback;
         TidLocal.Free;
-        FindRmRowProhibitLock(Tid);
+        FindRmRowProhibitLocks(Tid);
       end;
     end;
   end;
