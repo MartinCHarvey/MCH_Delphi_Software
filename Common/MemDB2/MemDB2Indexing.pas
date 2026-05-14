@@ -33,10 +33,25 @@ uses
 {$IFDEF USE_TRACKABLES}
   Trackables,
 {$ENDIF}
-  MemDB2Misc, MemDB2Streamable, CowTree, IndexedStore;
+  MemDB2Misc, MemDB2Streamable, CowTree, IndexedStore, Reffed, Classes;
+
+const
+  NODE_CACHE_SIZE = 1024;
 
 type
   TMemDbIndexLeafGeneric = class;
+
+  TMemDBNodeCache = class(TReffedCache)
+  protected
+    FPtrs: TList;
+    FPinCache: TObject;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    function GetFromCache: TReffed; override;
+    function PutToCache(Reffed: TReffed): boolean; override;
+    property PinCache: TObject read FPinCache;
+  end;
 
   { Quick reminder. Indexes are *immutable* once created,
     so provided you add-ref the root, you're good }
@@ -110,8 +125,9 @@ type
     function DupNoInit(SrcTree: TCowTree): TCowTreeItem; override;
   public
     destructor Destroy; override;
+    procedure Reset(Cache: TReffedCache); override;
 
-    procedure CopyFrom(Source: TCoWTreeItem); override;
+    procedure CopyFrom(Source: TCoWTreeItem; SrcTree: TCowTree); override;
 
     property OriginalIndex: TMemDbIndexGeneric read FOriginalIndex write FOriginalIndex;
 {$IFOPT C+}
@@ -140,7 +156,7 @@ type
     FFieldSearchVals: TMemDBFieldDataRecs;
     function Compare(Other: TCoWTreeItem;
                      AllowKeyDedupe: boolean): integer; override;
-    procedure CopyFrom(Source: TCoWTreeItem); override;
+    procedure CopyFrom(Source: TCoWTreeItem; SrcTree: TCowTree); override;
   end;
 
   //FK change-list indexing.
@@ -176,11 +192,7 @@ const
 implementation
 
 uses
-{$IFOPT C+}
-{$ELSE}
-  Classes,
-{$ENDIF}
-  MemDB2Buffered, SysUtils, Reffed, MemDB2BufBase;
+  MemDB2Buffered, SysUtils, MemDB2BufBase;
 
 { Misc functions }
 
@@ -338,16 +350,73 @@ end;
 
 { TMemDBIndexGeneric }
 
+constructor TMemDBNodeCache.Create;
+begin
+  inherited;
+  FPtrs := TList.Create;
+  FPinCache :=  TMemDBPinCache.Create;
+end;
+
+destructor TMemDBNodeCache.Destroy;
+var
+  i: integer;
+begin
+  for i := 0 to Pred(FPtrs.Count) do
+    TReffed(FPtrs[i]).Release; //Refcounts 1 for cached objects.
+  FPtrs.Free;
+  FPinCache.Free;
+  inherited;
+end;
+
+function TMemDBNodeCache.GetFromCache: TReffed;
+var
+  Count: integer;
+begin
+  Count := FPtrs.Count;
+  if Count > 0 then
+  begin
+    Dec(Count);
+    result := TReffed(FPtrs[Count]);
+    FPtrs.Delete(Count);
+  end
+  else
+    result := nil;
+end;
+
+function TMemDBNodeCache.PutToCache(Reffed: TReffed): boolean;
+var
+  Count: integer;
+begin
+  if Assigned(Reffed) then
+  begin
+    Count := FPtrs.Count;
+    if Count < NODE_CACHE_SIZE then
+    begin
+      FPtrs.Add(Reffed); //Add before reset so size calc is OK ...
+      Reffed.Reset(self);
+      result := true;
+    end
+    else
+      result := false;
+  end
+  else
+    result := true;
+end;
+
+{ TMemDBIndexGeneric }
+
 constructor TMemDBIndexGeneric.Create;
 begin
+  FCache := TMemDBNodeCache.Create;
   inherited;
 end;
 
 destructor TMemDBIndexGeneric.Destroy;
 begin
   FParentIndex.Release;
-  FRoot.Release;
-  FNext.Release;
+  FRoot.Release; //Not to cache...
+  FNext.Release; //Not to cache...
+  FCache.Free;
   inherited;
 end;
 
@@ -368,20 +437,20 @@ end;
 
 procedure TMemDbIndexGeneric.RootToNext;
 begin
-  FNext.Release;
+  FNext.ReleaseToCache(FCache);
   FNext := FRoot.AddRef as TMemDBIndexLeaf;
 end;
 
 procedure TMemDbIndexGeneric.CommitNextToRoot;
 begin
-  FRoot.Release;
+  FRoot.ReleaseToCache(FCache);
   FRoot := FNext;
   FNext := nil;
 end;
 
 procedure TMemDbIndexGeneric.DiscardNext;
 begin
-  FNext.Release;
+  FNext.ReleaseToCache(FCache);
   FNext := nil;
 end;
 
@@ -484,10 +553,10 @@ begin
       //Mods are serialised. No clever interlocked roots.
       case Sel of
         abCurrent: begin
-          FRoot.Release; FRoot := NewRoot;
+          FRoot.ReleaseToCache(FCache); FRoot := NewRoot;
         end;
         abNext: begin
-          FNext.Release; FNext := NewRoot;
+          FNext.ReleaseToCache(FCache); FNext := NewRoot;
         end;
       end;
     end
@@ -532,10 +601,10 @@ begin
       //Mods are serialised. No clever interlocked roots.
       case Sel of
         abCurrent: begin
-          FRoot.Release; FRoot := NewRoot;
+          FRoot.ReleaseToCache(FCache); FRoot := NewRoot;
         end;
         abNext: begin
-          FNext.Release; FNext := NewRoot;
+          FNext.ReleaseTOCache(FCache); FNext := NewRoot;
         end;
       end;
     end;
@@ -579,9 +648,33 @@ destructor TMemDBIndexLeafGeneric.Destroy;
 begin
   Assert(Assigned(self.FPin) = Assigned(self.FRow));
   if Assigned(FPin) then
-    (FRow as TMemDBRow).UnpinFromIndex(self);
+    (FRow as TMemDBRow).UnpinFromIndex(self, nil);
+  inherited;
+end;
+
+procedure TMemDBIndexLeafGeneric.Reset(Cache: TReffedCache);
+var
+  NCache: TMemDBNodeCache;
+  PCache: TMemDBPinCache;
+begin
+  Assert(Assigned(self.FPin) = Assigned(self.FRow));
+  Assert(Assigned(Cache));
+{$IFOPT C+}
+  NCache := Cache as TMemDbNodeCache;
+  PCache := NCache.PinCache as TMemDBPinCache;
+{$ELSE}
+  NCache := TMemDBNodeCache(Cache);
+  PCache := TMemDbPinCache(NCache.PinCache);
+{$ENDIF}
+  if Assigned(FPin) then
+    (FRow as TMemDBRow).UnpinFromIndex(self, PCache);
+  FOriginalIndex := nil;
+  FPin := nil;
   FRow := nil;
-  FPin := nil; //Protect against too much freeing in exception handlers.
+{$IFOPT C+}
+  FPinSet := false;
+  FRowSet := false;
+{$ENDIF}
   inherited;
 end;
 
@@ -612,13 +705,15 @@ begin
 end;
 {$ENDIF}
 
-procedure TMemDBIndexLeafGeneric.CopyFrom(Source: TCoWTreeItem);
+procedure TMemDBIndexLeafGeneric.CopyFrom(Source: TCoWTreeItem; SrcTree: TCowTree);
 var
   SL: TMemDbIndexLeafGeneric;
 {$IFOPT C+}
   SameFamily: boolean;
-  IndexCheck: TMemDBIndexGeneric;
 {$ENDIF}
+  IndexCheck: TMemDBIndexGeneric;
+  NCache: TMemDBNodeCache;
+  PCache: TMemDBPinCache;
 begin
   Assert(Assigned(Source) and (Source.ClassType = Self.ClassType));
   SL := TMemDBIndexLeafGeneric(Source);
@@ -639,7 +734,22 @@ begin
   end;
   Assert(SameFamily);
 {$ENDIF}
-  (SL.Row as TMemDBRow).DupIndexPin(SL, self);
+{$IFOPT C+}
+  IndexCheck := SrcTree as TMemDBIndexGeneric;
+  NCache := IndexCheck.FCache as TMemDbNodeCache;
+  if Assigned(NCache) then
+    PCache := NCache.PinCache as TMemDBPinCache
+  else
+    PCache := nil;
+{$ELSE}
+  IndexCheck := TMemDbIndexGeneric(SrcTree);
+  NCache := TMemDBNodeCache(IndexCheck.FCache);
+  if Assigned(NCache) then
+    PCache := TMemDBPinCache(NCache.PinCache)
+  else
+    PCache := nil;
+{$ENDIF}
+  (SL.Row as TMemDBRow).DupIndexPin(SL, self, PCache);
   //Now we need a key de-dupe which is invariant even when we copy nodes,
   //otherwise very bad things happen...
   Assert(PMemDBIndexPin(self.FPin).PinnedItem = PMemDBIndexPin(SL.FPin).PinnedItem);
@@ -832,7 +942,7 @@ begin
   Assert(not AllowKeyDedupe);
 end;
 
-procedure TMemDbIndexSearchVal.CopyFrom(Source: TCoWTreeItem);
+procedure TMemDbIndexSearchVal.CopyFrom(Source: TCoWTreeItem; SrcTree: TCowTree);
 begin
   Assert(false);
 end;

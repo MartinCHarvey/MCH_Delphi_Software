@@ -103,7 +103,7 @@ type
     function Compare(Other: TCoWTreeItem;
                      AllowKeyDedupe: boolean): integer; override;
     //CopyFrom copies reffed children (providing the keys).
-    procedure CopyFrom(Source: TCoWTreeItem); override;
+    procedure CopyFrom(Source: TCoWTreeItem; SrcTree: TCowTree); override;
   public
     Key: integer;
     function GetBal: integer;
@@ -223,7 +223,7 @@ begin
     result := 0;
 end;
 
-procedure TCowTestItem.CopyFrom(Source: TCoWTreeItem);
+procedure TCowTestItem.CopyFrom(Source: TCoWTreeItem; SrcTree: TCowTree);
 begin
   self.Key := (Source as TCowTestItem).Key;
   inherited;

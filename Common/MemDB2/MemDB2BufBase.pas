@@ -92,12 +92,10 @@ type
       var Deleted: boolean;
       var Null: boolean);
   public
-    procedure Prepare(const Tid: TTransactionId); virtual; abstract;
-
     procedure ToJournal(const Tid: TTransactionId; Stream: TStream); virtual; abstract;
     procedure ToScratch(const PseudoTid:TTransactionId; Stream: TStream); virtual; abstract;
     procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream); virtual; abstract;
-    procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream); virtual; abstract;
+    procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet); virtual; abstract;
 
     //In order of operation from one consistent state to another:
     //Check no A/B buffered changes. (Possibly debug only).
@@ -107,21 +105,12 @@ type
      //Tid to allow a pin to determine internal structure if necessary.
     function AnyChanges(const Tid: TTransactionId): boolean; virtual; abstract;
 
-    //TODO - Still not convinced AnyChanges (ForTid) here is the right way to do it.
-
-    //Pins etc managed by Multi-buffered class indicating how pins/changes have changed.
-
-    //No changes, no data, nothing pinned, is pretty much the final critera for can delete,
-    //but this class is not ref counted. Hopefully will be used as final double-check
-    //against referencing.
-
-    procedure StartTransaction(const Tid: TTRansactionId); virtual; abstract;
     //Check A/B buffered changes consistent and logical (and/or atomic) before commit.
-    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase); virtual; abstract;
+    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet); virtual; abstract;
     //Save to journal / Make the changes.
-    procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase); virtual; abstract;
+    procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase; Opts:TOptimizeSet); virtual; abstract;
     //Rollback changes, possibly promptly or delayed.
-    procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase); virtual; abstract;
+    procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase; Opts:TOptimizeSet); virtual; abstract;
   end;
 
   //Generally deep clone unless some list magic requires otherwise.
@@ -266,6 +255,24 @@ type
   PMemDBIndexPin = ^TMemDbIndexPin;
 {$ENDIF}
 
+const
+  PIN_CACHE_SIZE = 1024;
+
+type
+{$IFDEF USE_TRACKABLES}
+  TMemDBPinCache = class(TTrackable)
+{$ELSE}
+  TMemDBPinCache = class
+{$ENDIF}
+  protected
+    FPtrs: TList;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    function GetFromCache: PMemDBIndexPin;
+    function PutToCache(Pin: PMemDBIndexPin): boolean;
+  end;
+
   TPinReason = (pinEvolve, pinFinalCheck);
 
   TMemDBMultiBuffered = class(TMemDBReferenceReporter)
@@ -353,13 +360,11 @@ type
     //With the "From" functions, we can be sure re-play is single threaded,
     //and serial.
     procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream);override;
-    procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream);override;
+    procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet);override;
 
-    procedure StartTransaction(const Tid: TTRansactionId); override;
-    procedure Prepare(const Tid: TTransactionId); override;
-    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase); override;
-    procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase); override;
-    procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase); override;
+    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet); override;
+    procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase; Opts:TOptimizeSet); override;
+    procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase;  Opts:TOptimizeSet); override;
 
     //Navigated to via row list.
     function PinForCursor(const Tid: TTransactionId): boolean;
@@ -389,8 +394,15 @@ type
     //tree maniupulation. See MemDBRow for that.
     function PinForIndex(const Tid: TTransactionId; ItemSel: TAbSelType;
                          IndexNode: TMemDbIndexLeafGeneric): boolean;
-    procedure UnpinFromIndex(IndexNode: TMemDbIndexLeafGeneric);
-    procedure DupIndexPin(SourceNode, DestNode: TMemDBIndexLeafGeneric);
+
+    //INode and pin removes / adds cached on a cpl of lookaside lists used by
+    //whichever thread is doing the adding deleting.
+
+    //Node refcount > 0 means potentially shared in tree, but
+    //once it's down to zero, we can used stack-passed thread-local caches to
+    //speed things up considerably.
+    procedure UnpinFromIndex(IndexNode: TMemDbIndexLeafGeneric; PCache: TMemDBPinCache);
+    procedure DupIndexPin(SourceNode, DestNode: TMemDBIndexLeafGeneric; PCache: TMemDBPinCache);
   end;
 
   TMemDBMultiBufferedTiny = class(TMemDbMultiBuffered)
@@ -491,6 +503,18 @@ begin
 {$ENDIF}
 end;
 
+procedure ResetIndexPin(Pin: PMemDBIndexPin); inline;
+begin
+{$IFOPT C+}
+    DLItemInitObj(TObject(Pin), @Pin.Link);
+    Pin.PinnedTid := TTransactionId.Empty;
+    Pin.INode := nil;
+    Pin.PinnedItem := nil;
+{$ELSE}
+  FillChar(Pin^, sizeof(Pin^), 0);
+{$ENDIF}
+end;
+
 procedure DisposeMulti(Multi: PMemDbMultiItem); inline;
 begin
 {$IFOPT C+}
@@ -507,6 +531,60 @@ begin
 {$ELSE}
   Dispose(Pinned);
 {$ENDIF}
+end;
+
+{ TMemDBPinCache }
+
+
+constructor TMemDBPinCache.Create;
+begin
+  inherited;
+  FPtrs := TList.Create;
+end;
+
+destructor TMemDBPinCache.Destroy;
+var
+  i: integer;
+begin
+  for i := 0 to Pred(FPtrs.Count) do
+    DisposeIndexPin(PMemDBIndexPin(FPtrs[i]));
+  FPtrs.Free;
+  inherited;
+end;
+
+function TMemDBPinCache.GetFromCache: PMemDBIndexPin;
+var
+  Count: integer;
+begin
+  Count := FPtrs.Count;
+  if Count > 0 then
+  begin
+    Dec(Count);
+    result := PMemDBIndexPin(FPtrs[Count]);
+    FPtrs.Delete(Count);
+  end
+  else
+    result := nil;
+end;
+
+function TMemDBPinCache.PutToCache(Pin: PMemDBIndexPin): boolean;
+var
+  Count: integer;
+begin
+  if Assigned(Pin) then
+  begin
+    Count := FPtrs.Count;
+    if Count < PIN_CACHE_SIZE then
+    begin
+      FPtrs.Add(Pin);
+      ResetIndexPin(Pin);
+      result := true;
+    end
+    else
+      result := false;
+  end
+  else
+    result := true;
 end;
 
 { TMemDBJournalCreator }
@@ -1061,18 +1139,6 @@ begin
   DCPLazyHandle(RefUp);
 end;
 
-procedure TMemDBMultiBuffered.StartTransaction(const Tid: TTRansactionId);
-begin
-  Assert(false); //Generally not for double buffered, but yes for entities and DB.
-  //TODO - Refactor class heirarchy in due course.
-end;
-
-procedure TMemDBMultiBuffered.Prepare(const Tid: TTransactionId);
-begin
-  Assert(false); //Generally not for double buffered, but yes for entities and DB.
-  //TODO - Refactor class heirarchy in due course.
-end;
-
 procedure TMemDBMultiBuffered.RequireCurrentAtomic(const Tid: TTransactionId);
 var
   Cur: PMemDbMultiItem;
@@ -1095,7 +1161,7 @@ begin
   end;
 end;
 
-procedure TMemDBMultiBuffered.PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase);
+procedure TMemDBMultiBuffered.PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet);
 var
   Cur, Nxt: PMemDbMultiItem;
   Pin: PMemDbPinnedItem;
@@ -1127,7 +1193,7 @@ begin
   end;
 end;
 
-procedure TMemDBMultiBuffered.Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase);
+procedure TMemDBMultiBuffered.Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase; Opts:TOptimizeSet);
 var
   Cur, Nxt: PMemDbMultiItem;
   Pin: PMemDbPinnedItem;
@@ -1203,7 +1269,7 @@ begin
   DCPLazyHandle(RefUp);
 end;
 
-procedure TMemDBMultiBuffered.Rollback(const Tid: TTransactionId; Phase: TMemDBRollbackPhase);
+procedure TMemDBMultiBuffered.Rollback(const Tid: TTransactionId; Phase: TMemDBRollbackPhase; Opts:TOptimizeSet);
 var
   Nxt: PMemDBMultiItem;
   Pin: PMemDbPinnedItem;
@@ -1468,7 +1534,7 @@ begin
   DCPLazyHandle(RefUp);
 end;
 
-procedure TMemDBMultiBuffered.DupIndexPin(SourceNode, DestNode: TMemDBIndexLeafGeneric);
+procedure TMemDBMultiBuffered.DupIndexPin(SourceNode, DestNode: TMemDBIndexLeafGeneric; PCache: TMemDBPinCache);
 var
   RefUp: TReferenceUpdate;
   Pin, NewPin: PMemDBIndexPin;
@@ -1477,6 +1543,7 @@ begin
   //No race condition here: both nodes are known to exist in a tree
   //which is undergoing manipulation, and the dup is called at the point
   //where both are known to exist.
+  NewPin := nil;
   LockSelf;
   try
     DCPPre(RefUp);
@@ -1491,7 +1558,11 @@ begin
     Assert(Assigned(Pin.PinnedItem));
 
     //New pin which is just like the existing pin.
-    NewPin := NewIndexPin;
+    if Assigned(PCache) then
+      NewPin := PCache.GetFromCache;
+    if not Assigned(NewPin) then
+      NewPin := NewIndexPin;
+
     DLItemInitObj(TObject(NewPin), @NewPin.Link);
     NewPin.INode := DestNode;
     NewPin.PinnedTid := Pin.PinnedTid;
@@ -1513,7 +1584,7 @@ begin
 end;
 
 
-procedure TMemDBMultiBuffered.UnpinFromIndex(IndexNode: TMemDbIndexLeafGeneric);
+procedure TMemDBMultiBuffered.UnpinFromIndex(IndexNode: TMemDbIndexLeafGeneric; PCache: TMemDBPinCache);
 var
   RefUp: TReferenceUpdate;
   Pin: PMemDBIndexPin;
@@ -1525,10 +1596,10 @@ begin
       raise EMemDBInternalException.Create(S_INDEX_PIN_NOT_FOUND);
     Pin := PMemDBIndexPin(IndexNode.Pin);
     Pin.PinnedItem.Release;
-    Pin.PinnedItem := nil;
-    Pin.INode := nil;  ///Belt and braces.
     DLListRemoveObj(@Pin.Link);
-    DisposeIndexPin(Pin);
+
+    if not (Assigned(PCache) and PCache.PutToCache(Pin)) then
+      DisposeIndexPin(Pin);
     DCPPost(RefUp);
   finally
     UnlockSelf;
@@ -1896,7 +1967,7 @@ begin
   ExpectTag(Stream, mstDblBufferedEnd);
 end;
 
-procedure TMemDbMultiBuffered.FromScratch(const PseudoTid: TTransactionId; Stream: TStream);
+procedure TMemDbMultiBuffered.FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet);
 var
   ChangeType: TMDBChangeType;
   Cur, Next: TMemDBStreamable;

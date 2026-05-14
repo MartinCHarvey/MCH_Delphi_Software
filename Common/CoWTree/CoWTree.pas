@@ -70,7 +70,7 @@ type
     function Compare(Other: TCoWTreeItem;
                      AllowKeyDedupe: boolean): integer; virtual; abstract;
     //CopyFrom copies reffed children (providing the keys).
-    procedure CopyFrom(Source: TCoWTreeItem); virtual; abstract;
+    procedure CopyFrom(Source: TCoWTreeItem; SrcTree: TCowTree); virtual; abstract;
 {$IFOPT C+}
     property left: TCowTreeItem read __left write SetLeft;
     property right: TCowTreeItem read __right write SetRight;
@@ -82,6 +82,7 @@ type
 {$ENDIF}
   public
     destructor Destroy; override;
+    procedure Reset(Cache: TReffedCache); override;
   end;
 
   //Little bit of silly debug checking for boolean flags indicating
@@ -120,6 +121,9 @@ type
     function BalanceRight(Inp: TCowTreeItem; dl: boolean; var h:TChkBool): TCowTreeItem;
     function SearchGeneric(item: TCoWTreeItem; Inp: TCowTreeItem; AllowKeyDedupe: boolean): TCowTreeItem;
   protected
+    FCache: TReffedCache; //Can leave this as NIL if you don't want to implement a cache.
+    //Create and destroy in derived classes.
+
     function Delete(item: TCoWTreeItem; Inp: TCowTreeItem;
                              var h: TChkBool; var found:TChkBool): TCowTreeItem;
     function SearchAndInsert(item: TCoWTreeItem; Inp: TCowTreeItem;
@@ -133,7 +137,6 @@ type
     function LeftMost(Item: TCoWTreeItem): TCoWTreeItem;
     function RightMost(Item: TCoWTreeItem): TCoWTreeItem;
   public
-
     //Oh? You were looking for some public usable methods here?
     //You'll find those in derived classes dealing with what to do with roots
     //and multiple tree copies.
@@ -222,6 +225,21 @@ begin
   inherited;
 end;
 
+procedure TCowTreeItem.Reset(Cache: TReffedCache);
+begin
+  left.ReleaseToCache(Cache);
+  right.ReleaseToCache(Cache);
+  __left := nil;
+  __right := nil;
+  __bal := 0;
+{$IFOPT C+}
+  _setLeft := false;
+  _setRight := false;
+  _setBal := false;
+{$ENDIF}
+  inherited;
+end;
+
 constructor TCowTreeItem.Create;
 begin
   inherited;
@@ -229,13 +247,24 @@ end;
 
 function TCowTreeItem.DupNoInit(SrcTree: TCowTree): TCowTreeItem;
 begin
-  result := TCowTreeItemClass(self.ClassType).Create;
+  result := nil;
+  if Assigned(SrcTree.FCache) then
+  begin
+{$IFOPT C+}
+    result := SrcTree.FCache.GetFromCache as TCowTreeItem;
+    Assert((not Assigned(result)) or (result.ClassType = self.ClassType));
+{$ELSE}
+    result := TCowTreeItem(SrcTree.FCache.GetFromCache);
+{$ENDIF}
+  end;
+  if not Assigned(Result) then
+    result := TCowTreeItemClass(self.ClassType).Create;
 end;
 
 function TCowTreeItem.DupInit(SrcTree: TCowTree): TCowTreeItem;
 begin
   result := DupNoInit(SrcTree);
-  result.CopyFrom(self);
+  result.CopyFrom(self, SrcTree);
 end;
 
 { TCowTree }
@@ -408,7 +437,7 @@ begin
         CallP := Tmp;
         Retp := BalanceLeft(CallP, false, h);
         Assert(RetP <> CallP);
-        Tmp.Release;  //Release newly created temp.
+        Tmp.ReleaseToCache(Self.FCache);  //Release newly created temp.
         Tmp := RetP;
         RetP := nil;
       end;
@@ -440,7 +469,7 @@ begin
         CallP := Tmp;
         Retp := BalanceRight(CallP, false, h);
         Assert(RetP <> CallP);
-        Tmp.Release;  //Release newly created temp.
+        Tmp.ReleaseToCache(Self.FCache);  //Release newly created temp.
         Tmp := RetP;
         RetP := nil;
       end;
@@ -798,7 +827,7 @@ begin
         RetP := balanceLeft(CallP, True, h);
         Assert(RetP <> CallP);
         //InQR.r changed to new value, was tmp.
-        RetQR.r.Release; //Release old tmp.
+        RetQR.r.ReleaseToCache(Self.FCache); //Release old tmp.
         RetQR.r := RetP;
       end;
       Result := RetQR;
@@ -817,7 +846,7 @@ begin
       //r is still the primary "modified subtree" returned back up.
 
       Tmp := InQR.q.DupNoInit(self);
-      Tmp.CopyFrom(InQR.r); //Copy the key across from other node.
+      Tmp.CopyFrom(InQR.r, self); //Copy the key across from other node.
       Tmp.bal := InQR.q.bal; //Copy the balance across from original node, but not the children.
       RetQR.q := Tmp; //Return this modified Q to caller.
       Tmp := nil;
@@ -901,7 +930,7 @@ begin
         RetP := balanceRight(CallP, True, h);
         Assert(RetP <> CallP);
         Tmp := RetP; //Rebalance has done all the copying for us.
-        CallP.Release; //Release the tmp generated above.
+        CallP.ReleaseToCache(Self.FCache); //Release the tmp generated above.
       end;
     end
     else if comparison < 0 then
@@ -936,7 +965,7 @@ begin
         RetP := balanceLeft(CallP, True, h);
         Assert(RetP <> CallP);
         Tmp := RetP; //Rebalance has done all the copying for us.
-        CallP.Release;
+        CallP.ReleaseToCache(Self.FCache);
       end;
     end
     else
@@ -1004,7 +1033,7 @@ begin
           RetP := balanceRight(CallP, True, h);
           Assert(RetP <> CallP);
           //Rebalance has modified it again, and its guaranteed a temp creation.
-          Tmp.Release;
+          Tmp.ReleaseToCache(Self.FCache);
           Tmp := RetP;
         end;
       end;
