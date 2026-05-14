@@ -414,7 +414,7 @@ begin
 
         //This may raise exceptions if pre-commit checks fail.
         //Arranges streams in transaction for final journalling;
-        CommitStream := Transaction.FCRInterface.UserCommitCycleV3;
+        CommitStream := Transaction.FCRInterface.UserCommitCycle;
 
         //Exceptions after here less likely / not expected.
         Assert(not Assigned(Transaction.Changeset));
@@ -442,7 +442,7 @@ begin
         try
           //Since everything is multi-buffered, barring out of memory
           //exceptions we do not expect this to fail.
-          Transaction.FCRInterface.UserRollbackCycleV3;
+          Transaction.FCRInterface.UserRollbackCycle;
           //We really need rollback to work to clear pins and refcounts.
           //If it doesn't then something's very very broken.
         except
@@ -932,7 +932,7 @@ begin
     CStream := Changesets as TStream;
     while CStream.Position < CStream.Size do
     begin
-      API.JournalReplayCycleV3(CStream, Initial);
+      API.JournalReplayCycle(CStream, Initial);
       Initial := false;
     end;
   finally
@@ -993,15 +993,15 @@ begin
             //it here for safety.
             FDatabase.MetaIndexLock.Acquire;
             try
-              FDatabase.Rollback(PseudoTid, rbpIndexRollback);
-              FDatabase.Rollback(PseudoTid, rbpMetaRollback);
+              FDatabase.Rollback(PseudoTid, rbpIndexRollback, []);
+              FDatabase.Rollback(PseudoTid, rbpMetaRollback, []);
             finally
               FDatabase.MetaIndexLock.Release;
             end;
           end;
         finally
           FDatabase.CommitLock.Release;
-          FDatabase.Rollback(PseudoTid, rbpDelayedRollback);
+          FDatabase.Rollback(PseudoTid, rbpDelayedRollback, CleardownOptSet);
         end;
       except
         ChangesetStream.Free;

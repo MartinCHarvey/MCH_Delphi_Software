@@ -56,9 +56,9 @@ type
   public
     procedure TransactionStartCycle;
     //Really don't call any of these functions if you're an end user.
-    procedure JournalReplayCycleV3(JournalEntry: TStream; Initial: boolean);
-    function UserCommitCycleV3: TStream;
-    procedure UserRollbackCycleV3;
+    procedure JournalReplayCycle(JournalEntry: TStream; Initial: boolean);
+    function UserCommitCycle: TStream;
+    procedure UserRollbackCycle;
   end;
 
   TMemAPIDatabase = class(TMemAPIDBTopLevel)
@@ -168,7 +168,10 @@ type
   //API operations. These perform consistency checking on the operations,
   //and do not maintain an per-transaction state.
   TMemDbDatabase = class(TMemDbDatabasePersistent)
+  protected
+    FPolicies: TOptimizePolicies;
   public
+    constructor Create;
     procedure API_CreateTable(T: TObject; Name: string);
     procedure API_CreateForeignKey(T: TObject; Name: string);
     procedure API_RenameTableOrKey(T: TObject; OldName, NewName: string);
@@ -176,6 +179,8 @@ type
     function API_GetEntityNames(T: TObject): TStringList;
     function API_GetAPIObjectFromEntity(T: TObject; Name: string; API: TMemDBAPIId): TMemDBAPI;
     function HandleInterfacedObjRequest(Transaction: TObject; ID: TMemDBAPIId): TMemDBAPI;override;
+
+    property Policies: TOptimizePolicies read FPolicies write FPolicies;
   end;
 
   TMemDBTable = class(TMemDbTablePersistent)
@@ -382,66 +387,74 @@ begin
   end;
 end;
 
-procedure TMemAPIDatabaseInternal.JournalReplayCycleV3(JournalEntry: TStream; Initial: boolean);
+procedure TMemAPIDatabaseInternal.JournalReplayCycle(JournalEntry: TStream; Initial: boolean);
 var
    PseudoTid: TTransactionId;
+   OptSet: TOptimizeSet;
 begin
+  OptSet := MakeOptimizationSet(DB.Policies, Initial, not Initial, false, 0, JournalEntry.Size);
+
   PseudoTid := TTransactionId.NewTransactionID(ilSerialisable); //if only writer, should be serialisable.
   try
     DB.StartTransaction(PseudoTid);
 
     Assert(not DB.AnyChanges(PseudoTid));
     if Initial then
-      DB.FromScratch(PseudoTid, JournalEntry)
+      DB.FromScratch(PseudoTid, JournalEntry, OptSet)
     else
     begin
       DB.FromJournal(PseudoTid, JournalEntry);
-      DB.Prepare(PseudoTid);
+      DB.Prepare(PseudoTid, OptSet);
     end;
 
-    DB.PreCommit(PseudoTid, pcpTables);
-    DB.PreCommit(PseudoTid, pcpFKeys);
-    DB.Commit(PseudoTid, ccpData);
-    DB.Commit(PseudoTid, ccpMetaIndex);
-    DB.Commit(PseudoTid, ccpCleardown);
+    DB.PreCommit(PseudoTid, pcpTables, OptSet);
+    DB.PreCommit(PseudoTid, pcpFKeys, OptSet);
+    DB.Commit(PseudoTid, ccpData, OptSet);
+    DB.Commit(PseudoTid, ccpMetaIndex, OptSet);
+    DB.Commit(PseudoTid, ccpCleardown, OptSet);
   except
     //Clear pins etc, although in this case, it's
     //a non-start for the database.
     //However, final deletion of entities should still work
     //and delete everything provided we clear the pins.
-    DB.Rollback(PseudoTid, rbpIndexRollback);
-    DB.Rollback(PseudoTid, rbpMetaRollback);
-    DB.Rollback(PseudoTid, rbpDelayedRollback);
+    DB.Rollback(PseudoTid, rbpIndexRollback, OptSet);
+    DB.Rollback(PseudoTid, rbpMetaRollback, []);
+    DB.Rollback(PseudoTid, rbpDelayedRollback, OptSet);
     raise;
   end;
 end;
 
-function TMemAPIDatabaseInternal.UserCommitCycleV3: TStream;
+function TMemAPIDatabaseInternal.UserCommitCycle: TStream;
 var
   T: TMemDBTransaction;
+  SizeHint: int64;
+  OptSet: TOptimizeSet;
 begin
   T := FAssociatedTransaction as TMemDBTransaction;
   Assert(Assigned(T));
   Assert(not Assigned(T.Changeset));
   result := MakeStream(T.Session.TempStorageMode);
   try
-    DB.Prepare(T.Tid);
+    DB.SizeHint(T.Tid, SizeHint);
+    OptSet := MakeOptimizationSet(DB.Policies, false, false, true, SizeHint, 0);
+
+    DB.Prepare(T.Tid, OptSet);
 
     DB.CommitLock.Acquire;
     try
       try
         DB.ToJournal(T.Tid, result);
 
-        DB.PreCommit(T.Tid, pcpTables);
-        DB.PreCommit(T.Tid, pcpFKeys);
+        DB.PreCommit(T.Tid, pcpTables, OptSet);
+        DB.PreCommit(T.Tid, pcpFKeys, OptSet);
 
         //The assumption is all exceptions raised in pre-commit.
         //We're not checking for errors or allocating memory by the time
         //it comes to the commit step.
-        DB.Commit(T.Tid, ccpData);
+        DB.Commit(T.Tid, ccpData, OptSet);
         DB.MetaIndexLock.Acquire;
         try
-          DB.Commit(T.Tid, ccpMetaIndex);
+          DB.Commit(T.Tid, ccpMetaIndex, OptSet);
         finally
           DB.MetaIndexLock.Release;
         end;
@@ -450,7 +463,7 @@ begin
         //temp indexes protected under commit lock.
         DB.MetaIndexLock.Acquire;
         try
-          DB.Rollback(T.Tid, rbpIndexRollback);
+          DB.Rollback(T.Tid, rbpIndexRollback, OptSet);
         finally
           DB.MetaIndexLock.Release;
         end;
@@ -460,31 +473,35 @@ begin
       DB.CommitLock.Release;
     end;
     //Note final cleanup outside commit lock.
-    DB.Commit(T.Tid, ccpCleardown);
+    DB.Commit(T.Tid, ccpCleardown, OptSet);
   except
     result.Free;
     raise; //Rely on later rollback etc to clear pins and such.
   end;
 end;
 
-procedure TMemAPIDatabaseInternal.UserRollbackCycleV3;
+procedure TMemAPIDatabaseInternal.UserRollbackCycle;
 var
   T: TMemDBTransaction;
+  SizeHint: int64;
+  OptSet: TOptimizeSet;
+
 begin
   T := FAssociatedTransaction as TMemDBTransaction;
   Assert(Assigned(T));
 
-  //TODO - No lock acquisition needed here?
-  //meta change is TidLocal.
+  DB.SizeHint(T.Tid, SizeHint);
+  OptSet := MakeOptimizationSet(DB.Policies, false, false, true, SizeHint, 0);
+
   DB.MetaIndexLock.Acquire;
   try
-    DB.Rollback(T.Tid, rbpMetaRollback);
+    DB.Rollback(T.Tid, rbpMetaRollback, []);
   finally
     DB.MetaIndexLock.Release;
   end;
   //OK to rollback general double buffered outside lock:
   //we know changes won't be committed to current world-view.
-  DB.Rollback(T.Tid, rbpDelayedRollback);
+  DB.Rollback(T.Tid, rbpDelayedRollback, OptSet);
 end;
 
 { TMemAPIDatabase }
@@ -916,6 +933,18 @@ end;
 //////////////////////////////////////////////////////////////////////
 
 { TMemDbDatabase }
+
+constructor TMemDBDatabase.Create;
+begin
+  inherited;
+//TODO - NoOptimize back on for debug build.
+
+{$IFOPT C+}
+  FPolicies := NoOptimizePolicies;
+{$ELSE}
+  FPolicies := DefaultOptimizePolicies;
+{$ENDIF}
+end;
 
 //Generally, don't try to undelete, unrename etc etc in the same transaction.
 procedure TMemDBDatabase.API_CreateTable(T:TObject; Name: string);

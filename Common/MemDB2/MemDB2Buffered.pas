@@ -135,7 +135,7 @@ type
     procedure ToJournal(const Tid: TTransactionId; Stream: TStream);override;
     procedure ToScratch(const PseudoTid:TTransactionId; Stream: TStream);override;
     procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream);override;
-    procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream);override;
+    procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet);override;
 
     procedure RemoveFromLocalIndices(TidLocal: TTidLocal);
     procedure AddToLocalIndices(TidLocal: TTidLocal);
@@ -171,7 +171,7 @@ type
     function FieldByName(const AB: TBufSelector; const Name: string; var AbsIndex: integer; Reason: TPinReason): TMemFieldDef;
     function IndexByName(const AB: TBufSelector; const Name: string; var AbsIndex: integer; Reason: TPinReason): TMemIndexDef;
   public
-    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase); override;
+    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet); override;
     procedure Init(const Tid: TTransactionId; Parent: TObject; Name:string; DSName: boolean); override;
   end;
 
@@ -225,10 +225,12 @@ type
     procedure META_RequestChange(const Tid: TTransactionId); virtual;
     procedure META_Delete(const Tid: TTransactionId); virtual;
 
-    procedure StartTransaction(const Tid: TTransactionId); override;
-    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase); override;
-    procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase); override;
-    procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase); override;
+    procedure SizeHint(const Tid: TTransactionId; var SizeHint: int64); virtual;
+    procedure StartTransaction(const Tid: TTransactionId); virtual;
+    procedure Prepare(const Tid: TTransactionId; Opts:TOptimizeSet); virtual;
+    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet); override;
+    procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase; Opts:TOptimizeSet); override;
+    procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase; Opts:TOptimizeSet); override;
 
     procedure Init(const Tid: TTransactionId; Parent: TObject; Name:string; DSName: boolean);
 
@@ -292,12 +294,11 @@ type
     function AnyChanges(const Tid:TTransactionId): boolean; override;
     function AnyChangesForTid(const Tid: TTransactionId): boolean; override;
 
-    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase); override;
-    procedure Prepare(const Tid: TTransactionId); override;
+    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet); override;
     procedure ToJournal(const Tid: TTransactionId; Stream: TStream);override;
     procedure ToScratch(const PseudoTid:TTransactionId; Stream: TStream);override;
     procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream);override;
-    procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream);override;
+    procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet);override;
 
     procedure CheckAPITableDelete(const Sel: TBufSelector; TableName: string);
     procedure CheckAPIIndexDelete(const Sel: TBufSelector; IsoDeterminedTableName, IndexName: string);
@@ -400,7 +401,6 @@ type
 
     procedure CheckTableRowCount;
     procedure CheckChangedRowStructure;
-    procedure BuildCheckPartialIndexes;
     procedure RowLocalPreCommit;
 
     procedure InitialUpdate;
@@ -414,21 +414,25 @@ type
 
     procedure Init(Parent: TMemDBTablePersistent; const Tid: TTransactionId);
 
+    function SizeHint: Int64;
+
     procedure ToJournal(Stream: TStream);
     procedure ToScratch(Stream: TStream);
     procedure FromJournal(Stream: TStream);
-    procedure FromScratch(Stream: TStream);
+    procedure FromScratch(Stream: TStream; Opts:TOptimizeSet);
 
-    procedure PreCommit(Phase: TMemDBPreCommitPhase);
-    procedure Commit(Phase: TMemDBCommitPhase);
+    procedure PreCommit(Opts: TOptimizeSet);
+    procedure Commit;
     procedure Rollback;
 
     procedure IndexCommit;
     procedure IndexRollback;
 
-    procedure BuildValidateNewIndexesCommon(LocalIter: boolean);
-    procedure BuildValidateNewIndexesOutsideCommitLock;
-    procedure BuildValidateNewIndexesInsideCommitLock;
+    procedure BuildCheckPartialIndexes(Opts:TOptimizeSet);
+
+    procedure BuildValidateNewIndexesCommon(LocalIter: boolean; Opts:TOptimizeSet);
+    procedure BuildValidateNewIndexesOutsideCommitLock(Opts:TOptimizeSet);
+    procedure BuildValidateNewIndexesInsideCommitLock(Opts:TOptimizeSet);
 
     procedure RowCPTidHandle(Sender: TObject; const Update: TTidUpdate);
 
@@ -568,16 +572,18 @@ type
     constructor Create;
     destructor Destroy; override;
 
-    procedure Prepare(const Tid: TTransactionId); override;
+    procedure SizeHint(const Tid: TTransactionId; var SizeHint: int64); override;
+    procedure StartTransaction(const Tid: TTRansactionId); override;
+    procedure Prepare(const Tid: TTransactionId; Opts:TOptimizeSet); override;
+
     procedure ToJournal(const Tid: TTransactionId; Stream: TStream); override;
     procedure ToScratch(const PseudoTid:TTransactionId; Stream: TStream); override;
     procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream); override;
-    procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream); override;
+    procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet); override;
 
-    procedure StartTransaction(const Tid: TTRansactionId); override;
-    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase); override;
-    procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase); override;
-    procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase); override;
+    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet); override;
+    procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase; Opts:TOptimizeSet); override;
+    procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase; Opts:TOptimizeSet); override;
 
     function DataChangedForTid(const Tid:TTransactionId): boolean;
     function LayoutChangesRequiredForTid(const Tid: TTransactionId): boolean;
@@ -634,19 +640,27 @@ type
   public
     function EntitiesByName(const AB:TBufSelector; Name: string; PinReason: TPinReason): TMemDBEntity;
 
-    procedure Prepare(const Tid: TTransactionId); override;
+    procedure SizeHint(const Tid: TTransactionId; var SizeHint: int64); virtual;
+
+    function PrepareParallel(Ref1, Ref2: pointer):pointer;
+    procedure Prepare(const Tid: TTransactionId; Opts:TOptimizeSet); virtual;
+    procedure StartTransaction(const Tid: TTRansactionId); virtual;
+
     procedure ToJournal(const Tid: TTransactionId; Stream: TStream); override;
     procedure ToScratch(const PseudoTid:TTransactionId; Stream: TStream); override;
     procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream); override;
-    procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream); override;
+    procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet); override;
 
     function AnyChangesForTid(const TId: TTransactionId): boolean; override;
     function AnyChanges(const Tid: TTransactionId): boolean; override;
 
-    procedure StartTransaction(const Tid: TTRansactionId); override;
-    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase); override;
-    procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase); override;
-    procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase); override;
+    function PreCommitParallel(Ref1, Ref2: pointer):pointer;
+    function CommitParallel(Ref1, Ref2: pointer): pointer;
+    function RollbackParallel(Ref1, Ref2: pointer): pointer;
+
+    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase;  Opts:TOptimizeSet); override;
+    procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase;  Opts:TOptimizeSet); override;
+    procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase;  Opts:TOptimizeSet); override;
 
     constructor Create;
     destructor Destroy; override;
@@ -769,7 +783,7 @@ uses
 {$IFDEF DEBUG_SNAPSHOT}
   GlobalLog,
 {$ENDIF}
-  SysUtils, MemDB2, NullStream, MemDB2Api;
+  SysUtils, MemDB2, NullStream, MemDB2Api, Parallelizer;
 
 const
   S_REPLAY_CHECK_FAILED = 'Journal replay: pre or postcondition checks failed: ';
@@ -1170,6 +1184,44 @@ begin
   result := true;
 end;
 
+procedure ParallelInit(
+  var Handlers: TParallelHandlers;
+  var Refs1: TPHRefs;
+  var Refs2: TPHRefs;
+  var Excepts: TPHExcepts;
+  var Rets: TPHRefs;
+  var PCount: integer);
+begin
+  PCount := 0;
+  SetLength(Handlers, PCount);
+  SetLength(Refs1, PCount);
+  SetLength(Refs2, PCount);
+  SetLength(Excepts, PCount);
+  SetLength(Rets, PCount);
+end;
+
+procedure ParallelAddHandler(
+  Handler: TParallelHandler;
+  Ref1: pointer;
+  Ref2: pointer;
+  var Handlers: TParallelHandlers;
+  var Refs1: TPHRefs;
+  var Refs2: TPHRefs;
+  var Excepts: TPHExcepts;
+  var Rets: TPHRefs;
+  var PCount: integer);
+begin
+  Inc(PCount);
+  SetLength(Handlers, PCount);
+  SetLength(Refs1, PCount);
+  SetLength(Refs2, PCount);
+  SetLength(Excepts, PCount);
+  SetLength(Rets, PCount);
+  Handlers[Pred(PCount)] := Handler;
+  Refs1[Pred(PCount)] := Ref1;
+  Refs2[Pred(PCount)] := Ref2;
+end;
+
 { TMemDBAPI }
 
 procedure TMemDBAPI.CheckWriteTransaction;
@@ -1400,27 +1452,37 @@ begin
   FMetadata.PinCurrent(Tid, pinEvolve);
 end;
 
-procedure TMemDBEntity.PreCommit(const TId: TTransactionId; Phase:TMemDBPreCommitPhase);
+procedure TMemDBEntity.SizeHint(const Tid: TTransactionId; var SizeHint: int64);
+begin
+  //NOP.
+end;
+
+procedure TMemDBEntity.Prepare(const Tid: TTransactionId; Opts:TOptimizeSet);
+begin
+  //NOP.
+end;
+
+procedure TMemDBEntity.PreCommit(const TId: TTransactionId; Phase:TMemDBPreCommitPhase; Opts:TOptimizeSet);
 begin
   inherited;
-  FMetadata.PreCommit(Tid, Phase);
+  FMetadata.PreCommit(Tid, Phase, Opts);
   //Do not absolutely require atomic here.
   //Let tables / keys decide whether OK to proceed with metadata
   //changed behind our back.
 end;
 
-procedure TMemDBEntity.Commit(const TId: TTransactionId; Phase:TMemDBCommitPhase);
+procedure TMemDBEntity.Commit(const TId: TTransactionId; Phase:TMemDBCommitPhase; Opts:TOptimizeSet);
 begin
   inherited;
   if Phase = ccpMetaIndex then
-    FMetadata.Commit(Tid, Phase);
+    FMetadata.Commit(Tid, Phase, Opts);
 end;
 
-procedure TMemDBEntity.Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase);
+procedure TMemDBEntity.Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase; Opts:TOptimizeSet);
 begin
   inherited;
   if Phase = rbpMetaRollback then
-    FMetadata.Rollback(Tid, Phase);
+    FMetadata.Rollback(Tid, Phase, Opts);
 end;
 
 procedure TMemDBEntity.Init(const Tid: TTransactionId; Parent: TObject; Name:string; DSName: boolean);
@@ -2058,6 +2120,11 @@ begin
   inherited;
 end;
 
+function TTidLocal.SizeHint: Int64;
+begin
+  result := FCPRows.Count;
+end;
+
 procedure TTidLocal.ToJournal(Stream: TStream);
 var
   IRec: TItemRec;
@@ -2182,7 +2249,7 @@ begin
   ExpectTag(Stream, mstIndexedListEnd);
 end;
 
-procedure TTidLocal.FromScratch(Stream: TStream);
+procedure TTidLocal.FromScratch(Stream: TStream; Opts:TOptimizeSet);
 var
   Row: TMemDBRow;
   Created: boolean;
@@ -2193,7 +2260,7 @@ begin
   begin
     //Row DCP handler, Row CPTid handler handle reffing, and
     //all insertion except master list.
-    Row.FromScratch(FTid, Stream);
+    Row.FromScratch(FTid, Stream, Opts);
     if Created then
       Row.FProxy.Release;
     Row := LookaheadHelper(Stream, true, Created);
@@ -2331,7 +2398,7 @@ begin
 end;
 
 
-procedure TTidLocal.BuildValidateNewIndexesCommon(LocalIter: boolean);
+procedure TTidLocal.BuildValidateNewIndexesCommon(LocalIter: boolean; Opts:TOptimizeSet);
 var
   NewBuild: TReffedList;
   i, j: integer;
@@ -2590,14 +2657,14 @@ begin
   end
 end;
 
-procedure TTidLocal.BuildValidateNewIndexesOutsideCommitLock;
+procedure TTidLocal.BuildValidateNewIndexesOutsideCommitLock(Opts:TOptimizeSet);
 begin
-  BuildValidateNewIndexesCommon(true);
+  BuildValidateNewIndexesCommon(true, Opts);
 end;
 
-procedure TTidLocal.BuildValidateNewIndexesInsideCommitLock;
+procedure TTidLocal.BuildValidateNewIndexesInsideCommitLock(Opts:TOptimizeSet);
 begin
-  BuildValidateNewIndexesCommon(false);
+  BuildValidateNewIndexesCommon(false, Opts);
 end;
 
 function TTidLocal.GetIPinForIndex(Row: TMemDBRow; Index: TMemDbIndexGeneric; IndexSel: TAbSelType): PMemDbIndexPin;
@@ -3152,7 +3219,7 @@ begin
   while Assigned(IRec) do
   begin
     Row := IRec.Item as TMemDBRow;
-    Row.PreCommit(FTid, pcpTables);
+    Row.PreCommit(FTid, pcpTables, []);
 
     if Row.AnyChangesForTid(FTid) then
     begin
@@ -3169,7 +3236,7 @@ begin
   FParentTable.HandleRowProhibitOp(FTid, AddAcc, ChangeAcc, DelAcc);
 end;
 
-procedure TTidLocal.PreCommit;
+procedure TTidLocal.PreCommit(Opts: TOptimizeSet);
 
 begin
   //Check we haven't added / changed rows on the basis of out of date metadata.
@@ -3184,7 +3251,7 @@ begin
   //Check structure of changes rows, however that happened.
   CheckChangedRowStructure;
   //Indexes not rebuit / revalidated.
-  BuildCheckPartialIndexes;
+  BuildCheckPartialIndexes(Opts);
 end;
 
 procedure TTidLocal.Commit;
@@ -3199,7 +3266,7 @@ begin
   begin
     Row := IRec.Item as TMemDBRow;
     Assert(Row <> LastRow); //Just check the commit is removing things as it should.
-    Row.Commit(FTid, ccpData);
+    Row.Commit(FTid, ccpData, []);
     LastRow := Row;
     IRec := FCPRows.GetAnItem;
   end;
@@ -3219,7 +3286,7 @@ begin
   begin
     Row := IRec.Item as TMemDBRow;
     Assert(Row <> LastRow); //Just check the rollback is removing things as it should.
-    Row.Rollback(FTid, rbpDelayedRollback);
+    Row.Rollback(FTid, rbpDelayedRollback, []);
     LastRow := Row;
     IRec := FCPRows.GetAnItem;
   end;
@@ -4006,7 +4073,7 @@ begin
   FProxy.Release;
 end;
 
-procedure TMemDBTablePersistent.Prepare(const Tid: TTransactionId);
+procedure TMemDBTablePersistent.Prepare(const Tid: TTransactionId; Opts:TOptimizeSet);
 var
   TidLocal: TTidLocal;
 begin
@@ -4023,7 +4090,7 @@ begin
 
     TidLocal.AdjustTableStructureForMetadata;
     if TidLocal.FIndexingChangeRequired then
-      TidLocal.BuildValidateNewIndexesOutsideCommitLock;
+      TidLocal.BuildValidateNewIndexesOutsideCommitLock(Opts);
   end;
 end;
 
@@ -4140,7 +4207,7 @@ begin
   //Prepare will be called after this.
 end;
 
-procedure TMemDBTablePersistent.FromScratch(const PseudoTid: TTransactionId; Stream: TStream);
+procedure TMemDBTablePersistent.FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet);
 var
   TidLocal:TTidLocal;
   Newly: boolean;
@@ -4159,13 +4226,17 @@ begin
   end;
   ExpectTag(Stream, mstTableStart);
   TidLocal := GetTidLocal(PseudoTid);
-  FMetadata.FromScratch(PseudoTid, Stream);
+  FMetadata.FromScratch(PseudoTid, Stream, Opts);
   TidLocal.UpdateLayout(pinEvolve);
-  TidLocal.FromScratch(Stream);
+  TidLocal.FromScratch(Stream, Opts);
   ExpectTag(Stream, mstTableEnd);
+
+  //TODO - Don't do the indexes here. Do them in prepare, where
+  //we can parallelise per entity as well as per index.
+
   //Do not expect any contention and all rows modded this txion.
   if TidLocal.FIndexingChangeRequired then
-    TidLocal.BuildValidateNewIndexesOutsideCommitLock;
+    TidLocal.BuildValidateNewIndexesOutsideCommitLock(Opts);
 
   //Prepare will not be called after this.
 end;
@@ -4208,7 +4279,16 @@ begin
   end;
 end;
 
-procedure TMemDBTablePersistent.PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase);
+procedure TMemDBTablePersistent.SizeHint(const Tid: TTransactionId; var SizeHint: int64);
+var
+  TidLocal: TTidLocal;
+begin
+  TidLocal := GetTidLocal(Tid);
+  if Assigned(TidLocal) then
+    Inc(SizeHint, TidLocal.SizeHint);
+end;
+
+procedure TMemDBTablePersistent.PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet);
 var
   Cur, Next: TMemDBStreamable;
   Added, Changed, Deleted, Null: boolean;
@@ -4231,13 +4311,13 @@ begin
   TidLocal := GetTidLocal(Tid);
   //In cases where "current" changes behind our back, better to concurrency check
   //before building / revalidating indices.
-  TidLocal.PreCommit(Phase);
+  TidLocal.PreCommit(Opts);
   if TidLocal.FIndexingChangeRequired then
-    TidLocal.BuildValidateNewIndexesInsideCommitLock;
+    TidLocal.BuildValidateNewIndexesInsideCommitLock(Opts);
 end;
 
 
-procedure TMemDBTablePersistent.Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase);
+procedure TMemDBTablePersistent.Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase; Opts:TOptimizeSet);
 var
   TidLocal: TTidLocal;
 begin
@@ -4250,7 +4330,7 @@ begin
 
   TidLocal := GetTidLocal(Tid);
   case Phase of
-    ccpData: TidLocal.Commit(Phase);
+    ccpData: TidLocal.Commit;
     ccpMetaIndex: begin
       TidLocal.IndexCommit;
       inherited;
@@ -4262,7 +4342,7 @@ begin
   end;
 end;
 
-procedure TMemDBTablePersistent.Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase);
+procedure TMemDBTablePersistent.Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase; Opts:TOptimizeSet);
 var
   TidLocal: TTidLocal;
 begin
@@ -4478,11 +4558,6 @@ begin
   result := FMetadata.AnyChangesForTid(Tid);
 end;
 
-procedure TMemDBForeignKeyPersistent.Prepare(const Tid: TTransactionId);
-begin
-  //NOP.
-end;
-
 procedure TMemDBForeignKeyPersistent.ToJournal(const Tid: TTransactionId; Stream: TStream);
 begin
   if FMetadata.AnyChangesForTid(Tid) then
@@ -4518,7 +4593,7 @@ begin
   ExpectTag(Stream, mstFkEnd);
 end;
 
-procedure TMemDBForeignKeyPersistent.FromScratch(const PseudoTid: TTransactionId; Stream: TStream);
+procedure TMemDBForeignKeyPersistent.FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet);
 var
   CP, NP: TMemDBStreamable;
   Added, Changed, Deleted, Null: boolean;
@@ -4531,11 +4606,11 @@ begin
   if not Null then
     raise EMemDBInternalException.Create(S_FROM_SCRATCH_REQUIRES_EMPTY_OBJ);
   ExpectTag(Stream, mstFkStart);
-  FMetadata.FromScratch(PseudoTid, Stream);
+  FMetadata.FromScratch(PseudoTid, Stream, Opts);
   ExpectTag(Stream, mstFkEnd);
 end;
 
-procedure TMemDBForeignKeyPersistent.PreCommit(const Tid: TTransactionId; Phase: TMemDBPreCommitPhase);
+procedure TMemDBForeignKeyPersistent.PreCommit(const Tid: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet);
 var
   CP, NP: TMemDBStreamable;
   Added, Changed, Deleted, Null: boolean;
@@ -5858,7 +5933,7 @@ begin
   CheckABStreamableListChange(CheckItemCurrent, CheckItemNext);
 end;
 
-procedure TMemDBRow.FromScratch(const PseudoTid: TTransactionId; Stream: TStream);
+procedure TMemDBRow.FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet);
 var
   StreamRowGUID: TGUID;
   Cur, Nxt: TMemDBStreamable;
@@ -6100,7 +6175,7 @@ begin
   CheckABStreamableListChange(CurI, NextI);
 end;
 
-procedure TMemDbTableMetadata.PreCommit(const Tid: TTransactionId; Phase: TMemDBPreCommitPhase);
+procedure TMemDbTableMetadata.PreCommit(const Tid: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet);
 begin
   inherited;
   CheckABListChanges(Tid);
@@ -6377,7 +6452,28 @@ begin
   end;
 end;
 
-procedure TMemDBDatabasePersistent.PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase);
+
+
+type
+  TPOPreContext = record
+     Tid: TTRansactionId;
+     Phase: TMemDBPreCommitPhase;
+     Opts: TOptimizeSet;
+  end;
+  PPOPreContext = ^TPOPreContext;
+
+function TMemDBDatabasePersistent.PreCommitParallel(Ref1, Ref2: pointer):pointer;
+var
+  Entity: TMemDBEntity;
+  PreContext: PPOPreContext;
+begin
+  Entity := TMemDBEntity(Ref1);
+  PreContext := PPOPreContext(Ref2);
+  Entity.PreCommit(PreContext.Tid, PreContext.Phase, PreContext.Opts);
+  result := nil;
+end;
+
+procedure TMemDBDatabasePersistent.PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet);
 var
   i: integer;
   ProxI: TMemDBEntityProxy;
@@ -6388,9 +6484,27 @@ var
   ILat: TMemEntityMetadataItem;
   SelType: TABSelType;
   Names: TStringList;
+
+  Handlers: TParallelHandlers;
+  Refs1: TPHRefs;
+  Refs2: TPHRefs;
+  Excepts: TPHExcepts;
+  Rets: TPHRefs;
+  PCount: integer;
+  TPOPre: TPOPreContext;
+
 begin
   //Pre-commit check and no-pin goes from top to bottom.
   inherited;
+
+  if OptApplies(optEntitiesParallel, Opts) then
+  begin
+    ParallelInit(Handlers, Refs2, Refs2, Excepts, Rets, PCount);
+    TPOPre.Tid := Tid;
+    TPOPre.Phase := Phase;
+    TPOPre.Opts := Opts;
+  end;
+
   EntityList := AssembleEntityList;
   try
     case Phase of
@@ -6401,9 +6515,21 @@ begin
           ObjI := ProxI.Proxy as TMemDbEntity;
           Assert((ObjI is TMemDBTablePersistent) or (ObjI is TMemDBForeignKeyPersistent));
           if ObjI is TMemDBForeignKeyPersistent then
-            //Object should do their own deleted / null checks as appropriate.
-            ObjI.PreCommit(Tid, Phase);
+          begin
+            if OptApplies(optEntitiesParallel, Opts) then
+            begin
+              ParallelAddHandler(PreCommitParallel, ObjI, @TPOPre,
+                Handlers, Refs1, Refs2, Excepts, Rets, PCount);
+            end
+            else
+            begin
+              //Object should do their own deleted / null checks as appropriate.
+              ObjI.PreCommit(Tid, Phase, Opts);
+            end;
+          end;
         end;
+        if OptApplies(optEntitiesParallel, Opts) and (PCOunt > 0) then
+          ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
       end;
       pcpTables: begin
         Names := TStringList.Create;
@@ -6438,9 +6564,21 @@ begin
           ProxI := EntityList[i] as TMemDBEntityProxy;
           ObjI := ProxI.Proxy as TMemDbEntity;
           if ObjI is TMemDBTablePersistent then
-            //Object should do their own deleted / null checks as appropriate.
-            ObjI.PreCommit(Tid, Phase);
+          begin
+            if OptApplies(optEntitiesParallel, Opts) then
+            begin
+              ParallelAddHandler(PreCommitParallel, ObjI, @TPOPre,
+                Handlers, Refs1, Refs2, Excepts, Rets, PCount);
+            end
+            else
+            begin
+              //Object should do their own deleted / null checks as appropriate.
+              ObjI.PreCommit(Tid, Phase, Opts);
+            end;
+          end;
         end;
+        if OptApplies(optEntitiesParallel, Opts) and (PCOunt > 0) then
+          ExecParallel(Handlers, Refs1, refs2, Excepts, Rets, @MemDBXlateExceptions);
       end;
     else
       Assert(false);
@@ -6530,21 +6668,63 @@ begin
   Stream.Seek(Pos, TSeekOrigin.soBeginning);
 end;
 
-procedure TMemDBDatabasePersistent.Prepare(const Tid: TTransactionId);
+type
+  TPOPrepareContext = record
+    Tid: TTransactionId;
+    Opts: TOptimizeSet;
+  end;
+  PPOPrepareContext = ^TPOPrepareContext;
+
+function TMemDBDatabasePersistent.PrepareParallel(Ref1, Ref2: pointer):pointer;
+var
+  Entity: TMemDBEntity;
+  PContext: PPOPrepareContext;
+begin
+  Entity := TMemDBEntity(Ref1);
+  PContext := PPOPrepareContext(Ref2);
+  Entity.Prepare(PContext.Tid, PContext.Opts);
+  result := nil;
+end;
+
+procedure TMemDBDatabasePersistent.Prepare(const Tid: TTransactionId; Opts:TOptimizeSet);
 var
   EntityList: TReffedList;
   Prox: TMemDBEntityProxy;
   Entity: TMemDBEntity;
   i: integer;
+
+  Handlers: TParallelHandlers;
+  Refs1: TPHRefs;
+  Refs2: TPHRefs;
+  Excepts: TPHExcepts;
+  Rets: TPHRefs;
+  PCount: integer;
+  TPOPre: TPOPrepareContext;
+
 begin
+  if OptApplies(optEntitiesParallel, Opts) then
+  begin
+    ParallelInit(Handlers, Refs1, Refs2, Excepts, Rets, PCount);
+    TPOPre.Tid := Tid;
+    TPOPre.Opts := Opts;
+  end;
+
   EntityList := AssembleEntityList;
   try
     for i := 0 to Pred(EntityList.Count) do
     begin
       Prox := EntityList.Items[i] as TMemDBEntityProxy;
       Entity := Prox.Proxy as TMemDBEntity;
-      Entity.Prepare(Tid);
+      if OptApplies(optEntitiesParallel, Opts) then
+      begin
+        ParallelAddHandler(PrepareParallel, Entity, @TPOPre,
+          Handlers, Refs1, Refs2, Excepts, Rets, PCount);
+      end
+      else
+        Entity.Prepare(Tid, Opts);
     end;
+    if OptApplies(optEntitiesParallel, Opts) and (PCount > 0) then
+      ExecParallel(Handlers, Refs1, refs2, Excepts, Rets, @MemDBXlateExceptions);
   finally
     EntityList.Release;
   end;
@@ -6660,7 +6840,7 @@ begin
   end;
 end;
 
-procedure TMemDBDatabasePersistent.FromScratch(const PseudoTid: TTransactionId; Stream: TStream);
+procedure TMemDBDatabasePersistent.FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet);
 var
   StrPos: int64;
   NxtTag: TMemStreamTag;
@@ -6695,7 +6875,7 @@ begin
 
         DBU.Init(PseudoTid, self, EntityName, false);
         DBU.StartTransaction(PseudoTid);
-        DBU.FromScratch(PseudoTid, Stream); //Should inc ref on proxy for us.
+        DBU.FromScratch(PseudoTid, Stream, Opts); //Should inc ref on proxy for us.
         Assert(Assigned(DBU.Metadata.GetNext(PseudoTid)));
         Assert(not (DBU.Metadata.GetNext(PseudoTid) is TMemDeleteSentinel));
         DBU.Proxy.Release;
@@ -6751,35 +6931,115 @@ begin
   end;
 end;
 
-procedure TMemDBDatabasePersistent.Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase);
+type
+  TPOCommitContext = record
+    Tid: TTransactionId;
+    Phase: TMemDBCommitPhase;
+    Opts: TOptimizeSet;
+  end;
+  PPOCommitContext = ^TPOCommitContext;
+
+function TMemDBDatabasePersistent.CommitParallel(Ref1, Ref2: pointer): pointer;
+var
+  Entity: TMemDBEntity;
+  PPOContext: PPOCommitContext;
+begin
+  Entity := TMemDBEntity(Ref1);
+  PPOContext := PPOCommitContext(Ref2);
+  Entity.Commit(PPOContext.Tid, PPOContext.Phase, PPOContext.Opts);
+  result := nil;
+end;
+
+procedure TMemDBDatabasePersistent.Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase; Opts:TOptimizeSet);
 var
   EntityList: TReffedList;
   Proxy: TMemDBEntityProxy;
   Entity: TMemDbEntity;
   i: integer;
+
+  Handlers: TParallelHandlers;
+  Refs1: TPHRefs;
+  Refs2: TPHRefs;
+  Excepts: TPHExcepts;
+  Rets: TPHRefs;
+  PCount: integer;
+  TPOComm: TPOCommitContext;
+
 begin
   inherited;
+  if OptApplies(optEntitiesParallel, Opts) then
+  begin
+    ParallelInit(Handlers, Refs1, Refs2, Excepts, Rets, PCount);
+    TPOComm.Tid := Tid;
+    TPOComm.Phase := Phase;
+    TPOComm.Opts := Opts;
+  end;
+
   EntityList := AssembleEntityList;
   try
     for i := 0 to Pred(EntityList.Count) do
     begin
       Proxy := EntityList.Items[i] as TMemDBEntityProxy;
       Entity := Proxy.Proxy as TMemDBEntity;
-      Entity.Commit(Tid, Phase);
+      if OptApplies(optEntitiesParallel, Opts) then
+      begin
+        ParallelAddHandler(CommitParallel, Entity, @TPOComm,
+          Handlers, Refs1, Refs2, Excepts, Rets, PCount);
+      end
+      else
+        Entity.Commit(Tid, Phase, Opts);
     end;
+    if OptApplies(optEntitiesParallel, Opts) and (PCount > 0) then
+      ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
   finally
     EntityList.Release;
   end;
 end;
 
-procedure TMemDBDatabasePersistent.Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase);
+type
+  TPORollbackContext = record
+    Tid: TTransactionId;
+    Phase: TMemDBRollbackPhase;
+    Opts: TOptimizeSet;
+  end;
+  PPORollbackContext = ^TPORollbackContext;
+
+function TMemDBDatabasePersistent.RollbackParallel(Ref1, Ref2: pointer): pointer;
+var
+  Entity: TMemDBEntity;
+  PPORoll: PPORollbackContext;
+begin
+  Entity := TMemDBEntity(Ref1);
+  PPORoll := PPORollbackContext(Ref2);
+  Entity.Rollback(PPORoll.Tid, PPORoll.Phase, PPORoll.Opts);
+  result := nil;
+end;
+
+procedure TMemDBDatabasePersistent.Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase; Opts:TOptimizeSet);
 var
   EntityList: TReffedList;
   Proxy: TMemDBEntityProxy;
   Entity: TMemDbEntity;
   i: integer;
+
+  Handlers: TParallelHandlers;
+  Refs1: TPHRefs;
+  Refs2: TPHRefs;
+  Excepts: TPHExcepts;
+  Rets: TPHRefs;
+  PCount: integer;
+  TPORoll: TPORollbackContext;
+
 begin
   inherited;
+  if OptApplies(optEntitiesParallel, Opts) then
+  begin
+    ParallelInit(Handlers, Refs1, Refs2, Excepts, Rets, PCount);
+    TPORoll.Tid := Tid;
+    TPORoll.Phase := Phase;
+    TPORoll.Opts := Opts;
+  end;
+
   //TODO - Entity list allocation during rollback of out-of-memory cases.
   EntityList := AssembleEntityList;
   try
@@ -6787,7 +7047,36 @@ begin
     begin
       Proxy := EntityList.Items[i] as TMemDBEntityProxy;
       Entity := Proxy.Proxy as TMemDBEntity;
-      Entity.Rollback(Tid, Phase);
+      if OptApplies(optEntitiesParallel, Opts) then
+      begin
+        ParallelAddHandler(RollbackParallel, Entity, @TPORoll,
+          Handlers, refs1, Refs2, Excepts, Rets, PCount);
+      end
+      else
+        Entity.Rollback(Tid, Phase, Opts);
+    end;
+    if OptApplies(optEntitiesParallel, Opts) and (PCount > 0) then
+      ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
+  finally
+    EntityList.Release;
+  end;
+end;
+
+procedure TMemDBDatabasePersistent.SizeHint(const Tid: TTransactionID; var SizeHint: Int64);
+var
+  EntityList: TReffedList;
+  Proxy: TMemDBEntityProxy;
+  Entity: TMemDbEntity;
+  i: integer;
+begin
+  SizeHint := 0;
+  EntityList := AssembleEntityList;
+  try
+    for i := 0 to Pred(EntityList.Count) do
+    begin
+      Proxy := EntityList.Items[i] as TMemDBEntityProxy;
+      Entity := Proxy.Proxy as TMemDBEntity;
+      Entity.SizeHint(Tid, SizeHint);
     end;
   finally
     EntityList.Release;
@@ -6910,13 +7199,13 @@ begin
       finally
         EntityList.Release;
       end;
-      Prepare(PseudoTid);
+      Prepare(PseudoTid, CleardownOptSet);
       ToJournal(PseudoTid, NullStream);
-      PreCommit(PseudoTid, pcpFKeys);
-      PreCommit(PseudoTid, pcpTables);
-      Commit(PseudoTid, ccpData);
-      Commit(PseudoTid, ccpMetaIndex);
-      Commit(PseudoTid, ccpCleardown);
+      PreCommit(PseudoTid, pcpFKeys, CleardownOptSet);
+      PreCommit(PseudoTid, pcpTables, CleardownOptSet);
+      Commit(PseudoTid, ccpData, CleardownOptSet);
+      Commit(PseudoTid, ccpMetaIndex, []);
+      Commit(PseudoTid, ccpCleardown, CleardownOptSet);
     end;
   finally
     NullStream.Free;
@@ -6937,7 +7226,6 @@ begin
     EntityList.Release;
   end;
 {$ENDIF}
-  //I can see this assertion firing a few times.
   Assert(DlItemIsEmpty(@FEntityList));
   FInterfaced.Free;
   FEntityLock.Free;

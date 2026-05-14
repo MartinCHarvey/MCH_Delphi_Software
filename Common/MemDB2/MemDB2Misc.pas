@@ -179,27 +179,46 @@ type
     mdbClosingWaitClients, mdbClosingWaitPersist, mdbClosed,
     mdbError);
 
+  //TODO - Separate out pre-commit / commit / rollback parallelization?
+  TOptimization = (
+    optEntitiesParallel,
+    optIndexBuildParallel,
+    optIndexEvolveParallel,
+    optIndexDeleteParallel,
+    optFKListsParallel
+  );
+
+  TOptimizeSet = set of TOptimization;
+
+  TOptimizePolicyType = (optSpecify, optContext, optTxionSize);
+
+  TOptimizePolicy = record
+  case PolicyType: TOptimizePolicyType of
+    optSpecify: ( Enabled: boolean);
+    optContext: ( EnabledReplayFirst: boolean;
+                  EnabledReplayNext: boolean;
+                  EnabledUserOps: boolean; );
+    optTxionSize: ( EnabledRowChangeCount: integer;
+                    EnabledTxionBufSize: Int64;
+                  );
+  end;
+  POptimizePolicy = ^TOptimizePolicy;
+
+  TOptimizePolicies = array [TOptimization] of TOptimizePolicy;
+
 const
   TMemDBPhaseStrings: array[TMemDBPhase] of string =
     ('Null', 'Initialising', 'Running',
     'Closing (WaitClients)', 'Closing (WaitPersist)', 'Closed',
     'Error');
 
+  THIRTY_TWO_K = 32 * 1024;
+  TWO_FIFTY_SIX_K = 256 * 1024;
   ONE_MEG = 1024*1024;
   FILE_CACHE_SIZE = ONE_MEG; //Let's not mess about with small cache sizes.
 
   S_API_NOT_IMPLEMENTED = 'API not yet implemented.';
 
-type
-{$IFDEF USE_TRACKABLES}
-  TMemStats = class(TTrackable)
-{$ELSE}
-  TMemStats = class
-{$ENDIF}
-  //TODO - Possibly "to-string" or other serialization.
-  end;
-
-const
   IndexableFieldTypes: TMDBFieldTypeSet = [ftInteger,
                                            ftCardinal,
                                            ftInt64,
@@ -217,6 +236,7 @@ const
   MDBAccessModeStrings: TMDBAccessModeStrings =
     ( 'amReadShared', 'amWriteExclusive', 'amReadWriteShared');
 
+
 var
   AllIndexAttrs: TMDBIndexAttrs;
   MemDBXlateExceptions: TExceptionHandlerChain;
@@ -228,6 +248,19 @@ function CompareGuids(const OtherGuid, OwnGuid: TGUID): integer;
 {$ELSE}
 function CompareGuids(const OtherGuid, OwnGuid: TGUID): integer; inline;
 {$ENDIF}
+
+//Optimization helper functions.
+function OptApplies(Opt: TOptimization; Opts: TOptimizeSet): boolean;
+
+function MakeOptimizationSet(const Policies: TOptimizePolicies;
+                             InitFirstTrans, InitNextTrans, UserOp: boolean;
+                             RowCountEstimate: integer;
+                             TxionSizeEstimate: int64): TOptimizeSet;
+
+function CleardownOptSet: TOptimizeSet;
+
+function NoOptimizePolicies: TOptimizePolicies;
+function DefaultOptimizePolicies: TOptimizePolicies;
 
 implementation
 
@@ -249,6 +282,95 @@ const
   S_INTERNAL_INDEX_HAS_STORE_LINK = 'Internal index tagdata attached to specific db';
   S_INDEXTAG_DATA_NOT_VALID = 'Data in index tag not valid for this index type';
   S_OPTIMIZED_INDEX_SWIZZLE_FAILED = 'Internal error, optimised index building failed';
+
+{ Misc functions - Optimizations }
+
+function OptApplies(Opt: TOptimization; Opts: TOptimizeSet): boolean;
+begin
+  result := Opt in Opts;
+end;
+
+function MakeOptimizationSet(const Policies: TOptimizePolicies;
+                             InitFirstTrans, InitNextTrans, UserOp: boolean;
+                             RowCountEstimate: integer;
+                             TxionSizeEstimate: int64): TOptimizeSet;
+var
+  Opt: TOptimization;
+  Policy: POptimizePolicy;
+  DoOpt: boolean;
+begin
+  result := [];
+  for Opt := Low(Opt) to High(Opt) do
+  begin
+   Policy := @Policies[Opt];
+   case Policy.PolicyType of
+    optSpecify: DoOpt := Policy.Enabled;
+    optContext: DoOpt := (Policy.EnabledReplayFirst and InitFirstTrans) or
+                         (Policy.EnabledReplayNext and InitNextTrans) or
+                         (Policy.EnabledUserOps and UserOp);
+    optTxionSize: DoOpt := (RowCountEstimate > Policy.EnabledRowChangeCount) or
+                           (TxionSizeEstimate > Policy.EnabledTxionBufSize);
+   else
+     Assert(false);
+     DoOpt := false;
+   end;
+   if DoOpt then
+    result := result + [Opt];
+  end;
+end;
+
+function EmptyOptimizeSet: TOptimizeSet;
+begin
+  result := [];
+end;
+
+function CleardownOptSet: TOptimizeSet;
+begin
+  result := [optEntitiesParallel, optIndexDeleteParallel];
+end;
+
+function NoOptimizePolicies: TOptimizePolicies;
+var
+  Opt: TOptimization;
+begin
+  for Opt := Low(Opt) to High(Opt) do
+  begin
+    result[Opt].PolicyType := optSpecify;
+    result[Opt].Enabled := false;
+  end;
+end;
+
+function DefaultOptimizePolicies: TOptimizePolicies;
+begin
+  with result[TOptimization.optEntitiesParallel] do
+  begin
+    PolicyType := optTxionSize;
+    EnabledRowChangeCount := THIRTY_TWO_K;
+    EnabledTxionBufSize := TWO_FIFTY_SIX_K;
+  end;
+  with result[TOptimization.optIndexBuildParallel] do
+  begin
+    PolicyType := optSpecify;
+    Enabled := true;
+  end;
+  with result[TOptimization.optIndexEvolveParallel] do
+  begin
+    PolicyType := optTxionSize;
+    EnabledRowChangeCount := THIRTY_TWO_K;
+    EnabledTxionBufSize := TWO_FIFTY_SIX_K;
+  end;
+  with result[TOptimization.optIndexDeleteParallel] do
+  begin
+    PolicyType := optSpecify;
+    Enabled := true;
+  end;
+  with result[TOptimization.optFKListsParallel] do
+  begin
+    PolicyType := optTxionSize;
+    EnabledRowChangeCount := THIRTY_TWO_K;
+    EnabledTxionBufSize := TWO_FIFTY_SIX_K;
+  end;
+end;
 
 { Misc functions }
 

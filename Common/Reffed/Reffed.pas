@@ -33,14 +33,29 @@ uses
   SysUtils, Classes;
 
 type
+  TReffed = class;
+
+  //Take care - the point of caching is to avoid contention on memory manager
+  //locks. The assumption is you know the location of your cache,
+  //and that all allocs / releases and cache management are in the same thread.
+{$IFDEF USE_TRACKABLES}
+  TReffedCache = class(TTrackable)
+{$ELSE}
+  TReffedCache = class
+{$ENDIF}
+  public
+    function GetFromCache: TReffed; virtual; abstract;
+    function PutToCache(Reffed: TReffed): boolean; virtual; abstract;
+  end;
+
   TReffed = class
   private
     FRef: integer;
   protected
 {$IFOPT C+}
-    function TryReleaseInt: integer;
+    function TryReleaseInt(Cache: TReffedCache): integer;
 {$ELSE}
-    function TryReleaseInt: integer; inline;
+    function TryReleaseInt(Cache: TReffedCache): integer; inline;
 {$ENDIF}
   public
     constructor Create;
@@ -49,15 +64,21 @@ type
     function Unitary: boolean;
     function AddRef: TReffed;  //Where you know there shouldn't be a race conditon.
     function TryAddRef: TReffed; //Where you know there will be.
+    function TryReleaseToCache(Cache: TReffedCache): boolean;
+    procedure ReleaseToCache(Cache:TReffedCache);
     function TryRelease: boolean; //Returns whether object still live.
     procedure Release;
 {$ELSE}
     function Unitary: boolean; inline;
     function AddRef: TReffed; inline;
     function TryAddRef: TReffed; inline;
+    function TryReleaseToCache(Cache: TReffedCache): boolean; inline;
+    procedure ReleaseToCache(Cache:TReffedCache); inline;
     function TryRelease: boolean; inline;
     procedure Release; inline;
 {$ENDIF}
+    //Only need to worry about reset if you are caching objects.
+    procedure Reset(Cache: TReffedCache); virtual;
 
     procedure Free;
   end;
@@ -98,6 +119,8 @@ type
   public
     constructor Create;
     destructor Destroy; override;
+    //No reset here yet, not cached.
+
     procedure ReleaseAndClear;
     //No delete sentinels in these lists - just allowing for
     //dbl buffered, atomic, ref counted switchover between two sets of stuff.
@@ -118,6 +141,8 @@ type
     FProxy: TObject;
   public
     destructor Destroy; override;
+    //No reset here yet, not cached.
+
     property Proxy: TObject read FProxy write FProxy;
   end;
 
@@ -138,6 +163,11 @@ uses
 constructor TReffed.Create;
 begin
   inherited;
+  FRef := 1;
+end;
+
+procedure TReffed.Reset(Cache: TReffedCache);
+begin
   FRef := 1;
 end;
 
@@ -185,18 +215,28 @@ begin
   result := Self;
 end;
 
+function TReffed.TryReleaseToCache(Cache: TReffedCache): boolean;
+begin
+  result := TryReleaseInt(Cache) > 1;
+end;
+
+procedure TReffed.ReleaseToCache(Cache:TReffedCache);
+begin
+  if TryReleaseInt(Cache) <= 0 then
+    raise EReffedError.Create(S_REFFED_TEARDOWN_RACE_RELEASING_REF);
+end;
+
 procedure TReffed.Release;
 begin
-  if TryReleaseInt <= 0 then
-    raise EReffedError.Create(S_REFFED_TEARDOWN_RACE_RELEASING_REF);
+  ReleaseToCache(nil);
 end;
 
 function TReffed.TryRelease: boolean;
 begin
-  result := TryReleaseInt > 1;
+  result := TryReleaseToCache(nil);
 end;
 
-function TReffed.TryReleaseInt: integer;
+function TReffed.TryReleaseInt(Cache: TReffedCache): integer;
 var
   GoodExchange: boolean;
 begin
@@ -214,7 +254,10 @@ begin
                         Pred(result), result) = result;
     until GoodExchange;
     if result = 1 then
-      inherited Free;
+    begin
+      if not (Assigned(Cache) and Cache.PutToCache(self)) then
+        inherited Free;
+    end;
   end;
 end;
 
