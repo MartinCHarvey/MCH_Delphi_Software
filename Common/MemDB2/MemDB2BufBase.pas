@@ -36,7 +36,7 @@ uses
   Trackables,
 {$ENDIF}
   MemDB2Misc, Classes, MemDb2Streamable, DLList, TinyLock, LockAbstractions,
-  MemDB2Indexing;
+  MemDB2Indexing, StripedLock;
 
 {
    Isolation / serialization
@@ -256,7 +256,7 @@ type
 {$ENDIF}
 
 const
-  PIN_CACHE_SIZE = 1024;
+  PIN_CACHE_SIZE = 64;  //Longest possible path + rebalances
 
 type
 {$IFDEF USE_TRACKABLES}
@@ -283,7 +283,11 @@ type
     FPinnedItems: TDLEntry; //Pinned 1, 2, 3 etc.
     FIndexPins: TDLEntry;
 
+{$IFOPT C+}
     procedure DCPMake(var Data: boolean; var Changes: boolean; var Pins: boolean);
+{$ELSE}
+    procedure DCPMake(var Data: boolean; var Changes: boolean; var Pins: boolean); inline;
+{$ENDIF}
     procedure DCPPre(var Update: TReferenceUpdate);
     procedure DCPPost(var Update: TReferenceUpdate);
 
@@ -291,7 +295,7 @@ type
     procedure CPTidPre(const Tid: TTransactionId; var Update:TTidUpdate);
     procedure CPTidPost(const Tid: TTransactionId; var Update:TTidUpdate);
 
-    function LockInit: boolean; virtual; abstract;
+    function LockAlloc: boolean; virtual; abstract;
     procedure LockSelf; virtual; abstract;
     procedure UnlockSelf; virtual; abstract;
 
@@ -382,6 +386,12 @@ type
     //And in addition to all the ISO checking.
     procedure RequireCurrentAtomic(const Tid: TTransactionId);
 
+    //For use ONLY when you're under the commit lock, and need to save time
+    //finding current (for change flags / journal update etc) without
+    //pinning. Additionally must be sure you want current current, not
+    //some possibly old copy (user indexes etc).
+    function GetCurUnderCommitLock: TMemDBStreamable;
+
     function GetNext(const Tid: TTransactionId): TMemDBStreamable;
     function GetPinLatest(const Tid: TTransactionId;
                             var BufSelected: TAbSelType; Reason: TPinReason): TMemDBStreamable;
@@ -409,7 +419,7 @@ type
   private
     FLock: TTinyLock;
   protected
-    function LockInit: boolean; override;
+    function LockAlloc: boolean; override;
     procedure LockSelf; override;
     procedure UnlockSelf; override;
   end;
@@ -418,7 +428,19 @@ type
   private
     FLock: TCriticalSection;
   protected
-    function LockInit: boolean; override;
+    function LockAlloc: boolean; override;
+    procedure LockSelf; override;
+    procedure UnlockSelf; override;
+  public
+    constructor Create;
+    destructor Destroy; override;
+  end;
+
+  TMemDbMultiBufferedStriped = class(TMemDBMultiBuffered)
+  protected
+    FLock: TStripedLock;
+    function LockAlloc: boolean; override;
+    procedure Init(const Buf; Size: integer);
     procedure LockSelf; override;
     procedure UnlockSelf; override;
   public
@@ -1636,8 +1658,11 @@ end;
 procedure TMemDBMultiBuffered.ReleaseIndexPinOutsideLock(Pin: PMemDbIndexPin);
 begin
   //No UnpinFromIndex should have happened if we AddReffed OK.
-  Assert(Assigned(Pin.INode));
-  Pin.INode.Release; //Should call through to UnPinFromIndex.
+  if Assigned(Pin) then
+  begin
+    Assert(Assigned(Pin.INode));
+    Pin.INode.Release; //Should call through to UnPinFromIndex.
+  end;
 end;
 
 function TMemDBMultiBuffered.NewCurrentPinInternal(const Tid:TTransactionId; Reason:TPinReason): TMemDBStreamable;
@@ -1719,6 +1744,15 @@ begin
   end;
   CPTidHandle(TidUp);
   DCPLazyHandle(RefUp);
+end;
+
+function TMemDbMultiBuffered.GetCurUnderCommitLock: TMemDBStreamable;
+var
+  Cur: PMemDBMultiItem;
+begin
+  Cur := FindCurMultiItem;
+  Assert(Assigned(Cur));
+  result := Cur.Item;
 end;
 
 function TMemDbMultiBuffered.GetNext(const Tid: TTransactionId): TMemDBStreamable;
@@ -1803,7 +1837,7 @@ var
   Pin: PMemDBPinnedItem;
   IdxPin: PMemDBIndexPin;
 begin
-  if LockInit then
+  if LockAlloc then
   begin
     LockSelf;
     try
@@ -1998,7 +2032,7 @@ end;
 
 {  TMemDBMultiBufferedTiny }
 
-function TMemDBMultiBufferedTiny.LockInit: boolean;
+function TMemDBMultiBufferedTiny.LockAlloc: boolean;
 begin
   result := true;
 end;
@@ -2015,7 +2049,7 @@ end;
 
 { TMemDbMultiBufferedCrit }
 
-function TMemDBMultiBufferedCrit.LockInit: boolean;
+function TMemDBMultiBufferedCrit.LockAlloc: boolean;
 begin
   result := Assigned(FLock);
 end;
@@ -2043,6 +2077,44 @@ end;
 procedure TMemDbMultiBufferedCrit.UnlockSelf;
 begin
   FLock.Release;
+end;
+
+{ TMemDBMultiBufferedStriped }
+
+
+function TMemDbMultiBufferedStriped.LockAlloc: boolean;
+begin
+  result := Assigned(FLock);
+end;
+
+procedure TMemDbMultiBufferedStriped.Init(const Buf; Size: integer);
+begin
+  FLock.Init(Buf, Size);
+end;
+
+procedure TMemDbMultiBufferedStriped.LockSelf;
+begin
+  FLock.Acquire;
+end;
+
+procedure TMemDbMultiBufferedStriped.UnlockSelf;
+begin
+  FLock.Release;
+end;
+
+constructor TMemDbMultiBufferedStriped.Create;
+begin
+  inherited;
+  FLock := TStripedLock.Create;
+end;
+
+destructor TMemDbMultiBufferedStriped.Destroy;
+var
+  Tmp: TStripedLock;
+begin
+  Tmp := FLock;
+  inherited;
+  Tmp.Free;
 end;
 
 end.

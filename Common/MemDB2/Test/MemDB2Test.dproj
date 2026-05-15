@@ -167,6 +167,8 @@
         <DCCReference Include="..\MemDB2BufBase.pas"/>
         <DCCReference Include="..\..\Reffed\Reffed.pas"/>
         <DCCReference Include="..\..\CoWTree\CoWTree.pas"/>
+        <DCCReference Include="..\..\LockAbstractions\StripedLock.pas"/>
+        <DCCReference Include="..\..\CRC\CRC32.pas"/>
         <None Include="..\README_Conditionals.txt"/>
         <None Include="..\README_Ideas, and TODO.txt"/>
         <None Include="..\README_Known_Issues.txt"/>

@@ -215,7 +215,7 @@ const
   THIRTY_TWO_K = 32 * 1024;
   TWO_FIFTY_SIX_K = 256 * 1024;
   ONE_MEG = 1024*1024;
-  FILE_CACHE_SIZE = ONE_MEG; //Let's not mess about with small cache sizes.
+  FILE_CACHE_SIZE = ONE_MEG;
 
   S_API_NOT_IMPLEMENTED = 'API not yet implemented.';
 

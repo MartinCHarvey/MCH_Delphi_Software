@@ -25,7 +25,9 @@ uses
   RWWLock in '..\..\LockAbstractions\RWWLock.pas',
   MemDB2BufBase in '..\MemDB2BufBase.pas',
   Reffed in '..\..\Reffed\Reffed.pas',
-  CoWTree in '..\..\CoWTree\CoWTree.pas';
+  CoWTree in '..\..\CoWTree\CoWTree.pas',
+  StripedLock in '..\..\LockAbstractions\StripedLock.pas',
+  CRC32 in '..\..\CRC\CRC32.pas';
 
 {$R *.res}
 
