@@ -937,13 +937,8 @@ end;
 constructor TMemDBDatabase.Create;
 begin
   inherited;
-//TODO - NoOptimize back on for debug build.
-
-{$IFOPT C+}
-  FPolicies := NoOptimizePolicies;
-{$ELSE}
+//  FPolicies := NoOptimizePolicies;
   FPolicies := DefaultOptimizePolicies;
-{$ENDIF}
 end;
 
 //Generally, don't try to undelete, unrename etc etc in the same transaction.

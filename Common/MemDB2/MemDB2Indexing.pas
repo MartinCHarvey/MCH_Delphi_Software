@@ -36,7 +36,7 @@ uses
   MemDB2Misc, MemDB2Streamable, CowTree, IndexedStore, Reffed, Classes;
 
 const
-  NODE_CACHE_SIZE = 1024;
+  NODE_CACHE_SIZE = 64; //Longest possible path + rebalances
 
 type
   TMemDbIndexLeafGeneric = class;
@@ -437,20 +437,20 @@ end;
 
 procedure TMemDbIndexGeneric.RootToNext;
 begin
-  FNext.ReleaseToCache(FCache);
+  FNext.Release;
   FNext := FRoot.AddRef as TMemDBIndexLeaf;
 end;
 
 procedure TMemDbIndexGeneric.CommitNextToRoot;
 begin
-  FRoot.ReleaseToCache(FCache);
+  FRoot.Release;
   FRoot := FNext;
   FNext := nil;
 end;
 
 procedure TMemDbIndexGeneric.DiscardNext;
 begin
-  FNext.ReleaseToCache(FCache);
+  FNext.Release;
   FNext := nil;
 end;
 
