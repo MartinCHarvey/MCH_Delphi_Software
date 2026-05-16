@@ -514,9 +514,7 @@ type
     //Addition locks possibly the first of many smaller scale locks, but
     //at the moment, it's still doing FK's and indices under the
     //master commit lock. This area will be improved in future.
-
     FMasterRowList: TIndexedStoreO;
-    FLastTxionHasRows: boolean;
 
     FTidLocalLock: TCriticalSection;
     FTidLocalStructures: TDLEntry;
@@ -3366,7 +3364,7 @@ var
   Added, Changed, Deleted, Null: boolean;
   AddAcc, ChangeAcc, DelAcc: boolean;
 begin
-  if FParentTable.FLastTxionHasRows and (not (optGuaranteedSerial in Opts)) then
+  if not (optGuaranteedSerial in Opts) then
   begin
     //No locking, this is TidLocal.
     AddAcc := false;
@@ -3430,12 +3428,6 @@ begin
     IRec := FCPRows.GetAnItem;
   end;
 
-  FParentTable.FMasterRowLock.Acquire;
-  try
-    FParentTable.FLastTxionHasRows := (FParentTable.FMasterRowList.Count > 0);
-  finally
-    FParentTable.FMasterRowLock.Release;
-  end;
   FDataChanged := false;
   FLayoutChangeRequired := false;
 end;
