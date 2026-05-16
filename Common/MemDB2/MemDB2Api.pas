@@ -402,10 +402,9 @@ begin
     if Initial then
       DB.FromScratch(PseudoTid, JournalEntry, OptSet)
     else
-    begin
       DB.FromJournal(PseudoTid, JournalEntry);
-      DB.Prepare(PseudoTid, OptSet);
-    end;
+
+    DB.Prepare(PseudoTid, OptSet, Initial);
 
     DB.PreCommit(PseudoTid, pcpTables, OptSet);
     DB.PreCommit(PseudoTid, pcpFKeys, OptSet);
@@ -438,7 +437,7 @@ begin
     DB.SizeHint(T.Tid, SizeHint);
     OptSet := MakeOptimizationSet(DB.Policies, false, false, true, SizeHint, 0);
 
-    DB.Prepare(T.Tid, OptSet);
+    DB.Prepare(T.Tid, OptSet,false);
 
     DB.CommitLock.Acquire;
     try
@@ -1467,59 +1466,6 @@ begin
     end;
   end;
 end;
-
-{$IFDEF MEMDB2_TEMP_REMOVE}
-
-//TODO - Transplant to GetUserTidLocalIndexRoot.
-function TMemDBTable.IndexNameToIndexAndTag(Iso: TMDBIsolationLevel;  var Idx:TMemIndexDef; Name: string): PITagStruct;
-var
-  IdxIdx: integer;
-  Sic: TSubIndexClass;
-  TagData: TMemDbITagData;
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-  FieldDef: TMemFieldDef;
-  FieldIdx: integer;
-  i: integer;
-{$ENDIF}
-begin
-  if Length(Name) > 0 then
-  begin
-    //Always look in current metadata copy: Indexes don't change until the next commit.
-    //However, can still use "current / next" index with respect to data changes.
-    Idx := M.IndexByName(abCurrent, Name, IdxIdx);
-    if not Assigned(Idx) then
-      raise EMemDBAPIException.Create(S_API_INDEX_NAME_NOT_FOUND);
-    TagData := TagDataList[IdxIdx];
-    if not Assigned(TagData) then
-      raise EMemDBInternalException.Create(S_API_INTERNAL_TAG_DATA_BAD);
-    CheckTagAgreesWithMetadata(IdxIdx, TagData, tciPermanentAgreesCurrent, tcpProgrammed);
-    //Indices are never in transient state in abCurrent, so no difference
-    //between ND field index and absolute field index... we hope.
-    Sic := IsoToSubIndexClass(Iso);
-
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-    for i := 0 to Pred(Idx.FieldNameCount) do
-    begin
-      FieldDef := M.FieldByName(abCurrent, Idx.FieldNames[i], FieldIdx);
-      Assert(Assigned(FieldDef));
-      Assert(FieldIdx >= 0);
-      GLogLog(SV_INFO, 'Encode index tag (field ' + InttoStr(i) +'): ' +
-      SubIndexClassStrings[Sic] + 'Field index: ' + IntToStr(FieldIdx));
-    end;
-{$ENDIF}
-    result := TagData.TagStructs[Sic];
-  end
-  else
-  begin
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-    GLogLog(SV_INFO, 'Encode index tag: InternalRowId.');
-{$ENDIF}
-    result := MDBInternalIndexRowId.TagStructs[sicCurrent];
-    Idx := nil;
-  end;
-end;
-
-{$ENDIF}
 
 procedure TMemDBTable.META_CurIndexDefToFieldDefs(const Tid: TTransactionId; IndexDef: TMemIndexDef; var FieldDefs: TMemFieldDefs; var FieldAbsIdxs: TFieldOffsets);
 var

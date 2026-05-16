@@ -99,12 +99,43 @@ type
   private
     FFinalFieldOffsets: TFieldOffsets;
     FSparseFieldOffsets: TFieldOffsets;
+
+    FFinalFastBase, FSparseFastBase: PFieldOffset;
+    FFinalFastCount, FSparseFastCount: integer;
+  protected
+    procedure SetFinalFieldOffsets(FinalOffsets: TFieldOffsets);
+    procedure SetSparseFieldOffsets(SparseOffsets: TFieldOffsets);
+
+{$IFOPT C+}
+    procedure CheckFastConsistent;
+
+    function GetFinalFieldOffsets: TFieldOffsets;
+    function GetSparseFieldOffsets: TFieldOffsets;
+    function GetFinalFastBase: PFieldOffset;
+    function GetSparseFastBase: PFieldOffset;
+    function GetFinalFastCount: integer;
+    function GetSparseFastCount: integer;
+{$ENDIF}
   public
+    destructor Destroy; override;
     function Clone: TMemDBIndexGeneric; override;
     function Find(Sel: TAbSelType; SV: TMemDBIndexSearchVal): TMemDBIndexLeaf;
 
-    property FinalFieldOffsets: TFieldOffsets read FFinalFieldOffsets write FFinalFieldOffsets;
-    property SparseFieldOffsets: TFieldOffsets read FSparseFieldOffsets write FSparseFieldOffsets;
+{$IFOPT C+}
+    property FinalFieldOffsets: TFieldOffsets read GetFinalFieldOffsets write SetFinalFieldOffsets;
+    property SparseFieldOffsets: TFieldOffsets read GetSparseFieldOffsets write SetSparseFieldOffsets;
+    property FinalFastBase: PFieldOffset read GetFinalFastBase;
+    property SparseFastBase: PFieldOffset read GetSparseFastBase;
+    property FinalFastCount: integer read GetFinalFastCount;
+    property SparseFastCount: integer read GetSparseFastCount;
+{$ELSE}
+    property FinalFieldOffsets: TFieldOffsets read FFinalFieldOffsets write SetFinalFieldOffsets;
+    property SparseFieldOffsets: TFieldOffsets read FSparseFieldOffsets write SetSparseFieldOffsets;
+    property FinalFastBase: PFieldOffset read FFinalFastBase;
+    property SparseFastBase: PFieldOffset read FSparseFastBase;
+    property FinalFastCount: integer read FFinalFastCount;
+    property SparseFastCount: integer read FSparseFastCount;
+{$ENDIF}
   end;
 
   TMemDBIndexInternal = class(TMemDBIndexGeneric)
@@ -618,18 +649,149 @@ end;
 
 { TMemDBIndex }
 
+{$IFOPT C+}
+procedure TMemDbIndex.CheckFastConsistent;
+begin
+  Assert(Length(FFinalFieldOffsets) = FFinalFastCount);
+  Assert(Length(FSparseFieldOffsets) = FSparseFastCount);
+  Assert(Assigned(FFinalFastBase) = (FFinalFastCount <> 0));
+  Assert(Assigned(FSparseFastBase) = (FSparseFastCount <> 0));
+end;
+
+function TMemDbIndex.GetFinalFieldOffsets: TFieldOffsets;
+begin
+  CheckFastConsistent;
+  result := FFinalFieldOffsets;
+end;
+
+function TMemDbIndex.GetSparseFieldOffsets: TFieldOffsets;
+begin
+  CheckFastConsistent;
+  result := FSparseFieldOffsets;
+end;
+
+function TMemDbIndex.GetFinalFastBase: PFieldOffset;
+begin
+  CheckFastConsistent;
+  result := FFinalFastBase;
+end;
+
+function TMemDbIndex.GetSparseFastBase: PFieldOffset;
+begin
+  CheckFastConsistent;
+  result := FSparseFastBase;
+end;
+
+function TMemDbIndex.GetFinalFastCount: integer;
+begin
+  CheckFastConsistent;
+  result := FFinalFastCount;
+end;
+
+function TMemDbIndex.GetSparseFastCount: integer;
+begin
+  CheckFastConsistent;
+  result := FSparseFastCount;
+end;
+
+{$ENDIF}
+
+procedure TMemDbIndex.SetFinalFieldOffsets(FinalOffsets: TFieldOffsets);
+var
+  NewLen, i: integer;
+  WPtr: PFieldOffset;
+begin
+{$IFOPT C+}
+  CheckFastConsistent;
+{$ENDIF}
+  FFinalFieldOffsets := FinalOffsets;
+  NewLen := Length(FFinalFieldOffsets);
+  if NewLen <> FFinalFastCount then
+  begin
+    if Assigned(FFinalFastBase) then
+    begin
+      FreeMem(FFinalFastBase);
+      FFinalFastBase := nil;
+    end;
+    if NewLen > 0 then
+    begin
+      GetMem(FFinalFastBase, NewLen * sizeof(TFieldOffset));
+    end;
+    FFinalFastCount := NewLen;
+  end;
+  WPtr := FFinalFastBase;
+  for i := 0 to Pred(NewLen) do
+  begin
+    WPtr^ := FFinalFieldOffsets[i];
+    Inc(WPtr);
+  end;
+{$IFOPT C+}
+  CheckFastConsistent;
+{$ENDIF}
+end;
+
+procedure TMemDbIndex.SetSparseFieldOffsets(SparseOffsets: TFieldOffsets);
+var
+  NewLen, i: integer;
+  WPtr: PFieldOffset;
+begin
+{$IFOPT C+}
+  CheckFastConsistent;
+{$ENDIF}
+  FSparseFieldOffsets := SparseOffsets;
+  NewLen := Length(FSparseFieldOffsets);
+  if NewLen <> FSparseFastCount then
+  begin
+    if Assigned(FSparseFastBase) then
+    begin
+      FreeMem(FSparseFastBase);
+      FSparseFastBase := nil;
+    end;
+    if NewLen > 0 then
+    begin
+      GetMem(FSparseFastBase, NewLen * sizeof(TFieldOffset));
+    end;
+    FSparseFastCount := NewLen;
+  end;
+  WPtr := FSparseFastBase;
+  for i := 0 to Pred(NewLen) do
+  begin
+    WPtr^ := FSparseFieldOffsets[i];
+    Inc(WPtr);
+  end;
+{$IFOPT C+}
+  CheckFastConsistent;
+{$ENDIF}
+end;
+
+destructor TMemDBIndex.Destroy;
+begin
+  if Assigned(FFinalFastBase) then
+    FreeMem(FFinalFastBase);
+  if Assigned(FSparseFastBase) then
+    FreeMem(FSparseFastBase);
+  inherited;
+end;
+
 function TMemDBIndex.Clone: TMemDBIndexGeneric;
 begin
+{$IFOPT C+}
+  CheckFastConsistent;
+{$ENDIF}
   result := inherited;
   if Assigned(result) then
   begin
     Assert(result is TMemDBIndex);
     with result as TMemDBIndex do
     begin
-      FFinalFieldOffsets := self.FFinalFieldOffsets;
-      FSparseFieldOffsets := self.FSparseFieldOffsets;
+      FinalFieldOffsets := self.FinalFieldOffsets;
+      SparseFieldOffsets := self.SparseFieldOffsets;
     end;
   end;
+{$IFOPT C+}
+  CheckFastConsistent;
+  (result as TMemDBIndex).CheckFastConsistent;
+{$ENDIF}
 end;
 
 function TMemDbIndex.Find(Sel: TAbSelType; SV: TMemDBIndexSearchVal): TMemDBIndexLeaf;
@@ -755,7 +917,6 @@ begin
   Assert(PMemDBIndexPin(self.FPin).PinnedItem = PMemDBIndexPin(SL.FPin).PinnedItem);
 end;
 
-
 {$HINTS OFF}
 class function TMemDbIndexLeafGeneric.ComparePointers(Own, Other: Pointer): integer;
 var
@@ -795,7 +956,8 @@ function TMemDBIndexLeaf.Compare(Other: TCoWTreeItem;
                  AllowKeyDedupe: boolean): integer;
 var
   OtherLeaf: TMemDBIndexLeaf;
-  OwnOffsets, OtherOffsets: TFieldOffsets;
+  POwnOffset, POtherOffset: PFieldOffset;
+  OwnOffsetCount, OtherOffsetCount: integer;
   OwnFields, OtherFields: TMemRowFields;
   ff: integer;
   OwnField, OtherField: TMemDBStreamable;
@@ -829,21 +991,33 @@ begin
   OtherOrigIndex := TMemDbIndex(OtherLeaf.FOriginalIndex);
 {$ENDIF}
   if OwnFields.Sparse then
-    OwnOffsets := OrigIndex.FSparseFieldOffsets
+  begin
+    POwnOffset := OrigIndex.SparseFastBase;
+    OwnOffsetCount := OrigIndex.SparseFastCount;
+  end
   else
-    OwnOffsets := OrigIndex.FFinalFieldOffsets;
+  begin
+    POwnOffset := OrigIndex.FinalFastBase;
+    OwnOffsetCount := OrigIndex.FinalFastCount;
+  end;
   if OtherFields.Sparse then
-    OtherOffsets := OtherOrigIndex.FSparseFieldOffsets
+  begin
+    POtherOffset := OtherOrigIndex.SparseFastBase;
+    OtherOffsetCount := OtherOrigIndex.SparseFastCount;
+  end
   else
-    OtherOffsets := OtherOrigIndex.FFinalFieldOffsets;
+  begin
+    POtherOffset := OtherOrigIndex.FinalFastBase;
+    OtherOffsetCount := OtherOrigIndex.FinalFastCount;
+  end;
 
-  Assert(Length(OwnOffsets) = Length(OtherOffsets));
+  Assert(OwnOffsetCount = OtherOffsetCount);
   ff := 0;
   result := 0;
-  while (result = 0) and (ff < Length(OwnOffsets)) do
+  while (result = 0) and (ff < OwnOffsetCount) do
   begin
-    OwnField := OwnFields[OwnOffsets[ff]];
-    OtherField := OtherFields[OtherOffsets[ff]];
+    OwnField := OwnFields[POwnOffset^];
+    OtherField := OtherFields[POtherOffset^];
     Assert(AssignedNotSentinel(OwnField));
     Assert(AssignedNotSentinel(OtherField));
 {$IFOPT C+}
@@ -856,13 +1030,20 @@ begin
     result := CompareFields(OwnFieldData.FDataRec,
                             OtherFieldData.FDataRec);
     Inc(ff);
+    Inc(POwnOffset);
+    Inc(POtherOffset);
   end;
   if (result = 0) and AllowKeyDedupe then
   begin
     //Similar to internal index, use RowID to ensure a stable sort even when
     //pinned data items change.
+{$IFOPT C+}
     result := CompareGuids((OtherLeaf.Row as TMemDBRow).RowId,
                            (self.Row as TMemDBRow).RowId);
+{$ELSE}
+  result := CompareGuids(TMemDBRow(OtherLeaf.Row).RowId,
+                         TMemDBRow(self.Row).RowId);
+{$ENDIF}
   end;
 end;
 
@@ -873,17 +1054,19 @@ function TMemDBInternalIndexLeaf.Compare(Other: TCoWTreeItem;
 var
   OtherLeaf: TMemDBInternalIndexLeaf;
 begin
-{$IFOPT C+}
-  OtherLeaf := Other as TMemDbInternalIndexLeaf;
-{$ELSE}
-  OtherLeaf := TMemDbInternalIndexLeaf(Other);
-{$ENDIF}
-  Assert(AllowKeyDedupe);
   //OK, we now need to de-dupe the rows in a way which is stable,
   //such that if we mod / unpin / repin the comparison does not
   //change.
+{$IFOPT C+}
+  OtherLeaf := Other as TMemDbInternalIndexLeaf;
+  Assert(AllowKeyDedupe);
   result := CompareGuids((OtherLeaf.Row as TMemDBRow).RowId,
                          (self.Row as TMemDBRow).RowId);
+{$ELSE}
+  OtherLeaf := TMemDbInternalIndexLeaf(Other);
+  result := CompareGuids(TMemDBRow(OtherLeaf.Row).RowId,
+                         TMemDBRow(self.Row).RowId);
+{$ENDIF}
 end;
 
 { TMemDBIndexSearchVal }
@@ -892,7 +1075,8 @@ function TMemDBIndexSearchVal.Compare(Other: TCoWTreeItem;
                  AllowKeyDedupe: boolean): integer;
 var
   OtherLeaf: TMemDBIndexLeaf;
-  OtherOffsets: TFieldOffsets;
+  POtherOffset: PFieldOffset;
+  OtherOffsetCount: integer;
   OtherFields: TMemRowFields;
   ff: integer;
   OtherField: TMemDBStreamable;
@@ -919,16 +1103,22 @@ begin
 {$ENDIF}
   //Own offsets just the index ff.
   if OtherFields.Sparse then
-    OtherOffsets := OtherOrigIndex.FSparseFieldOffsets
+  begin
+    POtherOffset := OtherOrigIndex.SparseFastBase;
+    OtherOffsetCount := OtherOrigIndex.SparseFastCount;
+  end
   else
-    OtherOffsets := OtherOrigIndex.FFinalFieldOffsets;
+  begin
+    POtherOffset := OtherOrigIndex.FinalFastBase;
+    OtherOffsetCount := OtherOrigIndex.FinalFastCount;
+  end;
 
-  Assert(Length(FFieldSearchVals) = Length(OtherOffsets));
+  Assert(Length(FFieldSearchVals) = OtherOffsetCount);
   ff := 0;
   result := 0;
   while (result = 0) and (ff < Length(FFieldSearchVals)) do
   begin
-    OtherField := OtherFields[OtherOffsets[ff]];
+    OtherField := OtherFields[POtherOffset^];
     Assert(AssignedNotSentinel(OtherField));
 {$IFOPT C+}
     result := CompareFields(FFieldSearchVals[ff],
@@ -938,6 +1128,7 @@ begin
                             TMemFieldData(OtherField).FDataRec);
 {$ENDIF}
     Inc(ff);
+    Inc(POtherOffset);
   end;
   Assert(not AllowKeyDedupe);
 end;

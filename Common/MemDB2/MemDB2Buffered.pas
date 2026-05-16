@@ -43,8 +43,12 @@ uses
 {$IFDEF USE_TRACKABLES}
   Trackables,
 {$ENDIF}
-  IndexedStore, MemDB2Streamable, Classes, MemDB2Misc,
-  DLList, LockAbstractions, TinyLock, MemDB2BufBase, MemDB2Indexing, Reffed;
+  IndexedStore, MemDB2Streamable, Classes, MemDB2Misc, DLList, LockAbstractions,
+  TinyLock, MemDB2BufBase, MemDB2Indexing, Reffed, SyncObjs
+{$IF Defined(MSWINDOWS)}
+  , Windows
+{$ENDIF}
+  ;
 
 type
   TMemDBAPIInterfacedObject = class;
@@ -227,7 +231,7 @@ type
 
     procedure SizeHint(const Tid: TTransactionId; var SizeHint: int64); virtual;
     procedure StartTransaction(const Tid: TTransactionId); virtual;
-    procedure Prepare(const Tid: TTransactionId; Opts:TOptimizeSet); virtual;
+    procedure Prepare(const Tid: TTransactionId; Opts:TOptimizeSet; FromScratch: boolean); virtual;
     procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet); override;
     procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase; Opts:TOptimizeSet); override;
     procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase; Opts:TOptimizeSet); override;
@@ -244,7 +248,6 @@ type
   TMemDBFKMetaTags = record
     abBuf: TBufSelector;
     FieldAbsIdxs: TFieldOffsets;
-    FieldAbsIdxsFast: TFieldOffsetsFast;
   end;
   PMemDBMetaTags = ^TMemDbFKMetaTags;
 
@@ -401,7 +404,7 @@ type
 
     procedure CheckTableRowCount;
     procedure CheckChangedRowStructure;
-    procedure RowLocalPreCommit;
+    procedure RowLocalPreCommit(Opts: TOptimizeSet);
 
     procedure InitialUpdate;
     procedure UpdateNHelpers;
@@ -428,6 +431,8 @@ type
     procedure IndexCommit;
     procedure IndexRollback;
 
+    function ThrottleBuildCheckPartialIndexParallel(Ref1, Ref2: pointer): pointer;
+    function ThrottleBuildCheckPartialInternalIndexParallel(Ref1, Ref2: pointer): pointer;
     function BuildCheckPartialIndexParallel(Ref1, Ref2: pointer): pointer;
     function BuildCheckPartialInternalIndexParallel(Ref1, Ref2: pointer): pointer;
     procedure BuildCheckPartialIndexes(Opts:TOptimizeSet);
@@ -511,6 +516,7 @@ type
     //master commit lock. This area will be improved in future.
 
     FMasterRowList: TIndexedStoreO;
+    FLastTxionHasRows: boolean;
 
     FTidLocalLock: TCriticalSection;
     FTidLocalStructures: TDLEntry;
@@ -578,7 +584,7 @@ type
 
     procedure SizeHint(const Tid: TTransactionId; var SizeHint: int64); override;
     procedure StartTransaction(const Tid: TTRansactionId); override;
-    procedure Prepare(const Tid: TTransactionId; Opts:TOptimizeSet); override;
+    procedure Prepare(const Tid: TTransactionId; Opts:TOptimizeSet; FromScratch: boolean); override;
 
     procedure ToJournal(const Tid: TTransactionId; Stream: TStream); override;
     procedure ToScratch(const PseudoTid:TTransactionId; Stream: TStream); override;
@@ -625,6 +631,12 @@ type
   TMemDBDatabasePersistent = class(TMemDBJournalCreator)
   private
   protected
+    //Stripe locking performance degrades if more threads than CPU's,
+    //because threads become idle holding striped rowlocks. Hence the throttling.
+    FMaxParallel: integer;
+    FEntityThrottle: TSemaphore;
+    FIndexThrottle: TSemaphore;
+
     FInterfaced: TMemDBAPIInterfacedObject;
     FEntityLock: TCriticalSection;
     FEntityList: TDLEntry;
@@ -647,7 +659,7 @@ type
     procedure SizeHint(const Tid: TTransactionId; var SizeHint: int64); virtual;
 
     function PrepareParallel(Ref1, Ref2: pointer):pointer;
-    procedure Prepare(const Tid: TTransactionId; Opts:TOptimizeSet); virtual;
+    procedure Prepare(const Tid: TTransactionId; Opts:TOptimizeSet; FromScratch: boolean); virtual;
     procedure StartTransaction(const Tid: TTRansactionId); virtual;
 
     procedure ToJournal(const Tid: TTransactionId; Stream: TStream); override;
@@ -761,10 +773,10 @@ function IndexByNameInt(MetadataCopy: TMemTableMetadataItem; const Name:string; 
 function BuildMultiDataRecs(FieldList: TMemStreamableList;
                             const AbsFieldOffsets: TFieldOffsets): TMemDbFieldDataRecs;
 
-function SameLayoutFieldsSame(A,B: TMemStreamableList; FieldOffsets: TFieldOffsets): boolean;
+function SameLayoutFieldsSame(A,B: TMemStreamableList; const FieldOffsets: TFieldOffsets): boolean;
 
-function DiffLayoutFieldsSame(A: TMemStreamableList; AOffsets: TFieldOffsets;
-                              B: TMemStreamableList; BOffsets: TFieldOffsets): boolean;
+function DiffLayoutFieldsSame(A: TMemStreamableList; const AOffsets: TFieldOffsets;
+                              B: TMemStreamableList; const BOffsets: TFieldOffsets): boolean;
 
 function AllFieldsZero(FieldList: TMemStreamableList;
                             const AbsFieldOffsets: TFieldOffsets): boolean;
@@ -1102,7 +1114,7 @@ begin
   end;
 end;
 
-function SameLayoutFieldsSame(A,B: TMemStreamableList; FieldOffsets: TFieldOffsets): boolean;
+function SameLayoutFieldsSame(A,B: TMemStreamableList; const FieldOffsets: TFieldOffsets): boolean;
 var
   L,i: integer;
   OA, OB: TMemDBStreamable;
@@ -1134,8 +1146,8 @@ begin
   end;
 end;
 
-function DiffLayoutFieldsSame(A: TMemStreamableList; AOffsets: TFieldOffsets;
-                              B: TMemStreamableList; BOffsets: TFieldOffsets):boolean;
+function DiffLayoutFieldsSame(A: TMemStreamableList; const AOffsets: TFieldOffsets;
+                              B: TMemStreamableList; const BOffsets: TFieldOffsets):boolean;
 var
   LA,LB,i: integer;
   OA, OB: TMemDBStreamable;
@@ -1463,7 +1475,7 @@ begin
   //NOP.
 end;
 
-procedure TMemDBEntity.Prepare(const Tid: TTransactionId; Opts:TOptimizeSet);
+procedure TMemDBEntity.Prepare(const Tid: TTransactionId; Opts:TOptimizeSet; FromScratch: boolean);
 begin
   //NOP.
 end;
@@ -2431,6 +2443,7 @@ begin
   INode := nil;
   NewIndex := nil;
   PrevFields := nil;
+  result := nil;
   try
     Context := PBuildValidateIdxParallelContext(Ref1);
     i := Integer(Ref2);
@@ -2582,6 +2595,7 @@ var
 begin
   INode := nil;
   NewIndex := nil;
+  result := nil;
   try
     Context := PBuildValidateIdxParallelContext(Ref1);
     NewIndex := TMemDBIndexInternal.Create;
@@ -2776,10 +2790,15 @@ begin
   end;
 end;
 
-//type
-//  TPartialIndexParallelCtx = record
-//  end;
-//  PPartialIndexParallelCtx = ^TPartialIndexParallelCtx;
+function TTidLocal.ThrottleBuildCheckPartialIndexParallel(Ref1, Ref2: pointer): pointer;
+begin
+  FParentTable.FParentDB.FIndexThrottle.Acquire;
+  try
+    result := BuildCheckPartialIndexParallel(Ref1,Ref2);
+  finally
+    FParentTable.FParentDB.FIndexThrottle.Release;
+  end;
+end;
 
 function TTidLocal.BuildCheckPartialIndexParallel(Ref1, Ref2: pointer): pointer;
 var
@@ -2987,6 +3006,16 @@ begin
   result := nil;
 end;
 
+function TTidLocal.ThrottleBuildCheckPartialInternalIndexParallel(Ref1, Ref2: pointer): pointer;
+begin
+  FParentTable.FParentDB.FIndexThrottle.Acquire;
+  try
+    result := BuildCheckPartialInternalIndexParallel(Ref1, Ref2);
+  finally
+    FParentTable.FParentDB.FIndexThrottle.Release;
+  end;
+end;
+
 function TTidLocal.BuildCheckPartialInternalIndexParallel(Ref1, Ref2: pointer): pointer;
 var
   Index: TMemDBIndexInternal;
@@ -3105,7 +3134,7 @@ begin
     if PartialIndex then
     begin
       if OptApplies(optIndexEvolveParallel, Opts) then
-        ParallelAddHandler(BuildCheckPartialIndexParallel, Pointer(i), nil,
+        ParallelAddHandler(ThrottleBuildCheckPartialIndexParallel, Pointer(i), nil,
           Handlers, Refs1, Refs2, Excepts, Rets, PCount)
       else
         BuildCheckPartialIndexParallel(Pointer(i), nil);
@@ -3127,7 +3156,7 @@ begin
   if PartialIndex then
   begin
     if OptApplies(optIndexEvolveParallel, Opts) then
-      ParallelAddHandler(BuildCheckPartialInternalIndexParallel, nil, nil,
+      ParallelAddHandler(ThrottleBuildCheckPartialInternalIndexParallel, nil, nil,
         Handlers, Refs1, Refs2, Excepts, Rets, PCount)
     else
       BuildCheckPartialInternalIndexParallel(nil, nil);
@@ -3329,7 +3358,7 @@ begin
   //Else new build master index not swizzled on yet, TidLocal destroy will clean it up.
 end;
 
-procedure TTidLocal.RowLocalPreCommit;
+procedure TTidLocal.RowLocalPreCommit(Opts: TOptimizeSet);
 var
   IRec: TItemRec;
   Row: TMemDBRow;
@@ -3337,30 +3366,33 @@ var
   Added, Changed, Deleted, Null: boolean;
   AddAcc, ChangeAcc, DelAcc: boolean;
 begin
-  //No locking, this is TidLocal.
-  AddAcc := false;
-  ChangeAcc := false;
-  DelAcc := false;
-
-  IRec := FCPRows.GetAnItem;
-  while Assigned(IRec) do
+  if FParentTable.FLastTxionHasRows and (not (optGuaranteedSerial in Opts)) then
   begin
-    Row := IRec.Item as TMemDBRow;
-    Row.PreCommit(FTid, pcpTables, []);
+    //No locking, this is TidLocal.
+    AddAcc := false;
+    ChangeAcc := false;
+    DelAcc := false;
 
-    if Row.AnyChangesForTid(FTid) then
+    IRec := FCPRows.GetAnItem;
+    while Assigned(IRec) do
     begin
-      //Combination of PreCommit and AnyChangesForTid Solves races between different versions of "current" here.
-      Cur := Row.PinCurrent(FTid, pinFinalCheck);
-      Nxt := Row.GetNext(FTid);
-      Row.ChangeFlagsFromPinned(Cur, Nxt, Added, Changed, Deleted, Null);
-      AddAcc := AddAcc or Added;
-      ChangeAcc := ChangeAcc or Changed;
-      DelAcc := DelAcc or Deleted;
+      Row := IRec.Item as TMemDBRow;
+      Row.PreCommit(FTid, pcpTables, []);
+
+      if Row.AnyChangesForTid(FTid) then
+      begin
+        //Combination of PreCommit and AnyChangesForTid Solves races between different versions of "current" here.
+        Cur := Row.PinCurrent(FTid, pinFinalCheck);
+        Nxt := Row.GetNext(FTid);
+        Row.ChangeFlagsFromPinned(Cur, Nxt, Added, Changed, Deleted, Null);
+        AddAcc := AddAcc or Added;
+        ChangeAcc := ChangeAcc or Changed;
+        DelAcc := DelAcc or Deleted;
+      end;
+      FCPRows.GetAnotherItem(IRec);
     end;
-    FCPRows.GetAnotherItem(IRec);
+    FParentTable.HandleRowProhibitOp(FTid, AddAcc, ChangeAcc, DelAcc);
   end;
-  FParentTable.HandleRowProhibitOp(FTid, AddAcc, ChangeAcc, DelAcc);
 end;
 
 procedure TTidLocal.PreCommit(Opts: TOptimizeSet);
@@ -3372,7 +3404,7 @@ begin
     FParentTable.Metadata.RequireCurrentAtomic(FTid);
 
   //Check up-to-dateness of Nxt, Pins.
-  RowLocalPreCommit;
+  RowLocalPreCommit(Opts);
   //Table row count for null cases and deleted fields.
   CheckTableRowCount;
   //Check structure of changes rows, however that happened.
@@ -3396,6 +3428,13 @@ begin
     Row.Commit(FTid, ccpData, []);
     LastRow := Row;
     IRec := FCPRows.GetAnItem;
+  end;
+
+  FParentTable.FMasterRowLock.Acquire;
+  try
+    FParentTable.FLastTxionHasRows := (FParentTable.FMasterRowList.Count > 0);
+  finally
+    FParentTable.FMasterRowLock.Release;
   end;
   FDataChanged := false;
   FLayoutChangeRequired := false;
@@ -3520,19 +3559,18 @@ begin
   else
   begin
     ListTmp := nil;
+    INode := nil;
     try
       //Traversal by index, even internal index.
       case Pos of
-        ptFirst, ptLast: begin
-          INode := nil; //INode is "origin point to start from".
-        end;
+        ptFirst, ptLast: ;//INode NIL is "origin point to start from".
         ptNext, ptPrevious: begin
           if not (Assigned(Cursor) and Assigned(Cursor.Row)) then
             raise EMemDBAPIException.Create(S_API_NEXT_PREV_REQUIRES_CURRENT_ROW);
-          //Treat the INode as a hint, not as gospel.
-          INode := nil;
+          //INode initially NIL.
           if Cursor.IterIndex = IRoot then
           begin
+            //Treat the INode as a hint, not as gospel.
             if Assigned(Cursor.IterInode) and
                IRoot.CheckNonAliasedPresent(abCurrent, Cursor.IterInode) then
               INode := Cursor.IterInode;
@@ -4206,7 +4244,7 @@ begin
   FProxy.Release;
 end;
 
-procedure TMemDBTablePersistent.Prepare(const Tid: TTransactionId; Opts:TOptimizeSet);
+procedure TMemDBTablePersistent.Prepare(const Tid: TTransactionId; Opts:TOptimizeSet; FromScratch: boolean);
 var
   TidLocal: TTidLocal;
 begin
@@ -4218,10 +4256,13 @@ begin
 
   if TidLocal.LayoutChangeRequired then
   begin
-    if TidLocal.DataChanged then
-      raise EMemDBInternalException.Create(S_DATA_AND_LAYOUT_CHANGE_TO_JOURNAL);
+    if (not FromScratch) then
+    begin
+      if TidLocal.DataChanged then
+        raise EMemDBInternalException.Create(S_DATA_AND_LAYOUT_CHANGE_TO_JOURNAL);
+      TidLocal.AdjustTableStructureForMetadata;
+    end;
 
-    TidLocal.AdjustTableStructureForMetadata;
     if TidLocal.FIndexingChangeRequired then
       TidLocal.BuildValidateNewIndexesOutsideCommitLock(Opts);
   end;
@@ -4336,8 +4377,6 @@ begin
     TidLocal.FromJournal(Stream);
 
   ExpectTag(Stream, mstTableEnd);
-
-  //Prepare will be called after this.
 end;
 
 procedure TMemDBTablePersistent.FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet);
@@ -4363,15 +4402,6 @@ begin
   TidLocal.UpdateLayout(pinEvolve);
   TidLocal.FromScratch(Stream, Opts);
   ExpectTag(Stream, mstTableEnd);
-
-  //TODO - Don't do the indexes here. Do them in prepare, where
-  //we can parallelise per entity as well as per index.
-
-  //Do not expect any contention and all rows modded this txion.
-  if TidLocal.FIndexingChangeRequired then
-    TidLocal.BuildValidateNewIndexesOutsideCommitLock(Opts);
-
-  //Prepare will not be called after this.
 end;
 
 //Called under MetaIndex lock, possibly also commit lock.
@@ -5041,133 +5071,6 @@ begin
   end;
 end;
 
-
-{$IFDEF MEMDB2_TEMP_REMOVE}
-
-procedure TMemDBForeignKeyPersistent.ProcessRow(Row: TMemDBRow;
-                     Ref1, Ref2: TObject; TblList: TMemDbIndexedList);
-var
-  PStruct: PProcessRowFKStruct;
-  CurrentRowFields, NextRowFields: TMemStreamableList;
-
-  RV: TIsRetVal;
-  IRecAdd: TItemRec;
-  AddToList: boolean;
-begin
-  PStruct := PProcessRowFKStruct(Ref1);
-  case PStruct.Action of
-    rpaReferringAddedFieldsToList:
-    begin
-      if not (Row.Deleted or Row.Null) then
-      begin
-        if Row.Changed then
-        begin
-          //Might be changing field layout if simultaneous
-          //layout change and FK add.
-          AddToList := FMetadata.Added;
-
-          if not AddToList then
-          begin
-            //Latest field (delete sentinels still in place).
-            //Only perform calc if we need to.
-            NextRowFields := Row.ABData[abNext] as TMemStreamableList;
-            //Not adding FK, check current field. Same field offsets
-            //Delete sentinels not removed yet.
-            CurrentRowFields := Row.ABData[abCurrent] as TMemStreamableList;
-
-            AddToList := not SameLayoutFieldsSame(NextRowFields, CurrentRowFields,
-              PStruct.PMeta.FieldDefsReferringAbsIdx);
-          end;
-          if AddToList then
-          begin
-            RV := PStruct.OutList.AddItem(Row, IRecAdd);
-            Assert(RV in [rvOk]); //TODO - Handle failure, why dupKey?
-          end;
-        end
-        else
-        begin
-          //If row unchanged then got here because initting for the first time
-          Assert(FMetadata.Added or Row.Added);
-          //Only changing layout if stream from scratch, in which
-          //case indexes all added, none changed field number. Trim will not
-          //happen.
-          Assert((not PStruct.PMeta.TableReferring.LayoutChangeRequired)
-            or (PStruct.TransReason = mtrReplayFromScratch));
-          //In from scratch, no delete sentinels.
-          //Handle rows not fields, no need for field offset.
-          RV := PStruct.OutList.AddItem(Row, IRecAdd);
-          Assert(RV in [rvOk]);
-        end;
-      end;
-    end;
-    rpaReferredDeletedFieldsToList:
-    begin
-      //These cases slightly easier, because table not changing structure,
-      //and FK relationship not newly created.
-      Assert((not PStruct.PMeta.TableReferred.LayoutChangeRequired)
-        or (PStruct.TransReason = mtrReplayFromScratch));
-      Assert(not FMetadata.Added);
-      if not Row.Added then
-      begin
-        //FromScratch case should not get here.
-        Assert(not PStruct.PMeta.TableReferred.LayoutChangeRequired);
-        if Row.Deleted or Row.Changed then
-        begin
-
-          AddToList := Row.Deleted;
-          if not AddToList then
-          begin
-            CurrentRowFields := Row.ABData[abCurrent] as TMemStreamableList;
-            NextRowFields := Row.ABData[abNext] as TMemStreamableList;
-            AddToList := not SameLayoutFieldsSame(NextRowFields, CurrentRowFields,
-              PStruct.PMeta.FieldDefsReferredAbsIdx);
-          end;
-          if AddToList then
-          begin
-            RV := PStruct.OutList.AddItem(Row, IRecAdd);
-            Assert(RV in [rvOk]);
-          end;
-        end
-        else //Do not expect unchanged rows here.
-          raise EMemDBInternalException.Create(S_FK_INTERNAL);
-      end;
-    end;
-    rpaReferredAddedFieldsToList:
-    begin
-      //These cases slightly easier, because table not changing structure,
-      //and FK relationship not newly created.
-      Assert((not PStruct.PMeta.TableReferred.LayoutChangeRequired)
-        or (PStruct.TransReason = mtrReplayFromScratch));
-      Assert(not FMetadata.Added);
-      if not Row.Deleted then
-      begin
-        if Row.Added or Row.Changed then
-        begin
-          //From scratch case does get here, but no delete sentinels.
-          AddToList := Row.Added;
-          if not AddToList then
-          begin
-            NextRowFields := Row.ABData[abNext] as TMemStreamableList;
-            CurrentRowFields := Row.ABData[abCurrent] as TMemStreamableList;
-            AddToList := not SameLayoutFieldsSame(CurrentRowFields, NextRowFields,
-              PStruct.PMeta.FieldDefsReferredAbsIdx);
-          end;
-          if AddToList then
-          begin
-            RV := PStruct.OutList.AddItem(Row, IRecAdd);
-            Assert(RV in [rvOk, rvDuplicateKey]);
-          end;
-        end
-        else //Do not expect unchanged rows here.
-          raise EMemDBInternalException.Create(S_FK_INTERNAL);
-      end
-    end;
-  else
-    Assert(false);
-  end;
-end;
-
-{$ENDIF}
 
 procedure TMemDBForeignKeyPersistent.CreateReferringAddedList(const Meta: TMemDBFKMeta);
 var
@@ -6619,7 +6522,12 @@ var
 begin
   Entity := TMemDBEntity(Ref1);
   PreContext := PPOPreContext(Ref2);
-  Entity.PreCommit(PreContext.Tid, PreContext.Phase, PreContext.Opts);
+  Entity.FParentDB.FEntityThrottle.Acquire;
+  try
+    Entity.PreCommit(PreContext.Tid, PreContext.Phase, PreContext.Opts);
+  finally
+    Entity.FParentDB.FEntityThrottle.Release;
+  end;
   result := nil;
 end;
 
@@ -6822,6 +6730,7 @@ type
   TPOPrepareContext = record
     Tid: TTransactionId;
     Opts: TOptimizeSet;
+    FromScratch: boolean;
   end;
   PPOPrepareContext = ^TPOPrepareContext;
 
@@ -6832,11 +6741,16 @@ var
 begin
   Entity := TMemDBEntity(Ref1);
   PContext := PPOPrepareContext(Ref2);
-  Entity.Prepare(PContext.Tid, PContext.Opts);
+  Entity.FParentDB.FEntityThrottle.Acquire;
+  try
+    Entity.Prepare(PContext.Tid, PContext.Opts, PContext.FromScratch);
+  finally
+    Entity.FParentDB.FEntityThrottle.Release;
+  end;
   result := nil;
 end;
 
-procedure TMemDBDatabasePersistent.Prepare(const Tid: TTransactionId; Opts:TOptimizeSet);
+procedure TMemDBDatabasePersistent.Prepare(const Tid: TTransactionId; Opts:TOptimizeSet; FromScratch: boolean);
 var
   EntityList: TReffedList;
   Prox: TMemDBEntityProxy;
@@ -6857,6 +6771,7 @@ begin
     ParallelInit(Handlers, Refs1, Refs2, Excepts, Rets, PCount);
     TPOPre.Tid := Tid;
     TPOPre.Opts := Opts;
+    TPOPre.FromScratch := FromScratch;
   end;
 
   EntityList := AssembleEntityList;
@@ -6871,7 +6786,7 @@ begin
           Handlers, Refs1, Refs2, Excepts, Rets, PCount);
       end
       else
-        Entity.Prepare(Tid, Opts);
+        Entity.Prepare(Tid, Opts, FromScratch);
     end;
     if OptApplies(optEntitiesParallel, Opts) and (PCount > 0) then
       ExecParallel(Handlers, Refs1, refs2, Excepts, Rets, @MemDBXlateExceptions);
@@ -7096,7 +7011,13 @@ var
 begin
   Entity := TMemDBEntity(Ref1);
   PPOContext := PPOCommitContext(Ref2);
-  Entity.Commit(PPOContext.Tid, PPOContext.Phase, PPOContext.Opts);
+
+  Entity.FParentDB.FEntityThrottle.Acquire;
+  try
+    Entity.Commit(PPOContext.Tid, PPOContext.Phase, PPOContext.Opts);
+  finally
+    Entity.FParentDB.FEntityThrottle.Release;
+  end;
   result := nil;
 end;
 
@@ -7161,7 +7082,13 @@ var
 begin
   Entity := TMemDBEntity(Ref1);
   PPORoll := PPORollbackContext(Ref2);
-  Entity.Rollback(PPORoll.Tid, PPORoll.Phase, PPORoll.Opts);
+
+  Entity.FParentDB.FEntityThrottle.Acquire;
+  try
+    Entity.Rollback(PPORoll.Tid, PPORoll.Phase, PPORoll.Opts);
+  finally
+    Entity.FParentDB.FEntityThrottle.Release;
+  end;
   result := nil;
 end;
 
@@ -7300,6 +7227,10 @@ begin
 end;
 
 constructor TMemDBDatabasePersistent.Create;
+{$IF Defined(MSWINDOWS)}
+var
+  SysInfo: TSystemInfo;
+{$ENDIF}
 begin
   inherited;
   FInterfaced := TMemDBAPIInterfacedObject.Create;
@@ -7310,6 +7241,20 @@ begin
   FCommitLock := TCriticalSection.Create;
   FMetaIndexLock := TCriticalSection.Create;
   DLItemInitList(@FEntityList);
+{$IF Defined(MSWINDOWS)}
+  GetSystemInfo(SysInfo);
+  self.FMaxParallel := SysInfo.dwNumberOfProcessors;
+{$ELSE}
+  //TODO - find out how to determine # of CPU's on an appropriate platform.
+  FMaxParallel := 8;
+{$ENDIF}
+  if FMaxParallel < 1 then
+  begin
+    Assert(false);
+    FMaxParallel := 1;
+  end;
+  FEntityThrottle := TSemaphore.Create(nil, FMaxParallel, High(integer), '', false);
+  FIndexThrottle := TSemaphore.Create(nil, FMaxParallel, High(integer), '', false);
 end;
 
 destructor TMemDBDatabasePersistent.Destroy;
@@ -7349,7 +7294,7 @@ begin
       finally
         EntityList.Release;
       end;
-      Prepare(PseudoTid, CleardownOptSet);
+      Prepare(PseudoTid, CleardownOptSet, false);
       ToJournal(PseudoTid, NullStream);
       PreCommit(PseudoTid, pcpFKeys, CleardownOptSet);
       PreCommit(PseudoTid, pcpTables, CleardownOptSet);
@@ -7381,6 +7326,8 @@ begin
   FEntityLock.Free;
   FCommitLock.Free;
   FMetaIndexLock.Free;
+  FEntityThrottle.Free;
+  FIndexThrottle.Free;
   inherited;
 end;
 

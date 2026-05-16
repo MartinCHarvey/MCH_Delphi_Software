@@ -184,9 +184,14 @@ type
     optEntitiesParallel,
     optIndexBuildParallel,
     optIndexEvolveParallel,
-    optIndexDeleteParallel,
-    optFKListsParallel
+    optGuaranteedSerial  //Journal replay, no thread conflicts.
+    //optIndexDeleteParallel, TODO?
+    //optFKListsParallel TODO?
   );
+
+const
+  MaxOptByPolicy = optIndexEvolveParallel;
+type
 
   TOptimizeSet = set of TOptimization;
 
@@ -204,7 +209,7 @@ type
   end;
   POptimizePolicy = ^TOptimizePolicy;
 
-  TOptimizePolicies = array [TOptimization] of TOptimizePolicy;
+  TOptimizePolicies = array [Low(TOptimization).. MaxOptByPolicy] of TOptimizePolicy;
 
 const
   TMemDBPhaseStrings: array[TMemDBPhase] of string =
@@ -300,7 +305,7 @@ var
   DoOpt: boolean;
 begin
   result := [];
-  for Opt := Low(Opt) to High(Opt) do
+  for Opt := Low(Opt) to MaxOptByPolicy do
   begin
    Policy := @Policies[Opt];
    case Policy.PolicyType of
@@ -317,6 +322,8 @@ begin
    if DoOpt then
     result := result + [Opt];
   end;
+  if InitFirstTrans or InitNextTrans then
+    result := result + [optGuaranteedSerial];
 end;
 
 function EmptyOptimizeSet: TOptimizeSet;
@@ -326,7 +333,7 @@ end;
 
 function CleardownOptSet: TOptimizeSet;
 begin
-  result := [optEntitiesParallel, optIndexDeleteParallel];
+  result := [optEntitiesParallel];
 end;
 
 function NoOptimizePolicies: TOptimizePolicies;
@@ -354,17 +361,6 @@ begin
     Enabled := true;
   end;
   with result[TOptimization.optIndexEvolveParallel] do
-  begin
-    PolicyType := optTxionSize;
-    EnabledRowChangeCount := THIRTY_TWO_K;
-    EnabledTxionBufSize := TWO_FIFTY_SIX_K;
-  end;
-  with result[TOptimization.optIndexDeleteParallel] do
-  begin
-    PolicyType := optSpecify;
-    Enabled := true;
-  end;
-  with result[TOptimization.optFKListsParallel] do
   begin
     PolicyType := optTxionSize;
     EnabledRowChangeCount := THIRTY_TWO_K;
