@@ -13,6 +13,8 @@ Most recent (2026) development is in Common/MemDB2:
   - _I'll let you know here when it's done and of acceptable quality, which it isn't yet._
 - SQL support for both MemDB and MemDB2 to follow.
 
+If any of you folks get some of this to compile / run under the FPC compiler, I'd be very interested to know.
+
 martin_c_harvey@hotmail.com
 
 # Summary of contents.
