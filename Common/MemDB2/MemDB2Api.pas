@@ -391,42 +391,50 @@ procedure TMemAPIDatabaseInternal.JournalReplayCycle(JournalEntry: TStream; Init
 var
    PseudoTid: TTransactionId;
    OptSet: TOptimizeSet;
+   SizeHint: TDBSizeHint;
+   Ctxt: TXEntityLocalContext;
 begin
-  OptSet := MakeOptimizationSet(DB.Policies, Initial, not Initial, false, 0, JournalEntry.Size);
+  FillChar(SizeHint, sizeof(SizeHint), 0);
+  OptSet := MakeOptimizationSet(DB.Policies, Initial, not Initial, false, SizeHint, JournalEntry.Size);
 
   PseudoTid := TTransactionId.NewTransactionID(ilSerialisable); //if only writer, should be serialisable.
+  Ctxt := TXEntityLocalContext.Create;
   try
-    DB.StartTransaction(PseudoTid);
+    try
+      DB.StartTransaction(PseudoTid);
 
-    Assert(not DB.AnyChanges(PseudoTid));
-    if Initial then
-      DB.FromScratch(PseudoTid, JournalEntry, OptSet)
-    else
-      DB.FromJournal(PseudoTid, JournalEntry);
+      Assert(not DB.AnyChanges(PseudoTid));
+      if Initial then
+        DB.FromScratch(PseudoTid, JournalEntry, OptSet)
+      else
+        DB.FromJournal(PseudoTid, JournalEntry);
 
-    DB.Prepare(PseudoTid, OptSet, Initial);
+      DB.Prepare(PseudoTid, OptSet, Initial);
 
-    DB.PreCommit(PseudoTid, pcpTables, OptSet);
-    DB.PreCommit(PseudoTid, pcpFKeys, OptSet);
-    DB.Commit(PseudoTid, ccpData, OptSet);
-    DB.Commit(PseudoTid, ccpMetaIndex, OptSet);
-    DB.Commit(PseudoTid, ccpCleardown, OptSet);
-  except
-    //Clear pins etc, although in this case, it's
-    //a non-start for the database.
-    //However, final deletion of entities should still work
-    //and delete everything provided we clear the pins.
-    DB.Rollback(PseudoTid, rbpIndexRollback, OptSet);
-    DB.Rollback(PseudoTid, rbpMetaRollback, []);
-    DB.Rollback(PseudoTid, rbpDelayedRollback, OptSet);
-    raise;
+      DB.PreCommit(PseudoTid, pcpTables, OptSet);
+      DB.PreCommit(PseudoTid, pcpFKeys, OptSet);
+      DB.Commit(PseudoTid, ccpData, OptSet, Ctxt);
+      DB.Commit(PseudoTid, ccpMetaIndex, OptSet, Ctxt);
+      DB.Commit(PseudoTid, ccpCleardown, OptSet, Ctxt);
+    except
+      //Clear pins etc, although in this case, it's
+      //a non-start for the database.
+      //However, final deletion of entities should still work
+      //and delete everything provided we clear the pins.
+      DB.Rollback(PseudoTid, rbpIndexRollback, OptSet, Ctxt);
+      DB.Rollback(PseudoTid, rbpMetaRollback, [], Ctxt);
+      DB.Rollback(PseudoTid, rbpDelayedRollback, OptSet, Ctxt);
+      raise;
+    end;
+  finally
+    Ctxt.Free;
   end;
 end;
 
 function TMemAPIDatabaseInternal.UserCommitCycle: TStream;
 var
   T: TMemDBTransaction;
-  SizeHint: int64;
+  SizeHint: TDBSizeHint;
   OptSet: TOptimizeSet;
 begin
   T := FAssociatedTransaction as TMemDBTransaction;
@@ -434,8 +442,12 @@ begin
   Assert(not Assigned(T.Changeset));
   result := MakeStream(T.Session.TempStorageMode);
   try
+    FillChar(SizeHint, sizeof(SizeHint), 0);
+    SizeHint.ShouldUpdateLayout := true;
     DB.SizeHint(T.Tid, SizeHint);
     OptSet := MakeOptimizationSet(DB.Policies, false, false, true, SizeHint, 0);
+    if T.LocalContext.FCacheList.Capacity < SizeHint.TotalIndexes then
+      T.LocalContext.FCacheList.Capacity := SizeHint.TotalIndexes;
 
     DB.Prepare(T.Tid, OptSet,false);
 
@@ -450,10 +462,10 @@ begin
         //The assumption is all exceptions raised in pre-commit.
         //We're not checking for errors or allocating memory by the time
         //it comes to the commit step.
-        DB.Commit(T.Tid, ccpData, OptSet);
+        DB.Commit(T.Tid, ccpData, OptSet, T.LocalContext);
         DB.MetaIndexLock.Acquire;
         try
-          DB.Commit(T.Tid, ccpMetaIndex, OptSet);
+          DB.Commit(T.Tid, ccpMetaIndex, OptSet, T.LocalContext);
         finally
           DB.MetaIndexLock.Release;
         end;
@@ -462,7 +474,7 @@ begin
         //temp indexes protected under commit lock.
         DB.MetaIndexLock.Acquire;
         try
-          DB.Rollback(T.Tid, rbpIndexRollback, OptSet);
+          DB.Rollback(T.Tid, rbpIndexRollback, OptSet, T.LocalContext);
         finally
           DB.MetaIndexLock.Release;
         end;
@@ -472,7 +484,7 @@ begin
       DB.CommitLock.Release;
     end;
     //Note final cleanup outside commit lock.
-    DB.Commit(T.Tid, ccpCleardown, OptSet);
+    DB.Commit(T.Tid, ccpCleardown, OptSet, T.LocalContext);
   except
     result.Free;
     raise; //Rely on later rollback etc to clear pins and such.
@@ -482,25 +494,26 @@ end;
 procedure TMemAPIDatabaseInternal.UserRollbackCycle;
 var
   T: TMemDBTransaction;
-  SizeHint: int64;
+  SizeHint: TDBSizeHint;
   OptSet: TOptimizeSet;
 
 begin
   T := FAssociatedTransaction as TMemDBTransaction;
   Assert(Assigned(T));
 
+  FillChar(SizeHint, sizeof(SizeHint), 0);
   DB.SizeHint(T.Tid, SizeHint);
   OptSet := MakeOptimizationSet(DB.Policies, false, false, true, SizeHint, 0);
 
   DB.MetaIndexLock.Acquire;
   try
-    DB.Rollback(T.Tid, rbpMetaRollback, []);
+    DB.Rollback(T.Tid, rbpMetaRollback, OptSet, T.LocalContext);
   finally
     DB.MetaIndexLock.Release;
   end;
   //OK to rollback general double buffered outside lock:
   //we know changes won't be committed to current world-view.
-  DB.Rollback(T.Tid, rbpDelayedRollback, OptSet);
+  DB.Rollback(T.Tid, rbpDelayedRollback, OptSet, T.LocalContext);
 end;
 
 { TMemAPIDatabase }

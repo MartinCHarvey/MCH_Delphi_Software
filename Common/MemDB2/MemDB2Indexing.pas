@@ -35,9 +35,6 @@ uses
 {$ENDIF}
   MemDB2Misc, MemDB2Streamable, CowTree, IndexedStore, Reffed, Classes;
 
-const
-  NODE_CACHE_SIZE = 64; //Longest possible path + rebalances
-
 type
   TMemDbIndexLeafGeneric = class;
 
@@ -45,12 +42,19 @@ type
   protected
     FPtrs: TList;
     FPinCache: TObject;
+  protected
+    function GetCount: integer;
+    function GetCapacity: integer;
+    procedure SetCapacity(Capacity: integer);
   public
     constructor Create;
     destructor Destroy; override;
     function GetFromCache: TReffed; override;
     function PutToCache(Reffed: TReffed): boolean; override;
+    procedure TakeNodesFrom(Cache: TMemDbNodeCache);
     property PinCache: TObject read FPinCache;
+    property Capacity: integer read GetCapacity write SetCapacity;
+    property Count: integer read GetCount;
   end;
 
   { Quick reminder. Indexes are *immutable* once created,
@@ -61,7 +65,10 @@ type
     FRoot: TMemDBIndexLeafGeneric;
     FNext: TMemDBIndexLeafGeneric;
   protected
+    FStandbyCache: TMemDBNodeCache;
+
     function SelToRoot(Sel: TAbSelType): TMemDBIndexLeafGeneric;
+    function GetNodeCache: TMemDBNodeCache;
   public
     constructor Create; virtual;
     destructor Destroy; override;
@@ -83,9 +90,14 @@ type
     function Add(Sel: TAbSelType; var New: TMemDBIndexLeafGeneric): boolean;
     function Remove(Sel: TAbSelType; Old: TMemDBIndexLeafGeneric): boolean;
 
-    procedure RootToNext;
-    procedure CommitNextToRoot;
-    procedure DiscardNext;
+    procedure RootToNext(UseCache: boolean = false);
+    procedure CommitNextToRoot(UseCache: boolean = false);
+    procedure DiscardNext(UseCache: boolean = false);
+
+    procedure PushLargeCache(Capacity: integer);
+    function PopLargeCache: TMemDbNodeCache;
+
+    property NodeCache: TMemDbNodeCache read GetNodeCache;
 
     property ParentIndex: TMemDbIndexGeneric read FParentIndex;
   end;
@@ -152,7 +164,6 @@ type
     procedure SetRow(NewRow: TObject);
 {$ENDIF}
   protected
-    class function ComparePointers(Own, Other: Pointer): integer;
     function DupNoInit(SrcTree: TCowTree): TCowTreeItem; override;
   public
     destructor Destroy; override;
@@ -385,13 +396,15 @@ constructor TMemDBNodeCache.Create;
 begin
   inherited;
   FPtrs := TList.Create;
-  FPinCache :=  TMemDBPinCache.Create;
+  FPtrs.Capacity := SMALL_NODE_PIN_CACHE_SIZE;
+  FPinCache :=  TMemDBIPinCache.Create;
 end;
 
 destructor TMemDBNodeCache.Destroy;
 var
   i: integer;
 begin
+  FPtrs.Sort(ComparePointers);
   for i := 0 to Pred(FPtrs.Count) do
     TReffed(FPtrs[i]).Release; //Refcounts 1 for cached objects.
   FPtrs.Free;
@@ -421,7 +434,7 @@ begin
   if Assigned(Reffed) then
   begin
     Count := FPtrs.Count;
-    if Count < NODE_CACHE_SIZE then
+    if Count < FPtrs.Capacity then
     begin
       FPtrs.Add(Reffed); //Add before reset so size calc is OK ...
       Reffed.Reset(self);
@@ -432,6 +445,33 @@ begin
   end
   else
     result := true;
+end;
+
+procedure TMemDBNodeCache.TakeNodesFrom(Cache: TMemDbNodeCache);
+var
+  i: integer;
+begin
+  for i := 0 to Pred(Cache.FPtrs.Count) do
+    FPtrs.Add(Cache.FPtrs[i]);
+  Cache.FPtrs.Clear;
+  (FPinCache as TMemDBIPinCache).TakeNodesFrom(Cache.FPinCache as TMemDBIPinCache);
+end;
+
+function TMemDBNodeCache.GetCount: integer;
+begin
+  result := FPtrs.Count;
+end;
+
+function TMemDBNodeCache.GetCapacity: integer;
+begin
+  result := FPtrs.Capacity;
+end;
+
+procedure TMemDBNodeCache.SetCapacity(Capacity: integer);
+begin
+  Assert(Capacity >= FPtrs.Count);
+  FPtrs.Capacity := Capacity;
+  (FPinCache as TMemDBIPinCache).Capacity := Capacity;
 end;
 
 { TMemDBIndexGeneric }
@@ -466,24 +506,70 @@ begin
   end
 end;
 
-procedure TMemDbIndexGeneric.RootToNext;
+procedure TMemDbIndexGeneric.RootToNext(UseCache: boolean = false);
 begin
-  FNext.Release;
+  if UseCache then
+    FNext.ReleaseToCache(FCache)
+  else
+    FNext.Release;
   FNext := FRoot.AddRef as TMemDBIndexLeaf;
 end;
 
-procedure TMemDbIndexGeneric.CommitNextToRoot;
+procedure TMemDbIndexGeneric.CommitNextToRoot(UseCache: boolean = false);
 begin
-  FRoot.Release;
+  if UseCache then
+    FRoot.ReleaseToCache(FCache)
+  else
+    FRoot.Release;
   FRoot := FNext;
   FNext := nil;
 end;
 
-procedure TMemDbIndexGeneric.DiscardNext;
+procedure TMemDbIndexGeneric.DiscardNext(UseCache: boolean = false);
 begin
-  FNext.Release;
+  if UseCache then
+    FNext.ReleaseToCache(FCache)
+  else
+    FNext.Release;
   FNext := nil;
 end;
+
+procedure TMemDbIndexGeneric.PushLargeCache(Capacity: integer);
+var
+  Tmp: TMemDBNodeCache;
+begin
+  if not Assigned(FStandbyCache) then
+  begin
+    Tmp := nil;
+    try
+      Tmp := TMemDbNodeCache.Create;
+      Tmp.Capacity := Capacity;
+      FStandbyCache := FCache as TMemDBNodeCache;
+      FCache := tmp;
+    except
+      on EOutOfMemory do
+        Tmp.Free;
+    end;
+  end;
+end;
+
+function TMemDbIndexGeneric.PopLargeCache: TMemDbNodeCache;
+begin
+  if Assigned(FStandbyCache) then
+  begin
+    result := FCache as TMemDBNodeCache;
+    FCache := FStandbyCache;
+    FStandbyCache := nil;
+  end
+  else
+    result := nil;
+end;
+
+function TMemDBIndexGeneric.GetNodeCache: TMemDBNodeCache;
+begin
+  result := FCache as TMemDbNodeCache;
+end;
+
 
 function TMemDbIndexGeneric.SelToRoot(Sel: TAbSelType): TMemDBIndexLeafGeneric;
 begin
@@ -817,16 +903,16 @@ end;
 procedure TMemDBIndexLeafGeneric.Reset(Cache: TReffedCache);
 var
   NCache: TMemDBNodeCache;
-  PCache: TMemDBPinCache;
+  PCache: TMemDBIPinCache;
 begin
   Assert(Assigned(self.FPin) = Assigned(self.FRow));
   Assert(Assigned(Cache));
 {$IFOPT C+}
   NCache := Cache as TMemDbNodeCache;
-  PCache := NCache.PinCache as TMemDBPinCache;
+  PCache := NCache.PinCache as TMemDBIPinCache;
 {$ELSE}
   NCache := TMemDBNodeCache(Cache);
-  PCache := TMemDbPinCache(NCache.PinCache);
+  PCache := TMemDBIPinCache(NCache.PinCache);
 {$ENDIF}
   if Assigned(FPin) then
     (FRow as TMemDBRow).UnpinFromIndex(self, PCache);
@@ -875,7 +961,7 @@ var
 {$ENDIF}
   IndexCheck: TMemDBIndexGeneric;
   NCache: TMemDBNodeCache;
-  PCache: TMemDBPinCache;
+  PCache: TMemDBIPinCache;
 begin
   Assert(Assigned(Source) and (Source.ClassType = Self.ClassType));
   SL := TMemDBIndexLeafGeneric(Source);
@@ -900,14 +986,14 @@ begin
   IndexCheck := SrcTree as TMemDBIndexGeneric;
   NCache := IndexCheck.FCache as TMemDbNodeCache;
   if Assigned(NCache) then
-    PCache := NCache.PinCache as TMemDBPinCache
+    PCache := NCache.PinCache as TMemDBIPinCache
   else
     PCache := nil;
 {$ELSE}
   IndexCheck := TMemDbIndexGeneric(SrcTree);
   NCache := TMemDBNodeCache(IndexCheck.FCache);
   if Assigned(NCache) then
-    PCache := TMemDBPinCache(NCache.PinCache)
+    PCache := TMemDBIPinCache(NCache.PinCache)
   else
     PCache := nil;
 {$ENDIF}
@@ -916,39 +1002,6 @@ begin
   //otherwise very bad things happen...
   Assert(PMemDBIndexPin(self.FPin).PinnedItem = PMemDBIndexPin(SL.FPin).PinnedItem);
 end;
-
-{$HINTS OFF}
-class function TMemDbIndexLeafGeneric.ComparePointers(Own, Other: Pointer): integer;
-var
-  OwnInt, OtherInt: Cardinal;
-  Own64, Other64: UInt64;
-begin
-  if sizeof(Pointer) = sizeof(Cardinal) then
-  begin
-    OwnInt := Cardinal(Own);
-    OtherInt := Cardinal(Other);
-    if OtherInt > OwnInt then
-      result := 1
-    else if OtherInt < OwnInt then
-      result := -1
-    else
-      result := 0;
-  end
-  else if sizeof(Pointer) = sizeof(UInt64) then
-  begin
-    Own64 := UInt64(Own);
-    Other64 := UInt64(Other);
-    if Other64 > Own64 then
-      result := 1
-    else if Other64 < Own64 then
-      result := -1
-    else
-      result := 0;
-  end
-  else
-    Assert(false);
-end;
-{$HINTS ON}
 
 { TMemDbIndexLeaf }
 

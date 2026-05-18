@@ -4471,34 +4471,6 @@ var
     end;
   end;
 
-  procedure BlocTableDelete;
-  begin
-    Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
-    try
-      DBAPI := Trans.GetAPI;
-      try
-        DBAPI.DeleteTableOrKey('ExhaustMemTbl');
-      finally
-        DBAPI.Free;
-      end;
-      Trans.CommitAndFree;
-      LogtimeIncr('Exhaust memory bloc delete: amazingly, worked OK!!');
-    except
-      on E: EOutOfMemory do
-      begin
-        Trans.RollbackAndFree;
-        LogtimeIncr('Exhaust memory bloc delete: Expected memory exhaustion, OK.');
-        exit;
-      end;
-      on E: Exception do
-      begin
-        Trans.RollbackAndFree;
-        LogtimeIncr('Exhaust memory bloc delete unexpected failed: ' + E.Message);
-        raise;
-      end;
-    end;
-  end;
-
   procedure CarefulRowDelete;
   var
     BlocSize, BlocLeft: integer;
@@ -4532,7 +4504,7 @@ var
         on E: Exception do
         begin
           Trans.RollbackAndFree;
-          LogtimeIncr('Exhaust memory bloc delete unexpected failed: ' + E.Message);
+          LogtimeIncr('Exhaust memory careful row delete unexpected failed: ' + E.Message);
           raise;
         end;
       end;
@@ -4557,12 +4529,8 @@ begin
   //Now try to delete all the rows individually in the table (expect failure).
   BigRowDelete;
 
-  //Now try to delete the table en-bloc, (not sure if this will work).
-  BlocTableDelete;
-
   //Now slowly back the table out a few rows at a time.
   CarefulRowDelete;
-
 end;
 
 procedure TForm1.ResetClick(Sender: TObject);

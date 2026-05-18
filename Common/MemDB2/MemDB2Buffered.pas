@@ -229,12 +229,12 @@ type
     procedure META_RequestChange(const Tid: TTransactionId); virtual;
     procedure META_Delete(const Tid: TTransactionId); virtual;
 
-    procedure SizeHint(const Tid: TTransactionId; var SizeHint: int64); virtual;
+    procedure SizeHint(const Tid: TTransactionId; var SizeHint: TDBSizeHint); virtual;
     procedure StartTransaction(const Tid: TTransactionId); virtual;
     procedure Prepare(const Tid: TTransactionId; Opts:TOptimizeSet; FromScratch: boolean); virtual;
     procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet); override;
-    procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase; Opts:TOptimizeSet); override;
-    procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase; Opts:TOptimizeSet); override;
+    procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext); override;
+    procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext); override;
 
     procedure Init(const Tid: TTransactionId; Parent: TObject; Name:string; DSName: boolean);
 
@@ -297,6 +297,7 @@ type
     function AnyChanges(const Tid:TTransactionId): boolean; override;
     function AnyChangesForTid(const Tid: TTransactionId): boolean; override;
 
+    procedure SizeHint(const Tid: TTransactionId; var SizeHint: TDBSizeHint); override;
     procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet); override;
     procedure ToJournal(const Tid: TTransactionId; Stream: TStream);override;
     procedure ToScratch(const PseudoTid:TTransactionId; Stream: TStream);override;
@@ -417,7 +418,7 @@ type
 
     procedure Init(Parent: TMemDBTablePersistent; const Tid: TTransactionId);
 
-    function SizeHint: Int64;
+    function ChangedRowCount: Int64;
 
     procedure ToJournal(Stream: TStream);
     procedure ToScratch(Stream: TStream);
@@ -428,8 +429,8 @@ type
     procedure Commit;
     procedure Rollback;
 
-    procedure IndexCommit;
-    procedure IndexRollback;
+    procedure IndexCommit(Ctxt: TTXLocalContext);
+    procedure IndexRollback(Ctxt: TTXLocalContext);
 
     function ThrottleBuildCheckPartialIndexParallel(Ref1, Ref2: pointer): pointer;
     function ThrottleBuildCheckPartialInternalIndexParallel(Ref1, Ref2: pointer): pointer;
@@ -580,7 +581,7 @@ type
     constructor Create;
     destructor Destroy; override;
 
-    procedure SizeHint(const Tid: TTransactionId; var SizeHint: int64); override;
+    procedure SizeHint(const Tid: TTransactionId; var SizeHint: TDBSizeHint); override;
     procedure StartTransaction(const Tid: TTRansactionId); override;
     procedure Prepare(const Tid: TTransactionId; Opts:TOptimizeSet; FromScratch: boolean); override;
 
@@ -590,8 +591,8 @@ type
     procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet); override;
 
     procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet); override;
-    procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase; Opts:TOptimizeSet); override;
-    procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase; Opts:TOptimizeSet); override;
+    procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext); override;
+    procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext); override;
 
     function DataChangedForTid(const Tid:TTransactionId): boolean;
     function LayoutChangesRequiredForTid(const Tid: TTransactionId): boolean;
@@ -651,10 +652,11 @@ type
                              var EntityName: string);
     //Atomically get and assemble list of entities.
     function AssembleEntityList: TReffedList;
+    procedure ConsolidateAndFreeCaches(Ctxt: TTXLocalContext);
   public
     function EntitiesByName(const AB:TBufSelector; Name: string; PinReason: TPinReason): TMemDBEntity;
 
-    procedure SizeHint(const Tid: TTransactionId; var SizeHint: int64); virtual;
+    procedure SizeHint(const Tid: TTransactionId; var SizeHint: TDBSizeHint); virtual;
 
     function PrepareParallel(Ref1, Ref2: pointer):pointer;
     procedure Prepare(const Tid: TTransactionId; Opts:TOptimizeSet; FromScratch: boolean); virtual;
@@ -673,8 +675,8 @@ type
     function RollbackParallel(Ref1, Ref2: pointer): pointer;
 
     procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase;  Opts:TOptimizeSet); override;
-    procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase;  Opts:TOptimizeSet); override;
-    procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase;  Opts:TOptimizeSet); override;
+    procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase;  Opts:TOptimizeSet; Ctxt: TTXLocalContext); override;
+    procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase;  Opts:TOptimizeSet; Ctxt: TTXLocalContext); override;
 
     constructor Create;
     destructor Destroy; override;
@@ -1468,7 +1470,7 @@ begin
   FMetadata.PinCurrent(Tid, pinEvolve);
 end;
 
-procedure TMemDBEntity.SizeHint(const Tid: TTransactionId; var SizeHint: int64);
+procedure TMemDBEntity.SizeHint(const Tid: TTransactionId; var SizeHint: TDBSizeHint);
 begin
   //NOP.
 end;
@@ -1487,18 +1489,18 @@ begin
   //changed behind our back.
 end;
 
-procedure TMemDBEntity.Commit(const TId: TTransactionId; Phase:TMemDBCommitPhase; Opts:TOptimizeSet);
+procedure TMemDBEntity.Commit(const TId: TTransactionId; Phase:TMemDBCommitPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext);
 begin
   inherited;
   if Phase = ccpMetaIndex then
-    FMetadata.Commit(Tid, Phase, Opts);
+    FMetadata.Commit(Tid, Phase, Opts, Ctxt);
 end;
 
-procedure TMemDBEntity.Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase; Opts:TOptimizeSet);
+procedure TMemDBEntity.Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext);
 begin
   inherited;
   if Phase = rbpMetaRollback then
-    FMetadata.Rollback(Tid, Phase, Opts);
+    FMetadata.Rollback(Tid, Phase, Opts, Ctxt);
 end;
 
 procedure TMemDBEntity.Init(const Tid: TTransactionId; Parent: TObject; Name:string; DSName: boolean);
@@ -2136,7 +2138,7 @@ begin
   inherited;
 end;
 
-function TTidLocal.SizeHint: Int64;
+function TTidLocal.ChangedRowCount: Int64;
 begin
   result := FCPRows.Count;
 end;
@@ -2784,7 +2786,7 @@ begin
   finally
     for j := 0 to Pred(IPinListTmp.Count) do
       if IPinListTmp[j] <> result then
-        Row.ReleaseIndexPinOutsideLock(IPinListTmp[j]);
+        Row.ReleaseIndexPinOutsideLock(IPinListTmp[j], nil); //Cannot cache hint if its not ours.
   end;
 end;
 
@@ -2842,6 +2844,13 @@ begin
 
   ListTmp := nil;
   try
+    //Worst case is 3/2 number of changed nodes: An entire tree,
+    //plus rewrites of every node above top level, plus small cache size
+    //for temps.
+    //If mem alloc fails, no problem, it'll just go at snail pace.
+    //TODO - tune this.
+    Index.PushLargeCache(((3* FCPRows.Count) div 2) + SMALL_NODE_PIN_CACHE_SIZE);
+
     //TidLocal row set will not change under commit lock.
     IRec := FCPRows.GetAnItem;
     while Assigned(IRec) do
@@ -2867,7 +2876,7 @@ begin
             if not Ret then
               raise EMemDBInternalException.Create(S_ERROR_MODIFYING_INDEX_REMOVE);
           finally
-            Row.ReleaseIndexPinOutsideLock(IPin);
+            Row.ReleaseIndexPinOutsideLock(IPin, Index.NodeCache);
           end;
         end
         else if Added or Null then
@@ -2878,7 +2887,7 @@ begin
             if Assigned(IPin) then
               raise EMemDBInternalException.Create(S_ERROR_UNEXPECTED_PIN_FOR_INDEX_REMOVE);
           finally
-            Row.ReleaseIndexPinOutsideLock(IPin);
+            Row.ReleaseIndexPinOutsideLock(IPin, Index.NodeCache);
           end;
   {$ENDIF}
         end;
@@ -2991,7 +3000,7 @@ begin
           if Assigned(IPin) then
           begin
             Assert(Assigned(Row));
-            Row.ReleaseIndexPinOutsideLock(IPin);
+            Row.ReleaseIndexPinOutsideLock(IPin, Index.NodeCache);
           end;
         end;
 
@@ -3040,6 +3049,13 @@ begin
   //TidLocal row set will not change under commit lock.
   ListTmp := nil;
   try
+    //Worst case is 3/2 number of changed nodes: An entire tree,
+    //plus rewrites of every node above top level, plus small cache size
+    //for temps.
+    //If mem alloc fails, no problem, it'll just go at snail pace.
+    //TODO - tune this.
+    Index.PushLargeCache(((3* FCPRows.Count) div 2) + SMALL_NODE_PIN_CACHE_SIZE);
+
     IRec := FCPRows.GetAnItem;
     while Assigned(IRec) do
     begin
@@ -3064,7 +3080,7 @@ begin
             if not Ret then
               raise EMemDBInternalException.Create(S_ERROR_MODIFYING_INTERNAL_INDEX_REMOVE);
           finally
-            Row.ReleaseIndexPinOutsideLock(IPin);
+            Row.ReleaseIndexPinOutsideLock(IPin, Index.NodeCache);
           end;
         end
         else if Added or Null then
@@ -3075,7 +3091,7 @@ begin
             if Assigned(IPin) then
               raise EMemDBInternalException.Create(S_ERROR_UNEXPECTED_PIN_FOR_INTERNAL_INDEX_REMOVE);
           finally
-            Row.ReleaseIndexPinOutsideLock(IPin);
+            Row.ReleaseIndexPinOutsideLock(IPin, Index.NodeCache);
           end;
   {$ENDIF}
         end;
@@ -3164,7 +3180,7 @@ begin
     ExecParallel(Handlers, Refs1, refs2, Excepts, Rets, @MemDBXlateExceptions);
 end;
 
-procedure TTidLocal.IndexCommit;
+procedure TTidLocal.IndexCommit(Ctxt: TTXLocalContext);
 var
   i: integer;
   AddOrRebuild: boolean;
@@ -3237,8 +3253,10 @@ begin
                 '(' + IntToStr(NativeUint(Index)) + ')');
 {$ENDIF}
 
-        Index.CommitNextToRoot;
+        Index.CommitNextToRoot(true);
+        (Ctxt as TXEntityLocalContext).AddCache(Index.PopLargeCache);
       end;
+
     end;
     //And pack master indexes.
     FParentTable.FMasterIndexes.Pack;
@@ -3291,11 +3309,12 @@ begin
                 '*** Commit evolved IntIdx [' +IntToStr(-1) + '] ' +
                 '(' + IntToStr(NativeUint(FParentTable.FMasterInternalIndex)) + ')');
 {$ENDIF}
-        FParentTable.FMasterInternalIndex.CommitNextToRoot;
+        FParentTable.FMasterInternalIndex.CommitNextToRoot(true);
+        (Ctxt as TXEntityLocalContext).AddCache(FParentTable.FMasterInternalIndex.PopLargeCache);
       end;
     end;
   end
-  else
+  else //No indexing change required.
   begin
     for i := 0 to Pred(FParentTable.FMasterIndexes.Count) do
     begin
@@ -3307,7 +3326,8 @@ begin
                 '(' + IntToStr(NativeUint(Index)) + ')');
 {$ENDIF}
 
-      Index.CommitNextToRoot;
+      Index.CommitNextToRoot(true);
+      (Ctxt as TXEntityLocalContext).AddCache(Index.PopLargeCache);
     end;
     //Generally expect this to be assigned, but we'll be careful and
     //check all the same. Post-delete commit gets this far?
@@ -3320,12 +3340,13 @@ begin
                 ' Commit evolved IntIdx [' +IntToStr(-1) + '] ' +
                 '(' + IntToStr(NativeUint(FParentTable.FMasterInternalIndex)) + ')');
 {$ENDIF}
-      FParentTable.FMasterInternalIndex.CommitNextToRoot;
+      FParentTable.FMasterInternalIndex.CommitNextToRoot(true);
+      (Ctxt as TXEntityLocalContext).AddCache(FParentTable.FMasterInternalIndex.PopLargeCache);
     end;
   end;
 end;
 
-procedure TTidLocal.IndexRollback;
+procedure TTidLocal.IndexRollback(Ctxt: TTXLocalContext);
 var
   i: integer;
   Index: TMemDBIndex;
@@ -3341,7 +3362,8 @@ begin
             '(' + IntToStr(NativeUint(Index)) + ')');
 {$ENDIF}
 
-    Index.DiscardNext;
+    Index.DiscardNext(true);
+    (Ctxt as TXEntityLocalContext).AddCache(Index.PopLargeCache);
   end;
   //Master internal index not always assigned in rollback case (new index build).
   if Assigned(FParentTable.FMasterInternalIndex) then
@@ -3351,7 +3373,8 @@ begin
             ' Rollback IntIdx [' +IntToStr(-1) + '] ' +
             '(' + IntToStr(NativeUint(FParentTable.FMasterInternalIndex)) + ')');
 {$ENDIF}
-    FParentTable.FMasterInternalIndex.DiscardNext;
+    FParentTable.FMasterInternalIndex.DiscardNext(true);
+    (Ctxt as TXEntityLocalContext).AddCache(FParentTable.FMasterInternalIndex.PopLargeCache);
   end;
   //Else new build master index not swizzled on yet, TidLocal destroy will clean it up.
 end;
@@ -3423,7 +3446,7 @@ begin
   begin
     Row := IRec.Item as TMemDBRow;
     Assert(Row <> LastRow); //Just check the commit is removing things as it should.
-    Row.Commit(FTid, ccpData, []);
+    Row.Commit(FTid, ccpData, [], nil);
     LastRow := Row;
     IRec := FCPRows.GetAnItem;
   end;
@@ -3444,7 +3467,7 @@ begin
   begin
     Row := IRec.Item as TMemDBRow;
     Assert(Row <> LastRow); //Just check the rollback is removing things as it should.
-    Row.Rollback(FTid, rbpDelayedRollback, []);
+    Row.Rollback(FTid, rbpDelayedRollback, [], nil);
     LastRow := Row;
     IRec := FCPRows.GetAnItem;
   end;
@@ -3577,7 +3600,8 @@ begin
               //Can be deleted by other API object in same transaction ...
 
             INode := IPin.INode;
-            Cursor.Row.ReleaseIndexPinOutsideLock(IPin);
+            Cursor.Row.ReleaseIndexPinOutsideLock(IPin, nil); //Not caching user ops yet.
+
             //We know the tree we're looking for is not ephemeral form our point of view
             //so can release IPin here.
           end;
@@ -4434,13 +4458,40 @@ begin
   end;
 end;
 
-procedure TMemDBTablePersistent.SizeHint(const Tid: TTransactionId; var SizeHint: int64);
+procedure TMemDBTablePersistent.SizeHint(const Tid: TTransactionId; var SizeHint: TDBSizeHint);
 var
   TidLocal: TTidLocal;
+  TotalRowCount: Int64;
+  i: integer;
 begin
   TidLocal := GetTidLocal(Tid);
   if Assigned(TidLocal) then
-    Inc(SizeHint, TidLocal.SizeHint);
+  begin
+    if SizeHint.ShouldUpdateLayout then
+      TidLocal.UpdateLayout(pinEvolve); //May not be possible to in some rollback cases.
+
+    if Assigned(TidLocal.FIndexHelper) then
+    begin
+      //I can't remember under what conditions/commit/rollback this is assigned.
+      //An estimate is fine for now.
+      Inc(SizeHint.TotalIndexes, TidLocal.FIndexHelper.Count);
+    end;
+
+    Inc(SizeHint.ChangedRows, TidLocal.ChangedRowCount);
+    //OK, now calculate the number of possibly re-indexed rows.
+    FMasterRowLock.Acquire;
+    try
+      TotalRowCount := FMasterRowList.Count;
+    finally
+      FMasterRowLock.Release;
+    end;
+    for i := 0 to Pred(Length(TidLocal.FIndexChangesets)) do
+    begin
+      if TidLocal.FIndexChangesets[i] * [ictAdded, ictChangedFieldNumber] <> [] then
+        Inc(SizeHint.IndexBuildRows, TotalRowCount);
+    end;
+    Inc(SizeHint.TotalRows, TotalRowCount);
+  end;
 end;
 
 procedure TMemDBTablePersistent.PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet);
@@ -4472,7 +4523,7 @@ begin
 end;
 
 
-procedure TMemDBTablePersistent.Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase; Opts:TOptimizeSet);
+procedure TMemDBTablePersistent.Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext);
 var
   TidLocal: TTidLocal;
 begin
@@ -4487,7 +4538,7 @@ begin
   case Phase of
     ccpData: TidLocal.Commit;
     ccpMetaIndex: begin
-      TidLocal.IndexCommit;
+      TidLocal.IndexCommit(CTxt);
       inherited;
       FindRmRowProhibitLocks(Tid);
     end;
@@ -4497,7 +4548,7 @@ begin
   end;
 end;
 
-procedure TMemDBTablePersistent.Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase; Opts:TOptimizeSet);
+procedure TMemDBTablePersistent.Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext);
 var
   TidLocal: TTidLocal;
 begin
@@ -4512,7 +4563,7 @@ begin
   begin
     //Some very pathalogical cases involve rollback for nonexistent Tid.
     case Phase of
-      rbpIndexRollback: TidLocal.IndexRollback;
+      rbpIndexRollback: TidLocal.IndexRollback(Ctxt);
       rbpMetaRollback: inherited;
       rbpDelayedRollback: begin
         TidLocal.Rollback;
@@ -4763,6 +4814,19 @@ begin
   ExpectTag(Stream, mstFkStart);
   FMetadata.FromScratch(PseudoTid, Stream, Opts);
   ExpectTag(Stream, mstFkEnd);
+end;
+
+procedure TMemDBForeignKeyPersistent.SizeHint(const Tid: TTransactionId; var SizeHint: TDBSizeHint);
+var
+  CP, NP: TMemDBStreamable;
+  Added, Changed, Deleted, Null: boolean;
+begin
+  CP := FMetadata.PinCurrent(Tid, pinFinalCheck);
+  NP := FMetadata.GetNext(Tid);
+  ChangeFlagsFromPinned(CP, NP, Added, Changed, Deleted, Null);
+
+  if Added then
+    SizeHint.FKAdd := true;
 end;
 
 procedure TMemDBForeignKeyPersistent.PreCommit(const Tid: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet);
@@ -5658,6 +5722,7 @@ begin
       raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_19);
   end;
 
+  //TODO - FKLists parallel.
   try
     //N.B. Indexed store gives us a "duplicate key" error code, which we should use.
     CreateReferringAddedList(Meta);
@@ -6050,7 +6115,7 @@ begin
   except
     while List.Count > 0 do
     begin
-      ReleaseIndexPinOutsideLock(PMemDbIndexPin(List.Items[Pred(List.Count)]));
+      ReleaseIndexPinOutsideLock(PMemDbIndexPin(List.Items[Pred(List.Count)]), nil);
       List.Delete(Pred(List.Count));
     end;
     raise;
@@ -6082,7 +6147,7 @@ begin
             raise EMemDBInternalException.Create(S_LOCAL_INDEX_DELETION_BAD_2);
       finally
         if Assigned(Pin) then
-          ReleaseIndexPinOutsideLock(Pin);
+          ReleaseIndexPinOutsideLock(Pin, nil);
       end;
     end;
   finally
@@ -6119,7 +6184,7 @@ begin
           Assert(Pin.INode.OriginalIndex = Index);
           raise EMemDBInternalException.Create(S_LOCAL_INDEX_INSERTION_DUPLICATE);
         finally
-          ReleaseIndexPinOutsideLock(Pin);
+          ReleaseIndexPinOutsideLock(Pin, nil);
         end;
       end;
 {$ENDIF}
@@ -6993,6 +7058,7 @@ type
     Tid: TTransactionId;
     Phase: TMemDBCommitPhase;
     Opts: TOptimizeSet;
+    Ctxt: TTXLocalContext;
   end;
   PPOCommitContext = ^TPOCommitContext;
 
@@ -7006,14 +7072,14 @@ begin
 
   Entity.FParentDB.FEntityThrottle.Acquire;
   try
-    Entity.Commit(PPOContext.Tid, PPOContext.Phase, PPOContext.Opts);
+    Entity.Commit(PPOContext.Tid, PPOContext.Phase, PPOContext.Opts, PPOContext.Ctxt);
   finally
     Entity.FParentDB.FEntityThrottle.Release;
   end;
   result := nil;
 end;
 
-procedure TMemDBDatabasePersistent.Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase; Opts:TOptimizeSet);
+procedure TMemDBDatabasePersistent.Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext);
 var
   EntityList: TReffedList;
   Proxy: TMemDBEntityProxy;
@@ -7036,6 +7102,7 @@ begin
     TPOComm.Tid := Tid;
     TPOComm.Phase := Phase;
     TPOComm.Opts := Opts;
+    TPOComm.Ctxt := Ctxt;
   end;
 
   EntityList := AssembleEntityList;
@@ -7050,13 +7117,14 @@ begin
           Handlers, Refs1, Refs2, Excepts, Rets, PCount);
       end
       else
-        Entity.Commit(Tid, Phase, Opts);
+        Entity.Commit(Tid, Phase, Opts, Ctxt);
     end;
     if OptApplies(optEntitiesParallel, Opts) and (PCount > 0) then
       ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
   finally
     EntityList.Release;
   end;
+  ConsolidateAndFreeCaches(Ctxt);
 end;
 
 type
@@ -7064,6 +7132,7 @@ type
     Tid: TTransactionId;
     Phase: TMemDBRollbackPhase;
     Opts: TOptimizeSet;
+    Ctxt: TTXLocalContext;
   end;
   PPORollbackContext = ^TPORollbackContext;
 
@@ -7077,14 +7146,14 @@ begin
 
   Entity.FParentDB.FEntityThrottle.Acquire;
   try
-    Entity.Rollback(PPORoll.Tid, PPORoll.Phase, PPORoll.Opts);
+    Entity.Rollback(PPORoll.Tid, PPORoll.Phase, PPORoll.Opts, PPORoll.Ctxt);
   finally
     Entity.FParentDB.FEntityThrottle.Release;
   end;
   result := nil;
 end;
 
-procedure TMemDBDatabasePersistent.Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase; Opts:TOptimizeSet);
+procedure TMemDBDatabasePersistent.Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext);
 var
   EntityList: TReffedList;
   Proxy: TMemDBEntityProxy;
@@ -7107,6 +7176,7 @@ begin
     TPORoll.Tid := Tid;
     TPORoll.Phase := Phase;
     TPORoll.Opts := Opts;
+    TPORoll.Ctxt := Ctxt;
   end;
 
   //TODO - Entity list allocation during rollback of out-of-memory cases.
@@ -7122,23 +7192,51 @@ begin
           Handlers, refs1, Refs2, Excepts, Rets, PCount);
       end
       else
-        Entity.Rollback(Tid, Phase, Opts);
+        Entity.Rollback(Tid, Phase, Opts, Ctxt);
     end;
     if OptApplies(optEntitiesParallel, Opts) and (PCount > 0) then
       ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
   finally
     EntityList.Release;
   end;
+  ConsolidateAndFreeCaches(Ctxt);
 end;
 
-procedure TMemDBDatabasePersistent.SizeHint(const Tid: TTransactionID; var SizeHint: Int64);
+procedure TMemDBDatabasePersistent.ConsolidateAndFreeCaches(Ctxt: TTXLocalContext);
+var
+  MCache: TMemDbNodeCache;
+  CETxt: TXEntityLocalContext;
+  i, TSize: integer;
+begin
+  //This does not *have* to work, things will just run faster when it does.
+  //Put all the caches together, put into one big sorted list,
+  //And then free the whole lot sequentially.
+  CETxt := Ctxt as TXEntityLocalContext;
+  MCache := nil;
+  TSize := 0;
+  try
+    for i := 0 to Pred(CETxt.FCacheList.Count) do
+      Inc(TSize, TMemDBNodeCache(CETxt.FCacheList[i]).Count);
+    MCache := TMemDBNodeCache.Create;
+    MCache.Capacity := TSize;
+    for i := 0 to Pred(CETxt.FCacheList.Count) do
+      MCache.TakeNodesFrom(TMemDBNodeCache(CETxt.FCacheList[i]));
+    for i := 0 to Pred(CETxt.FCacheList.Count) do
+      TMemDBNodeCache(CETxt.FCacheList[i]).Free;
+    CETxt.FCacheList.Clear;
+  except
+    on EOutOfMemory do
+  end;
+  MCache.Free;
+end;
+
+procedure TMemDBDatabasePersistent.SizeHint(const Tid: TTransactionID; var SizeHint: TDBSizeHint);
 var
   EntityList: TReffedList;
   Proxy: TMemDBEntityProxy;
   Entity: TMemDbEntity;
   i: integer;
 begin
-  SizeHint := 0;
   EntityList := AssembleEntityList;
   try
     for i := 0 to Pred(EntityList.Count) do
@@ -7259,10 +7357,12 @@ var
   Entity: TMemDbEntity;
   NullStream: TNullStream;
   FKs, Del: boolean;
+  Ctxt: TXEntityLocalContext;
 {$ENDIF}
 begin
 {$IFDEF CHECK_TEARDOWN_REFS}
   NullStream := TNullStream.Create;
+  Ctxt := TXEntityLocalContext.Create;
   try
     for FKs := True downto False do
     begin
@@ -7290,12 +7390,13 @@ begin
       ToJournal(PseudoTid, NullStream);
       PreCommit(PseudoTid, pcpFKeys, CleardownOptSet);
       PreCommit(PseudoTid, pcpTables, CleardownOptSet);
-      Commit(PseudoTid, ccpData, CleardownOptSet);
-      Commit(PseudoTid, ccpMetaIndex, []);
-      Commit(PseudoTid, ccpCleardown, CleardownOptSet);
+      Commit(PseudoTid, ccpData, CleardownOptSet, Ctxt);
+      Commit(PseudoTid, ccpMetaIndex, [], Ctxt);
+      Commit(PseudoTid, ccpCleardown, CleardownOptSet, Ctxt);
     end;
   finally
     NullStream.Free;
+    Ctxt.Free;
   end;
 {$ELSE}
   //TODO - Harden this to handle out of memory conditions.
