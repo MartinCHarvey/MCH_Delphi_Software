@@ -204,6 +204,7 @@ type
                   EnabledReplayNext: boolean;
                   EnabledUserOps: boolean; );
     optTxionSize: ( EnabledRowChangeCount: integer;
+                    EnabledFKRowsTotal: integer;
                     EnabledTxionBufSize: Int64;
                   );
   end;
@@ -221,6 +222,8 @@ const
   TWO_FIFTY_SIX_K = 256 * 1024;
   ONE_MEG = 1024*1024;
   FILE_CACHE_SIZE = ONE_MEG;
+
+  SMALL_NODE_PIN_CACHE_SIZE = 64; //Longest possible path + rebalances
 
   S_API_NOT_IMPLEMENTED = 'API not yet implemented.';
 
@@ -248,18 +251,22 @@ var
 
 procedure AppendTrailingDirSlash(var Path: string);
 
-{$IFOPT C+}
 function CompareGuids(const OtherGuid, OwnGuid: TGUID): integer;
-{$ELSE}
-function CompareGuids(const OtherGuid, OwnGuid: TGUID): integer; inline;
-{$ENDIF}
 
 //Optimization helper functions.
+type
+  TDBSizeHint = record
+    ChangedRows, IndexBuildRows, TotalRows: Int64;
+    TotalIndexes: integer;
+    FKAdd: boolean;
+    ShouldUpdateLayout: boolean;
+  end;
+
 function OptApplies(Opt: TOptimization; Opts: TOptimizeSet): boolean;
 
 function MakeOptimizationSet(const Policies: TOptimizePolicies;
                              InitFirstTrans, InitNextTrans, UserOp: boolean;
-                             RowCountEstimate: integer;
+                             DBSizeHint: TDBSizeHint;
                              TxionSizeEstimate: int64): TOptimizeSet;
 
 function CleardownOptSet: TOptimizeSet;
@@ -297,7 +304,7 @@ end;
 
 function MakeOptimizationSet(const Policies: TOptimizePolicies;
                              InitFirstTrans, InitNextTrans, UserOp: boolean;
-                             RowCountEstimate: integer;
+                             DBSizeHint: TDBSizeHint;
                              TxionSizeEstimate: int64): TOptimizeSet;
 var
   Opt: TOptimization;
@@ -313,8 +320,12 @@ begin
     optContext: DoOpt := (Policy.EnabledReplayFirst and InitFirstTrans) or
                          (Policy.EnabledReplayNext and InitNextTrans) or
                          (Policy.EnabledUserOps and UserOp);
-    optTxionSize: DoOpt := (RowCountEstimate > Policy.EnabledRowChangeCount) or
-                           (TxionSizeEstimate > Policy.EnabledTxionBufSize);
+    //TODO - optTxionSize can overestimate Txion size based on file size,
+    //and create threads for a bunch of tiny transactions.
+    optTxionSize: DoOpt := (DBSizeHint.ChangedRows + DBSizeHint.IndexBuildRows
+                              > Policy.EnabledRowChangeCount) or
+                           (TxionSizeEstimate > Policy.EnabledTxionBufSize) or
+                           (DBSizeHint.FKAdd and (DBSizeHint.TotalRows > Policy.EnabledFKRowsTotal));
    else
      Assert(false);
      DoOpt := false;
@@ -354,6 +365,7 @@ begin
     PolicyType := optTxionSize;
     EnabledRowChangeCount := THIRTY_TWO_K;
     EnabledTxionBufSize := TWO_FIFTY_SIX_K;
+    EnabledFKRowsTotal := TWO_FIFTY_SIX_K;
   end;
   with result[TOptimization.optIndexBuildParallel] do
   begin
@@ -365,6 +377,7 @@ begin
     PolicyType := optTxionSize;
     EnabledRowChangeCount := THIRTY_TWO_K;
     EnabledTxionBufSize := TWO_FIFTY_SIX_K;
+    EnabledFKRowsTotal := TWO_FIFTY_SIX_K;
   end;
 end;
 

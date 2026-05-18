@@ -42,6 +42,16 @@ type
 
   TInProgressType = (tiptNone, tiptCommitRollback);
 
+  //Currently used for garbage collection from multiple async/parallel operations.
+  TXEntityLocalContext = class(TTXLocalContext)
+    FLocalLock: TCriticalSection;
+    //In future perhaps have separate lists of TObject and TReffed.
+    FCacheList: TList;
+    procedure AddCache(Cache: TObject);
+    constructor Create;
+    destructor Destroy; override;
+  end;
+
 {$IFDEF USE_TRACKABLES}
   TMemDBTransaction = class(TTrackedReffed)
 {$ELSE}
@@ -63,6 +73,7 @@ type
     FApiObjects: TList;
     FApiObjectLock: TCriticalSection;
     FCRInterface: TMemAPIDatabaseInternal;
+    FLocalContext: TXEntityLocalContext;
   protected
   public
     procedure CommitAndFree;
@@ -88,6 +99,7 @@ type
     property ParentSession: TMemDBSession read FSession;
     property Changeset: TStream read FChangeset;
     property Session: TMemDBSession read FSession;
+    property LocalContext: TXEntityLocalContext read FLocalContext;
   end;
 
   //TODO - Might like to think about whether we actually need a session
@@ -198,6 +210,43 @@ const
   S_READONLY_HAS_CHANGED_DATA = 'Read-only transaction has changed data!';
   S_TRANSACTION_HAS_API_OBJECTS = 'Transaction has associated API objects. You should have freed them before commit/rollback';
 
+  { TXLocalContext }
+
+constructor TXEntityLocalContext.Create;
+begin
+  inherited;
+  FLocalLock := TCriticalSection.Create;
+  FCacheList := TList.Create;
+  //Set this way early so as little alloc as possible on rollback path.
+  FCacheList.Capacity := 64;
+end;
+
+destructor TXEntityLocalContext.Destroy;
+var
+  i: integer;
+begin
+  //Expect transaction synchronous cleanup to have already cleaned most of this
+  //up, but just in case...
+  for i := 0 to Pred(FCacheList.Count) do
+    TObject(FCacheList[i]).Free;
+  FCacheList.Free;
+  FLocalLock.Free;
+  inherited;
+end;
+
+procedure TXEntityLocalContext.AddCache(Cache: TObject);
+begin
+  if Assigned(Cache) then
+  begin
+    FLocalLock.Acquire;
+    try
+      FCacheList.Add(Cache);
+    finally
+      FLocalLock.Release;
+    end;
+  end;
+end;
+
   { TMemDBTransaction }
 
 function TMemDBTransaction.GetAPI: TMemAPIDatabase;
@@ -222,7 +271,7 @@ begin
   inherited;
   FApiObjects := TList.Create;
   FApiObjectLock := TCriticalSection.Create;
-  //No Add-Ref, initial refcount 1.
+  FLocalContext := TXEntityLocalContext.Create;
 end;
 
 procedure TMemDbTransaction.RegisterCreatedApi(Api: TMemDBApi);
@@ -303,6 +352,7 @@ begin
   Assert((not Assigned(FApiObjects)) or (FAPIObjects.Count = 0));
   FApiObjects.Free;
   FApiObjectLock.Free;
+  FLocalContext.Free;
   inherited;
 end;
 
@@ -960,6 +1010,7 @@ var
   ChangesetStream: TStream;
   TmpName: string;
   PseudoTid: TTransactionId;
+  Ctxt: TXEntityLocalContext;
 begin
   FSessionLock.Acquire;
   try
@@ -979,36 +1030,41 @@ begin
     //Totally consistent worldview - but will do list atomicity
     //inside DB classes as well.
     try
-      TmpName := TPath.GetTempFileName();
-      ChangesetStream := TMemDBTempFileStream.Create(TmpName);
-      PseudoTid := TTransactionId.NewTransactionID(ilSerialisable); //if no writes, should definitley be serialisable.
+      Ctxt := TXEntityLocalContext.Create;
       try
-        FDatabase.StartTransaction(PseudoTid);
-        FDatabase.CommitLock.Acquire; //This if we don't acquire at lrSharedRead for ever.
+        TmpName := TPath.GetTempFileName();
+        ChangesetStream := TMemDBTempFileStream.Create(TmpName);
+        PseudoTid := TTransactionId.NewTransactionID(ilSerialisable); //if no writes, should definitley be serialisable.
         try
+          FDatabase.StartTransaction(PseudoTid);
+          FDatabase.CommitLock.Acquire; //This if we don't acquire at lrSharedRead for ever.
           try
-            FDatabase.ToScratch(PseudoTid, ChangesetStream);
-          finally
-            //We probably shouldn't need to to this at all, but keep
-            //it here for safety.
-            FDatabase.MetaIndexLock.Acquire;
             try
-              FDatabase.Rollback(PseudoTid, rbpIndexRollback, []);
-              FDatabase.Rollback(PseudoTid, rbpMetaRollback, []);
+              FDatabase.ToScratch(PseudoTid, ChangesetStream);
             finally
-              FDatabase.MetaIndexLock.Release;
+              //We probably shouldn't need to to this at all, but keep
+              //it here for safety.
+              FDatabase.MetaIndexLock.Acquire;
+              try
+                FDatabase.Rollback(PseudoTid, rbpIndexRollback, [], Ctxt);
+                FDatabase.Rollback(PseudoTid, rbpMetaRollback, [], Ctxt);
+              finally
+                FDatabase.MetaIndexLock.Release;
+              end;
             end;
+          finally
+            FDatabase.CommitLock.Release;
+            FDatabase.Rollback(PseudoTid, rbpDelayedRollback, CleardownOptSet, Ctxt);
           end;
-        finally
-          FDatabase.CommitLock.Release;
-          FDatabase.Rollback(PseudoTid, rbpDelayedRollback, CleardownOptSet);
+        except
+          ChangesetStream.Free;
+          DeleteFile(TmpName);
+          raise;
         end;
-      except
-        ChangesetStream.Free;
-        DeleteFile(TmpName);
-        raise;
+        FJournal.Checkpoint(ChangesetStream);
+      finally
+        Ctxt.Free;
       end;
-      FJournal.Checkpoint(ChangesetStream);
     finally
       FRWWLock.Release(lrSharedRead);
       FSessionLock.Acquire;

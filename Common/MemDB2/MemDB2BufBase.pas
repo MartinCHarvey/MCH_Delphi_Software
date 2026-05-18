@@ -77,6 +77,13 @@ type
   TMemDBCommitPhase = (ccpData, ccpMetaIndex, ccpCleardown);
   TMemDBRollbackPhase = (rbpIndexRollback, rbpMetaRollback, rbpDelayedRollback);
 
+{$IFDEF USE_TRACKABLES}
+  TTXLocalContext = class(TTrackable)
+{$ELSE}
+  TTXLocalContext = class
+{$ENDIF}
+  end;
+
   //Object which can write changes between current and next version to journal.
 {$IFDEF USE_TRACKABLES}
   TMemDBJournalCreator = class(TTrackable)
@@ -108,9 +115,9 @@ type
     //Check A/B buffered changes consistent and logical (and/or atomic) before commit.
     procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet); virtual; abstract;
     //Save to journal / Make the changes.
-    procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase; Opts:TOptimizeSet); virtual; abstract;
+    procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext); virtual; abstract;
     //Rollback changes, possibly promptly or delayed.
-    procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase; Opts:TOptimizeSet); virtual; abstract;
+    procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext); virtual; abstract;
   end;
 
   //Generally deep clone unless some list magic requires otherwise.
@@ -255,22 +262,23 @@ type
   PMemDBIndexPin = ^TMemDbIndexPin;
 {$ENDIF}
 
-const
-  PIN_CACHE_SIZE = 64;  //Longest possible path + rebalances
-
 type
 {$IFDEF USE_TRACKABLES}
-  TMemDBPinCache = class(TTrackable)
+  TMemDBIPinCache = class(TTrackable)
 {$ELSE}
-  TMemDBPinCache = class
+  TMemDBIPinCache = class
 {$ENDIF}
   protected
     FPtrs: TList;
+    function GetCapacity: integer;
+    procedure SetCapacity(Capacity: integer);
   public
     constructor Create;
     destructor Destroy; override;
     function GetFromCache: PMemDBIndexPin;
     function PutToCache(Pin: PMemDBIndexPin): boolean;
+    procedure TakeNodesFrom(Cache: TMemDBIPinCache);
+    property Capacity: integer read GetCapacity write SetCapacity;
   end;
 
   TPinReason = (pinEvolve, pinFinalCheck);
@@ -327,7 +335,7 @@ type
     procedure SetListCreateClass(New: TMemDBStreamableClass);
 
     function HoldIndexPinInLock(Pin: PMemDbIndexPin): PMemDBIndexPin;
-    procedure ReleaseIndexPinOutsideLock(Pin: PMemDbIndexPin);
+    procedure ReleaseIndexPinOutsideLock(Pin: PMemDbIndexPin; NodeCacheHint: TMemDBNodeCache);
   public
     //Determining changes for Tid's is easy to do for composite objects,
     //if you don't mind accruing pins along the way (internal structure).
@@ -367,8 +375,8 @@ type
     procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet);override;
 
     procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet); override;
-    procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase; Opts:TOptimizeSet); override;
-    procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase;  Opts:TOptimizeSet); override;
+    procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext); override;
+    procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase;  Opts:TOptimizeSet; Ctxt: TTXLocalContext); override;
 
     //Navigated to via row list.
     function PinForCursor(const Tid: TTransactionId): boolean;
@@ -411,8 +419,8 @@ type
     //Node refcount > 0 means potentially shared in tree, but
     //once it's down to zero, we can used stack-passed thread-local caches to
     //speed things up considerably.
-    procedure UnpinFromIndex(IndexNode: TMemDbIndexLeafGeneric; PCache: TMemDBPinCache);
-    procedure DupIndexPin(SourceNode, DestNode: TMemDBIndexLeafGeneric; PCache: TMemDBPinCache);
+    procedure UnpinFromIndex(IndexNode: TMemDbIndexLeafGeneric; PCache: TMemDBIPinCache);
+    procedure DupIndexPin(SourceNode, DestNode: TMemDBIndexLeafGeneric; PCache: TMemDBIPinCache);
   end;
 
   TMemDBMultiBufferedTiny = class(TMemDbMultiBuffered)
@@ -451,7 +459,7 @@ type
 implementation
 
 uses
-  SysUtils, Reffed;
+  SysUtils, Reffed, IndexedStore;
 
 const
   S_CHANGESET_BAD_LISTS = 'Changeset has lists of items that are not consistent';
@@ -555,26 +563,28 @@ begin
 {$ENDIF}
 end;
 
-{ TMemDBPinCache }
+{ TMemDBIPinCache }
 
 
-constructor TMemDBPinCache.Create;
+constructor TMemDBIPinCache.Create;
 begin
   inherited;
   FPtrs := TList.Create;
+  FPtrs.Capacity := SMALL_NODE_PIN_CACHE_SIZE;
 end;
 
-destructor TMemDBPinCache.Destroy;
+destructor TMemDBIPinCache.Destroy;
 var
   i: integer;
 begin
+  FPtrs.Sort(ComparePointers);
   for i := 0 to Pred(FPtrs.Count) do
     DisposeIndexPin(PMemDBIndexPin(FPtrs[i]));
   FPtrs.Free;
   inherited;
 end;
 
-function TMemDBPinCache.GetFromCache: PMemDBIndexPin;
+function TMemDBIPinCache.GetFromCache: PMemDBIndexPin;
 var
   Count: integer;
 begin
@@ -589,14 +599,14 @@ begin
     result := nil;
 end;
 
-function TMemDBPinCache.PutToCache(Pin: PMemDBIndexPin): boolean;
+function TMemDBIPinCache.PutToCache(Pin: PMemDBIndexPin): boolean;
 var
   Count: integer;
 begin
   if Assigned(Pin) then
   begin
     Count := FPtrs.Count;
-    if Count < PIN_CACHE_SIZE then
+    if Count < FPtrs.Capacity then
     begin
       FPtrs.Add(Pin);
       ResetIndexPin(Pin);
@@ -607,6 +617,26 @@ begin
   end
   else
     result := true;
+end;
+
+procedure TMemDBIPinCache.TakeNodesFrom(Cache: TMemDBIPinCache);
+var
+  i: integer;
+begin
+  for i := 0 to Pred(Cache.FPtrs.Count) do
+    FPtrs.Add(Cache.FPtrs[i]);
+  Cache.FPtrs.Clear;
+end;
+
+function TMemDBIPinCache.GetCapacity: integer;
+begin
+  result := FPtrs.Capacity;
+end;
+
+procedure TMemDBIPinCache.SetCapacity(Capacity: integer);
+begin
+  Assert(Capacity >= FPtrs.Count);
+  FPtrs.Capacity := Capacity;
 end;
 
 { TMemDBJournalCreator }
@@ -1215,7 +1245,7 @@ begin
   end;
 end;
 
-procedure TMemDBMultiBuffered.Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase; Opts:TOptimizeSet);
+procedure TMemDBMultiBuffered.Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext);
 var
   Cur, Nxt: PMemDbMultiItem;
   Pin: PMemDbPinnedItem;
@@ -1291,7 +1321,7 @@ begin
   DCPLazyHandle(RefUp);
 end;
 
-procedure TMemDBMultiBuffered.Rollback(const Tid: TTransactionId; Phase: TMemDBRollbackPhase; Opts:TOptimizeSet);
+procedure TMemDBMultiBuffered.Rollback(const Tid: TTransactionId; Phase: TMemDBRollbackPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext);
 var
   Nxt: PMemDBMultiItem;
   Pin: PMemDbPinnedItem;
@@ -1556,7 +1586,7 @@ begin
   DCPLazyHandle(RefUp);
 end;
 
-procedure TMemDBMultiBuffered.DupIndexPin(SourceNode, DestNode: TMemDBIndexLeafGeneric; PCache: TMemDBPinCache);
+procedure TMemDBMultiBuffered.DupIndexPin(SourceNode, DestNode: TMemDBIndexLeafGeneric; PCache: TMemDBIPinCache);
 var
   RefUp: TReferenceUpdate;
   Pin, NewPin: PMemDBIndexPin;
@@ -1606,7 +1636,7 @@ begin
 end;
 
 
-procedure TMemDBMultiBuffered.UnpinFromIndex(IndexNode: TMemDbIndexLeafGeneric; PCache: TMemDBPinCache);
+procedure TMemDBMultiBuffered.UnpinFromIndex(IndexNode: TMemDbIndexLeafGeneric; PCache: TMemDBIPinCache);
 var
   RefUp: TReferenceUpdate;
   Pin: PMemDBIndexPin;
@@ -1655,13 +1685,13 @@ end;
 
 //N.B Must be careful to hold/release in pairs, because it releases INode
 //without further ado.
-procedure TMemDBMultiBuffered.ReleaseIndexPinOutsideLock(Pin: PMemDbIndexPin);
+procedure TMemDBMultiBuffered.ReleaseIndexPinOutsideLock(Pin: PMemDbIndexPin; NodeCacheHint: TMemDBNodeCache);
 begin
   //No UnpinFromIndex should have happened if we AddReffed OK.
   if Assigned(Pin) then
   begin
     Assert(Assigned(Pin.INode));
-    Pin.INode.Release; //Should call through to UnPinFromIndex.
+    Pin.INode.ReleaseToCache(NodeCacheHint); //Should call through to UnPinFromIndex.
   end;
 end;
 

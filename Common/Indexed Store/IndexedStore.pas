@@ -92,11 +92,6 @@ type
     function CompareItems(OwnItem, OtherItem: TObject; IndexTag: TTagType; OtherNode: TIndexNode): integer; virtual;
       abstract;
   public
-{$IFOPT C+}
-    class function ComparePointers(Own, Other: Pointer): integer;
-{$ELSE}
-    class function ComparePointers(Own, Other: Pointer): integer; inline;
-{$ENDIF}
     constructor Create; virtual;
   end;
   TIndexNodeClass = class of TIndexNode;
@@ -336,6 +331,8 @@ type
     property SearchVal: TObject read FSearchVal write FSearchVal;
   end;
 
+  function ComparePointers(Own, Other: Pointer): integer;
+
 implementation
 
 uses SysUtils, LockAbstractions;
@@ -412,6 +409,42 @@ const
     'Store found an index link node, but it was not attached to an index node.';
   S_NO_MEM_FORWARDED =
     'Out of memory exception forwarded from client thread';
+
+{ Misc functions }
+
+{$HINTS OFF}
+function ComparePointers(Own, Other: Pointer): integer;
+var
+  OwnInt, OtherInt: Cardinal;
+  Own64, Other64: UInt64;
+begin
+  if sizeof(Pointer) = sizeof(Cardinal) then
+  begin
+    OwnInt := Cardinal(Own);
+    OtherInt := Cardinal(Other);
+    if OtherInt > OwnInt then
+      result := 1
+    else if OtherInt < OwnInt then
+      result := -1
+    else
+      result := 0;
+  end
+  else if sizeof(Pointer) = sizeof(UInt64) then
+  begin
+    Own64 := UInt64(Own);
+    Other64 := UInt64(Other);
+    if Other64 > Own64 then
+      result := 1
+    else if Other64 < Own64 then
+      result := -1
+    else
+      result := 0;
+  end
+  else
+    Assert(false);
+end;
+{$HINTS ON}
+
 
 (************************************
  * TItemRec                         *
@@ -1668,39 +1701,6 @@ begin
   //Need this constructor, because virtual,
   //because variable class type creation used here.
 end;
-
-{$HINTS OFF}
-class function TIndexNode.ComparePointers(Own, Other: Pointer): integer;
-var
-  OwnInt, OtherInt: Cardinal;
-  Own64, Other64: UInt64;
-begin
-  if sizeof(Pointer) = sizeof(Cardinal) then
-  begin
-    OwnInt := Cardinal(Own);
-    OtherInt := Cardinal(Other);
-    if OtherInt > OwnInt then
-      result := 1
-    else if OtherInt < OwnInt then
-      result := -1
-    else
-      result := 0;
-  end
-  else if sizeof(Pointer) = sizeof(UInt64) then
-  begin
-    Own64 := UInt64(Own);
-    Other64 := UInt64(Other);
-    if Other64 > Own64 then
-      result := 1
-    else if Other64 < Own64 then
-      result := -1
-    else
-      result := 0;
-  end
-  else
-    Assert(false, S_POINTERS_ODD_SIZE);
-end;
-{$HINTS ON}
 
 function TIndexNode.Compare(Other: TBinTreeItem; AllowKeyDedupe: boolean): integer;
 var
