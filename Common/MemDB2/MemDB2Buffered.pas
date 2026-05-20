@@ -44,11 +44,7 @@ uses
   Trackables,
 {$ENDIF}
   IndexedStore, MemDB2Streamable, Classes, MemDB2Misc, DLList, LockAbstractions,
-  TinyLock, MemDB2BufBase, MemDB2Indexing, Reffed, SyncObjs
-{$IF Defined(MSWINDOWS)}
-  , Windows
-{$ENDIF}
-  ;
+  TinyLock, MemDB2BufBase, MemDB2Indexing, Reffed, SyncObjs;
 
 type
   TMemDBAPIInterfacedObject = class;
@@ -438,6 +434,8 @@ type
     function BuildCheckPartialInternalIndexParallel(Ref1, Ref2: pointer): pointer;
     procedure BuildCheckPartialIndexes(Opts:TOptimizeSet);
 
+    function ThrottleBuildValidateNewIndexParallel(Ref1, Ref2: pointer): pointer;
+    function ThrottleBuildValidateInternalIndexParallel(Ref1, Ref2: pointer): pointer;
     function BuildValidateNewIndexParallel(Ref1, Ref2: pointer): pointer;
     function BuildValidateInternalIndexParallel(Ref1, Ref2: pointer): pointer;
     procedure BuildValidateNewIndexesCommon(LocalIter: boolean; Opts:TOptimizeSet);
@@ -632,7 +630,7 @@ type
   protected
     //Stripe locking performance degrades if more threads than CPU's,
     //because threads become idle holding striped rowlocks. Hence the throttling.
-    FMaxParallel: integer;
+    FPolicies: TOptimizePolicies;
     FEntityThrottle: TSemaphore;
     FIndexThrottle: TSemaphore;
 
@@ -2085,7 +2083,9 @@ end;
 procedure TTidLocal.Init(Parent: TMemDBTablePersistent; const Tid: TTransactionId);
 var
   AddRef: boolean;
+{$IFOPT C+}
   OtherTidLocal: TTidLocal;
+{$ENDIF}
 begin
   FParentTable := Parent;
 
@@ -2421,6 +2421,16 @@ type
   end;
   PBuildValidateIdxParallelContext = ^TBuildValidateIdxParallelContext;
 
+function TTidLocal.ThrottleBuildValidateNewIndexParallel(Ref1, Ref2: pointer): pointer;
+begin
+  FParentTable.FParentDB.FIndexThrottle.Acquire;
+  try
+    result := BuildValidateNewIndexParallel(Ref1, Ref2);
+  finally
+    FParentTable.FParentDB.FIndexThrottle.Release;
+  end;
+end;
+
 function TTidLocal.BuildValidateNewIndexParallel(Ref1, Ref2: pointer): pointer;
 var
   NC: TMemTableMetadataItem;
@@ -2583,6 +2593,16 @@ begin
   end;
 end;
 
+function TTidLocal.ThrottleBuildValidateInternalIndexParallel(Ref1, Ref2: pointer): pointer;
+begin
+  FParentTable.FParentDB.FIndexThrottle.Acquire;
+  try
+    result := BuildValidateInternalIndexParallel(Ref1, Ref2);
+  finally
+    FParentTable.FParentDB.FIndexThrottle.Release;
+  end;
+end;
+
 function TTidLocal.BuildValidateInternalIndexParallel(Ref1, Ref2: pointer): pointer;
 var
   NewIndex: TMemDBIndexInternal;
@@ -2673,6 +2693,23 @@ begin
 
   NewBuild := nil;
   UIdxContext.LocalIter := LocalIter;
+
+  //Re-asses opts, depending on how many indexes we actually need to build
+  //in parallel.
+  PCount := 0;
+  for i := 0 to Pred(Length(FIndexChangesets)) do
+  begin
+    if FIndexChangesets[i] * [ictAdded, ictChangedFieldNumber] <> [] then
+      Inc(PCount);
+  end;
+  if FInternalIndexChangeset * [ictAdded] <> [] then
+    Inc(PCount);
+
+  if PCount <= 1 then
+    Opts := Opts - [optIndexBuildParallel];
+  PCount := 0;
+  //Opt re-assesment done.
+
   if OptApplies(optIndexBuildParallel, Opts) then
     ParallelInit(Handlers, Refs1, Refs2, Excepts, Rets, PCount);
 
@@ -2697,8 +2734,7 @@ begin
       if FIndexChangesets[i] * [ictAdded, ictChangedFieldNumber] <> [] then
       begin
         if OptApplies(optIndexBuildParallel, Opts) then
-          ParallelAddHandler(
-            BuildValidateNewIndexParallel, @UIdxContext, Pointer(i),
+          ParallelAddHandler(ThrottleBuildValidateNewIndexParallel, @UIdxContext, Pointer(i),
             Handlers, Refs1, Refs2, Excepts, Rets, PCount)
         else
           NewBuild.Items[i] := TMemDbIndex(BuildValidateNewIndexParallel(
@@ -2711,8 +2747,7 @@ begin
     begin
       Assert(not Assigned(FInternalIndexCopy)); //Not retrieved from initial index clone.
       if OptApplies(optIndexBuildParallel, Opts) then
-        ParallelAddHandler(
-          BuildValidateInternalIndexParallel, @UIdxContext, nil,
+        ParallelAddHandler(ThrottleBuildValidateInternalIndexParallel, @UIdxContext, nil,
           Handlers, Refs1, Refs2, Excepts, Rets, PCount)
       else
         FInternalIndexCopy := TMemDBIndexInternal(
@@ -3132,6 +3167,35 @@ var
   PCount: integer;
 
 begin
+  //Re-asses opts, depending on how many indexes we actually need to build
+  //in parallel.
+  PCount := 0;
+  //UIdxs.
+  for i := 0 to Pred(FParentTable.FMasterIndexes.Count) do
+  begin
+    if not FIndexingChangeRequired then
+      Inc(PCount)
+    else
+    begin
+      Assert(i < Length(FIndexChangesets));
+      if  FIndexChangesets[i]
+        * [ictAdded, ictDeleted, ictChangedFieldNumber] = [] then
+        Inc(PCount);
+    end;
+  end;
+  //IntIdx.
+  if not FIndexingChangeRequired then
+    Inc(PCount)
+  else
+  begin
+    if FInternalIndexChangeset = [] then
+      Inc(PCount);
+  end;
+  if PCount <= 1 then
+    Opts := Opts - [optIndexEvolveParallel];
+  PCount := 0;
+  //Opt re-assesment done.
+
   if OptApplies(optIndexEvolveParallel, Opts) then
     ParallelInit(Handlers, Refs1, refs2, Excepts, Rets, PCount);
 
@@ -6858,8 +6922,14 @@ var
   Prox: TMemDBEntityProxy;
   Entity: TMemDBEntity;
   i: integer;
+  StartPos, EndPos, i64: int64;
 begin
-  WrTag(Stream, mstDBStart);
+  StartPos := Stream.Position;
+  WrTag(Stream, mstDBStartV2);
+  //Size hint.
+  i64 := 0;
+  Stream.Write(i64, sizeof(i64));
+
   EntityList := AssembleEntityList;
   try
     for i := 0 to Pred(EntityList.Count) do
@@ -6872,6 +6942,18 @@ begin
     EntityList.Release;
   end;
   WrTag(Stream, mstDBEnd);
+
+  //Fixup size hint.
+  //Twist, NullStream really doesn't like being read from.
+  if not (Stream is TNullStream) then
+  begin
+    EndPos := Stream.Position;
+    Stream.Seek(StartPos, soFromBeginning);
+    ExpectTag(Stream, mstDBStartV2);
+    i64 := EndPos - StartPos;
+    Stream.Write(i64, sizeof(i64));
+    Stream.Seek(EndPos, soFromBeginning);
+  end;
 end;
 
 procedure TMemDBDatabasePersistent.ToScratch(const PseudoTid:TTransactionId; Stream: TStream);
@@ -6880,8 +6962,14 @@ var
   Proxy: TMemDbEntityProxy;
   Entity: TMemDbEntity;
   i: integer;
+  StartPos, EndPos, i64: int64;
 begin
-  WrTag(Stream, mstDBStart);
+  StartPos := Stream.Position;
+  WrTag(Stream, mstDBStartV2);
+  //Size hint.
+  i64 := 0;
+  Stream.Write(i64, sizeof(i64));
+
   EntityList := AssembleEntityList;
   try
     for i := 0 to Pred(EntityList.Count) do
@@ -6894,18 +6982,35 @@ begin
     EntityList.Release;
   end;
   WrTag(Stream, mstDBEnd);
+
+  //Fixup size hint.
+  //Twist, NullStream really doesn't like being read from.
+  if not (Stream is TNullStream) then
+  begin
+    EndPos := Stream.Position;
+    Stream.Seek(StartPos, soFromBeginning);
+    ExpectTag(Stream, mstDBStartV2);
+    i64 := EndPos - StartPos;
+    Stream.Write(i64, sizeof(i64));
+    Stream.Seek(EndPos, soFromBeginning);
+  end;
 end;
 
 procedure TMemDBDatabasePersistent.FromJournal(const PseudoTid: TTransactionId; Stream: TStream);
 var
-  StrPos: int64;
+  StrPos, i64: int64;
   NxtTag: TMemStreamTag;
   ChangeType: TMemDBEntityChangeType;
   EntityName: string;
   DBU: TMemDBEntity;
   DBUMeta: TMemDBStreamable;
 begin
-  ExpectTag(Stream, mstDBStart);
+  NxtTag := RdTag(Stream);
+  if not (NxtTag in [mstDBStart, mstDBStartV2]) then
+    raise EMemDBException.Create(S_WRONG_TAG);
+  if (NxtTag = mstDBStartV2) then
+    Stream.Read(i64, sizeof(i64));
+
   StrPos := Stream.Position;
   NxtTag := RdTag(Stream);
   while NxtTag <> mstDBEnd do
@@ -6964,14 +7069,19 @@ end;
 
 procedure TMemDBDatabasePersistent.FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet);
 var
-  StrPos: int64;
+  StrPos, i64: int64;
   NxtTag: TMemStreamTag;
   ChangeType: TMemDBEntityChangeType;
   EntityName: string;
   DBU: TMemDBEntity;
   LatestSel: TBufSelector;
 begin
-  ExpectTag(Stream, mstDBStart);
+  NxtTag := RdTag(Stream);
+  if not (NxtTag in [mstDBStart, mstDBStartV2]) then
+    raise EMemDBException.Create(S_WRONG_TAG);
+  if (NxtTag = mstDBStartV2) then
+    Stream.Read(i64, sizeof(i64));
+
   StrPos := Stream.Position;
   NxtTag := RdTag(Stream);
   while NxtTag <> mstDBEnd do
@@ -7317,10 +7427,6 @@ begin
 end;
 
 constructor TMemDBDatabasePersistent.Create;
-{$IF Defined(MSWINDOWS)}
-var
-  SysInfo: TSystemInfo;
-{$ENDIF}
 begin
   inherited;
   FInterfaced := TMemDBAPIInterfacedObject.Create;
@@ -7331,20 +7437,9 @@ begin
   FCommitLock := TCriticalSection.Create;
   FMetaIndexLock := TCriticalSection.Create;
   DLItemInitList(@FEntityList);
-{$IF Defined(MSWINDOWS)}
-  GetSystemInfo(SysInfo);
-  self.FMaxParallel := SysInfo.dwNumberOfProcessors;
-{$ELSE}
-  //TODO - find out how to determine # of CPU's on an appropriate platform.
-  FMaxParallel := 8;
-{$ENDIF}
-  if FMaxParallel < 1 then
-  begin
-    Assert(false);
-    FMaxParallel := 1;
-  end;
-  FEntityThrottle := TSemaphore.Create(nil, FMaxParallel, High(integer), '', false);
-  FIndexThrottle := TSemaphore.Create(nil, FMaxParallel, High(integer), '', false);
+  FPolicies := DefaultOptimizePolicies; //TODO - Configurability here.
+  FEntityThrottle := TSemaphore.Create(nil, FPolicies.MaxParallel, High(integer), '', false);
+  FIndexThrottle := TSemaphore.Create(nil, FPolicies.MaxParallel, High(integer), '', false);
 end;
 
 destructor TMemDBDatabasePersistent.Destroy;

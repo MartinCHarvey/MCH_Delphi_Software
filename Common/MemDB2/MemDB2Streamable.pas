@@ -284,6 +284,7 @@ type
     mstRowStartV2,
     mstGuidStart,
     mstGuidEnd,
+    mstDBStartV2,
     mstReservedForEscape,
     mstReservedForEscape2 //NB, can add after these. No longer FE, FF.
   );
@@ -300,6 +301,8 @@ function RdGuid(Stream:TStream): TGUID;
 
 function AssignedNotSentinel(X: TMemDBStreamable): boolean; inline;
 function NotAssignedOrSentinel(X: TMemDBStreamable): boolean; inline;
+
+procedure GetTxionSizeEstimate(JournalEntry: TStream; var TxionSizeEstimate: int64);
 
 implementation
 
@@ -1270,6 +1273,27 @@ end;
 function NotAssignedOrSentinel(X: TMemDBStreamable): boolean;
 begin
   result := (not Assigned(X)) or (X is TMemDeleteSentinel);
+end;
+
+procedure GetTxionSizeEstimate(JournalEntry: TStream; var TxionSizeEstimate: int64);
+var
+  JPos: int64;
+  Tag: TMemStreamTag;
+begin
+  TxionSizeEstimate := 0;
+  if Assigned(JournalEntry) then
+  begin
+    JPos := JournalEntry.Position;
+    try
+      Tag := RdTag(JournalEntry);
+      if Tag = mstDBStartV2 then
+        JournalEntry.Read(TxionSizeEstimate, sizeof(TxionSizeEstimate))
+      else
+        TxionSizeEstimate := JournalEntry.Size - JournalEntry.Position;
+    finally
+      JournalEntry.Seek(JPos, soFromBeginning);
+    end;
+  end;
 end;
 
 end.

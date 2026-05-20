@@ -118,36 +118,17 @@ type
     procedure SetFinalFieldOffsets(FinalOffsets: TFieldOffsets);
     procedure SetSparseFieldOffsets(SparseOffsets: TFieldOffsets);
 
-{$IFOPT C+}
-    procedure CheckFastConsistent;
-
-    function GetFinalFieldOffsets: TFieldOffsets;
-    function GetSparseFieldOffsets: TFieldOffsets;
-    function GetFinalFastBase: PFieldOffset;
-    function GetSparseFastBase: PFieldOffset;
-    function GetFinalFastCount: integer;
-    function GetSparseFastCount: integer;
-{$ENDIF}
   public
     destructor Destroy; override;
     function Clone: TMemDBIndexGeneric; override;
     function Find(Sel: TAbSelType; SV: TMemDBIndexSearchVal): TMemDBIndexLeaf;
 
-{$IFOPT C+}
-    property FinalFieldOffsets: TFieldOffsets read GetFinalFieldOffsets write SetFinalFieldOffsets;
-    property SparseFieldOffsets: TFieldOffsets read GetSparseFieldOffsets write SetSparseFieldOffsets;
-    property FinalFastBase: PFieldOffset read GetFinalFastBase;
-    property SparseFastBase: PFieldOffset read GetSparseFastBase;
-    property FinalFastCount: integer read GetFinalFastCount;
-    property SparseFastCount: integer read GetSparseFastCount;
-{$ELSE}
     property FinalFieldOffsets: TFieldOffsets read FFinalFieldOffsets write SetFinalFieldOffsets;
     property SparseFieldOffsets: TFieldOffsets read FSparseFieldOffsets write SetSparseFieldOffsets;
     property FinalFastBase: PFieldOffset read FFinalFastBase;
     property SparseFastBase: PFieldOffset read FSparseFastBase;
     property FinalFastCount: integer read FFinalFastCount;
     property SparseFastCount: integer read FSparseFastCount;
-{$ENDIF}
   end;
 
   TMemDBIndexInternal = class(TMemDBIndexGeneric)
@@ -735,61 +716,11 @@ end;
 
 { TMemDBIndex }
 
-{$IFOPT C+}
-procedure TMemDbIndex.CheckFastConsistent;
-begin
-  Assert(Length(FFinalFieldOffsets) = FFinalFastCount);
-  Assert(Length(FSparseFieldOffsets) = FSparseFastCount);
-  Assert(Assigned(FFinalFastBase) = (FFinalFastCount <> 0));
-  Assert(Assigned(FSparseFastBase) = (FSparseFastCount <> 0));
-end;
-
-function TMemDbIndex.GetFinalFieldOffsets: TFieldOffsets;
-begin
-  CheckFastConsistent;
-  result := FFinalFieldOffsets;
-end;
-
-function TMemDbIndex.GetSparseFieldOffsets: TFieldOffsets;
-begin
-  CheckFastConsistent;
-  result := FSparseFieldOffsets;
-end;
-
-function TMemDbIndex.GetFinalFastBase: PFieldOffset;
-begin
-  CheckFastConsistent;
-  result := FFinalFastBase;
-end;
-
-function TMemDbIndex.GetSparseFastBase: PFieldOffset;
-begin
-  CheckFastConsistent;
-  result := FSparseFastBase;
-end;
-
-function TMemDbIndex.GetFinalFastCount: integer;
-begin
-  CheckFastConsistent;
-  result := FFinalFastCount;
-end;
-
-function TMemDbIndex.GetSparseFastCount: integer;
-begin
-  CheckFastConsistent;
-  result := FSparseFastCount;
-end;
-
-{$ENDIF}
-
 procedure TMemDbIndex.SetFinalFieldOffsets(FinalOffsets: TFieldOffsets);
 var
   NewLen, i: integer;
   WPtr: PFieldOffset;
 begin
-{$IFOPT C+}
-  CheckFastConsistent;
-{$ENDIF}
   FFinalFieldOffsets := FinalOffsets;
   NewLen := Length(FFinalFieldOffsets);
   if NewLen <> FFinalFastCount then
@@ -811,9 +742,6 @@ begin
     WPtr^ := FFinalFieldOffsets[i];
     Inc(WPtr);
   end;
-{$IFOPT C+}
-  CheckFastConsistent;
-{$ENDIF}
 end;
 
 procedure TMemDbIndex.SetSparseFieldOffsets(SparseOffsets: TFieldOffsets);
@@ -821,9 +749,6 @@ var
   NewLen, i: integer;
   WPtr: PFieldOffset;
 begin
-{$IFOPT C+}
-  CheckFastConsistent;
-{$ENDIF}
   FSparseFieldOffsets := SparseOffsets;
   NewLen := Length(FSparseFieldOffsets);
   if NewLen <> FSparseFastCount then
@@ -845,9 +770,6 @@ begin
     WPtr^ := FSparseFieldOffsets[i];
     Inc(WPtr);
   end;
-{$IFOPT C+}
-  CheckFastConsistent;
-{$ENDIF}
 end;
 
 destructor TMemDBIndex.Destroy;
@@ -861,9 +783,6 @@ end;
 
 function TMemDBIndex.Clone: TMemDBIndexGeneric;
 begin
-{$IFOPT C+}
-  CheckFastConsistent;
-{$ENDIF}
   result := inherited;
   if Assigned(result) then
   begin
@@ -874,10 +793,6 @@ begin
       SparseFieldOffsets := self.SparseFieldOffsets;
     end;
   end;
-{$IFOPT C+}
-  CheckFastConsistent;
-  (result as TMemDBIndex).CheckFastConsistent;
-{$ENDIF}
 end;
 
 function TMemDbIndex.Find(Sel: TAbSelType; SV: TMemDBIndexSearchVal): TMemDBIndexLeaf;
