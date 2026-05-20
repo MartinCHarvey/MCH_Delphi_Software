@@ -283,7 +283,7 @@ uses
 {$IF Defined(MSWINDOWS)}
   Windows,
 {$ENDIF}
-  MemDB2Indexing;
+  MemDB2Indexing, PatchFreeMem;
 
 const
   S_TAG_FREED_IDX_SET = 'Index tag data freed whilst index still set.';
@@ -685,5 +685,6 @@ initialization
   //N.B There's a bug in the Delphi XE4 version of SysFreeMem where this flag is
   //not correctly checked. If you're seeing poor performance, perhaps time to upgrade
   //to a newer version.
-  System.NeverSleepOnMMThreadContention := true
+  GoPatchFreeMem;
+  System.NeverSleepOnMMThreadContention := true;
 end.

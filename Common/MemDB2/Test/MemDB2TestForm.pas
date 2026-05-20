@@ -4356,9 +4356,7 @@ procedure TForm1.MultiRRTrans(Sender: TObject);
 
 begin
   SetupRR;
-  LogTimeIncr('This test runs OK ...');
   BlastRR(true);
-  LogTimeIncr('Poor performance here due to FastMM 64 bit not honouring NeverSleepOnMMThreadContention (at least on XE4)');
   BlastRR(false);
 end;
 

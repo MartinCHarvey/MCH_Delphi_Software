@@ -1,15 +1,6 @@
 
 MemDB2 TODO.
 
-- Lots of small transactions reading one row is very slow
-  - 1024 tx start par thread x 64 threads takes 30 secs.
-    - even when commit / rollback etc does not spawn threads?
-      only one row changed per thread?
-
-- As opposed to 64 tx start, 1024 rows per tx, is 1 sec
-  (as fast as 1 serial thread ... expect metadata serialisation)
-  but should be able to do it in prob 1/8th second
-
 - Refactor META_ / Pinning functions to use cached values.
   - Todo: Debug bad multi-reader performance, see if this is indeed the cause.
 
