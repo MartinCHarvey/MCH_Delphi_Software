@@ -1102,7 +1102,7 @@ begin
       end;
     end;
   finally
-    EntityList.Release;
+    EntityList.ReleaseToCache(FEntityListCache);
   end;
 end;
 

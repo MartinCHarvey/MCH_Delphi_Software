@@ -625,9 +625,33 @@ type
     constructor Create;
   end;
 
+  //Quick bit of caching for these lists which are created and destroyed
+  //multiple times per txion, whether or not any underlying index copies etc
+  //are created.
+  TMemDBEntityList = class(TReffedList)
+  protected
+    procedure ReleaseAndClearCaching;
+  public
+    procedure Reset(Cache: TReffedCache); override;
+  end;
+
+  TMemDBEntityListCache = class(TReffedCache)
+  private
+    FLock: TCriticalSection;
+    FList: TList;
+  public
+    constructor Create;
+    destructor Destroy; override;
+
+    function GetFromCache: TReffed; override;
+    function PutToCache(Reffed: TReffed): boolean; override;
+  end;
+
   TMemDBDatabasePersistent = class(TMemDBJournalCreator)
   private
   protected
+    FEntityListCache: TMemDBEntityListCache;
+
     //Stripe locking performance degrades if more threads than CPU's,
     //because threads become idle holding striped rowlocks. Hence the throttling.
     FPolicies: TOptimizePolicies;
@@ -649,7 +673,7 @@ type
                              var ChangeType: TMemDBEntityChangeType;
                              var EntityName: string);
     //Atomically get and assemble list of entities.
-    function AssembleEntityList: TReffedList;
+    function AssembleEntityList: TMemDBEntityList;
     procedure ConsolidateAndFreeCaches(Ctxt: TTXLocalContext);
   public
     function EntitiesByName(const AB:TBufSelector; Name: string; PinReason: TPinReason): TMemDBEntity;
@@ -6602,6 +6626,90 @@ begin
   //FLock, list, init done elsewhere.
 end;
 
+{ TMemDBEntityList }
+
+procedure TMemDBEntityList.ReleaseAndClearCaching;
+var
+  i: integer;
+begin
+  for i := 0 to Pred(Count) do
+  begin
+    Items[i].Release; //Child items not freed to our cache.
+    Items[i] := nil;
+  end;
+  //Don't touch the memory allocator, just set the count.
+  Count := 0;
+end;
+
+procedure TMemDBEntityList.Reset(Cache: TReffedCache);
+begin
+  ReleaseAndClearCaching;
+  inherited;
+end;
+
+{ TMemDBEntityListCache }
+
+constructor TMemDBEntityListCache.Create;
+begin
+  inherited;
+  FList := TList.Create;
+  FLock := TCriticalSection.Create;
+end;
+
+destructor TMemDBEntityListCache.Destroy;
+var
+  i: integer;
+begin
+  if Assigned(FList) then
+  begin
+    for i := 0 to Pred(FList.Count) do
+      TReffed(FList.Items[i]).Release;
+  end;
+  FList.Free;
+  FLock.Free;
+  inherited;
+end;
+
+function TMemDBEntityListCache.GetFromCache: TReffed;
+var
+ C: integer;
+begin
+  FLock.Acquire;
+  try
+    C := FList.Count;
+    if C > 0 then
+    begin
+      Dec(C);
+      result := FList[C];
+      FList.Delete(C);
+    end
+    else
+      result := nil;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TMemDBEntityListCache.PutToCache(Reffed: TReffed): boolean;
+begin
+  if Assigned(Reffed) then
+  begin
+    //Outside lock, but we are the only thread with a reference to reffed.
+    Reffed.Reset(self);
+    //This must be locked, (atomic counts), and ...
+    //other threads could use contents of reffed...
+    FLock.Acquire;
+    try
+      FList.Add(Reffed);
+    finally
+      FLock.Release;
+    end;
+    result := true;
+  end
+  else
+    result := false;
+end;
+
 { TMemDBDatabasePersistent }
 
 procedure TMemDBDatabasePersistent.StartTransaction(const Tid: TTRansactionId);
@@ -6622,7 +6730,7 @@ begin
       ObjI.StartTransaction(Tid);
     end;
   finally
-    EntityList.Release;
+    EntityList.ReleaseToCache(FEntityListCache);
   end;
 end;
 
@@ -6763,7 +6871,7 @@ begin
       Assert(false);
     end;
   finally
-    EntityList.Release;
+    EntityList.ReleaseToCache(FEntityListCache);
   end;
 end;
 
@@ -6912,7 +7020,7 @@ begin
     if OptApplies(optEntitiesParallel, Opts) and (PCount > 0) then
       ExecParallel(Handlers, Refs1, refs2, Excepts, Rets, @MemDBXlateExceptions);
   finally
-    EntityList.Release;
+    EntityList.ReleaseToCache(FEntityListCache);
   end;
 end;
 
@@ -6939,7 +7047,7 @@ begin
       Entity.ToJournal(Tid, Stream);
     end;
   finally
-    EntityList.Release;
+    EntityList.ReleaseToCache(FEntityListCache);
   end;
   WrTag(Stream, mstDBEnd);
 
@@ -6979,7 +7087,7 @@ begin
       Entity.ToScratch(PseudoTid, Stream);
     end;
   finally
-    EntityList.Release;
+    EntityList.ReleaseToCache(FEntityListCache);
   end;
   WrTag(Stream, mstDBEnd);
 
@@ -7138,7 +7246,7 @@ begin
       result := result or Entity.AnyChangesForTid(Tid);
     end;
   finally
-    EntityList.Release;
+    EntityList.ReleaseToCache(FEntityListCache);
   end;
 end;
 
@@ -7159,7 +7267,7 @@ begin
       result := result or Entity.AnyChanges(Tid);
     end;
   finally
-    EntityList.Release;
+    EntityList.ReleaseToCache(FEntityListCache);
   end;
 end;
 
@@ -7232,9 +7340,10 @@ begin
     if OptApplies(optEntitiesParallel, Opts) and (PCount > 0) then
       ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
   finally
-    EntityList.Release;
+    EntityList.ReleaseToCache(FEntityListCache);
   end;
-  ConsolidateAndFreeCaches(Ctxt);
+  if Phase = ccpCleardown then
+    ConsolidateAndFreeCaches(Ctxt);
 end;
 
 type
@@ -7289,7 +7398,6 @@ begin
     TPORoll.Ctxt := Ctxt;
   end;
 
-  //TODO - Entity list allocation during rollback of out-of-memory cases.
   EntityList := AssembleEntityList;
   try
     for i := 0 to Pred(EntityList.Count) do
@@ -7307,9 +7415,10 @@ begin
     if OptApplies(optEntitiesParallel, Opts) and (PCount > 0) then
       ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
   finally
-    EntityList.Release;
+    EntityList.ReleaseToCache(FEntityListCache);
   end;
-  ConsolidateAndFreeCaches(Ctxt);
+  if Phase = rbpDelayedRollback then
+    ConsolidateAndFreeCaches(Ctxt);
 end;
 
 procedure TMemDBDatabasePersistent.ConsolidateAndFreeCaches(Ctxt: TTXLocalContext);
@@ -7356,15 +7465,18 @@ begin
       Entity.SizeHint(Tid, SizeHint);
     end;
   finally
-    EntityList.Release;
+    EntityList.ReleaseToCache(FEntityListCache);
   end;
 end;
 
-function TMemDBDatabasePersistent.AssembleEntityList: TReffedList;
+function TMemDBDatabasePersistent.AssembleEntityList: TMemDBEntityList;
 var
   Proxy: TMemDBEntityProxy;
 begin
-  result := TReffedList.Create;
+  if Assigned(FEntityListCache) then
+    result := FEntityListCache.GetFromCache as TMemDBEntityList;
+  if not Assigned(result) then
+    result := TMemDBEntityList.Create;
   try
     FEntityLock.Acquire;
     try
@@ -7378,7 +7490,7 @@ begin
       FEntityLock.Release;
     end;
   except
-    result.Release;
+    result.ReleaseToCache(FEntityListCache);
     raise;
   end;
 end;
@@ -7421,7 +7533,7 @@ begin
       end;
     end;
   finally
-    List.Release;
+    List.ReleaseToCache(FEntityListCache);
   end;
   result := nil;
 end;
@@ -7440,6 +7552,7 @@ begin
   FPolicies := DefaultOptimizePolicies; //TODO - Configurability here.
   FEntityThrottle := TSemaphore.Create(nil, FPolicies.MaxParallel, High(integer), '', false);
   FIndexThrottle := TSemaphore.Create(nil, FPolicies.MaxParallel, High(integer), '', false);
+  FEntityListCache:= TMemDBEntityListCache.Create;
 end;
 
 destructor TMemDBDatabasePersistent.Destroy;
@@ -7479,7 +7592,7 @@ begin
             //Should clear all pins and refs, assuming no oustanding txions.
         end;
       finally
-        EntityList.Release;
+        EntityList.ReleaseToCache(FEntityListCache);
       end;
       Prepare(PseudoTid, CleardownOptSet, false);
       ToJournal(PseudoTid, NullStream);
@@ -7506,7 +7619,7 @@ begin
       EntityList.Items[i] := nil;
     end;
   finally
-    EntityList.Release;
+    EntityList.ReleaseToCache(FEntityListCache);
   end;
 {$ENDIF}
   Assert(DlItemIsEmpty(@FEntityList));
@@ -7516,6 +7629,7 @@ begin
   FMetaIndexLock.Free;
   FEntityThrottle.Free;
   FIndexThrottle.Free;
+  FEntityListCache.Free;
   inherited;
 end;
 
@@ -7547,7 +7661,7 @@ begin
           .HandleAPITableRename(Sel, OldName, NewName) or result;
     end;
   finally
-    EntityList.Release;
+    EntityList.ReleaseToCache(FEntityListCache);
   end;
 end;
 
@@ -7569,7 +7683,7 @@ begin
         .CheckAPITableDelete(Sel, TableName);
     end;
   finally
-    EntityList.Release;
+    EntityList.ReleaseToCache(FEntityListCache);
   end;
 end;
 
@@ -7592,7 +7706,7 @@ begin
         .HandleAPIIndexRename(Sel, IsoDeterminedTableName, OldName, NewName) or result;
     end;
   finally
-    EntityList.Release;
+    EntityList.ReleaseToCache(FEntityListCache);
   end;
 end;
 
@@ -7615,7 +7729,7 @@ begin
         .CheckAPIIndexDelete(Sel, IsoDeterminedTableName, IndexName);
     end;
   finally
-    EntityList.Release;
+    EntityList.ReleaseToCache(FEntityListCache);
   end;
 end;
 

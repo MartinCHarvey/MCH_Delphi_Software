@@ -577,9 +577,12 @@ destructor TMemDBIPinCache.Destroy;
 var
   i: integer;
 begin
-  FPtrs.Sort(ComparePointers);
-  for i := 0 to Pred(FPtrs.Count) do
-    DisposeIndexPin(PMemDBIndexPin(FPtrs[i]));
+  if Assigned(FPtrs) then
+  begin
+    FPtrs.Sort(ComparePointers);
+    for i := 0 to Pred(FPtrs.Count) do
+      DisposeIndexPin(PMemDBIndexPin(FPtrs[i]));
+  end;
   FPtrs.Free;
   inherited;
 end;

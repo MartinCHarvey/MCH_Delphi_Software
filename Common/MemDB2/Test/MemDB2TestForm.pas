@@ -90,7 +90,7 @@ const
   BIG_NTABLES = 5;
   BIG_NINDEXES = 5;
   BLOB_SIZE = 1024;
-  THREADS_CONCURRENT = 64;
+  THREADS_CONCURRENT = 16;
 
 type
   EMemDBTestException = class(EMemDBException);
@@ -4356,7 +4356,9 @@ procedure TForm1.MultiRRTrans(Sender: TObject);
 
 begin
   SetupRR;
+  LogTimeIncr('This test runs OK ...');
   BlastRR(true);
+  LogTimeIncr('Poor performance here due to FastMM 64 bit not honouring NeverSleepOnMMThreadContention (at least on XE4)');
   BlastRR(false);
 end;
 
