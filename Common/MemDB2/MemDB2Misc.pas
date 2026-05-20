@@ -210,7 +210,10 @@ type
   end;
   POptimizePolicy = ^TOptimizePolicy;
 
-  TOptimizePolicies = array [Low(TOptimization).. MaxOptByPolicy] of TOptimizePolicy;
+  TOptimizePolicies = record
+    P: array [Low(TOptimization).. MaxOptByPolicy] of TOptimizePolicy;
+    MaxParallel: integer;
+  end;
 
 const
   TMemDBPhaseStrings: array[TMemDBPhase] of string =
@@ -277,6 +280,9 @@ function DefaultOptimizePolicies: TOptimizePolicies;
 implementation
 
 uses
+{$IF Defined(MSWINDOWS)}
+  Windows,
+{$ENDIF}
   MemDB2Indexing;
 
 const
@@ -314,7 +320,7 @@ begin
   result := [];
   for Opt := Low(Opt) to MaxOptByPolicy do
   begin
-   Policy := @Policies[Opt];
+   Policy := @Policies.P[Opt];
    case Policy.PolicyType of
     optSpecify: DoOpt := Policy.Enabled;
     optContext: DoOpt := (Policy.EnabledReplayFirst and InitFirstTrans) or
@@ -353,31 +359,48 @@ var
 begin
   for Opt := Low(Opt) to High(Opt) do
   begin
-    result[Opt].PolicyType := optSpecify;
-    result[Opt].Enabled := false;
+    result.P[Opt].PolicyType := optSpecify;
+    result.P[Opt].Enabled := false;
   end;
+  result.MaxParallel := 1;
 end;
 
 function DefaultOptimizePolicies: TOptimizePolicies;
+{$IF Defined(MSWINDOWS)}
+var
+  SysInfo: TSystemInfo;
+{$ENDIF}
 begin
-  with result[TOptimization.optEntitiesParallel] do
+  with result.P[TOptimization.optEntitiesParallel] do
   begin
     PolicyType := optTxionSize;
     EnabledRowChangeCount := THIRTY_TWO_K;
     EnabledTxionBufSize := TWO_FIFTY_SIX_K;
     EnabledFKRowsTotal := TWO_FIFTY_SIX_K;
   end;
-  with result[TOptimization.optIndexBuildParallel] do
+  with result.P[TOptimization.optIndexBuildParallel] do
   begin
     PolicyType := optSpecify;
     Enabled := true;
   end;
-  with result[TOptimization.optIndexEvolveParallel] do
+  with result.P[TOptimization.optIndexEvolveParallel] do
   begin
     PolicyType := optTxionSize;
     EnabledRowChangeCount := THIRTY_TWO_K;
     EnabledTxionBufSize := TWO_FIFTY_SIX_K;
     EnabledFKRowsTotal := TWO_FIFTY_SIX_K;
+  end;
+{$IF Defined(MSWINDOWS)}
+  GetSystemInfo(SysInfo);
+  result.MaxParallel := SysInfo.dwNumberOfProcessors;
+{$ELSE}
+  //TODO - find out how to determine # of CPU's on an appropriate platform.
+  result.MaxParallel := 8;
+{$ENDIF}
+  if result.MaxParallel < 1 then
+  begin
+    Assert(false);
+    result.MaxParallel := 1;
   end;
 end;
 
@@ -474,7 +497,7 @@ begin
     inherited;
   finally
     if Length(Tmp) > 0 then
-      DeleteFile(Tmp);
+      SysUtils.DeleteFile(Tmp);
   end;
 end;
 

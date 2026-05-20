@@ -55,7 +55,7 @@ uses
 
 const
   LOCK_ARRAY_SIZE = Succ(High(Word));
-  A_LONGER_SPIN = 12000;
+  //A_LONGER_SPIN = 12000;
 
 type
   TSpinModCriticalSection = class(TCriticalSection)
@@ -119,7 +119,7 @@ begin
   for i := Low(LockArray) to High(LockArray) do
   begin
     Locks[i] := TSpinModCriticalSection.Create;
-    Locks[i].SetSpinCount(A_LONGER_SPIN);
+    //Locks[i].SetSpinCount(A_LONGER_SPIN);
   end;
 end;
 

@@ -168,10 +168,7 @@ type
   //API operations. These perform consistency checking on the operations,
   //and do not maintain an per-transaction state.
   TMemDbDatabase = class(TMemDbDatabasePersistent)
-  protected
-    FPolicies: TOptimizePolicies;
   public
-    constructor Create;
     procedure API_CreateTable(T: TObject; Name: string);
     procedure API_CreateForeignKey(T: TObject; Name: string);
     procedure API_RenameTableOrKey(T: TObject; OldName, NewName: string);
@@ -393,9 +390,11 @@ var
    OptSet: TOptimizeSet;
    SizeHint: TDBSizeHint;
    Ctxt: TXEntityLocalContext;
+   TxionSizeEstimate: Int64;
 begin
   FillChar(SizeHint, sizeof(SizeHint), 0);
-  OptSet := MakeOptimizationSet(DB.Policies, Initial, not Initial, false, SizeHint, JournalEntry.Size);
+  GetTxionSizeEstimate(JournalEntry, TxionSizeEstimate);
+  OptSet := MakeOptimizationSet(DB.Policies, Initial, not Initial, false, SizeHint, TxionSizeEstimate);
 
   PseudoTid := TTransactionId.NewTransactionID(ilSerialisable); //if only writer, should be serialisable.
   Ctxt := TXEntityLocalContext.Create;
@@ -945,13 +944,6 @@ end;
 //////////////////////////////////////////////////////////////////////
 
 { TMemDbDatabase }
-
-constructor TMemDBDatabase.Create;
-begin
-  inherited;
-//  FPolicies := NoOptimizePolicies;
-  FPolicies := DefaultOptimizePolicies;
-end;
 
 //Generally, don't try to undelete, unrename etc etc in the same transaction.
 procedure TMemDBDatabase.API_CreateTable(T:TObject; Name: string);

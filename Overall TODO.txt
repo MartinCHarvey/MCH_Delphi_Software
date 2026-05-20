@@ -1,16 +1,24 @@
 
 MemDB2 TODO.
 
-- VTune straight line performance. Okay, but not fab.
-  Unfortunately locking does kinda slow stuff down, unavoidable.
+- Lots of small transactions reading one row is very slow
+  - 1024 tx start par thread x 64 threads takes 30 secs.
+    - even when commit / rollback etc does not spawn threads?
+      only one row changed per thread?
 
-- Parallelise.
+- As opposed to 64 tx start, 1024 rows per tx, is 1 sec
+  (as fast as 1 serial thread ... expect metadata serialisation)
+  but should be able to do it in prob 1/8th second
 
 - Refactor META_ / Pinning functions to use cached values.
   - Todo: Debug bad multi-reader performance, see if this is indeed the cause.
 
-- Create GetCurrentInLock / GetNextInLock function for faster access under commit lock.
-  - Only where definitely possible (perhaps not GetNext as it's not an immutable part of the list).
+- Have CurrentInLock function.
+  - Check not duplicated work with FLagsInLock.
+  - Create boolean test flag for InLock
+    - Global, and MemDBTest only.
+  - Look for instances of PinCurrent durring commit cycle where clearly
+    not needed.
 
 - MinIso values  / require atomic. Way to make that cleaner?
   - More careful scrutiny on what requires meta to be atomic and when.

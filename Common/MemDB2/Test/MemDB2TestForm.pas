@@ -4171,20 +4171,32 @@ type
     WaitHandle: TEvent;
     RMode: TMDBAccessMode;
     Iso: TMDBIsolationLevel;
+    EntireTablePerTrans: boolean;
     procedure Execute; override;
   end;
 
 procedure TRRThread.Execute;
 var
-  i: integer;
-  j: integer;
+  i, LimI: integer;
+  j, LimJ: integer;
+  idx: integer;
   T: TMemDBTransaction;
   DBAPI: TMemAPIDatabase;
   TblData:TMemAPITableData;
   DataRec: TMemDbFieldDataRec;
 begin
   WaitHandle.WaitFor(INFINITE);
-  for i := 1 to LIMIT do
+  if self.EntireTablePerTrans then
+  begin
+    LimI := 1;
+    LimJ := LIMIT
+  end
+  else
+  begin
+    LimI := LIMIT;
+    LimJ := 1;
+  end;
+  for i := 1 to LimI do
   begin
     T := FSession.StartTransaction(RMode, amLazyWrite, Iso);
     try
@@ -4192,18 +4204,25 @@ begin
       try
         TblData := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
         try
-          DataRec.FieldType := ftInteger;
-          j := Succ(Random(LIMIT));
-          DataRec.i32Val := j;
-          TblData.FindByIndex('IntField1Idx', DataRec);
-          TblData.ReadField('IntField1', DataRec);
-          Assert(DataRec.i32Val = j);
-          TblData.ReadField('IntField2', DataRec);
-          Assert(DataRec.i32Val + j = Succ(LIMIT));
-          TblData.ReadField('StringField1', DataRec);
-          Assert(DataRec.sVal = IntToStr(j));
-          TblData.ReadField('StringField2', DataRec);
-          Assert(DataRec.sVal = IntToStr(Succ(LIMIT - j)));
+          for j := 1 to LimJ do
+          begin
+            DataRec.FieldType := ftInteger;
+            if LimJ =1 then
+              idx := Succ(Random(LIMIT))
+            else
+              idx := j;
+            DataRec.i32Val := idx;
+
+            TblData.FindByIndex('IntField1Idx', DataRec);
+            TblData.ReadField('IntField1', DataRec);
+            Assert(DataRec.i32Val = idx);
+            TblData.ReadField('IntField2', DataRec);
+            Assert(DataRec.i32Val + idx = Succ(LIMIT));
+            TblData.ReadField('StringField1', DataRec);
+            Assert(DataRec.sVal = IntToStr(idx));
+            TblData.ReadField('StringField2', DataRec);
+            Assert(DataRec.sVal = IntToStr(Succ(LIMIT - idx)));
+          end;
         finally
           TblData.Free;
         end;
@@ -4221,7 +4240,7 @@ end;
 //get cleared down correctly etc.
 procedure TForm1.MultiRRTrans(Sender: TObject);
 
-  procedure BlastRR;
+  procedure BlastRR(EntireTable: boolean);
   var
     Evt: TEvent;
     Threads: array [0..THREADS_CONCURRENT] of TRRThread;
@@ -4235,6 +4254,7 @@ procedure TForm1.MultiRRTrans(Sender: TObject);
         Threads[i].WaitHandle := Evt;
         Threads[i].RMode := self.RMode;
         Threads[i].Iso := self.Iso;
+        Threads[i].EntireTablePerTrans := EntireTable;
         Threads[i].Resume;
       end;
       Evt.SetEvent;
@@ -4247,7 +4267,10 @@ procedure TForm1.MultiRRTrans(Sender: TObject);
     finally
       Evt.Free;
     end;
-    LogTimeIncr('Multi RR test run OK');
+    if EntireTable then
+      LogTimeIncr('Multi RR test run OK (entire table per transaction)')
+    else
+      LogTimeIncr('Multi RR test run OK (one row per transaction)')
   end;
 
   procedure SetupRR;
@@ -4282,6 +4305,7 @@ procedure TForm1.MultiRRTrans(Sender: TObject);
         DBAPI.Free;
       end;
       T.CommitAndFree;
+      LogTimeIncr('Multi RR test setup table.');
     except
       on E: Exception do
       begin
@@ -4318,6 +4342,7 @@ procedure TForm1.MultiRRTrans(Sender: TObject);
         DBAPI.Free;
       end;
       T.CommitAndFree;
+      LogTimeIncr('Multi RR test filled data.');
     except
       on E: Exception do
       begin
@@ -4331,8 +4356,8 @@ procedure TForm1.MultiRRTrans(Sender: TObject);
 
 begin
   SetupRR;
-  BlastRR;
-  //TODO - More RW transactions / modes etc when they arrive.
+  BlastRR(true);
+  BlastRR(false);
 end;
 
 procedure TForm1.MultiTransClick(Sender: TObject);
