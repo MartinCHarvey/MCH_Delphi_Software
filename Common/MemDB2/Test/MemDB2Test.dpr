@@ -27,7 +27,8 @@ uses
   Reffed in '..\..\Reffed\Reffed.pas',
   CoWTree in '..\..\CoWTree\CoWTree.pas',
   StripedLock in '..\..\LockAbstractions\StripedLock.pas',
-  CRC32 in '..\..\CRC\CRC32.pas';
+  CRC32 in '..\..\CRC\CRC32.pas',
+  PatchFreeMem in '..\..\PatchFreeMem\PatchFreeMem.pas';
 
 {$R *.res}
 
