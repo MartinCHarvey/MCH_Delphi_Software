@@ -385,9 +385,12 @@ destructor TMemDBNodeCache.Destroy;
 var
   i: integer;
 begin
-  FPtrs.Sort(ComparePointers);
-  for i := 0 to Pred(FPtrs.Count) do
-    TReffed(FPtrs[i]).Release; //Refcounts 1 for cached objects.
+  if Assigned(FPtrs) then
+  begin
+    FPtrs.Sort(ComparePointers);
+    for i := 0 to Pred(FPtrs.Count) do
+      TReffed(FPtrs[i]).Release; //Refcounts 1 for cached objects.
+  end;
   FPtrs.Free;
   FPinCache.Free;
   inherited;

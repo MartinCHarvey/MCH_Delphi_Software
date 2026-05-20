@@ -670,4 +670,20 @@ initialization
     Func := MemDBGeneralXlateExceptions;
     Next := nil;
   end;
+  //N.B. When you do things in parallel, even commits and rollbacks under the
+  //MetaIndex lock involve some degree of memory allocation and freeing.
+  //Calling sleep whilst under that lock is fairly terminal for performance.
+
+  //This is mitigated for indexes with the index caches.
+  //For general DB commit/rollback path entity list cache handles most alloc
+  //cases.
+
+  //Despite this, might want to set sleep on contention to true do debug performance
+  //cases where you want to remove as much contention / memory pressure in critical
+  //paths as possible.
+
+  //N.B There's a bug in the Delphi XE4 version of SysFreeMem where this flag is
+  //not correctly checked. If you're seeing poor performance, perhaps time to upgrade
+  //to a newer version.
+  System.NeverSleepOnMMThreadContention := true
 end.
