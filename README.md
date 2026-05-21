@@ -11,6 +11,7 @@ Most recent (2026) development is in Common/MemDB2:
 - MemDB2 is still work in progress.
   - Caching / locking / etc is still being worked/reworked.
   - _I'll let you know here when it's done and of acceptable quality, which it isn't yet._
+- Now I have Delphi CE 12, I'll be checking for portability to ARM. (I expect it to be mostly seamless).
 - SQL support for both MemDB and MemDB2 to follow.
 
 If any of you folks get some of this to compile / run under the FPC compiler, I'd be very interested to know.
