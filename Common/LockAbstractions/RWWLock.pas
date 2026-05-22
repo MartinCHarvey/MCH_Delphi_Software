@@ -44,7 +44,7 @@ type
                   lsExclusiveWriteExit);
 
   TRWThreadCounts = record
-    Active, Waiting, Admitted: Uint32;
+    Active, Waiting, AdmittedContended: Uint32;
   end;
 
   // All counts zero <=> lock state is idle.
@@ -68,6 +68,7 @@ type
     FCrit: TCriticalSection;
     FState: TRWWLockState;
     FCounts: TRWCounts;
+    FContended: boolean;
     FThreadWaits: TRWWaits;
     FDestroyed: TEvent;
     FRatios: TRWRatios;
@@ -76,7 +77,7 @@ type
     FExclusiveCrit: TCriticalSection;
   protected
     function CanReturnIdle: boolean;
-    function CalcNextState(Reason: TRWWLockReason; var NewReason:TRWWLockReason): TRWWLockState;
+    function CalcNextState(Reason: TRWWLockReason; var NewReason:TRWWLockReason; var ClearContended: boolean): TRWWLockState;
     function OnlyActiveAdmittedCurReason(Reason: TRWWLockReason): boolean;
 
     function GetRatio(Reason:TRWWLockReason):Uint32;
@@ -238,6 +239,7 @@ begin
         Assert(CanReturnIdle); //Check all counts zero as expected.
         FState := ActiveState(Reason);
         FThreadWaits[Reason].SetEvent;
+        Assert(not FContended);
         //Can immediately lock with given reason,
         //counts are zero.
       end;
@@ -253,8 +255,9 @@ begin
         Waiting := false;
         Acquired := true;
         Inc(FCounts[Reason].Active);
-        Inc(FCounts[Reason].Admitted);
-        if FCounts[Reason].Admitted = FRatios[Reason] then
+        if FContended then
+          Inc(FCounts[Reason].AdmittedContended);
+        if FCounts[Reason].AdmittedContended = FRatios[Reason] then
         begin
           FState := ExitState(Reason);
           FThreadWaits[Reason].ResetEvent;
@@ -266,6 +269,11 @@ begin
       end
       else
       begin
+        if FState <> ExitState(Reason) then
+        begin
+          Assert(FState <> lsIdle);
+          FContended := true;  //We are definitely leaving current state.
+        end;
         Waiting := true;
         Acquired := false;
         Inc(FCounts[Reason].Waiting);
@@ -290,7 +298,7 @@ begin
     if ReasonIter <> Reason then
     begin
       if (FCounts[ReasonIter].Active <> 0)
-        or (FCounts[ReasonIter].Admitted <> 0) then
+        or (FCounts[ReasonIter].AdmittedContended <> 0) then
       begin
         result := false;
         exit;
@@ -312,7 +320,7 @@ begin
   end;
 end;
 
-function TRWWLock.CalcNextState(Reason: TRWWLockReason; var NewReason: TRWWLockReason): TRWWLockState;
+function TRWWLock.CalcNextState(Reason: TRWWLockReason; var NewReason: TRWWLockReason; var ClearContended: boolean): TRWWLockState;
 var
   ReasonIter: TRWWLockReason;
 
@@ -322,36 +330,55 @@ begin
   Assert((FState = ActiveState(Reason)) or (FState = ExitState(Reason)));
   NewReason := Reason;
   if FCounts[Reason].Active > 0 then
-    result := FState
+  begin
+    result := FState;
+    ClearContended := false;
+  end
   else
   begin
-    //Can leave current state.
-
-    //Only have waiting for our reason if in the exit state for our reason.
-    //else only threads in our state are active (there are none).
-
-    //Hence ... OK to check any other threads waiting for some other reason.
-    //Should leave current state if waiting threads for any other active state...
+    ClearContended := true;
+    //Any threads waiting for some other reason?
     ReasonIter := IncRWWReason(Reason);
     while ReasonIter <> Reason do
     begin
       if FCounts[ReasonIter].Waiting <> 0 then
       begin
-        result := ActiveState(ReasonIter);
-        NewReason := ReasonIter;
-        exit;
+        if NewReason = Reason then
+        begin
+          result := ActiveState(ReasonIter);
+          NewReason := ReasonIter;
+          Assert(NewReason <> Reason);
+          //Not necessarily contended.
+          //Found new state/reason to move to.
+          //Only clear contention flag if no other states also have waiters.
+        end
+        else
+        begin
+          //Found new state to move to, but other states still have waiters,
+          //Cannot clear contention flag.
+          ClearContended := false;
+        end;
       end;
       ReasonIter := IncRWWReason(ReasonIter);
     end;
-
-    //However, if we have no waiting threads for any other state, and we have
-    //gone into our own WaitExit state, and we have waiting threads,
-    //then go back to our own active state... (otherwise things will grind to a halt).
-    if FCounts[Reason].Waiting <> 0 then
+    //Did we actually decide to move to a new state?
+    if NewReason <> Reason then
     begin
-      result := ActiveState(Reason);
-      exit;
+      Assert((result <> ActiveState(reason)) and (result <> ExitState(Reason)));
+      //Decided to move to a new state, we may have waiters in our current state.
+
+      exit; //With new idea of whether to clear contended flag.
     end;
+
+    //Just assert that we don't need to recycle back into our
+    //existing state, and that there are no waiters.
+{$IFOPT C+}
+    for ReasonIter := Low(ReasonIter) to High(ReasonIter) do
+      Assert(FCounts[ReasonIter].Waiting = 0);
+{$ENDIF}
+    //Check we're clearing contended flag and returning to idle.
+    Assert(ClearContended);
+
     //However, if nothing waiting at all, then back to idle.
     result := lsIdle;
   end;
@@ -361,6 +388,7 @@ procedure TRWWLock.Release(Reason: TRWWLockReason);
 var
   NewState: TRWWLockState;
   NewReason: TRWWLockReason;
+  ClearContended: boolean;
 begin
   if Reason = lrExclusiveWrite then
     FExclusiveCrit.Release;
@@ -382,13 +410,15 @@ begin
       exit;
     end;
 
-    NewState := CalcNextState(Reason, NewReason);
+    NewState := CalcNextState(Reason, NewReason, ClearContended);
     if NewState <> FState then
     begin
       //Leaving current active or exit state, event might already
       //be reset, but reset it anyway.
       Assert(FCounts[Reason].Active = 0);
-      FCounts[Reason].Admitted := 0;
+      FCounts[Reason].AdmittedContended := 0;
+      if ClearContended then
+        FContended := false;
 
       if NewState = lsIdle then //To Idle.
       begin
@@ -400,16 +430,11 @@ begin
       begin
         if FState = ActiveState(Reason) then
           FThreadWaits[Reason].ResetEvent; //Optimise - no reset needed from exit state.
-        FState := NewState;
         FThreadWaits[NewReason].SetEvent;
-      end
-      else //Recycle back to active, same reason.
-      begin
-        Assert(NewState = ActiveState(Reason));
-        Assert(FState = ExitState(Reason));
         FState := NewState;
-        FThreadWaits[Reason].SetEvent;
-      end;
+      end
+      else
+        Assert(false); //Not recycling back to own state again.
     end;
   finally
     FCrit.Release;

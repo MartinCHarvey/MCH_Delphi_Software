@@ -90,7 +90,7 @@ const
   BIG_NTABLES = 5;
   BIG_NINDEXES = 5;
   BLOB_SIZE = 1024;
-  THREADS_CONCURRENT = 16;
+  THREADS_CONCURRENT = 64;
 
 type
   EMemDBTestException = class(EMemDBException);
@@ -127,12 +127,14 @@ end;
 
 procedure TForm1.LeakTransClick(Sender: TObject);
 begin
-  if RMode <> amReadWriteShared then
+  if (RMode <> amReadWriteShared) or (WMode <> amReadWriteShared) then
     LogTimeIncr('Suggest you leak this transaction in amReadWriteShared. Done nothing.')
   else
   begin
     LogTimeIncr('Deliberately leaked transaction at amReadWriteShared. Stick with that mode for subsequent testing.');
     FSession.StartTransaction(RMode, amLazyWrite, Iso);
+    RModeCombo.Enabled := false;
+    WModeCombo.Enabled := false;
   end;
 end;
 

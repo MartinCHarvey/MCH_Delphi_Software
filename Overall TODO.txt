@@ -1,6 +1,11 @@
 
 MemDB2 TODO.
 
+- Work on zombie tables:
+  - Leaked Txion leave old tables present with refs.
+  - Should still be possible to do a cleanup and exit.
+  - Most cases already fixed, but something is clearing down TidLocal too early.
+
 - Refactor META_ / Pinning functions to use cached values.
   - Todo: Debug bad multi-reader performance, see if this is indeed the cause.
 
