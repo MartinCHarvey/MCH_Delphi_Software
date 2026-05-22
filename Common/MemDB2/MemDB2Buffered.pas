@@ -3386,9 +3386,13 @@ begin
     end
     else
     begin
-      //Generally expect this to be assigned, but we'll be careful and
-      //check all the same. Post-delete commit gets this far?
-      //TODO - Check with dangling txion.
+      //If past final commit, master internal index has been de-reffed,
+      //although local clones possibly exist).
+
+      //However, in such cases, we expect that we can't get another indexing change,
+      //because at least pre-commit should have detected meta out of date.
+      //Hence this assertion in debug build.
+      //For release build, we'll just check whether index assigned.
       Assert(Assigned(FParentTable.FMasterInternalIndex));
       if Assigned(FParentTable.FMasterInternalIndex) then
       begin
@@ -3417,10 +3421,8 @@ begin
       Index.CommitNextToRoot(true);
       (Ctxt as TXEntityLocalContext).AddCache(Index.PopLargeCache);
     end;
-    //Generally expect this to be assigned, but we'll be careful and
-    //check all the same. Post-delete commit gets this far?
-    //TODO - Check with dangling txion.
-    Assert(Assigned(FParentTable.FMasterInternalIndex));
+    //If deleted table, then we can get here, and have no master internal
+    //index (removed from table at final commit, local clones may exist).
     if Assigned(FParentTable.FMasterInternalIndex) then
     begin
 {$IFDEF DEBUG_SNAPSHOT}
