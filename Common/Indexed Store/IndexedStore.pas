@@ -331,11 +331,9 @@ type
     property SearchVal: TObject read FSearchVal write FSearchVal;
   end;
 
-  function ComparePointers(Own, Other: Pointer): integer;
-
 implementation
 
-uses SysUtils, LockAbstractions;
+uses SysUtils, LockAbstractions, PComp;
 //Use Windows CMPXCHG not TInterlocked, which is broken on XE4.
 
 const
@@ -393,8 +391,6 @@ const
     'Intermediate tree traversal handler was not given a final handler function.';
   S_TRAVERSAL_ITEM_BAD_TYPE =
     'Node encountered during tree traversal is not index node.';
-  S_POINTERS_ODD_SIZE =
-    'Can''t convert pointers to ordinal. What platform is this?';
   S_INODE_COMPARE_NIL_PTRS =
     'Pointer index node trying to compare nil pointers.';
   S_SEARCH_INODE_COMPARE_ASSG_PTRS =
@@ -411,39 +407,6 @@ const
     'Out of memory exception forwarded from client thread';
 
 { Misc functions }
-
-{$HINTS OFF}
-function ComparePointers(Own, Other: Pointer): integer;
-var
-  OwnInt, OtherInt: Cardinal;
-  Own64, Other64: UInt64;
-begin
-  if sizeof(Pointer) = sizeof(Cardinal) then
-  begin
-    OwnInt := Cardinal(Own);
-    OtherInt := Cardinal(Other);
-    if OtherInt > OwnInt then
-      result := 1
-    else if OtherInt < OwnInt then
-      result := -1
-    else
-      result := 0;
-  end
-  else if sizeof(Pointer) = sizeof(UInt64) then
-  begin
-    Own64 := UInt64(Own);
-    Other64 := UInt64(Other);
-    if Other64 > Own64 then
-      result := 1
-    else if Other64 < Own64 then
-      result := -1
-    else
-      result := 0;
-  end
-  else
-    Assert(false);
-end;
-{$HINTS ON}
 
 
 (************************************
