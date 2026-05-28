@@ -13,7 +13,8 @@ uses
   TinyLock in '..\..\LockAbstractions\TinyLock.pas',
   LockAbstractions in '..\..\LockAbstractions\LockAbstractions.pas',
   CoWABTree in '..\CoWABTree.pas',
-  CoWSimpleTree in '..\CoWSimpleTree.pas';
+  CoWSimpleTree in '..\CoWSimpleTree.pas',
+  PComp in '..\..\PComp\PComp.pas';
 
 {$R *.res}
 
