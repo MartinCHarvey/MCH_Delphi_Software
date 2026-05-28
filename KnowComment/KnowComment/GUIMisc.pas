@@ -114,7 +114,8 @@ procedure ImageLoadFailed(Guid: string; ListLevel:TKListLevel; WorkingList: TKId
 implementation
 
 uses
-  ImageCache, IndexedStore, SysUtils, System.UITypes, MemDBMisc, DBContainer;
+  ImageCache, IndexedStore, SysUtils, System.UITypes, MemDBMisc, DBContainer,
+  PComp;
 
 type
 {$IFDEF USE_TRACKABLES}

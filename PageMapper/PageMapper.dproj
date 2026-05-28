@@ -159,6 +159,8 @@
         <DCCReference Include="..\Common\OrdinalSets\OrdinalSets.pas"/>
         <DCCReference Include="..\Common\Parallelizer\Parallelizer.pas"/>
         <DCCReference Include="..\Common\LockAbstractions\LockAbstractions.pas"/>
+        <DCCReference Include="..\Common\LockAbstractions\TinyLock.pas"/>
+        <DCCReference Include="..\Common\PComp\PComp.pas"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>
