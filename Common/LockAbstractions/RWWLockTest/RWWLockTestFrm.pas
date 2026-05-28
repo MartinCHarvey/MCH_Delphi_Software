@@ -40,6 +40,7 @@ type
     FLock: TRWWLock;
     POngoing: PLockStats;
     PHighest: PLockStats;
+    PExceptions: PInteger;
   protected
     procedure Execute; override;
   end;
@@ -59,23 +60,27 @@ var
 begin
   while not Terminated do
   begin
-    i := Random(Range) + Ord(lrSharedRead);
-    Reason := TRWWLockReason(i);
-    FLock.Acquire(Reason);
     try
-      c:= InterlockedIncrement(POngoing[Reason]);
-      if c > PHighest[reason] then //Not atomic, but don't mind.
-        PHighest[reason] := c;
-      for Reason2 := Low(Reason2) to High(Reason2) do
-      begin
-        if Reason2 <> Reason then
-          Assert(POngoing[Reason2] = 0);
-          //This however, is atomic, cos we have a lock (doh!).
+      i := Random(Range) + Ord(lrSharedRead);
+      Reason := TRWWLockReason(i);
+      FLock.Acquire(Reason);
+      try
+        c:= InterlockedIncrement(POngoing[Reason]);
+        if c > PHighest[reason] then //Not atomic, but don't mind.
+          PHighest[reason] := c;
+        for Reason2 := Low(Reason2) to High(Reason2) do
+        begin
+          if Reason2 <> Reason then
+            Assert(POngoing[Reason2] = 0);
+            //This however, is atomic, cos we have a lock (doh!).
+        end;
+        Sleep(1); //Raise contention - this loop is so tiny.
+        InterlockedDecrement(POngoing[Reason]);
+      finally
+        FLock.Release(Reason);
       end;
-      Sleep(1); //Raise contention - this loop is so tiny.
-      InterlockedDecrement(POngoing[Reason]);
-    finally
-      FLock.Release(Reason);
+    except
+      InterlockedIncrement(PExceptions^);
     end;
   end;
 end;
@@ -91,10 +96,12 @@ var
   Lock: TRWWLock;
   Ongoing: TLockStats;
   Highest: TLockStats;
+  Exceptions: integer;
 begin
   FillChar(Ongoing, sizeof(Ongoing), 0);
   FillChar(Highest, sizeof(Highest), 0);
   FillChar(Threads, sizeof(Threads), 0);
+  Exceptions := 0;
   Lock := TRWWLock.Create;
   try
     for i := 0 to LIMIT_THREADS do
@@ -105,6 +112,7 @@ begin
         FLock := Lock;
         POngoing := @Ongoing;
         PHighest := @Highest;
+        PExceptions := @Exceptions;
         Resume;
       end;
     end;
@@ -119,6 +127,7 @@ begin
       + ' Ratio: ' + IntToStr(Lock.Ratios[lrSharedWrite]));
     Memo1.Lines.Add('Highest lrExclusiveWrite:' + IntToStr(Highest[lrExclusiveWrite])
       + ' Ratio: ' + IntToStr(Lock.Ratios[lrExclusiveWrite]));
+    Memo1.Lines.Add('Exceptions:' + IntToStr(Exceptions));
   finally
     Lock.Free;
     for i := 0 to LIMIT_THREADS do

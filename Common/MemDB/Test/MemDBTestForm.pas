@@ -74,7 +74,7 @@ const
   BIG_NTABLES = 5;
   BIG_NINDEXES = 5;
   BLOB_SIZE = 1024;
-  THREADS_CONCURRENT = 16;
+  THREADS_CONCURRENT = 64;
 
 type
   EMemDBTestException = class(EMemDBException);

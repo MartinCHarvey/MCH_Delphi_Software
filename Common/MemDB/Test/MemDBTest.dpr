@@ -21,7 +21,8 @@ uses
   NullStream in '..\..\NullStream\NullStream.pas',
   LockAbstractions in '..\..\LockAbstractions\LockAbstractions.pas',
   SRWLockWrapper in '..\..\SRWLockWrapper\SRWLockWrapper.pas',
-  TinyLock in '..\..\LockAbstractions\TinyLock.pas';
+  TinyLock in '..\..\LockAbstractions\TinyLock.pas',
+  PComp in '..\..\PComp\PComp.pas';
 
 {$R *.res}
 

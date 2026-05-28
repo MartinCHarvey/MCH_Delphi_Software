@@ -166,6 +166,7 @@
         <DCCReference Include="..\..\LockAbstractions\LockAbstractions.pas"/>
         <DCCReference Include="..\..\SRWLockWrapper\SRWLockWrapper.pas"/>
         <DCCReference Include="..\..\LockAbstractions\TinyLock.pas"/>
+        <DCCReference Include="..\..\PComp\PComp.pas"/>
         <None Include="Performance figures.txt"/>
         <None Include="..\README_Conditionals.txt"/>
         <None Include="..\README_Ideas, and TODO.txt"/>
