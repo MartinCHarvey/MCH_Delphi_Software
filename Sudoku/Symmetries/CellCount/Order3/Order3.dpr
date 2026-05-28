@@ -18,7 +18,10 @@ uses
   ExactCover in '..\..\..\..\Common\ExactCover\ExactCover.pas',
   IndexedStore in '..\..\..\..\Common\Indexed Store\IndexedStore.pas',
   CellCountShared in '..\..\Shared\CellCountShared.pas',
-  Parallelizer in '..\..\..\..\Common\Parallelizer\Parallelizer.pas';
+  Parallelizer in '..\..\..\..\Common\Parallelizer\Parallelizer.pas',
+  TinyLock in '..\..\..\..\Common\LockAbstractions\TinyLock.pas',
+  LockAbstractions in '..\..\..\..\Common\LockAbstractions\LockAbstractions.pas',
+  PComp in '..\..\..\..\Common\PComp\PComp.pas';
 
 begin
   try
