@@ -132,10 +132,10 @@ type
     function CheckFormatAgainstMetaDefs(const Tid: TTransactionId; AB: TAbSelType; MetaFieldDefs: TMemStreamableList; PinReason: TPinReason): boolean;
     class function StaticCheckFormatAgainstMetaDefs(Data: TMemDBStreamable; MetaFieldDefs: TMemStreamableList): boolean;
 
-    procedure ToJournal(const Tid: TTransactionId; Stream: TStream);override;
-    procedure ToScratch(const PseudoTid:TTransactionId; Stream: TStream);override;
-    procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream);override;
-    procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet);override;
+    procedure ToJournal(const Tid: TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);override;
+    procedure ToScratch(const PseudoTid:TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);override;
+    procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);override;
+    procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet; Ctxt: TTXLocalContext);override;
 
     procedure RemoveFromLocalIndices(TidLocal: TTidLocal);
     procedure AddToLocalIndices(TidLocal: TTidLocal);
@@ -171,7 +171,7 @@ type
     function FieldByName(const AB: TBufSelector; const Name: string; var AbsIndex: integer; Reason: TPinReason): TMemFieldDef;
     function IndexByName(const AB: TBufSelector; const Name: string; var AbsIndex: integer; Reason: TPinReason): TMemIndexDef;
   public
-    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet); override;
+    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext); override;
     procedure Init(const Tid: TTransactionId; Parent: TObject; Name:string; DSName: boolean); override;
   end;
 
@@ -226,9 +226,9 @@ type
     procedure META_Delete(const Tid: TTransactionId); virtual;
 
     procedure SizeHint(const Tid: TTransactionId; var SizeHint: TDBSizeHint); virtual;
-    procedure StartTransaction(const Tid: TTransactionId); virtual;
-    procedure Prepare(const Tid: TTransactionId; Opts:TOptimizeSet; FromScratch: boolean); virtual;
-    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet); override;
+    procedure StartTransaction(const Tid: TTransactionId; Ctxt: TTXLocalContext); virtual;
+    procedure Prepare(const Tid: TTransactionId; Opts:TOptimizeSet; FromScratch: boolean; Ctxt: TTXLocalContext); virtual;
+    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext); override;
     procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext); override;
     procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext); override;
 
@@ -260,6 +260,7 @@ type
   //know what's what, and where.
   TMemDBFKMeta = record
     Tid: TTransactionId;
+    Ctxt: TTXLocalContext;
     TableReferring, TableReferred: TMemDbTablePersistent;
     IndexDefReferring, IndexDefReferred: TMemIndexDef;
     FieldDefsReferring, FieldDefsReferred: TMemFieldDefs;
@@ -290,20 +291,20 @@ type
     constructor Create;
     destructor Destroy; override;
 
-    function AnyChanges(const Tid:TTransactionId): boolean; override;
-    function AnyChangesForTid(const Tid: TTransactionId): boolean; override;
+    function AnyChanges(const Tid:TTransactionId; Ctxt: TTXLocalContext): boolean; override;
+    function AnyChangesForTid(const Tid: TTransactionId; Ctxt: TTXLocalContext): boolean; override;
 
     procedure SizeHint(const Tid: TTransactionId; var SizeHint: TDBSizeHint); override;
-    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet); override;
-    procedure ToJournal(const Tid: TTransactionId; Stream: TStream);override;
-    procedure ToScratch(const PseudoTid:TTransactionId; Stream: TStream);override;
-    procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream);override;
-    procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet);override;
+    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext); override;
+    procedure ToJournal(const Tid: TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);override;
+    procedure ToScratch(const PseudoTid:TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);override;
+    procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);override;
+    procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet; Ctxt: TTXLocalContext);override;
 
-    procedure CheckAPITableDelete(const Sel: TBufSelector; TableName: string);
-    procedure CheckAPIIndexDelete(const Sel: TBufSelector; IsoDeterminedTableName, IndexName: string);
-    function HandleAPITableRename(const Sel: TBufSelector; OldName, NewName: string): boolean;
-    function HandleAPIIndexRename(const Sel: TBufSelector; IsoDeterminedTableName, OldName, NewName: string): boolean;
+    procedure CheckAPITableDelete(const Tid: TTransactionId; TableName: string);
+    procedure CheckAPIIndexDelete(const Tid: TTransactionId; IsoDeterminedTableName, IndexName: string);
+    function HandleAPITableRename(const Tid: TTransactionId; OldName, NewName: string): boolean;
+    function HandleAPIIndexRename(const Tid: TTransactionId; IsoDeterminedTableName, OldName, NewName: string): boolean;
   end;
 
   TFieldChangeType = (fctAdded,
@@ -580,22 +581,22 @@ type
     destructor Destroy; override;
 
     procedure SizeHint(const Tid: TTransactionId; var SizeHint: TDBSizeHint); override;
-    procedure StartTransaction(const Tid: TTRansactionId); override;
-    procedure Prepare(const Tid: TTransactionId; Opts:TOptimizeSet; FromScratch: boolean); override;
+    procedure StartTransaction(const Tid: TTRansactionId; Ctxt: TTXLocalContext); override;
+    procedure Prepare(const Tid: TTransactionId; Opts:TOptimizeSet; FromScratch: boolean; Ctxt: TTXLocalContext); override;
 
-    procedure ToJournal(const Tid: TTransactionId; Stream: TStream); override;
-    procedure ToScratch(const PseudoTid:TTransactionId; Stream: TStream); override;
-    procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream); override;
-    procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet); override;
+    procedure ToJournal(const Tid: TTransactionId; Stream: TStream; Ctxt: TTXLocalContext); override;
+    procedure ToScratch(const PseudoTid:TTransactionId; Stream: TStream; Ctxt: TTXLocalContext); override;
+    procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream; Ctxt: TTXLocalContext); override;
+    procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet; Ctxt: TTXLocalContext); override;
 
-    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet); override;
+    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext); override;
     procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext); override;
     procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext); override;
 
     function DataChangedForTid(const Tid:TTransactionId): boolean;
     function LayoutChangesRequiredForTid(const Tid: TTransactionId): boolean;
-    function AnyChanges(const Tid:TTransactionId): boolean; override;
-    function AnyChangesForTid(const Tid: TTransactionId): boolean; override;
+    function AnyChanges(const Tid:TTransactionId; Ctxt: TTXLocalContext): boolean; override;
+    function AnyChangesForTid(const Tid: TTransactionId; Ctxt: TTXLocalContext): boolean; override;
 
     //TODO - Cache metadata for current access for API to reduce lock contention.
     function META_PinCurrent(const Tid: TTransactionId; Reason: TPinReason): TMemDBStreamable; override;
@@ -625,33 +626,9 @@ type
     constructor Create;
   end;
 
-  //Quick bit of caching for these lists which are created and destroyed
-  //multiple times per txion, whether or not any underlying index copies etc
-  //are created.
-  TMemDBEntityList = class(TReffedList)
-  protected
-    procedure ReleaseAndClearCaching;
-  public
-    procedure Reset(Cache: TReffedCache); override;
-  end;
-
-  TMemDBEntityListCache = class(TReffedCache)
-  private
-    FLock: TCriticalSection;
-    FList: TList;
-  public
-    constructor Create;
-    destructor Destroy; override;
-
-    function GetFromCache: TReffed; override;
-    function PutToCache(Reffed: TReffed): boolean; override;
-  end;
-
   TMemDBDatabasePersistent = class(TMemDBJournalCreator)
   private
   protected
-    FEntityListCache: TMemDBEntityListCache;
-
     //Stripe locking performance degrades if more threads than CPU's,
     //because threads become idle holding striped rowlocks. Hence the throttling.
     FPolicies: TOptimizePolicies;
@@ -673,40 +650,42 @@ type
                              var ChangeType: TMemDBEntityChangeType;
                              var EntityName: string);
     //Atomically get and assemble list of entities.
-    function AssembleEntityList: TMemDBEntityList;
+    //Use with care: entities actually registered to a transaction may be more
+    //sensible / useful.
+    function AssembleEntityList: TReffedList;
     procedure ConsolidateAndFreeCaches(Ctxt: TTXLocalContext);
   public
-    function EntitiesByName(const AB:TBufSelector; Name: string; PinReason: TPinReason): TMemDBEntity;
+    function EntitiesByName(const AB:TBufSelector; Name: string; PinReason: TPinReason; Ctxt: TTXLocalContext; IsoOverride: boolean): TMemDBEntity;
 
-    procedure SizeHint(const Tid: TTransactionId; var SizeHint: TDBSizeHint); virtual;
+    procedure SizeHint(const Tid: TTransactionId; var SizeHint: TDBSizeHint; Ctxt: TTXLocalContext); virtual;
 
     function PrepareParallel(Ref1, Ref2: pointer):pointer;
-    procedure Prepare(const Tid: TTransactionId; Opts:TOptimizeSet; FromScratch: boolean); virtual;
-    procedure StartTransaction(const Tid: TTRansactionId); virtual;
+    procedure Prepare(const Tid: TTransactionId; Opts:TOptimizeSet; FromScratch: boolean; Ctxt: TTXLocalContext); virtual;
+    procedure StartTransaction(const Tid: TTRansactionId; Ctxt: TTXLocalContext); virtual;
 
-    procedure ToJournal(const Tid: TTransactionId; Stream: TStream); override;
-    procedure ToScratch(const PseudoTid:TTransactionId; Stream: TStream); override;
-    procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream); override;
-    procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet); override;
+    procedure ToJournal(const Tid: TTransactionId; Stream: TStream; Ctxt: TTXLocalContext); override;
+    procedure ToScratch(const PseudoTid:TTransactionId; Stream: TStream; Ctxt: TTXLocalContext); override;
+    procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream; Ctxt: TTXLocalContext); override;
+    procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet; Ctxt: TTXLocalContext); override;
 
-    function AnyChangesForTid(const TId: TTransactionId): boolean; override;
-    function AnyChanges(const Tid: TTransactionId): boolean; override;
+    function AnyChangesForTid(const TId: TTransactionId; Ctxt: TTXLocalContext): boolean; override;
+    function AnyChanges(const Tid: TTransactionId; Ctxt: TTXLocalContext): boolean; override;
 
     function PreCommitParallel(Ref1, Ref2: pointer):pointer;
     function CommitParallel(Ref1, Ref2: pointer): pointer;
     function RollbackParallel(Ref1, Ref2: pointer): pointer;
 
-    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase;  Opts:TOptimizeSet); override;
+    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase;  Opts:TOptimizeSet; Ctxt: TTXLocalContext); override;
     procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase;  Opts:TOptimizeSet; Ctxt: TTXLocalContext); override;
     procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase;  Opts:TOptimizeSet; Ctxt: TTXLocalContext); override;
 
     constructor Create;
     destructor Destroy; override;
 
-    procedure CheckAPITableDelete(const Sel: TBufSelector; TableName: string);
-    procedure CheckAPIIndexDelete(const Sel: TBufSelector; IsoDeterminedTableName, IndexName: string);
-    function HandleAPITableRename(const Sel: TBufSelector; OldName, NewName: string): boolean;
-    function HandleAPIIndexRename(const Sel: TBufSelector; IsoDeterminedTableName, OldName, NewName: string): boolean;
+    procedure CheckAPITableDelete(const Tid: TTransactionId; Ctxt: TTXLocalContext; TableName: string);
+    procedure CheckAPIIndexDelete(const Tid: TTransactionId; Ctxt: TTXLocalContext; IsoDeterminedTableName, IndexName: string);
+    function HandleAPITableRename(const Tid: TTransactionId; Ctxt: TTXLocalContext; OldName, NewName: string): boolean;
+    function HandleAPIIndexRename(const Tid: TTransactionId; Ctxt: TTXLocalContext; IsoDeterminedTableName, OldName, NewName: string): boolean;
 
     property Interfaced: TMemDBAPIInterfacedObject read FInterfaced;
     property CommitLock: TCriticalSection read FCommitLock;
@@ -895,7 +874,6 @@ const
   S_FK_INTERNAL_INDEX_SEL = 'Foreign key validation, internal error: index selectors not as expected';
   S_FK_NOT_IN_REFERRED_TABLE = 'Foreign key: trying to add a key not found in referred table.';
   S_FK_IN_REFERRING_TABLE = 'Foreign key: trying to delete a key found in referring table.';
-  S_FK_INTERNAL_OVERWRITE = 'Internal error: multiple rename conflicts should have been caught before this point.';
   S_ROW_IDS_DISAGREE = 'Journal replay: RowID''s disagree';
   S_INDEXED_LIST_LOOKAHEAD_FAILED = 'Indexed list lookahead failed, tag: ';
   S_TABLE_LOOKAHEAD_FAILED = 'Table lookahead failed, tag: ';
@@ -1047,6 +1025,7 @@ const
   S_FKEYS_INTERNAL_38 = 'Foreign key checking internal error 38.';
   S_FKEYS_INTERNAL_39 = 'Foreign key checking internal error 39.';
   S_FKEYS_INTERNAL_40 = 'Foreign key checking internal error 40.';
+  S_ENTITY_LIST_CONFUSION_CHECKING_CHANGES = 'Error: did not expect async mod of entity lists at this time.';
 
 { Misc Functions }
 
@@ -1486,7 +1465,7 @@ begin
   end;
 end;
 
-procedure TMemDBEntity.StartTransaction(const Tid: TTransactionId);
+procedure TMemDBEntity.StartTransaction(const Tid: TTransactionId; Ctxt: TTXLocalContext);
 begin
   inherited;
   FMetadata.PinCurrent(Tid, pinEvolve);
@@ -1497,15 +1476,15 @@ begin
   //NOP.
 end;
 
-procedure TMemDBEntity.Prepare(const Tid: TTransactionId; Opts:TOptimizeSet; FromScratch: boolean);
+procedure TMemDBEntity.Prepare(const Tid: TTransactionId; Opts:TOptimizeSet; FromScratch: boolean; Ctxt: TTXLocalContext);
 begin
   //NOP.
 end;
 
-procedure TMemDBEntity.PreCommit(const TId: TTransactionId; Phase:TMemDBPreCommitPhase; Opts:TOptimizeSet);
+procedure TMemDBEntity.PreCommit(const TId: TTransactionId; Phase:TMemDBPreCommitPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext);
 begin
   inherited;
-  FMetadata.PreCommit(Tid, Phase, Opts);
+  FMetadata.PreCommit(Tid, Phase, Opts, Ctxt);
   //Do not absolutely require atomic here.
   //Let tables / keys decide whether OK to proceed with metadata
   //changed behind our back.
@@ -2177,9 +2156,9 @@ begin
   while Assigned(IRec) do
   begin
     Row := IRec.Item as TMemDBRow;
-    if Row.AnyChangesForTid(self.FTid) then //Some Items are pinned not changed.
+    if Row.AnyChangesForTid(self.FTid, nil) then //Some Items are pinned not changed.
     begin
-      Row.ToJournal(self.FTid, Stream);
+      Row.ToJournal(self.FTid, Stream, nil);
     end;
     FCPRows.GetAnotherItem(IRec);
   end;
@@ -2201,7 +2180,7 @@ begin
     begin
       Row := IRec.Item as TMemDBRow;
       if Assigned(Row.PinCurrent(FTid, pinEvolve) as TMemDbStreamable) then
-        Row.ToScratch(self.FTid, Stream);
+        Row.ToScratch(self.FTid, Stream, nil);
       FParentTable.FMasterRowList.GetAnotherItem(IRec);
     end;
   finally
@@ -2283,7 +2262,7 @@ begin
   Row := LookaheadHelper(Stream, false, Created);
   while Assigned(Row) do
   begin
-    Row.FromJournal(FTid, Stream);
+    Row.FromJournal(FTid, Stream, nil);
     if Created then
       Row.FProxy.Release;
     Row := LookaheadHelper(Stream, false, Created);
@@ -2302,7 +2281,7 @@ begin
   begin
     //Row DCP handler, Row CPTid handler handle reffing, and
     //all insertion except master list.
-    Row.FromScratch(FTid, Stream, Opts);
+    Row.FromScratch(FTid, Stream, Opts, nil);
     if Created then
       Row.FProxy.Release;
     Row := LookaheadHelper(Stream, true, Created);
@@ -2339,7 +2318,7 @@ begin
   end;
   //And now deal with NoChanges -> Changes transition separately.
   if Update.Changes.Post then
-    FDataChanged := FDataChanged or (Sender as TMemDBRow).AnyChangesForTid(Update.Tid);
+    FDataChanged := FDataChanged or (Sender as TMemDBRow).AnyChangesForTid(Update.Tid, nil);
 end;
 
 procedure TTidLocal.CheckTableRowCount;
@@ -2414,7 +2393,7 @@ begin
   while Assigned(IRec) do
   begin
     Row := IRec.Item as TMemDBRow;
-    if Row.AnyChangesForTid(self.FTid) then
+    if Row.AnyChangesForTid(self.FTid, nil) then
     begin
       Streamable := Row.GetPinLatest(FTid, bufSel, pinFinalCheck);
       //Can have null rows? Not if you managed to pin it. If CPTid,
@@ -2916,7 +2895,7 @@ begin
     begin
       Row := IRec.Item as TMemDBRow;
 
-      if Row.AnyChangesForTid(self.FTid) then
+      if Row.AnyChangesForTid(self.FTid, nil) then
       begin //Save ourselves unnecessary index traversal.
 
         Cur := Row.GetCurUnderCommitLock;
@@ -3120,7 +3099,7 @@ begin
     begin
       Row := IRec.Item as TMemDBRow;
 
-      if Row.AnyChangesForTid(self.FTid) then
+      if Row.AnyChangesForTid(self.FTid, nil) then
       begin //Save ourselves unnecessary index traversal.
 
         Cur := Row.GetCurUnderCommitLock;
@@ -3342,7 +3321,7 @@ begin
 {$ENDIF}
 
         Index.CommitNextToRoot(true);
-        (Ctxt as TXEntityLocalContext).AddCache(Index.PopLargeCache);
+        (Ctxt as TXTransactionLocalContext).AddCache(Index.PopLargeCache);
       end;
 
     end;
@@ -3402,7 +3381,7 @@ begin
                 '(' + IntToStr(NativeUint(FParentTable.FMasterInternalIndex)) + ')');
 {$ENDIF}
         FParentTable.FMasterInternalIndex.CommitNextToRoot(true);
-        (Ctxt as TXEntityLocalContext).AddCache(FParentTable.FMasterInternalIndex.PopLargeCache);
+        (Ctxt as TXTransactionLocalContext).AddCache(FParentTable.FMasterInternalIndex.PopLargeCache);
       end;
     end;
   end
@@ -3419,7 +3398,7 @@ begin
 {$ENDIF}
 
       Index.CommitNextToRoot(true);
-      (Ctxt as TXEntityLocalContext).AddCache(Index.PopLargeCache);
+      (Ctxt as TXTransactionLocalContext).AddCache(Index.PopLargeCache);
     end;
     //If deleted table, then we can get here, and have no master internal
     //index (removed from table at final commit, local clones may exist).
@@ -3431,7 +3410,7 @@ begin
                 '(' + IntToStr(NativeUint(FParentTable.FMasterInternalIndex)) + ')');
 {$ENDIF}
       FParentTable.FMasterInternalIndex.CommitNextToRoot(true);
-      (Ctxt as TXEntityLocalContext).AddCache(FParentTable.FMasterInternalIndex.PopLargeCache);
+      (Ctxt as TXTransactionLocalContext).AddCache(FParentTable.FMasterInternalIndex.PopLargeCache);
     end;
   end;
 end;
@@ -3453,7 +3432,7 @@ begin
 {$ENDIF}
 
     Index.DiscardNext(true);
-    (Ctxt as TXEntityLocalContext).AddCache(Index.PopLargeCache);
+    (Ctxt as TXTransactionLocalContext).AddCache(Index.PopLargeCache);
   end;
   //Master internal index not always assigned in rollback case (new index build).
   if Assigned(FParentTable.FMasterInternalIndex) then
@@ -3464,7 +3443,7 @@ begin
             '(' + IntToStr(NativeUint(FParentTable.FMasterInternalIndex)) + ')');
 {$ENDIF}
     FParentTable.FMasterInternalIndex.DiscardNext(true);
-    (Ctxt as TXEntityLocalContext).AddCache(FParentTable.FMasterInternalIndex.PopLargeCache);
+    (Ctxt as TXTransactionLocalContext).AddCache(FParentTable.FMasterInternalIndex.PopLargeCache);
   end;
   //Else new build master index not swizzled on yet, TidLocal destroy will clean it up.
 end;
@@ -3488,9 +3467,9 @@ begin
     while Assigned(IRec) do
     begin
       Row := IRec.Item as TMemDBRow;
-      Row.PreCommit(FTid, pcpTables, []);
+      Row.PreCommit(FTid, pcpTables, [], nil);
 
-      if Row.AnyChangesForTid(FTid) then
+      if Row.AnyChangesForTid(FTid, nil) then
       begin
         //Combination of PreCommit and AnyChangesForTid Solves races between different versions of "current" here.
         Cur := Row.PinCurrent(FTid, pinFinalCheck);
@@ -4350,7 +4329,7 @@ begin
   FProxy.Release;
 end;
 
-procedure TMemDBTablePersistent.Prepare(const Tid: TTransactionId; Opts:TOptimizeSet; FromScratch: boolean);
+procedure TMemDBTablePersistent.Prepare(const Tid: TTransactionId; Opts:TOptimizeSet; FromScratch: boolean; Ctxt: TTXLocalContext);
 var
   TidLocal: TTidLocal;
 begin
@@ -4374,7 +4353,7 @@ begin
   end;
 end;
 
-procedure TMemDBTablePersistent.ToJournal(const Tid: TTransactionId; Stream: TStream);
+procedure TMemDBTablePersistent.ToJournal(const Tid: TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);
 var
   TidLocal: TTidLocal;
   Meta: TMemDBStreamable;
@@ -4384,13 +4363,13 @@ begin
   TidLocal := GetTidLocal(Tid);
   //TODO - Do I absolutely need to update layout here or not?
   //I don't think so if always updated on field change.
-  MetaChange := FMetadata.AnyChangesForTid(Tid);
+  MetaChange := FMetadata.AnyChangesForTid(Tid, Ctxt);
 
   if MetaChange or TidLocal.DataChangePrePrepare then
   begin
     WrTag(Stream, mstTableStart);
     if MetaChange then
-      FMetadata.ToJournal(Tid, Stream)
+      FMetadata.ToJournal(Tid, Stream, Ctxt)
     else
     begin
       WrTag(Stream, mstTableUnchangedName);
@@ -4405,7 +4384,7 @@ begin
   end;
 end;
 
-procedure TMemDBTablePersistent.ToScratch(const PseudoTid: TTransactionId; Stream: TStream);
+procedure TMemDBTablePersistent.ToScratch(const PseudoTid: TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);
 var
   TidLocal:TTidLocal;
 begin
@@ -4420,7 +4399,7 @@ begin
   if Assigned(META_PinCurrent(PseudoTid, pinEvolve)) then
   begin
     WrTag(Stream, mstTableStart);
-    FMetadata.ToScratch(PseudoTid, Stream);
+    FMetadata.ToScratch(PseudoTid, Stream, Ctxt);
     TidLocal.ToScratch(Stream);
     WrTag(Stream, mstTableEnd);
   end;
@@ -4447,7 +4426,7 @@ begin
   Stream.Seek(Pos, TSeekOrigin.soBeginning);
 end;
 
-procedure TMemDBTablePersistent.FromJournal(const PseudoTid: TTransactionId; Stream: TStream);
+procedure TMemDBTablePersistent.FromJournal(const PseudoTid: TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);
 var
   MetadataInStream, DataInStream: boolean;
   TblName: string;
@@ -4463,7 +4442,7 @@ begin
   LookaheadHelper(Stream, MetadataInStream, DataInStream);
   if MetadataInStream then
   begin
-    FMetadata.FromJournal(PseudoTid, Stream);
+    FMetadata.FromJournal(PseudoTid, Stream, Ctxt);
     TidLocal.UpdateLayout(pinEvolve);
   end
   else
@@ -4485,14 +4464,14 @@ begin
   ExpectTag(Stream, mstTableEnd);
 end;
 
-procedure TMemDBTablePersistent.FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet);
+procedure TMemDBTablePersistent.FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet; Ctxt: TTXLocalContext);
 var
   TidLocal:TTidLocal;
   Newly: boolean;
 begin
   FMasterRowLock.Acquire;
   try
-    if FMetadata.AnyChangesForTid(PseudoTid)
+    if FMetadata.AnyChangesForTid(PseudoTid, Ctxt)
        or Assigned(Metadata.PinCurrent(PseudoTid, pinEvolve))
        or (FMasterRowList.Count > 0) then
       raise EMemDBInternalException.Create(S_FROM_SCRATCH_REQUIRES_EMPTY_OBJ);
@@ -4504,14 +4483,14 @@ begin
   end;
   ExpectTag(Stream, mstTableStart);
   TidLocal := GetTidLocal(PseudoTid);
-  FMetadata.FromScratch(PseudoTid, Stream, Opts);
+  FMetadata.FromScratch(PseudoTid, Stream, Opts, Ctxt);
   TidLocal.UpdateLayout(pinEvolve);
   TidLocal.FromScratch(Stream, Opts);
   ExpectTag(Stream, mstTableEnd);
 end;
 
 //Called under MetaIndex lock, possibly also commit lock.
-procedure TMemDBTablePersistent.StartTransaction(const Tid: TTRansactionId);
+procedure TMemDBTablePersistent.StartTransaction(const Tid: TTRansactionId; Ctxt: TTXLocalContext);
 var
   TidLocal: TTidLocal;
 begin
@@ -4584,7 +4563,7 @@ begin
   end;
 end;
 
-procedure TMemDBTablePersistent.PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet);
+procedure TMemDBTablePersistent.PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext);
 var
   Cur, Next: TMemDBStreamable;
   Added, Changed, Deleted, Null: boolean;
@@ -4664,20 +4643,20 @@ begin
   end;
 end;
 
-function TMemDbTablePersistent.AnyChanges(const Tid:TTransactionId): boolean;
+function TMemDbTablePersistent.AnyChanges(const Tid:TTransactionId; Ctxt: TTXLocalContext): boolean;
 var
   TidLocal: TTidLocal;
 begin
   TidLocal := GetTidLocal(Tid);
-  result := FMetadata.AnyChanges(Tid) or TidLocal.DataChanged;
+  result := FMetadata.AnyChanges(Tid, Ctxt) or TidLocal.DataChanged;
 end;
 
-function TMemDbTablePersistent.AnyChangesForTid(const Tid: TTransactionId): boolean;
+function TMemDbTablePersistent.AnyChangesForTid(const Tid: TTransactionId; Ctxt: TTXLocalContext): boolean;
 var
   TidLocal: TTidLocal;
 begin
   TidLocal := GetTidLocal(Tid);
-  result := FMetadata.AnyChangesForTid(Tid) or TidLocal.DataChanged;
+  result := FMetadata.AnyChangesForTid(Tid, Ctxt) or TidLocal.DataChanged;
 end;
 
 function TMemDbTablePersistent.DataChangedForTid(const Tid:TTransactionId): boolean;
@@ -4844,27 +4823,27 @@ begin
   inherited;
 end;
 
-function TMemDBForeignKeyPersistent.AnyChanges(const Tid:TTransactionId): boolean;
+function TMemDBForeignKeyPersistent.AnyChanges(const Tid:TTransactionId; Ctxt: TTXLocalContext): boolean;
 begin
-  result := FMetadata.AnyChanges(Tid);
+  result := FMetadata.AnyChanges(Tid, Ctxt);
 end;
 
-function TMemDBForeignKeyPersistent.AnyChangesForTid(const Tid: TTransactionId): boolean;
+function TMemDBForeignKeyPersistent.AnyChangesForTid(const Tid: TTransactionId; Ctxt: TTXLocalContext): boolean;
 begin
-  result := FMetadata.AnyChangesForTid(Tid);
+  result := FMetadata.AnyChangesForTid(Tid, Ctxt);
 end;
 
-procedure TMemDBForeignKeyPersistent.ToJournal(const Tid: TTransactionId; Stream: TStream);
+procedure TMemDBForeignKeyPersistent.ToJournal(const Tid: TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);
 begin
-  if FMetadata.AnyChangesForTid(Tid) then
+  if FMetadata.AnyChangesForTid(Tid, Ctxt) then
   begin
     WrTag(Stream, mstFkStart);
-    FMetadata.ToJournal(Tid, Stream);
+    FMetadata.ToJournal(Tid, Stream, Ctxt);
     WrTag(Stream, mstFkEnd);
   end;
 end;
 
-procedure TMemDBForeignKeyPersistent.ToScratch(const PseudoTid:TTransactionId; Stream: TStream);
+procedure TMemDBForeignKeyPersistent.ToScratch(const PseudoTid:TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);
 var
   CP, NP: TMemDBStreamable;
   Added, Changed, Deleted, Null: boolean;
@@ -4875,21 +4854,21 @@ begin
   if not Null then
   begin
     WrTag(Stream, mstFkStart);
-    FMetadata.ToScratch(PseudoTid, Stream);
+    FMetadata.ToScratch(PseudoTid, Stream, Ctxt);
     WrTag(Stream, mstFkEnd);
   end;
 end;
 
-procedure TMemDBForeignKeyPersistent.FromJournal(const PseudoTid: TTransactionId; Stream: TStream);
+procedure TMemDBForeignKeyPersistent.FromJournal(const PseudoTid: TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);
 begin
   //Premise is that this is being called given appropriate previous lookahead
   //and construction.
   ExpectTag(Stream, mstFkStart);
-  FMetadata.FromJournal(PseudoTid, Stream);
+  FMetadata.FromJournal(PseudoTid, Stream, Ctxt);
   ExpectTag(Stream, mstFkEnd);
 end;
 
-procedure TMemDBForeignKeyPersistent.FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet);
+procedure TMemDBForeignKeyPersistent.FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet; Ctxt: TTXLocalContext);
 var
   CP, NP: TMemDBStreamable;
   Added, Changed, Deleted, Null: boolean;
@@ -4902,7 +4881,7 @@ begin
   if not Null then
     raise EMemDBInternalException.Create(S_FROM_SCRATCH_REQUIRES_EMPTY_OBJ);
   ExpectTag(Stream, mstFkStart);
-  FMetadata.FromScratch(PseudoTid, Stream, Opts);
+  FMetadata.FromScratch(PseudoTid, Stream, Opts, Ctxt);
   ExpectTag(Stream, mstFkEnd);
 end;
 
@@ -4919,7 +4898,7 @@ begin
     SizeHint.FKAdd := true;
 end;
 
-procedure TMemDBForeignKeyPersistent.PreCommit(const Tid: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet);
+procedure TMemDBForeignKeyPersistent.PreCommit(const Tid: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext);
 var
   CP, NP: TMemDBStreamable;
   Added, Changed, Deleted, Null: boolean;
@@ -4951,6 +4930,7 @@ begin
   FillChar(Meta, sizeof(Meta), 0);
   //Very basic metadata checking.
   (Metadata as TMemDBForeignKeyMetadata).ConsistencyCheck(Tid);
+  Meta.Ctxt := Ctxt;
 
   //FKM = Latest.
   if AssignedNotSentinel(NP) then
@@ -4975,7 +4955,7 @@ begin
 
   try
     //ReferringIndex.
-    EntityReferring := ParentDB.EntitiesByName(SelLatest, FKM.TableReferer, pinFinalCheck);
+    EntityReferring := ParentDB.EntitiesByName(SelLatest, FKM.TableReferer, pinFinalCheck, Ctxt, true);
     if not (Assigned(EntityReferring) and (EntityReferring is TMemDBTablePersistent)) then
       raise EMemDBException.Create(S_FK_TABLE_NOT_FOUND);
     Meta.TableReferring := EntityReferring as TMemDBTablePersistent;
@@ -5046,7 +5026,7 @@ begin
     end;
 
     //Referred index.
-    EntityReferred := ParentDB.EntitiesByName(SelLatest, FKM.TableReferred, pinFinalCheck);
+    EntityReferred := ParentDB.EntitiesByName(SelLatest, FKM.TableReferred, pinFinalCheck, Ctxt, true);
     if not (Assigned(EntityReferred) and (EntityReferred is TMemDBTablePersistent)) then
       raise EMemDBException.Create(S_FK_TABLE_NOT_FOUND);
     Meta.TableReferred := EntityReferred as TMemDBTablePersistent;
@@ -5154,8 +5134,8 @@ begin
 
       //Tables.
       SelCurrent := MakeCurrentBufSelector(Tid);
-      CCEntityReferring := ParentDB.EntitiesByName(SelCurrent, FKMCC.TableReferer, pinFinalCheck);
-      CCEntityReferred := ParentDB.EntitiesByName(SelCurrent, FKMCC.TableReferred, pinFinalCheck);
+      CCEntityReferring := ParentDB.EntitiesByName(SelCurrent, FKMCC.TableReferer, pinFinalCheck, Ctxt, true);
+      CCEntityReferred := ParentDB.EntitiesByName(SelCurrent, FKMCC.TableReferred, pinFinalCheck, Ctxt, true);
 
       //Tables actually have to be the same object in memory.
       if (EntityReferring <> CCEntityReferring)
@@ -5247,7 +5227,7 @@ begin
   while Assigned(IRec) do
   begin
     Row := IRec.Item as TMemDBRow;
-    if MasterRows or Row.AnyChangesForTid(Meta.Tid) then
+    if MasterRows or Row.AnyChangesForTid(Meta.Tid, Meta.Ctxt) then
     begin
       CC := Row.PinCurrent(Meta.Tid, pinFinalCheck);
       NC := Row.GetNext(Meta.Tid);
@@ -5441,7 +5421,7 @@ begin
       while Assigned(IRec) do
       begin
         Row := IRec.Item as TMemDBRow;
-        if Row.AnyChangesForTid(Meta.Tid) then
+        if Row.AnyChangesForTid(Meta.Tid, Meta.Ctxt) then
         begin
           CC := Row.PinCurrent(Meta.Tid, pinFinalCheck);
           NC := Row.GetNext(Meta.Tid);
@@ -5537,7 +5517,7 @@ begin
         while Assigned(IRec) do
         begin
           Row := IRec.Item as TMemDBRow;
-          if Row.AnyChangesForTid(Meta.Tid) then
+          if Row.AnyChangesForTid(Meta.Tid, Meta.Ctxt) then
           begin
             CC :=  Row.PinCurrent(Meta.Tid, pinFinalCheck);
             NC := Row.GetNext(Meta.Tid);
@@ -5830,9 +5810,7 @@ begin
   end;
 end;
 
-
-//TODO - This can be optimised considerably if API only deals in latest names etc.
-function TMemDBForeignKeyPersistent.HandleAPITableRename(const Sel: TBufSelector; OldName, NewName: string): boolean;
+function TMemDBForeignKeyPersistent.HandleAPITableRename(const Tid: TTransactionId; OldName, NewName: string): boolean;
 var
   FKMeta: TMemDBForeignKeyMetadata;
   P: TMemDBStreamable;
@@ -5840,54 +5818,46 @@ var
   bufSel: TABSelType;
 begin
   result := false;
-  P := Metadata.GetPinLatest(Sel.TId, bufSel, pinEvolve);
-  SelLatest := MakeLatestBufSelector(Sel.TId);
+  P := Metadata.GetPinLatest(TId, bufSel, pinEvolve);
+  SelLatest := MakeLatestBufSelector(TId);
   if AssignedNotSentinel(P) then
   begin
     FKMeta := Metadata as TMemDBForeignKeyMetadata;
-    if OldName = FKMeta.Referer[fkTable, Sel, pinEvolve] then
+    if OldName = FKMeta.Referer[fkTable, SelLatest, pinEvolve] then
     begin
-      //Rename overwrites should already have been caught.
-      if OldName <> FKMeta.Referer[fkTable, SelLatest, pinEvolve] then
-        raise EMemDBInternalException.Create(S_FK_INTERNAL_OVERWRITE);
-      FKMeta.SetReferer(Sel.Tid, fkTable, NewName);
+      FKMeta.SetReferer(Tid, fkTable, NewName);
       result :=  true;
     end;
-    if OldName = FKMeta.Referred[fkTable, Sel, pinEvolve] then
+    if OldName = FKMeta.Referred[fkTable, SelLatest, pinEvolve] then
     begin
-      //Rename overwrites should already have been caught.
-      if OldName <> FKMeta.Referred[fkTable, SelLatest, pinEvolve] then
-        raise EMemDBInternalException.Create(S_FK_INTERNAL_OVERWRITE);
-      FKMeta.SetReferred(Sel.Tid, fkTable, NewName);
+      FKMeta.SetReferred(Tid, fkTable, NewName);
       result := true;
     end;
   end;
 end;
 
-//TODO - This can be optimised considerably if API only deals in latest names etc.
-procedure TMemDBForeignKeyPersistent.CheckAPITableDelete(const Sel: TBufSelector; TableName: string);
+procedure TMemDBForeignKeyPersistent.CheckAPITableDelete(const Tid: TTransactionId; TableName: string);
 var
   FKMeta: TMemDBForeignKeyMetadata;
   SelLatest: TBufSelector;
   P: TMemDBStreamable;
   bufSel: TABSelType;
 begin
-  SelLatest := MakeLatestBufSelector(Sel.TId);
-  P := Metadata.GetPinLatest(Sel.TId, bufSel, pinEvolve);
+  SelLatest := MakeLatestBufSelector(Tid);
+  P := Metadata.GetPinLatest(Tid, bufSel, pinEvolve);
   if AssignedNotSentinel(P) then
   begin
     FKMeta := Metadata as TMemDBForeignKeyMetadata;
     //Looks funny, but foreign key references cannot be moved from one place
     //to another. After multiple renames, should still be able to refer
     //to a table by its old name....
-    if (TableName = FKMeta.Referer[fkTable, Sel, pinEvolve]) or
-       (TableName = FKMeta.Referred[fkTable, Sel, pinEvolve]) then
+    if (TableName = FKMeta.Referer[fkTable, SelLatest, pinEvolve]) or
+       (TableName = FKMeta.Referred[fkTable, SelLatest, pinEvolve]) then
       raise EMemDBAPIException.Create(S_FK_REFERENCES_TABLE);
   end;
 end;
 
-//TODO - This can be optimised considerably if API only deals in latest names etc.
-function TMemDBForeignKeyPersistent.HandleAPIIndexRename(const Sel: TBufSelector; IsoDeterminedTableName, OldName, NewName: string): boolean;
+function TMemDBForeignKeyPersistent.HandleAPIIndexRename(const Tid:TTransactionId; IsoDeterminedTableName, OldName, NewName: string): boolean;
 var
   FKMeta: TMemDBForeignKeyMetadata;
   SelLatest: TBufSelector;
@@ -5895,58 +5865,53 @@ var
   bufSel: TABSelType;
 begin
   result := false;
-  SelLatest := MakeLatestBufSelector(Sel.TId);
-  P := Metadata.GetPinLatest(Sel.TId, bufSel, pinEvolve);
+  SelLatest := MakeLatestBufSelector(Tid);
+  P := Metadata.GetPinLatest(Tid, bufSel, pinEvolve);
   if AssignedNotSentinel(P) then
   begin
     FKMeta := Metadata as TMemDBForeignKeyMetadata;
-    if IsoDeterminedTableName = FKMeta.Referer[fkTable, Sel, pinEvolve] then
+    if IsoDeterminedTableName = FKMeta.Referer[fkTable, SelLatest, pinEvolve] then
     begin
-      if OldName = FKMeta.Referer[fkIndex, Sel, pinEvolve] then
+      if OldName = FKMeta.Referer[fkIndex, SelLatest, pinEvolve] then
       begin
-        //Rename overwrites should already have been caught.
-        if OldName <> FKMeta.Referer[fkIndex, SelLatest, pinEvolve] then
-          raise EMemDBInternalException.Create(S_FK_INTERNAL_OVERWRITE);
-        FKMeta.SetReferer(Sel.TId,fkIndex, NewName);
+        FKMeta.SetReferer(TId,fkIndex, NewName);
         result :=  true;
       end;
     end;
-    if IsoDeterminedTableName = FKMeta.Referred[fkTable, Sel, pinEvolve] then
+    if IsoDeterminedTableName = FKMeta.Referred[fkTable, SelLatest, pinEvolve] then
     begin
-      if OldName = FKMeta.Referred[fkIndex, Sel, PinEvolve] then
+      if OldName = FKMeta.Referred[fkIndex, SelLatest, PinEvolve] then
       begin
-        //Rename overwrites should already have been caught.
-        if OldName <> FKMeta.Referred[fkIndex, SelLatest, pinEvolve] then
-          raise EMemDBInternalException.Create(S_FK_INTERNAL_OVERWRITE);
-        FKMeta.SetReferred(Sel.TId,fkIndex, NewName);
+        FKMeta.SetReferred(TId,fkIndex, NewName);
         result :=  true;
       end;
     end;
   end;
 end;
 
-//TODO - This can be optimised considerably if API only deals in latest names etc.
-procedure TMemDBForeignKeyPersistent.CheckAPIIndexDelete(const Sel: TBufSelector; IsoDeterminedTableName, IndexName: string);
+procedure TMemDBForeignKeyPersistent.CheckAPIIndexDelete(const Tid:TTransactionId; IsoDeterminedTableName, IndexName: string);
 var
   FKMeta: TMemDBForeignKeyMetadata;
   P: TMemDBStreamable;
   bufSel: TABSelType;
+  SelLatest: TBufSelector;
 begin
-  P := Metadata.GetPinLatest(Sel.TId, bufSel, pinEvolve);
+  P := Metadata.GetPinLatest(TId, bufSel, pinEvolve);
+  SelLatest := MakeLatestBufSelector(Tid);
   if AssignedNotSentinel(P) then
   begin
     FKMeta := Metadata as TMemDBForeignKeyMetadata;
     //Looks funny, but foreign key references cannot be moved from one place
     //to another. After multiple renames, should still be able to refer
     //to a table by its old name....
-    if IsoDeterminedTableName = FKMeta.Referer[fkTable, Sel, pinEvolve] then
+    if IsoDeterminedTableName = FKMeta.Referer[fkTable, SelLatest, pinEvolve] then
     begin
-      if IndexName = FKMeta.Referer[fkIndex, Sel, pinEvolve] then
+      if IndexName = FKMeta.Referer[fkIndex, SelLatest, pinEvolve] then
         raise EMemDBAPIException.Create(S_FK_REFERENCES_INDEX);
     end;
-    if IsoDeterminedTableName = FKMeta.Referred[fkTable, Sel, pinEvolve] then
+    if IsoDeterminedTableName = FKMeta.Referred[fkTable, SelLatest, pinEvolve] then
     begin
-      if IndexName = FKMeta.Referred[fkIndex, Sel, pinEvolve] then
+      if IndexName = FKMeta.Referred[fkIndex, SelLatest, pinEvolve] then
         raise EMemDBAPIException.Create(S_FK_REFERENCES_INDEX);
     end;
   end;
@@ -6070,7 +6035,7 @@ begin
   result := StaticCheckFormatAgainstMetaDefs(Data, MetaFieldDefs);
 end;
 
-procedure TMemDBRow.ToJournal(const Tid: TTransactionId; Stream: TStream);
+procedure TMemDBRow.ToJournal(const Tid: TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);
 var
   Added, Changed, Deleted, Null: boolean;
 begin
@@ -6084,7 +6049,7 @@ begin
   end;
 end;
 
-procedure TMemDBRow.ToScratch(const PseudoTid:TTransactionId; Stream: TStream);
+procedure TMemDBRow.ToScratch(const PseudoTid:TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);
 begin
   WrTag(Stream, mstRowStartV2);
   WrGuid(Stream, RowId);
@@ -6092,7 +6057,7 @@ begin
   WrTag(Stream, mstRowEnd);
 end;
 
-procedure TMemDBRow.FromJournal(const PseudoTid: TTransactionId; Stream: TStream);
+procedure TMemDBRow.FromJournal(const PseudoTid: TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);
 var
   StreamRowGuid: TGUID;
   CheckItemCurrent, CheckItemNext: TMemStreamableList;
@@ -6117,7 +6082,7 @@ begin
   CheckABStreamableListChange(CheckItemCurrent, CheckItemNext);
 end;
 
-procedure TMemDBRow.FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet);
+procedure TMemDBRow.FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet; Ctxt: TTXLocalContext);
 var
   StreamRowGUID: TGUID;
   Cur, Nxt: TMemDBStreamable;
@@ -6375,7 +6340,7 @@ begin
   CheckABStreamableListChange(CurI, NextI);
 end;
 
-procedure TMemDbTableMetadata.PreCommit(const Tid: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet);
+procedure TMemDbTableMetadata.PreCommit(const Tid: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext);
 begin
   inherited;
   CheckABListChanges(Tid);
@@ -6628,121 +6593,50 @@ begin
   //FLock, list, init done elsewhere.
 end;
 
-{ TMemDBEntityList }
-
-procedure TMemDBEntityList.ReleaseAndClearCaching;
-var
-  i: integer;
-begin
-  for i := 0 to Pred(Count) do
-  begin
-    Items[i].Release; //Child items not freed to our cache.
-    Items[i] := nil;
-  end;
-  //Don't touch the memory allocator, just set the count.
-  Count := 0;
-end;
-
-procedure TMemDBEntityList.Reset(Cache: TReffedCache);
-begin
-  ReleaseAndClearCaching;
-  inherited;
-end;
-
-{ TMemDBEntityListCache }
-
-constructor TMemDBEntityListCache.Create;
-begin
-  inherited;
-  FList := TList.Create;
-  FLock := TCriticalSection.Create;
-end;
-
-destructor TMemDBEntityListCache.Destroy;
-var
-  i: integer;
-begin
-  if Assigned(FList) then
-  begin
-    for i := 0 to Pred(FList.Count) do
-      TReffed(FList.Items[i]).Release;
-  end;
-  FList.Free;
-  FLock.Free;
-  inherited;
-end;
-
-function TMemDBEntityListCache.GetFromCache: TReffed;
-var
- C: integer;
-begin
-  FLock.Acquire;
-  try
-    C := FList.Count;
-    if C > 0 then
-    begin
-      Dec(C);
-      result := FList[C];
-      FList.Delete(C);
-    end
-    else
-      result := nil;
-  finally
-    FLock.Release;
-  end;
-end;
-
-function TMemDBEntityListCache.PutToCache(Reffed: TReffed): boolean;
-begin
-  if Assigned(Reffed) then
-  begin
-    //Outside lock, but we are the only thread with a reference to reffed.
-    Reffed.Reset(self);
-    //This must be locked, (atomic counts), and ...
-    //other threads could use contents of reffed...
-    FLock.Acquire;
-    try
-      FList.Add(Reffed);
-    finally
-      FLock.Release;
-    end;
-    result := true;
-  end
-  else
-    result := false;
-end;
-
 { TMemDBDatabasePersistent }
 
-procedure TMemDBDatabasePersistent.StartTransaction(const Tid: TTRansactionId);
+procedure TMemDBDatabasePersistent.StartTransaction(const Tid: TTRansactionId; Ctxt: TTXLocalContext);
 var
-  EntityList: TReffedList;
   i: integer;
   ProxI: TMemDBEntityProxy;
   ObjI: TMemDBEntity;
+  CtxtLocal: TXTransactionLocalContext;
+  EList: TReffedList;
 begin
   inherited;
-  EntityList := AssembleEntityList;
+  CtxtLocal := Ctxt as TXTransactionLocalContext;
+  //Transaction local entities - the list can vary
+  //but the set of non-null entities (from the point of view of this transaction)
+  //is protected by commit and meta index locks.
+
+  //Start transaction and/or prepare allocate local structures,
+  //and we should rollback / teardown on the basis of the set of entities
+  //we have allocated local structures for.
+
+  //Entity list assemble OK here.
+  CtxtLocal.SetInitialEntityLists(AssembleEntityList);
+  //For EList acquisition inside commit/rollback machinery,
+  //use low isolation value to obtain most recent copy of list.
+  EList := CtxtLocal.GetEntityList(Low(TMDBIsolationLevel));
   try
-    for i := 0 to Pred(EntityList.Count) do
+    for i := 0 to Pred(EList.Count) do
     begin
-      ProxI := EntityList[i] as TMemDBEntityProxy;
+      ProxI := EList.Items[i] as TMemDBEntityProxy;
       ObjI := ProxI.Proxy as TMemDbEntity;
       //Object should do their own deleted / null checks as appropriate.
-      ObjI.StartTransaction(Tid);
+      ObjI.StartTransaction(Tid, Ctxt);
     end;
   finally
-    EntityList.ReleaseToCache(FEntityListCache);
+    CtxtLocal.PutEntityList(EList);
   end;
 end;
-
-
 
 type
   TPOPreContext = record
      Tid: TTRansactionId;
      Phase: TMemDBPreCommitPhase;
      Opts: TOptimizeSet;
+     Ctxt: TTXLocalContext
   end;
   PPOPreContext = ^TPOPreContext;
 
@@ -6755,24 +6649,25 @@ begin
   PreContext := PPOPreContext(Ref2);
   Entity.FParentDB.FEntityThrottle.Acquire;
   try
-    Entity.PreCommit(PreContext.Tid, PreContext.Phase, PreContext.Opts);
+    Entity.PreCommit(PreContext.Tid, PreContext.Phase, PreContext.Opts, PreContext.Ctxt);
   finally
     Entity.FParentDB.FEntityThrottle.Release;
   end;
   result := nil;
 end;
 
-procedure TMemDBDatabasePersistent.PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet);
+procedure TMemDBDatabasePersistent.PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext);
 var
   i: integer;
   ProxI: TMemDBEntityProxy;
   ObjI: TMemDBEntity;
-  EntityList: TReffedList;
+  EList, ELCheck: TReffedList;
   IAdded, IChanged, IDeleted, INull: boolean;
   ICur, INxt: TMemDbStreamable;
   ILat: TMemEntityMetadataItem;
   SelType: TABSelType;
   Names: TStringList;
+  CtxtLocal: TXTransactionLocalContext;
 
   Handlers: TParallelHandlers;
   Refs1: TPHRefs;
@@ -6785,6 +6680,7 @@ var
 begin
   //Pre-commit check and no-pin goes from top to bottom.
   inherited;
+  CtxtLocal := Ctxt as TXTransactionLocalContext;
 
   if OptApplies(optEntitiesParallel, Opts) then
   begin
@@ -6792,15 +6688,26 @@ begin
     TPOPre.Tid := Tid;
     TPOPre.Phase := Phase;
     TPOPre.Opts := Opts;
+    TPOPre.Ctxt := Ctxt;
   end;
 
-  EntityList := AssembleEntityList;
+  EList := CtxtLocal.GetEntityList(Low(TMDBIsolationLevel));
   try
     case Phase of
+      pcpEntitySet: begin
+        //Yes there are races between a new entity being created.
+        //and the other transaction getting to know about it.
+        ELCheck := AssembleEntityList;
+        try
+          CtxtLocal.ValidateEntityLists(ELCheck);
+        finally
+          ELCheck.Release;
+        end;
+      end;
       pcpFKeys: begin
-        for i := 0 to Pred(EntityList.Count) do
+        for i := 0 to Pred(EList.Count) do
         begin
-          ProxI := EntityList[i] as TMemDBEntityProxy;
+          ProxI := EList.Items[i] as TMemDBEntityProxy;
           ObjI := ProxI.Proxy as TMemDbEntity;
           Assert((ObjI is TMemDBTablePersistent) or (ObjI is TMemDBForeignKeyPersistent));
           if ObjI is TMemDBForeignKeyPersistent then
@@ -6813,7 +6720,7 @@ begin
             else
             begin
               //Object should do their own deleted / null checks as appropriate.
-              ObjI.PreCommit(Tid, Phase, Opts);
+              ObjI.PreCommit(Tid, Phase, Opts, Ctxt);
             end;
           end;
         end;
@@ -6823,9 +6730,9 @@ begin
       pcpTables: begin
         Names := TStringList.Create;
         try
-          for i := 0 to Pred(EntityList.Count) do
+          for i := 0 to Pred(EList.Count) do
           begin
-            ProxI := EntityList[i] as TMemDBEntityProxy;
+            ProxI := EList.Items[i] as TMemDBEntityProxy;
             ObjI := ProxI.Proxy as TMemDbEntity;
             ICur := ObjI.META_PinCurrent(Tid, pinFinalCheck);
             INxt := ObjI.META_GetNext(Tid);
@@ -6848,9 +6755,9 @@ begin
         finally
           Names.Free;
         end;
-        for i := 0 to Pred(EntityList.Count) do
+        for i := 0 to Pred(EList.Count) do
         begin
-          ProxI := EntityList[i] as TMemDBEntityProxy;
+          ProxI := EList.Items[i] as TMemDBEntityProxy;
           ObjI := ProxI.Proxy as TMemDbEntity;
           if ObjI is TMemDBTablePersistent then
           begin
@@ -6862,7 +6769,7 @@ begin
             else
             begin
               //Object should do their own deleted / null checks as appropriate.
-              ObjI.PreCommit(Tid, Phase, Opts);
+              ObjI.PreCommit(Tid, Phase, Opts, Ctxt);
             end;
           end;
         end;
@@ -6873,7 +6780,7 @@ begin
       Assert(false);
     end;
   finally
-    EntityList.ReleaseToCache(FEntityListCache);
+    CtxtLocal.PutEntityList(EList);
   end;
 end;
 
@@ -6962,6 +6869,7 @@ type
     Tid: TTransactionId;
     Opts: TOptimizeSet;
     FromScratch: boolean;
+    Ctxt: TTXLocalContext
   end;
   PPOPrepareContext = ^TPOPrepareContext;
 
@@ -6974,19 +6882,20 @@ begin
   PContext := PPOPrepareContext(Ref2);
   Entity.FParentDB.FEntityThrottle.Acquire;
   try
-    Entity.Prepare(PContext.Tid, PContext.Opts, PContext.FromScratch);
+    Entity.Prepare(PContext.Tid, PContext.Opts, PContext.FromScratch, PContext.Ctxt);
   finally
     Entity.FParentDB.FEntityThrottle.Release;
   end;
   result := nil;
 end;
 
-procedure TMemDBDatabasePersistent.Prepare(const Tid: TTransactionId; Opts:TOptimizeSet; FromScratch: boolean);
+procedure TMemDBDatabasePersistent.Prepare(const Tid: TTransactionId; Opts:TOptimizeSet; FromScratch: boolean; Ctxt: TTXLocalContext);
 var
-  EntityList: TReffedList;
   Prox: TMemDBEntityProxy;
   Entity: TMemDBEntity;
   i: integer;
+  CtxtLocal: TXTransactionLocalContext;
+  EList: TReffedList;
 
   Handlers: TParallelHandlers;
   Refs1: TPHRefs;
@@ -6997,19 +6906,22 @@ var
   TPOPre: TPOPrepareContext;
 
 begin
+  CtxtLocal := Ctxt as TXTransactionLocalContext;
+
   if OptApplies(optEntitiesParallel, Opts) then
   begin
     ParallelInit(Handlers, Refs1, Refs2, Excepts, Rets, PCount);
     TPOPre.Tid := Tid;
     TPOPre.Opts := Opts;
     TPOPre.FromScratch := FromScratch;
+    TPOPre.Ctxt := Ctxt;
   end;
 
-  EntityList := AssembleEntityList;
+  EList := CtxtLocal.GetEntityList(Low(TMDBIsolationLevel));
   try
-    for i := 0 to Pred(EntityList.Count) do
+    for i := 0 to Pred(EList.Count) do
     begin
-      Prox := EntityList.Items[i] as TMemDBEntityProxy;
+      Prox := EList.Items[i] as TMemDBEntityProxy;
       Entity := Prox.Proxy as TMemDBEntity;
       if OptApplies(optEntitiesParallel, Opts) then
       begin
@@ -7017,41 +6929,43 @@ begin
           Handlers, Refs1, Refs2, Excepts, Rets, PCount);
       end
       else
-        Entity.Prepare(Tid, Opts, FromScratch);
+        Entity.Prepare(Tid, Opts, FromScratch, Ctxt);
     end;
     if OptApplies(optEntitiesParallel, Opts) and (PCount > 0) then
       ExecParallel(Handlers, Refs1, refs2, Excepts, Rets, @MemDBXlateExceptions);
   finally
-    EntityList.ReleaseToCache(FEntityListCache);
+    CTxtLocal.PutEntityList(EList);
   end;
 end;
 
-procedure TMemDBDatabasePersistent.ToJournal(const Tid: TTransactionId; Stream: TStream);
+procedure TMemDBDatabasePersistent.ToJournal(const Tid: TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);
 var
-  EntityList: TReffedList;
   Prox: TMemDBEntityProxy;
   Entity: TMemDBEntity;
   i: integer;
   StartPos, EndPos, i64: int64;
+  CtxtLocal: TXTransactionLocalContext;
+  EList: TReffedList;
 begin
   StartPos := Stream.Position;
   WrTag(Stream, mstDBStartV2);
   //Size hint.
   i64 := 0;
   Stream.Write(i64, sizeof(i64));
+  CtxtLocal := Ctxt as TXTransactionLocalContext;
 
-  EntityList := AssembleEntityList;
+  EList := CtxtLocal.GetEntityList(Low(TMDBIsolationLevel));
   try
-    for i := 0 to Pred(EntityList.Count) do
+    for i := 0 to Pred(EList.Count) do
     begin
-      Prox := EntityList.Items[i] as TMemDBEntityProxy;
+      Prox := EList.Items[i] as TMemDBEntityProxy;
       Entity := Prox.Proxy as TMemDBEntity;
-      Entity.ToJournal(Tid, Stream);
+      Entity.ToJournal(Tid, Stream, Ctxt);
     end;
+    WrTag(Stream, mstDBEnd);
   finally
-    EntityList.ReleaseToCache(FEntityListCache);
+    CtxtLocal.PutEntityList(EList);
   end;
-  WrTag(Stream, mstDBEnd);
 
   //Fixup size hint.
   //Twist, NullStream really doesn't like being read from.
@@ -7066,32 +6980,35 @@ begin
   end;
 end;
 
-procedure TMemDBDatabasePersistent.ToScratch(const PseudoTid:TTransactionId; Stream: TStream);
+procedure TMemDBDatabasePersistent.ToScratch(const PseudoTid:TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);
 var
-  EntityList: TReffedList;
   Proxy: TMemDbEntityProxy;
   Entity: TMemDbEntity;
   i: integer;
   StartPos, EndPos, i64: int64;
+  CtxtLocal: TXTransactionLocalContext;
+  EList: TReffedList;
+
 begin
   StartPos := Stream.Position;
   WrTag(Stream, mstDBStartV2);
   //Size hint.
   i64 := 0;
   Stream.Write(i64, sizeof(i64));
+  CtxtLocal := Ctxt as TXTransactionLocalContext;
 
-  EntityList := AssembleEntityList;
+  EList := CTxtLocal.GetEntityList(Low(TMDBIsolationLevel));
   try
-    for i := 0 to Pred(EntityList.Count) do
+    for i := 0 to Pred(EList.Count) do
     begin
-      Proxy := EntityList.Items[i] as TMemDbEntityProxy;
+      Proxy := EList.Items[i] as TMemDbEntityProxy;
       Entity := Proxy.Proxy as TMemDbEntity;
-      Entity.ToScratch(PseudoTid, Stream);
+      Entity.ToScratch(PseudoTid, Stream, Ctxt);
     end;
+    WrTag(Stream, mstDBEnd);
   finally
-    EntityList.ReleaseToCache(FEntityListCache);
+    CTxtLocal.PutEntityList(EList);
   end;
-  WrTag(Stream, mstDBEnd);
 
   //Fixup size hint.
   //Twist, NullStream really doesn't like being read from.
@@ -7106,7 +7023,7 @@ begin
   end;
 end;
 
-procedure TMemDBDatabasePersistent.FromJournal(const PseudoTid: TTransactionId; Stream: TStream);
+procedure TMemDBDatabasePersistent.FromJournal(const PseudoTid: TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);
 var
   StrPos, i64: int64;
   NxtTag: TMemStreamTag;
@@ -7114,7 +7031,9 @@ var
   EntityName: string;
   DBU: TMemDBEntity;
   DBUMeta: TMemDBStreamable;
+  CtxtLocal: TXTransactionLocalContext;
 begin
+  CTxtLocal := CTxt as TXTransactionLocalContext;
   NxtTag := RdTag(Stream);
   if not (NxtTag in [mstDBStart, mstDBStartV2]) then
     raise EMemDBException.Create(S_WRONG_TAG);
@@ -7133,7 +7052,7 @@ begin
       begin
         //In these cases, lookahead helper should be returning the
         //new entity name.
-        DBU := EntitiesByName(MakeLatestBufSelector(PseudoTid), EntityName, pinEvolve);
+        DBU := EntitiesByName(MakeLatestBufSelector(PseudoTid), EntityName, pinEvolve, Ctxt, true);
         if Assigned(DBU) then
         begin
           DBU.FProxy.Release;
@@ -7146,8 +7065,13 @@ begin
           DBU := TMemDBForeignKey.Create;
 
         DBU.Init(PseudoTid, self, EntityName, false);
-        DBU.StartTransaction(PseudoTid);
-        DBU.FromJournal(PseudoTid, Stream); //should inc ref.
+
+        //Journal replay, add only local txion entity list
+        DBU.StartTransaction(PseudoTid, Ctxt);
+        CTxtLocal.AddEntityProxyToRegistered(DBU.Proxy);
+        CTxtLocal.AddEntityProxyToSnapshot(DBU.Proxy);
+
+        DBU.FromJournal(PseudoTid, Stream, Ctxt); //should inc ref.
         Assert(Assigned(DBU.Metadata.GetNext(PseudoTid)));
         Assert(not (DBU.Metadata.GetNext(PseudoTid) is TMemDeleteSentinel));
         DBU.Proxy.Release;
@@ -7158,10 +7082,10 @@ begin
         //current entity name.
 
         //Not all the renaming is checked here, we'll do that in the pre-commit check.
-        DBU := EntitiesByName(MakeCurrentBufSelector(PseudoTid), EntityName, pinEvolve);
+        DBU := EntitiesByName(MakeCurrentBufSelector(PseudoTid), EntityName, pinEvolve, Ctxt, true);
         if Assigned(DBU) then
         begin
-          DBU.FromJournal(PseudoTid, Stream);
+          DBU.FromJournal(PseudoTid, Stream, Ctxt);
           DBUMeta := DBU.Metadata.GetNext(PseudoTid);
           Assert(Assigned(DBUMeta) = (ChangeType = mectChangedDeletedEntity));
           DBU.FProxy.Release;
@@ -7177,7 +7101,7 @@ begin
   end;
 end;
 
-procedure TMemDBDatabasePersistent.FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet);
+procedure TMemDBDatabasePersistent.FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet; Ctxt: TTXLocalContext);
 var
   StrPos, i64: int64;
   NxtTag: TMemStreamTag;
@@ -7185,7 +7109,9 @@ var
   EntityName: string;
   DBU: TMemDBEntity;
   LatestSel: TBufSelector;
+  CtxtLocal: TXTransactionLocalContext;
 begin
+  CtxtLocal := CTxt as TXTransactionLocalContext;
   NxtTag := RdTag(Stream);
   if not (NxtTag in [mstDBStart, mstDBStartV2]) then
     raise EMemDBException.Create(S_WRONG_TAG);
@@ -7203,7 +7129,7 @@ begin
       mectNewFK:
       begin
         LatestSel := MakeLatestBufSelector(PseudoTid);
-        DBU := EntitiesByName(LatestSel, EntityName, pinEvolve);
+        DBU := EntitiesByName(LatestSel, EntityName, pinEvolve, Ctxt, true);
         if Assigned(DBU) then
         begin
           DBU.FProxy.Release;
@@ -7216,8 +7142,13 @@ begin
           DBU := TMemDBForeignKey.Create;
 
         DBU.Init(PseudoTid, self, EntityName, false);
-        DBU.StartTransaction(PseudoTid);
-        DBU.FromScratch(PseudoTid, Stream, Opts); //Should inc ref on proxy for us.
+
+        //Serialised journal replay, add only local txion
+        DBU.StartTransaction(PseudoTid, Ctxt);
+        CTxtLocal.AddEntityProxyToRegistered(DBU.Proxy);
+        CTxtLocal.AddEntityProxyToSnapshot(DBU.Proxy);
+
+        DBU.FromScratch(PseudoTid, Stream, Opts, Ctxt); //Should inc ref on proxy for us.
         Assert(Assigned(DBU.Metadata.GetNext(PseudoTid)));
         Assert(not (DBU.Metadata.GetNext(PseudoTid) is TMemDeleteSentinel));
         DBU.Proxy.Release;
@@ -7231,45 +7162,69 @@ begin
   end;
 end;
 
-function TMemDBDatabasePersistent.AnyChangesForTid(const TId: TTransactionId): boolean;
+function TMemDBDatabasePersistent.AnyChangesForTid(const TId: TTransactionId; Ctxt: TTXLocalContext): boolean;
 var
-  EntityList: TReffedList;
+  EntityList, TxList: TReffedList;
   Proxy: TReffedProxy;
   Entity: TMemDbEntity;
   i: integer;
+  CtxtLocal: TXTransactionLocalContext;
 begin
+  //At point where we check any changes for Tid,
+  //lists may differ, but expect only changes in entities where the entities
+  //are registered for that transaction.
+  CtxtLocal := Ctxt as TXTransactionLocalContext;
+
+  //Assemble entity list OK here.
   EntityList := AssembleEntityList;
+  TxList := CtxtLocal.GetEntityList(Low(TMDBIsolationLevel));
   try
     result := false;
     for i := 0 to Pred(EntityList.Count) do
     begin
       Proxy := EntityList.Items[i] as TReffedProxy;
       Entity := Proxy.Proxy as TMemDBEntity;
-      result := result or Entity.AnyChangesForTid(Tid);
+      //Cross check with entities this transaction can reasonably have altered.
+      if TxList.IndexOf(Proxy) >= 0 then
+        result := result or Entity.AnyChangesForTid(Tid, Ctxt)
+      else
+        Assert(not Entity.AnyChangesForTid(Tid, Ctxt));
     end;
   finally
-    EntityList.ReleaseToCache(FEntityListCache);
+    EntityList.Release;
+    CtxtLocal.PutEntityList(TxList);
   end;
 end;
 
-function TMemDBDatabasePersistent.AnyChanges(const TId: TTransactionId): boolean;
+function TMemDBDatabasePersistent.AnyChanges(const TId: TTransactionId; Ctxt: TTXLocalContext): boolean;
 var
-  EntityList: TReffedList;
+  EntityList, TxList: TReffedList;
   Proxy: TReffedProxy;
   Entity: TMemDbEntity;
   i: integer;
+  CtxtLocal: TXTransactionLocalContext;
 begin
+  //At points where this function called, we do not expect any variance
+  //between global entity list, and any transaction local registered lists,
+  //serialised at that point.
+  CtxtLocal := Ctxt as TXTransactionLocalContext;
+
+  //Assemble entity list Ok here.
   EntityList := AssembleEntityList;
+  TxList := CtxtLocal.GetEntityList(Low(TMDBIsolationLevel));
   try
+    if not EntityList.SameMembers(TxList) then
+      raise EMemDBInternalException.Create(S_ENTITY_LIST_CONFUSION_CHECKING_CHANGES);
     result := false;
     for i := 0 to Pred(EntityList.Count) do
     begin
       Proxy := EntityList.Items[i] as TReffedProxy;
       Entity := Proxy.Proxy as TMemDBEntity;
-      result := result or Entity.AnyChanges(Tid);
+      result := result or Entity.AnyChanges(Tid, Ctxt);
     end;
   finally
-    EntityList.ReleaseToCache(FEntityListCache);
+    EntityList.Release;
+    CtxtLocal.PutEntityList(TxList);
   end;
 end;
 
@@ -7301,10 +7256,11 @@ end;
 
 procedure TMemDBDatabasePersistent.Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext);
 var
-  EntityList: TReffedList;
   Proxy: TMemDBEntityProxy;
   Entity: TMemDbEntity;
   i: integer;
+  CtxtLocal: TXTransactionLocalContext;
+  EList: TReffedList;
 
   Handlers: TParallelHandlers;
   Refs1: TPHRefs;
@@ -7316,6 +7272,8 @@ var
 
 begin
   inherited;
+  CtxtLocal := Ctxt as TXTransactionLocalContext;
+  //By this point entity list has been checked as being complete enough.
   if OptApplies(optEntitiesParallel, Opts) then
   begin
     ParallelInit(Handlers, Refs1, Refs2, Excepts, Rets, PCount);
@@ -7325,11 +7283,11 @@ begin
     TPOComm.Ctxt := Ctxt;
   end;
 
-  EntityList := AssembleEntityList;
+  EList := CTxtLocal.GetEntityList(Low(TMDBIsolationLevel));
   try
-    for i := 0 to Pred(EntityList.Count) do
+    for i := 0 to Pred(EList.Count) do
     begin
-      Proxy := EntityList.Items[i] as TMemDBEntityProxy;
+      Proxy := EList.Items[i] as TMemDBEntityProxy;
       Entity := Proxy.Proxy as TMemDBEntity;
       if OptApplies(optEntitiesParallel, Opts) then
       begin
@@ -7341,11 +7299,11 @@ begin
     end;
     if OptApplies(optEntitiesParallel, Opts) and (PCount > 0) then
       ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
+    if Phase = ccpCleardown then
+      ConsolidateAndFreeCaches(Ctxt);
   finally
-    EntityList.ReleaseToCache(FEntityListCache);
+    CtxtLocal.PutEntityList(EList);
   end;
-  if Phase = ccpCleardown then
-    ConsolidateAndFreeCaches(Ctxt);
 end;
 
 type
@@ -7376,10 +7334,11 @@ end;
 
 procedure TMemDBDatabasePersistent.Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext);
 var
-  EntityList: TReffedList;
   Proxy: TMemDBEntityProxy;
   Entity: TMemDbEntity;
   i: integer;
+  CtxtLocal: TXTransactionLocalContext;
+  EList: TReffedList;
 
   Handlers: TParallelHandlers;
   Refs1: TPHRefs;
@@ -7391,6 +7350,10 @@ var
 
 begin
   inherited;
+  CtxtLocal := Ctxt as TXTransactionLocalContext;
+  //Rollbacks always occur on the entity list that has been registered for the
+  //txion.
+
   if OptApplies(optEntitiesParallel, Opts) then
   begin
     ParallelInit(Handlers, Refs1, Refs2, Excepts, Rets, PCount);
@@ -7400,11 +7363,11 @@ begin
     TPORoll.Ctxt := Ctxt;
   end;
 
-  EntityList := AssembleEntityList;
+  EList := CTxtLocal.GetEntityList(Low(TMDBIsolationLevel));
   try
-    for i := 0 to Pred(EntityList.Count) do
+    for i := 0 to Pred(EList.Count) do
     begin
-      Proxy := EntityList.Items[i] as TMemDBEntityProxy;
+      Proxy := EList.Items[i] as TMemDBEntityProxy;
       Entity := Proxy.Proxy as TMemDBEntity;
       if OptApplies(optEntitiesParallel, Opts) then
       begin
@@ -7416,23 +7379,24 @@ begin
     end;
     if OptApplies(optEntitiesParallel, Opts) and (PCount > 0) then
       ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
+
+    if Phase = rbpDelayedRollback then
+      ConsolidateAndFreeCaches(Ctxt);
   finally
-    EntityList.ReleaseToCache(FEntityListCache);
+    CtxtLocal.PutEntityList(EList);
   end;
-  if Phase = rbpDelayedRollback then
-    ConsolidateAndFreeCaches(Ctxt);
 end;
 
 procedure TMemDBDatabasePersistent.ConsolidateAndFreeCaches(Ctxt: TTXLocalContext);
 var
   MCache: TMemDbNodeCache;
-  CETxt: TXEntityLocalContext;
+  CETxt: TXTransactionLocalContext;
   i, TSize: integer;
 begin
   //This does not *have* to work, things will just run faster when it does.
   //Put all the caches together, put into one big sorted list,
   //And then free the whole lot sequentially.
-  CETxt := Ctxt as TXEntityLocalContext;
+  CETxt := Ctxt as TXTransactionLocalContext;
   MCache := nil;
   TSize := 0;
   try
@@ -7451,34 +7415,34 @@ begin
   MCache.Free;
 end;
 
-procedure TMemDBDatabasePersistent.SizeHint(const Tid: TTransactionID; var SizeHint: TDBSizeHint);
+procedure TMemDBDatabasePersistent.SizeHint(const Tid: TTransactionID; var SizeHint: TDBSizeHint; Ctxt: TTXLocalContext);
 var
-  EntityList: TReffedList;
   Proxy: TMemDBEntityProxy;
   Entity: TMemDbEntity;
+  EList: TReffedList;
   i: integer;
+  CtxtLocal: TXTransactionLocalContext;
 begin
-  EntityList := AssembleEntityList;
+  CtxtLocal := Ctxt as TXTransactionLocalContext;
+
+  EList := CtxtLocal.GetEntityList(Low(TMDBIsolationLevel));
   try
-    for i := 0 to Pred(EntityList.Count) do
+    for i := 0 to Pred(EList.Count) do
     begin
-      Proxy := EntityList.Items[i] as TMemDBEntityProxy;
+      Proxy := EList.Items[i] as TMemDBEntityProxy;
       Entity := Proxy.Proxy as TMemDBEntity;
       Entity.SizeHint(Tid, SizeHint);
     end;
   finally
-    EntityList.ReleaseToCache(FEntityListCache);
+    CtxtLocal.PutEntityList(EList);
   end;
 end;
 
-function TMemDBDatabasePersistent.AssembleEntityList: TMemDBEntityList;
+function TMemDBDatabasePersistent.AssembleEntityList: TReffedList;
 var
   Proxy: TMemDBEntityProxy;
 begin
-  if Assigned(FEntityListCache) then
-    result := FEntityListCache.GetFromCache as TMemDBEntityList;
-  if not Assigned(result) then
-    result := TMemDBEntityList.Create;
+  result := TReffedList.Create;
   try
     FEntityLock.Acquire;
     try
@@ -7492,28 +7456,34 @@ begin
       FEntityLock.Release;
     end;
   except
-    result.ReleaseToCache(FEntityListCache);
+    result.Release;
     raise;
   end;
 end;
 
-function TMemDBDatabasePersistent.EntitiesByName(const AB:TBufSelector; Name: string; PinReason: TPinReason): TMemDBEntity;
+function TMemDBDatabasePersistent.EntitiesByName(const AB:TBufSelector; Name: string; PinReason: TPinReason; CTxt: TTXLocalContext; IsoOverride: boolean): TMemDBEntity;
 var
   i: integer;
   Proxy: TMemDBEntityProxy;
   Entity: TMemDBEntity;
-  List: TReffedList;
+  EList: TReffedList;
   SelType: TABSelType;
   EntMetaS: TMemDBStreamable;
   EntMetaItem: TMemEntityMetadataItem;
+  CtxLocal: TXTransactionLocalContext;
 begin
-  List := AssembleEntityList;
+  CtxLocal := Ctxt as TXTransactionLocalContext;
+
+  if IsoOverride then
+    EList := CtxLocal.GetEntityList(Low(TMDbIsolationLevel))
+  else
+    EList := CtxLocal.GetEntityList(AB.TId.Iso);
   try
-    for i := 0 to Pred(List.Count) do
+    for i := 0 to Pred(EList.Count) do
     begin
       //NB. Do not need PinForUnorderedContainer here, because we get all of them
       //at once, and use atomicity on the pins. The same is not the case for DB rows.
-      Proxy := List.Items[i] as TMemDbEntityProxy;
+      Proxy := EList.Items[i] as TMemDbEntityProxy;
       Assert(Assigned(Proxy.Proxy) and (Proxy.Proxy is TMemDbEntity));
       Entity := Proxy.Proxy as TMemDbEntity;
       case AB.SelType of
@@ -7534,10 +7504,10 @@ begin
         exit;
       end;
     end;
+    result := nil;
   finally
-    List.ReleaseToCache(FEntityListCache);
+    CtxLocal.PutEntityList(EList);
   end;
-  result := nil;
 end;
 
 constructor TMemDBDatabasePersistent.Create;
@@ -7554,7 +7524,6 @@ begin
   FPolicies := DefaultOptimizePolicies; //TODO - Configurability here.
   FEntityThrottle := TSemaphore.Create(nil, FPolicies.MaxParallel, High(integer), '', false);
   FIndexThrottle := TSemaphore.Create(nil, FPolicies.MaxParallel, High(integer), '', false);
-  FEntityListCache:= TMemDBEntityListCache.Create;
 end;
 
 destructor TMemDBDatabasePersistent.Destroy;
@@ -7562,22 +7531,33 @@ var
   EntityList: TReffedList;
   i: integer;
   Proxy: TMemDBEntityProxy;
+  EntSnapshot: TReffedList;
+  EntRegistered: TReffedList;
 {$IFDEF CHECK_TEARDOWN_REFS}
   PseudoTid: TTransactionId;
   Entity: TMemDbEntity;
   NullStream: TNullStream;
   FKs, Del: boolean;
-  Ctxt: TXEntityLocalContext;
+  Ctxt: TXTransactionLocalContext;
 {$ENDIF}
 begin
+  EntSnapshot := nil;
+  EntRegistered := nil;
 {$IFDEF CHECK_TEARDOWN_REFS}
   NullStream := TNullStream.Create;
-  Ctxt := TXEntityLocalContext.Create;
+  Ctxt := TXTransactionLocalContext.Create;
+  Ctxt.SetPtrs(@EntSnapshot, @EntRegistered);
   try
     for FKs := True downto False do
     begin
       PseudoTid := TTransactionId.NewTransactionId(ilSerialisable);
-      StartTransaction(PseudoTid);
+      EntSnapshot.Release;
+      EntSnapShot := nil;
+      EntRegistered.Release;
+      EntRegistered := nil;
+
+      StartTransaction(PseudoTid, Ctxt);
+      //Destructor, raw entity list OK.
       EntityList := AssembleEntityList;
       try
         for i := 0 to Pred(EntityList.Count) do
@@ -7594,12 +7574,13 @@ begin
             //Should clear all pins and refs, assuming no oustanding txions.
         end;
       finally
-        EntityList.ReleaseToCache(FEntityListCache);
+        EntityList.Release;
       end;
-      Prepare(PseudoTid, CleardownOptSet, false);
-      ToJournal(PseudoTid, NullStream);
-      PreCommit(PseudoTid, pcpFKeys, CleardownOptSet);
-      PreCommit(PseudoTid, pcpTables, CleardownOptSet);
+      Prepare(PseudoTid, CleardownOptSet, false, Ctxt);
+      ToJournal(PseudoTid, NullStream, Ctxt);
+      PreCommit(PseudoTid, pcpEntitySet, CleardownOptSet, Ctxt);
+      PreCommit(PseudoTid, pcpTables, CleardownOptSet, Ctxt);
+      PreCommit(PseudoTid, pcpFKeys, CleardownOptSet, Ctxt);
       Commit(PseudoTid, ccpData, CleardownOptSet, Ctxt);
       Commit(PseudoTid, ccpMetaIndex, [], Ctxt);
       Commit(PseudoTid, ccpCleardown, CleardownOptSet, Ctxt);
@@ -7607,9 +7588,11 @@ begin
   finally
     NullStream.Free;
     Ctxt.Free;
+    EntSnapshot.Release;
+    EntRegistered.Release;
   end;
 {$ELSE}
-  //TODO - Harden this to handle out of memory conditions.
+  //Destructor, raw entity list OK.
   EntityList := AssembleEntityList;
   try
     for i := 0 to Pred(EntityList.Count) do
@@ -7621,7 +7604,7 @@ begin
       EntityList.Items[i] := nil;
     end;
   finally
-    EntityList.ReleaseToCache(FEntityListCache);
+    EntityList.Release;
   end;
 {$ENDIF}
   Assert(DlItemIsEmpty(@FEntityList));
@@ -7631,7 +7614,6 @@ begin
   FMetaIndexLock.Free;
   FEntityThrottle.Free;
   FIndexThrottle.Free;
-  FEntityListCache.Free;
   inherited;
 end;
 
@@ -7644,94 +7626,106 @@ begin
   end;
 end;
 
-function TMemDBDatabasePersistent.HandleAPITableRename(const Sel: TBufSelector; OldName, NewName: string): boolean;
+function TMemDBDatabasePersistent.HandleAPITableRename(const Tid: TTransactionId; Ctxt: TTXLocalContext;  OldName, NewName: string): boolean;
 var
   i: integer;
-  EntityList: TReffedList;
+  EList: TReffedList;
   Proxy: TMemDBEntityProxy;
   Entity: TMemDBEntity;
+  CtxtLocal: TXTransactionLocalContext;
 begin
   result := false;
-  EntityList := AssembleEntityList;
+  CtxtLocal := Ctxt as TXTransactionLocalContext;
+
+  EList := CtxtLocal.GetEntityList(Tid.Iso);
   try
-    for i := 0 to Pred(EntityList.Count) do
+    for i := 0 to Pred(EList.Count) do
     begin
-      Proxy := EntityList.Items[i] as TMemDBEntityProxy;
+      Proxy := EList.Items[i] as TMemDBEntityProxy;
       Entity := Proxy.Proxy as TMemDBEntity;
       if Entity is TMemDBForeignKeyPersistent then
         result := (Entity as TMemDBForeignKeyPersistent)
-          .HandleAPITableRename(Sel, OldName, NewName) or result;
+          .HandleAPITableRename(Tid, OldName, NewName) or result;
     end;
   finally
-    EntityList.ReleaseToCache(FEntityListCache);
+    CtxtLocal.PutEntityList(EList);
   end;
 end;
 
-procedure TMemDBDatabasePersistent.CheckAPITableDelete(const Sel: TBufSelector; TableName: string);
+procedure TMemDBDatabasePersistent.CheckAPITableDelete(const Tid: TTransactionId; Ctxt: TTXLocalContext; TableName: string);
 var
   i: integer;
-  EntityList: TReffedList;
+  EList: TReffedList;
   Proxy: TMemDBEntityProxy;
   Entity: TMemDBEntity;
+  CtxtLocal: TXTransactionLocalContext;
 begin
-  EntityList := AssembleEntityList;
+  CtxtLocal := Ctxt as TXTransactionLocalContext;
+
+  EList := CtxtLocal.GetEntityList(Tid.Iso);
   try
-    for i := 0 to Pred(EntityList.Count) do
+    for i := 0 to Pred(EList.Count) do
     begin
-      Proxy := EntityList.Items[i] as TMemDBEntityProxy;
+      Proxy := EList.Items[i] as TMemDBEntityProxy;
       Entity := Proxy.Proxy as TMemDBEntity;
       if Entity is TMemDBForeignKeyPersistent then
         (Entity as TMemDBForeignKeyPersistent)
-        .CheckAPITableDelete(Sel, TableName);
+        .CheckAPITableDelete(Tid, TableName);
     end;
   finally
-    EntityList.ReleaseToCache(FEntityListCache);
+    CtxtLocal.PutEntityList(EList);
   end;
 end;
 
-function TMemDBDatabasePersistent.HandleAPIIndexRename(const Sel: TBufSelector; IsoDeterminedTableName, OldName, NewName: string): boolean;
+function TMemDBDatabasePersistent.HandleAPIIndexRename(const Tid: TTransactionId; Ctxt: TTXLocalContext; IsoDeterminedTableName, OldName, NewName: string): boolean;
 var
   i: integer;
-  EntityList: TReffedList;
+  EList: TReffedList;
   Proxy: TMemDBEntityProxy;
   Entity: TMemDBEntity;
+  CtxtLocal: TXTransactionLocalContext;
 begin
   result := false;
-  EntityList := AssembleEntityList;
+  CtxtLocal := Ctxt as TXTransactionLocalContext;
+
+  EList := CtxtLocal.GetEntityList(Tid.Iso);
   try
-    for i := 0 to Pred(EntityList.Count) do
+    for i := 0 to Pred(EList.Count) do
     begin
-      Proxy := EntityList.Items[i] as TMemDBEntityProxy;
+      Proxy := EList.Items[i] as TMemDBEntityProxy;
       Entity := Proxy.Proxy as TMemDBEntity;
       if Entity is TMemDBForeignKeyPersistent then
         result := (Entity as TMemDBForeignKeyPersistent)
-        .HandleAPIIndexRename(Sel, IsoDeterminedTableName, OldName, NewName) or result;
+        .HandleAPIIndexRename(Tid, IsoDeterminedTableName, OldName, NewName) or result;
     end;
   finally
-    EntityList.ReleaseToCache(FEntityListCache);
+    CtxtLocal.PutEntityList(EList);
   end;
 end;
 
 
-procedure TMemDBDatabasePersistent.CheckAPIIndexDelete(const Sel: TBufSelector; IsoDeterminedTableName, IndexName: string);
+procedure TMemDBDatabasePersistent.CheckAPIIndexDelete(const Tid: TTransactionId; Ctxt: TTXLocalContext; IsoDeterminedTableName, IndexName: string);
 var
   i: integer;
-  EntityList: TReffedList;
+  EList: TReffedList;
   Proxy: TMemDBEntityProxy;
   Entity: TMemDBEntity;
+  CtxtLocal: TXTransactionLocalContext;
 begin
-  EntityList := AssembleEntityList;
+  CtxtLocal := Ctxt as TXTransactionLocalContext;
+
+  EList := CtxtLocal.GetEntityList(Tid.Iso);
   try
-    for i := 0 to Pred(EntityList.Count) do
+    for i := 0 to Pred(EList.Count) do
     begin
-      Proxy := EntityList.Items[i] as TMemDBEntityProxy;
+      Proxy := EList.Items[i] as TMemDBEntityProxy;
       Entity := Proxy.Proxy as TMemDBEntity;
       if Entity is TMemDBForeignKeyPersistent then
         (Entity as TMemDBForeignKeyPersistent)
-        .CheckAPIIndexDelete(Sel, IsoDeterminedTableName, IndexName);
+        .CheckAPIIndexDelete(Tid, IsoDeterminedTableName, IndexName);
     end;
   finally
-    EntityList.ReleaseToCache(FEntityListCache);
+    CtxtLocal.PutEntityList(EList);
   end;
 end;
 

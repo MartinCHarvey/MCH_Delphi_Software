@@ -158,7 +158,6 @@
         <DCCReference Include="..\Common\MemDB\MemDBJournal.pas"/>
         <DCCReference Include="..\Common\MemDB\MemDBMisc.pas"/>
         <DCCReference Include="..\Common\MemDB\MemDbStreamable.pas"/>
-        <DCCReference Include="..\Common\MemDB\MemDBUtils.pas"/>
         <DCCReference Include="..\Common\WorkItems\CommonPool.pas"/>
         <DCCReference Include="..\Common\WorkItems\DLThreadQueue.pas"/>
         <DCCReference Include="..\Common\WorkItems\WorkItems.pas"/>
@@ -170,6 +169,8 @@
         <DCCReference Include="..\Common\LockAbstractions\LockAbstractions.pas"/>
         <DCCReference Include="..\Common\SRWLockWrapper\SRWLockWrapper.pas"/>
         <DCCReference Include="..\Common\NullStream\NullStream.pas"/>
+        <DCCReference Include="..\Common\LockAbstractions\TinyLock.pas"/>
+        <DCCReference Include="..\Common\PComp\PComp.pas"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>

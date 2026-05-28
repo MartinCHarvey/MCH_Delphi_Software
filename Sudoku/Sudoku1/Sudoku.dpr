@@ -23,7 +23,9 @@ uses
   ExactCover in '..\..\Common\ExactCover\ExactCover.pas',
   SparseMatrix in '..\..\Common\SparseMatrix\SparseMatrix.pas',
   Parallelizer in '..\..\Common\Parallelizer\Parallelizer.pas',
-  LockAbstractions in '..\..\Common\LockAbstractions\LockAbstractions.pas';
+  LockAbstractions in '..\..\Common\LockAbstractions\LockAbstractions.pas',
+  TinyLock in '..\..\Common\LockAbstractions\TinyLock.pas',
+  PComp in '..\..\Common\PComp\PComp.pas';
 
 {$R *.res}
 

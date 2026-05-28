@@ -24,7 +24,6 @@ uses
   MemDBJournal in '..\..\Common\MemDB\MemDBJournal.pas',
   MemDBMisc in '..\..\Common\MemDB\MemDBMisc.pas',
   MemDbStreamable in '..\..\Common\MemDB\MemDbStreamable.pas',
-  MemDBUtils in '..\..\Common\MemDB\MemDBUtils.pas',
   SSAbstracts in '..\..\Common\StreamingSystem\SSAbstracts.pas',
   SSIntermediates in '..\..\Common\StreamingSystem\SSIntermediates.pas',
   SSStreamables in '..\..\Common\StreamingSystem\SSStreamables.pas',
@@ -43,7 +42,9 @@ uses
   CheckInServiceCoOrdinator in '..\..\CheckIn\CheckInServiceCoOrdinator.pas',
   Parallelizer in '..\..\Common\Parallelizer\Parallelizer.pas',
   LockAbstractions in '..\..\Common\LockAbstractions\LockAbstractions.pas',
-  NullStream in '..\..\Common\NullStream\NullStream.pas';
+  NullStream in '..\..\Common\NullStream\NullStream.pas',
+  TinyLock in '..\..\Common\LockAbstractions\TinyLock.pas',
+  PComp in '..\..\Common\PComp\PComp.pas';
 
 {$R *.res}
 

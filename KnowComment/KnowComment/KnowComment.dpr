@@ -93,7 +93,9 @@ uses
   PrefsEditForm in 'PrefsEditForm.pas' {PrefsEditFrm},
   Parallelizer in '..\..\Common\Parallelizer\Parallelizer.pas',
   LockAbstractions in '..\..\Common\LockAbstractions\LockAbstractions.pas',
-  NullStream in '..\..\Common\NullStream\NullStream.pas';
+  NullStream in '..\..\Common\NullStream\NullStream.pas',
+  TinyLock in '..\..\Common\LockAbstractions\TinyLock.pas',
+  PComp in '..\..\Common\PComp\PComp.pas';
 
 {$R *.res}
 

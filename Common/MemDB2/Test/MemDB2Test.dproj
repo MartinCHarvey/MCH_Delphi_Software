@@ -170,6 +170,7 @@
         <DCCReference Include="..\..\LockAbstractions\StripedLock.pas"/>
         <DCCReference Include="..\..\CRC\CRC32.pas"/>
         <DCCReference Include="..\..\PatchFreeMem\PatchFreeMem.pas"/>
+        <DCCReference Include="..\..\PComp\PComp.pas"/>
         <None Include="..\README_Conditionals.txt"/>
         <None Include="..\README_Ideas, and TODO.txt"/>
         <None Include="..\README_Known_Issues.txt"/>

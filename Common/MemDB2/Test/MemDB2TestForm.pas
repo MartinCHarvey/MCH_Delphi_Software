@@ -126,15 +126,86 @@ begin
 end;
 
 procedure TForm1.LeakTransClick(Sender: TObject);
+
+const
+  MAX_ZOMBIES = 9;
+
+  procedure LogTestName(TestNum: integer);
+  begin
+    case TestNum of
+      1: LogTimeIncr('Test with zombie: Basic test');
+      2: LogTimeIncr('Test with zombie: Index test');
+      3: LogTimeIncr('Test with zombie: Index test 2');
+      4: LogTimeIncr('Test with zombie: FKey test');
+      5: LogTimeIncr('Test with zombie: Small Trans test');
+      6: LogTimeIncr('Test with zombie: Edge test');
+      7: LogTimeIncr('Test with zombie: MF Indexes');
+      8: LogTimeIncr('Test with zombie: MF FKeys');
+      9: LogTimeIncr('Test with zombie: Blobs');
+    else
+      Assert(false);
+    end;
+  end;
+
+  procedure DoZombie(TestNum: integer);
+  begin
+    case TestNum of
+      1: BasicTestBtnClick(Sender);
+      2: IndexTestClick(Sender);
+      3: IndexTest2Click(Sender);
+      4: FKTestClick(Sender);
+      5: SmallTransClick(Sender);
+      6: FindEdgeTestClick(Sender);
+      7: MFIndexTestClick(Sender);
+      8: MFFKeyTestClick(Sender);
+      9: TstBlobsClick(Sender);
+    else
+      Assert(False);
+    end;
+  end;
+
+  procedure ReloadDB;
+  begin
+    FSession.Free;
+    LogTimeIncr('Zombie Session closed...');
+    FDB.StopDB;
+    LogTimeIncr('Zombie DB stopped...');
+    FDB.InitDB(DB_LOCATION, jtV2);
+    LogTimeIncr('Zombie DB started...');
+    FSession := FDB.StartSession;
+    LogTimeIncr('Zombie Session running.');
+  end;
+
+var
+  MaxTest: integer;
+  TestNum: integer;
 begin
   if (RMode <> amReadWriteShared) or (WMode <> amReadWriteShared) then
-    LogTimeIncr('Suggest you leak this transaction in amReadWriteShared. Done nothing.')
+    LogTimeIncr('Need both modes to be amReadWriteShared. Done nothing.')
   else
   begin
-    LogTimeIncr('Deliberately leaked transaction at amReadWriteShared. Stick with that mode for subsequent testing.');
-    FSession.StartTransaction(RMode, amLazyWrite, Iso);
     RModeCombo.Enabled := false;
     WModeCombo.Enabled := false;
+    for MaxTest := 0 to MAX_ZOMBIES do
+    begin
+      LogtimeIncr('Zombie test, iteration: ' +IntToStr(MaxTest));
+      ResetClick(Sender);
+      FSession.StartTransaction(RMode, amLazyWrite, Iso);
+      if MaxTest > 0 then
+      begin
+        for TestNum := 1 to MaxTest do
+        begin
+          LogTestName(TestNum);
+          DoZombie(TestNum);
+          LogtimeIncr('Zombie test, leak transaction iteration: ' +IntToStr(MaxTest)
+            + ' test number: ' +IntToStr(TestNum));
+          FSession.StartTransaction(RMode, amLazyWrite, Iso);
+        end;
+      end;
+      LogtimeIncr('Zombie test, reload: ' +IntToStr(MaxTest));
+      Application.ProcessMessages;
+      ReloadDB
+    end;
   end;
 end;
 

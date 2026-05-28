@@ -118,6 +118,7 @@
         <DCCReference Include="..\..\LockAbstractions\LockAbstractions.pas"/>
         <DCCReference Include="..\CoWABTree.pas"/>
         <DCCReference Include="..\CoWSimpleTree.pas"/>
+        <DCCReference Include="..\..\PComp\PComp.pas"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>

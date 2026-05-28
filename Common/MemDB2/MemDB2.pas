@@ -37,19 +37,42 @@ uses
   MemDB2Buffered, MemDB2API, LockAbstractions, RWWLock, MemDB2BufBase, Reffed;
 
 type
+  PReffedList = ^TReffedList;
   TMemDB = class;
   TMemDBSession = class;
 
-  TInProgressType = (tiptNone, tiptCommitRollback);
+  TInProgressType = (tiptNone, tiptStart, tiptCommitRollback);
 
   //Currently used for garbage collection from multiple async/parallel operations.
-  TXEntityLocalContext = class(TTXLocalContext)
-    FLocalLock: TCriticalSection;
+  TXTransactionLocalContext = class(TTXLocalContext)
+  private
+    FRegisteredListLock: TCriticalSection;
+    PSnapshotList, PRegisteredList: PReffedList;
+  public
+    //Misc cruft for node caching
+    //Public at the moment for simplicity.
+
+    //Lock is for cache list.
+    FCacheListLock: TCriticalSection;
     //In future perhaps have separate lists of TObject and TReffed.
     FCacheList: TList;
+
     procedure AddCache(Cache: TObject);
+
     constructor Create;
     destructor Destroy; override;
+
+    //Entity lists slightly more critical to handle correctly,
+    //hence procedures to ensure correct access.
+
+    procedure SetInitialEntityLists(List: TReffedList);
+    procedure ValidateEntityLists(Canonical: TReffedList);
+    function GetEntityList(Iso: TMDBIsolationLevel): TReffedList;
+    procedure PutEntityList(List: TReffedList);
+    procedure SetPtrs(Snapshot, Registered: PReffedList);
+
+    procedure AddEntityProxyToRegistered(EProxy: TReffed);
+    procedure AddEntityProxyToSnapshot(EProxy: TReffed);
   end;
 
 {$IFDEF USE_TRACKABLES}
@@ -65,6 +88,11 @@ type
     FMode: TMDBAccessMode;
     FSync: TMDBSyncMode;
     FTid: TTransactionId;
+    //Txions register with entities at Txion start and end.
+    //These to ensure consistent register/deregister.
+    FEntitiesSnapshot: TReffedList;
+    FEntitiesRegistered: TReffedList;
+
     //Changeset states.
     FChangeset: TStream;
     FCommitRollbackInProgress: TInProgressType;
@@ -73,7 +101,7 @@ type
     FApiObjects: TList;
     FApiObjectLock: TCriticalSection;
     FCRInterface: TMemAPIDatabaseInternal;
-    FLocalContext: TXEntityLocalContext;
+    FLocalContext: TXTransactionLocalContext;
   protected
   public
     procedure CommitAndFree;
@@ -99,7 +127,7 @@ type
     property ParentSession: TMemDBSession read FSession;
     property Changeset: TStream read FChangeset;
     property Session: TMemDBSession read FSession;
-    property LocalContext: TXEntityLocalContext read FLocalContext;
+    property LocalContext: TXTransactionLocalContext read FLocalContext;
   end;
 
   //TODO - Might like to think about whether we actually need a session
@@ -173,6 +201,9 @@ type
     procedure HandleJournalTransactionWriteFlush(Sender: TObject; Transaction: TObject);
     procedure HandleUIStateChange(Sender: TObject);
   public
+    //Public, but for internal use only ....
+    procedure HandleNewEntityUnderDBLocks(Entity: TMemDBEntity; OwnerTx: TMemDBTransaction);
+
     constructor Create;
     destructor Destroy; override;
     function InitDB(RootLocation: string;
@@ -209,19 +240,21 @@ const
   S_UNEXPECTED_ROLLBACK_FAILED = 'Unexpected rollback failed, state uncertain: ';
   S_READONLY_HAS_CHANGED_DATA = 'Read-only transaction has changed data!';
   S_TRANSACTION_HAS_API_OBJECTS = 'Transaction has associated API objects. You should have freed them before commit/rollback';
+  S_ENTITIES_OUT_OF_DATE = 'Aborted: Concurrency conflict: table/key list changed, not fixed up in time.';
 
   { TXLocalContext }
 
-constructor TXEntityLocalContext.Create;
+constructor TXTransactionLocalContext.Create;
 begin
   inherited;
-  FLocalLock := TCriticalSection.Create;
+  FCacheListLock := TCriticalSection.Create;
   FCacheList := TList.Create;
   //Set this way early so as little alloc as possible on rollback path.
   FCacheList.Capacity := 64;
+  FRegisteredListLock := TCriticalSection.Create;
 end;
 
-destructor TXEntityLocalContext.Destroy;
+destructor TXTransactionLocalContext.Destroy;
 var
   i: integer;
 begin
@@ -230,20 +263,95 @@ begin
   for i := 0 to Pred(FCacheList.Count) do
     TObject(FCacheList[i]).Free;
   FCacheList.Free;
-  FLocalLock.Free;
+  FCacheListLock.Free;
+  FRegisteredListLock.Free;
+  //Do not destroy PReffedLists here.
   inherited;
 end;
 
-procedure TXEntityLocalContext.AddCache(Cache: TObject);
+procedure TXTransactionLocalContext.AddCache(Cache: TObject);
 begin
   if Assigned(Cache) then
   begin
-    FLocalLock.Acquire;
+    FCacheListLock.Acquire;
     try
       FCacheList.Add(Cache);
     finally
-      FLocalLock.Release;
+      FCacheListLock.Release;
     end;
+  end;
+end;
+
+procedure TXTransactionLocalContext.SetInitialEntityLists(List: TReffedList);
+begin
+  FRegisteredListLock.Acquire;
+  try
+    Assert(PSnapshotList^ = nil);
+    PSnapshotList^ := List;
+    Assert(PRegisteredList^ = nil);
+    PRegisteredList^ := PSnapshotList.CloneByRef;
+  finally
+    FRegisteredListLock.Release;
+  end;
+end;
+
+procedure TXTransactionLocalContext.ValidateEntityLists(Canonical: TReffedList);
+begin
+  FRegisteredListLock.Acquire;
+  try
+    //At pre commit, need to check against all entities present in the DB.
+    if not Canonical.SameMembers(PRegisteredList^) then
+      raise EMemDBConcurrencyException.Create(S_ENTITIES_OUT_OF_DATE);
+  finally
+    FRegisteredListLock.Release;
+  end;
+end;
+
+function TXTransactionLocalContext.GetEntityList(Iso: TMDBIsolationLevel): TReffedList;
+begin
+  FRegisteredListLock.Acquire;
+  try
+    if Iso >= ilSnapshot then
+      result := PSnapshotList.CloneByRef
+    else
+      result := PRegisteredList.CloneByRef;
+  finally
+    FRegisteredListLock.Release;
+  end;
+end;
+
+procedure TXTransactionLocalContext.PutEntityList(List: TReffedList);
+begin
+  List.Release;
+end;
+
+procedure TXTransactionLocalContext.SetPtrs(Snapshot, Registered: PReffedList);
+begin
+  PSnapshotList := Snapshot;
+  PRegisteredList := Registered;
+end;
+
+procedure TXTransactionLocalContext.AddEntityProxyToRegistered(EProxy: TReffed);
+begin
+  FRegisteredListLock.Acquire;
+  try
+    Assert(Assigned(EProxy));
+    Assert(PRegisteredList.IndexOf(EProxy) < 0);
+    PRegisteredList.AddNoRef(EProxy.AddRef);
+  finally
+    FRegisteredListLock.Release;
+  end;
+end;
+
+procedure TXTransactionLocalContext.AddEntityProxyToSnapshot(EProxy: TReffed);
+begin
+  FRegisteredListLock.Acquire;
+  try
+    Assert(Assigned(EProxy));
+    Assert(PSnapshotList.IndexOf(EProxy) < 0);
+    PSnapshotList.AddNoRef(EProxy.AddRef);
+  finally
+    FRegisteredListLock.Release;
   end;
 end;
 
@@ -271,7 +379,9 @@ begin
   inherited;
   FApiObjects := TList.Create;
   FApiObjectLock := TCriticalSection.Create;
-  FLocalContext := TXEntityLocalContext.Create;
+  FLocalContext := TXTransactionLocalContext.Create;
+  FLocalContext.PSnapshotList := @FEntitiesSnapshot;
+  FLocalContext.PRegisteredList := @FEntitiesRegistered;
 end;
 
 procedure TMemDbTransaction.RegisterCreatedApi(Api: TMemDBApi);
@@ -353,6 +463,8 @@ begin
   FApiObjects.Free;
   FApiObjectLock.Free;
   FLocalContext.Free;
+  FEntitiesSnapshot.Release;
+  FEntitiesRegistered.Release;
   inherited;
 end;
 
@@ -402,6 +514,71 @@ begin
     FClientWait.SetEvent;
 end;
 
+procedure TMemDB.HandleNewEntityUnderDBLocks(Entity: TMemDBEntity; OwnerTx: TMemDBTransaction);
+var
+  IdleTxionList: TList;
+  i: integer;
+  Tx: TMemDBTransaction;
+begin
+  //Oh this is nasty.
+
+  //Holding the commit and meta index locks ensures that Txions we reference
+  //cannot start accessing entity lists as part of commit or rollback cycle,
+  //if they transition from no commit rollbacks in progress to commit
+  //rollbacks in progress.
+
+  //However, for txions which have a commit/rollback in progress, we should not
+  //change the entity lists for them, because they access those lists
+  //(rollback / cleardown cases) after dropping commit/metaindex locks,
+  //and we can't safely change the entity lists at that time.
+
+  ///Exception cases, erm. I think they're ok ...
+  IdleTxionList := TList.Create;
+  try
+    FSessionLock.Acquire;
+    try
+      //Get all transactions where CR not yet in progress, and stopped
+      //before commit / meta index lock.
+      for i := 0 to Pred(FTransactionList.Count) do
+      begin
+        Tx := TMemDBTransaction(FTransactionList.Items[i]);
+        if (Tx.FCommitRollbackInProgress = TInProgressType.tiptNone)
+          and not (Tx.FCommitedOrRolledBack) then
+          IdleTxionList.Add(Tx);
+      end;
+    finally
+      FSessionLock.Release;
+    end;
+    //Even after releasing session lock, Txions may start a commit/rollback,
+    //but will not get as far as accessing entity lists or DB.
+
+    //Touch wood, we don't even need to add-ref, they won't get any further down
+    //the destruction path due to locking.
+
+    //For Txions we have had to skip for some reason, PreCommit catches incomplete
+    //entity lists, and Rollback is by definition only rollback of entities that
+    //have been touched by that txion.
+    for i := 0 to Pred(IdleTxionList.Count) do
+    begin
+      Tx := TMemDBTransaction(IdleTxionList.Items[i]);
+      //Also, do not update entity lists for serialisable transactions unless
+      //we are the transaction adding the new table, that way
+      //entity additions by other transactions result in an abort.
+      if (Tx.Tid.Iso < ilSerialisable) or (Tx = OwnerTx) then
+      begin
+        Entity.StartTransaction(Tx.Tid, Tx.LocalContext);
+        //OK. If some other transaction, then update entity list.
+        //If our own transaction, then update entity list and snapshot list.
+        Tx.LocalContext.AddEntityProxyToRegistered(Entity.Proxy);
+        if Tx = OwnerTx then
+          Tx.LocalContext.AddEntityProxyToSnapshot(Entity.Proxy);
+      end;
+    end;
+  finally
+    IdleTxionList.Free;
+  end;
+end;
+
 procedure TMemDB.RemoveTransaction(Transaction: TMemDBTransaction; Commit: boolean);
 var
   idx: integer;
@@ -447,7 +624,7 @@ begin
 
     if not (Transaction.FMode in [amReadWriteShared, amWriteExclusive]) then
     begin
-      if FDatabase.AnyChangesForTid(Transaction.Tid) then
+      if FDatabase.AnyChangesForTid(Transaction.Tid, Transaction.FLocalContext) then
         raise EMemDBInternalException.Create(S_READONLY_HAS_CHANGED_DATA);
       //Internally read-only txions go through the rollback cycle to clear pins/refs etc.
       Commit := false;
@@ -480,8 +657,17 @@ begin
         //Now remove internal API object for transaction:
         //No longer needed, db restart case frees underlying DB obejcts.
 
+        //Also cleardown all refs on internal entities; leaving those refs
+        //for a while would result in old tables etc not being cleared,
+        //under continuous overlapping transactions.
         Transaction.FCRInterface.Free;
         Transaction.FCRInterface := nil;
+        Transaction.FLocalContext.Free;
+        Transaction.FLocalContext := nil;
+        Transaction.FEntitiesSnapshot.Release;
+        Transaction.FEntitiesSnapshot := nil;
+        Transaction.FEntitiesRegistered.Release;
+        Transaction.FEntitiesRegistered := nil;
 
         //And now journal it.
         Transaction.AddRef;
@@ -516,13 +702,14 @@ begin
         end;
       end;
     end;
-  finally
+  except
     FSessionLock.Acquire;
     try
       Transaction.FCommitRollbackInProgress := tiptNone;
     finally
       FSessionLock.Release;
     end;
+    raise;
   end;
   //If failed commit, hold the R/W lock.
   //If good commit, drop the lock.
@@ -581,10 +768,12 @@ begin
         result.FMode := Mode;
         result.FSync := Sync;
         result.FTid := TTransactionId.NewTransactionID(Iso);
+        result.FCommitRollbackInProgress := tiptStart;
       except
         if Assigned(result) then
         begin
           result.FCommitedOrRolledBack := true; //just got make dtor OK.
+          result.FCommitRollbackInProgress := tiptNone;
           result.Release;
           result := nil;
         end;
@@ -602,9 +791,20 @@ begin
       as TMemAPIDatabaseInternal;
 
     result.FCRInterface.TransactionStartCycle;
+
+    FSessionLock.Acquire; //Really just a fence...
+    try
+      result.FCommitRollbackInProgress := tiptNone;
+    finally
+      FSessionLock.Release;
+    end;
   except
     if Assigned(result) then
+    begin
+      //Just set the flag here to let the rollback proceed.
+      result.FCommitRollbackInProgress := tiptNone;
       result.RollbackAndFree;
+    end;
     raise;
   end;
 end;
@@ -690,6 +890,7 @@ begin
   FJournal.OnJournalError := HandleJournalError;
   FJournal.OnUIStateChange := HandleUIStateChange;
   FDatabase := TMemDBDatabase.Create;
+  (FDatabase as TMemDBDatabase).Init(self);
   inherited;
 end;
 
@@ -847,6 +1048,7 @@ begin
 
           DBTmp := FDatabase;
           FDatabase := TMemDBDatabase.Create;
+          (FDatabase as TMemDBDatabase).Init(self);
           FSessionLock.Release;
           DBTmp.Free;
 
@@ -1010,8 +1212,11 @@ var
   ChangesetStream: TStream;
   TmpName: string;
   PseudoTid: TTransactionId;
-  Ctxt: TXEntityLocalContext;
+  Ctxt: TXTransactionLocalContext;
+  EntSnapshot, EntRegistered: TReffedList;
 begin
+  EntSnapshot := nil;
+  EntRegistered := nil;
   FSessionLock.Acquire;
   try
     result := FPhase = mdbRunning;
@@ -1030,17 +1235,19 @@ begin
     //Totally consistent worldview - but will do list atomicity
     //inside DB classes as well.
     try
-      Ctxt := TXEntityLocalContext.Create;
+      Ctxt := TXTransactionLocalContext.Create;
+      Ctxt.PSnapshotList := @EntSnapshot;
+      Ctxt.PRegisteredList := @EntRegistered;
       try
         TmpName := TPath.GetTempFileName();
         ChangesetStream := TMemDBTempFileStream.Create(TmpName);
         PseudoTid := TTransactionId.NewTransactionID(ilSerialisable); //if no writes, should definitley be serialisable.
         try
-          FDatabase.StartTransaction(PseudoTid);
+          FDatabase.StartTransaction(PseudoTid, Ctxt);
           FDatabase.CommitLock.Acquire; //This if we don't acquire at lrSharedRead for ever.
           try
             try
-              FDatabase.ToScratch(PseudoTid, ChangesetStream);
+              FDatabase.ToScratch(PseudoTid, ChangesetStream, Ctxt);
             finally
               //We probably shouldn't need to to this at all, but keep
               //it here for safety.
@@ -1064,6 +1271,8 @@ begin
         FJournal.Checkpoint(ChangesetStream);
       finally
         Ctxt.Free;
+        EntSnapshot.Release;
+        EntRegistered.Release;
       end;
     finally
       FRWWLock.Release(lrSharedRead);

@@ -11,7 +11,10 @@ uses
   Vcl.Themes,
   Vcl.Styles,
   Trackables in '..\..\Tracking\Trackables.pas',
-  Parallelizer in '..\..\Parallelizer\Parallelizer.pas';
+  Parallelizer in '..\..\Parallelizer\Parallelizer.pas',
+  TinyLock in '..\..\LockAbstractions\TinyLock.pas',
+  LockAbstractions in '..\..\LockAbstractions\LockAbstractions.pas',
+  PComp in '..\..\PComp\PComp.pas';
 
 {$R *.res}
 

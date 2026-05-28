@@ -32,7 +32,9 @@ uses
   SoftLexer in '..\Common\SoftLexer\SoftLexer.pas',
   OrdinalSets in '..\Common\OrdinalSets\OrdinalSets.pas',
   Parallelizer in '..\Common\Parallelizer\Parallelizer.pas',
-  LockAbstractions in '..\Common\LockAbstractions\LockAbstractions.pas';
+  LockAbstractions in '..\Common\LockAbstractions\LockAbstractions.pas',
+  TinyLock in '..\Common\LockAbstractions\TinyLock.pas',
+  PComp in '..\Common\PComp\PComp.pas';
 
 {$R *.res}
 

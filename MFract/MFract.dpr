@@ -34,7 +34,9 @@ uses
   CocoBase in '..\CoCoDM\Distributable\Frames\CocoBase.pas',
   IndexedStore in '..\Common\Indexed Store\IndexedStore.pas',
   Parallelizer in '..\Common\Parallelizer\Parallelizer.pas',
-  LockAbstractions in '..\Common\LockAbstractions\LockAbstractions.pas';
+  LockAbstractions in '..\Common\LockAbstractions\LockAbstractions.pas',
+  TinyLock in '..\Common\LockAbstractions\TinyLock.pas',
+  PComp in '..\Common\PComp\PComp.pas';
 
 {$R *.RES}
 

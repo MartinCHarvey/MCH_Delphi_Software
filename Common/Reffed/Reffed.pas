@@ -120,6 +120,7 @@ type
     constructor Create;
     destructor Destroy; override;
     //No reset here yet, not cached.
+    function CloneByRef: TReffedList;
 
     procedure ReleaseAndClear;
     //No delete sentinels in these lists - just allowing for
@@ -127,6 +128,9 @@ type
     function AddNoRef(Item: TReffed): integer;
     procedure Clear;
     procedure Pack;
+    function IndexOf(Item: TReffed): Integer;
+    function SameMembers(Other: TReffedList): boolean;
+
      //Beware: SetCount acts like TList, and does not free stuff.
     property Count: Integer read GetCount write SetCount;
     property Items[idx:integer]: TReffed read GetItem write SetItem; default;
@@ -157,8 +161,7 @@ const
 implementation
 
 uses
-  LockAbstractions;
-
+  LockAbstractions, PComp;
 
 constructor TReffed.Create;
 begin
@@ -322,6 +325,16 @@ begin
   inherited;
 end;
 
+function TReffedList.CloneByRef: TReffedList;
+var
+  i: integer;
+begin
+  result := TReffedList.Create;
+  result.Count := self.Count;
+  for i := 0 to Pred(Self.Count) do
+    result[i] := self[i].AddRef;
+end;
+
 function TReffedList.GetCount: integer;
 begin
   result := FList.Count;
@@ -355,6 +368,45 @@ end;
 procedure TReffedList.Pack;
 begin
   FList.Pack;
+end;
+
+function TReffedList.IndexOf(Item: TReffed): Integer;
+begin
+  result := FList.IndexOf(Item);
+end;
+
+function TReffedList.SameMembers(Other: TReffedList): boolean;
+var
+  L1, L2: TList;
+  i: integer;
+begin
+  if Count <> Other.Count then
+  begin
+    result := false;
+    exit;
+  end;
+  L1 := TList.Create;
+  L2 := TList.Create;
+  try
+    for i := 0 to Pred(Count) do
+      L1.Add(Items[i]);
+    for i := 0 to Pred(Other.Count) do
+      L2.Add(Other.Items[i]);
+    L1.Sort(ComparePointers);
+    L2.Sort(ComparePointers);
+    for i := 0 to Pred(L1.Count) do
+    begin
+      if L1.Items[i] <> L2.Items[i] then
+      begin
+        result := false;
+        exit;
+      end;
+    end;
+    result := true;
+  finally
+    L1.Free;
+    L2.Free;
+  end;
 end;
 
 procedure TReffedList.ReleaseAndClear;

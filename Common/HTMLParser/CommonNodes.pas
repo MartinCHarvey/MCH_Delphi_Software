@@ -239,12 +239,11 @@ implementation
 
 { EParseAbort }
 
-uses
-  HTMLEscapeHelper
 {$IFDEF DEBUG_SEARCH}
-    , GlobalLog
+uses
+  GlobalLog;
 {$ENDIF}
-    ;
+
 
 constructor EParseAbort.Create(Msg: string; Ln, Col: integer);
 begin
@@ -870,7 +869,7 @@ end;
 
 function TStringNavHelper.MakeSearchStringAnsi(Search: string): AnsiString;
 begin
-  result := CheckedUnicodeToUTF8(Search);
+  result := UTF8Encode(Search);
 end;
 
 end.

@@ -285,6 +285,8 @@ type
 
 implementation
 
+uses PComp;
+
 
 const
   IndexInstancePtr = 0;
