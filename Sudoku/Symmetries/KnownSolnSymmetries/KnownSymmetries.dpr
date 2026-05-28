@@ -18,7 +18,9 @@ uses
   SharedSymmetries in '..\Shared\SharedSymmetries.pas',
   CellCountShared in '..\Shared\CellCountShared.pas',
   Parallelizer in '..\..\..\Common\Parallelizer\Parallelizer.pas',
-  LockAbstractions in '..\..\..\Common\LockAbstractions\LockAbstractions.pas';
+  LockAbstractions in '..\..\..\Common\LockAbstractions\LockAbstractions.pas',
+  TinyLock in '..\..\..\Common\LockAbstractions\TinyLock.pas',
+  PComp in '..\..\..\Common\PComp\PComp.pas';
 
 begin
   try
