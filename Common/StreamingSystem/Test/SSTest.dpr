@@ -19,7 +19,9 @@ uses
   StreamSysBinary in '..\StreamSysBinary.pas',
   BufferedFileStream in '..\..\CachedStream\BufferedFileStream.pas',
   Parallelizer in '..\..\Parallelizer\Parallelizer.pas',
-  LockAbstractions in '..\..\LockAbstractions\LockAbstractions.pas';
+  LockAbstractions in '..\..\LockAbstractions\LockAbstractions.pas',
+  TinyLock in '..\..\LockAbstractions\TinyLock.pas',
+  PComp in '..\..\PComp\PComp.pas';
 
 {$R *.RES}
 
