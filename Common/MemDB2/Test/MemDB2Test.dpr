@@ -28,7 +28,8 @@ uses
   CoWTree in '..\..\CoWTree\CoWTree.pas',
   StripedLock in '..\..\LockAbstractions\StripedLock.pas',
   CRC32 in '..\..\CRC\CRC32.pas',
-  PatchFreeMem in '..\..\PatchFreeMem\PatchFreeMem.pas';
+  PatchFreeMem in '..\..\PatchFreeMem\PatchFreeMem.pas',
+  PComp in '..\..\PComp\PComp.pas';
 
 {$R *.res}
 

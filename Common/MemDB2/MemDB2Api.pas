@@ -33,7 +33,7 @@ interface
 
 uses
   MemDB2Buffered, MemDb2Misc, MemDb2Streamable, MemDB2Indexing, Classes,
-  IndexedStore;
+  IndexedStore, MemDB2BufBase;
 
 type
   TMemDBDatabase = class;
@@ -168,7 +168,11 @@ type
   //API operations. These perform consistency checking on the operations,
   //and do not maintain an per-transaction state.
   TMemDbDatabase = class(TMemDbDatabasePersistent)
+  private
+    FParentMemDB: TObject;
   public
+    procedure Init(Parent: TObject);
+
     procedure API_CreateTable(T: TObject; Name: string);
     procedure API_CreateForeignKey(T: TObject; Name: string);
     procedure API_RenameTableOrKey(T: TObject; OldName, NewName: string);
@@ -279,7 +283,7 @@ uses
 {$IFDEF DEBUG_DATABASE_NAVIGATE}
   GlobalLog,
 {$ENDIF}
-  MemDB2, SysUtils, IoUtils, BufferedFileStream, Math, NullStream, MemDB2BufBase,
+  MemDB2, SysUtils, IoUtils, BufferedFileStream, Math, NullStream,
   Reffed;
 
 const
@@ -364,7 +368,7 @@ begin
     try
       DB.MetaIndexLock.Acquire;
       try
-        DB.StartTransaction(T.Tid);
+        DB.StartTransaction(T.Tid, T.LocalContext);
       finally
         DB.MetaIndexLock.Release;
       end;
@@ -377,7 +381,7 @@ begin
     //Only require meta and index snapshots consistent.
     DB.MetaIndexLock.Acquire;
     try
-      DB.StartTransaction(T.Tid);
+      DB.StartTransaction(T.Tid, T.LocalContext);
     finally
       DB.MetaIndexLock.Release;
     end;
@@ -389,29 +393,34 @@ var
    PseudoTid: TTransactionId;
    OptSet: TOptimizeSet;
    SizeHint: TDBSizeHint;
-   Ctxt: TXEntityLocalContext;
+   Ctxt: TXTransactionLocalContext;
    TxionSizeEstimate: Int64;
+   EntSnapshot, EntRegistered: TReffedList;
 begin
+  EntSnapshot := nil;
+  EntRegistered := nil;
   FillChar(SizeHint, sizeof(SizeHint), 0);
   GetTxionSizeEstimate(JournalEntry, TxionSizeEstimate);
   OptSet := MakeOptimizationSet(DB.Policies, Initial, not Initial, false, SizeHint, TxionSizeEstimate);
 
   PseudoTid := TTransactionId.NewTransactionID(ilSerialisable); //if only writer, should be serialisable.
-  Ctxt := TXEntityLocalContext.Create;
+  Ctxt := TXTransactionLocalContext.Create;
+  Ctxt.SetPtrs(@EntSnapshot, @EntRegistered);
   try
     try
-      DB.StartTransaction(PseudoTid);
+      DB.StartTransaction(PseudoTid, Ctxt);
 
-      Assert(not DB.AnyChanges(PseudoTid));
+      Assert(not DB.AnyChanges(PseudoTid, Ctxt));
       if Initial then
-        DB.FromScratch(PseudoTid, JournalEntry, OptSet)
+        DB.FromScratch(PseudoTid, JournalEntry, OptSet, Ctxt)
       else
-        DB.FromJournal(PseudoTid, JournalEntry);
+        DB.FromJournal(PseudoTid, JournalEntry, Ctxt);
 
-      DB.Prepare(PseudoTid, OptSet, Initial);
+      DB.Prepare(PseudoTid, OptSet, Initial, Ctxt);
 
-      DB.PreCommit(PseudoTid, pcpTables, OptSet);
-      DB.PreCommit(PseudoTid, pcpFKeys, OptSet);
+      DB.PreCommit(PseudoTid, pcpEntitySet, OptSet, Ctxt);
+      DB.PreCommit(PseudoTid, pcpTables, OptSet, Ctxt);
+      DB.PreCommit(PseudoTid, pcpFKeys, OptSet, Ctxt);
       DB.Commit(PseudoTid, ccpData, OptSet, Ctxt);
       DB.Commit(PseudoTid, ccpMetaIndex, OptSet, Ctxt);
       DB.Commit(PseudoTid, ccpCleardown, OptSet, Ctxt);
@@ -427,6 +436,8 @@ begin
     end;
   finally
     Ctxt.Free;
+    EntSnapshot.Release;
+    EntRegistered.Release;
   end;
 end;
 
@@ -443,20 +454,21 @@ begin
   try
     FillChar(SizeHint, sizeof(SizeHint), 0);
     SizeHint.ShouldUpdateLayout := true;
-    DB.SizeHint(T.Tid, SizeHint);
+    DB.SizeHint(T.Tid, SizeHint, T.LocalContext);
     OptSet := MakeOptimizationSet(DB.Policies, false, false, true, SizeHint, 0);
     if T.LocalContext.FCacheList.Capacity < SizeHint.TotalIndexes then
       T.LocalContext.FCacheList.Capacity := SizeHint.TotalIndexes;
 
-    DB.Prepare(T.Tid, OptSet,false);
+    DB.Prepare(T.Tid, OptSet,false, T.LocalContext);
 
     DB.CommitLock.Acquire;
     try
       try
-        DB.ToJournal(T.Tid, result);
+        DB.ToJournal(T.Tid, result, T.LocalContext);
 
-        DB.PreCommit(T.Tid, pcpTables, OptSet);
-        DB.PreCommit(T.Tid, pcpFKeys, OptSet);
+        DB.PreCommit(T.Tid, pcpEntitySet, OptSet, T.LocalContext);
+        DB.PreCommit(T.Tid, pcpTables, OptSet, T.LocalContext);
+        DB.PreCommit(T.Tid, pcpFKeys, OptSet, T.LocalContext);
 
         //The assumption is all exceptions raised in pre-commit.
         //We're not checking for errors or allocating memory by the time
@@ -501,7 +513,7 @@ begin
   Assert(Assigned(T));
 
   FillChar(SizeHint, sizeof(SizeHint), 0);
-  DB.SizeHint(T.Tid, SizeHint);
+  DB.SizeHint(T.Tid, SizeHint, T.LocalContext);
   OptSet := MakeOptimizationSet(DB.Policies, false, false, true, SizeHint, 0);
 
   DB.MetaIndexLock.Acquire;
@@ -945,6 +957,11 @@ end;
 
 { TMemDbDatabase }
 
+procedure TMemDBDatabase.Init(Parent: TObject);
+begin
+  FParentMemDB := Parent;
+end;
+
 //Generally, don't try to undelete, unrename etc etc in the same transaction.
 procedure TMemDBDatabase.API_CreateTable(T:TObject; Name: string);
 var
@@ -956,8 +973,7 @@ begin
   Tr := T as TMemDBTransaction;
   BS := MakeLatestBufSelector(Tr.Tid);
   //These checks are not definitive, not until pre-commit can we be sure we're OK.
-  //Checking next buffers is however, definitive.
-  Ent := EntitiesByName(BS, Name, pinEvolve);
+  Ent := EntitiesByName(BS, Name, pinEvolve, Tr.LocalContext, false);
   if Assigned(Ent) then
   begin
     Ent.Proxy.Release;
@@ -965,7 +981,17 @@ begin
   end;
   NewTable := TMemDBTable.Create;
   NewTable.Init(Tr.Tid, self, Name, true);
-  NewTable.StartTransaction(Tr.Tid);
+  FCommitLock.Acquire;
+  try
+    FMetaIndexLock.Acquire;
+    try
+      (FParentMemDB as TMemDB).HandleNewEntityUnderDBLocks(NewTable, Tr);
+    finally
+      FMetaIndexLock.Release;
+    end;
+  finally
+    FCommitLock.Release;
+  end;
   NewTable.Proxy.Release;
 end;
 
@@ -980,7 +1006,7 @@ begin
   BS := MakeLatestBufSelector(Tr.Tid);
   //These checks are not definitive, not until pre-commit can we be sure we're OK.
   //Checking next buffers is however, definitive.
-  Ent := EntitiesByName(BS, Name, pinEvolve);
+  Ent := EntitiesByName(BS, Name, pinEvolve, Tr.LocalContext, false);
   if Assigned(Ent) then
   begin
     Ent.Proxy.Release;
@@ -988,7 +1014,17 @@ begin
   end;
   NewKey := TMemDBForeignKey.Create;
   NewKey.Init(Tr.Tid, self, Name, true);
-  NewKey.StartTransaction(Tr.Tid);
+  FCommitLock.Acquire;
+  try
+    FMetaIndexLock.Acquire;
+    try
+      (FParentMemDB as TMemDB).HandleNewEntityUnderDBLocks(NewKey, Tr);
+    finally
+      FMetaIndexLock.Release;
+    end;
+  finally
+    FCommitLock.Release;
+  end;
   NewKey.Proxy.Release;
 end;
 
@@ -1006,7 +1042,7 @@ begin
 
   //These checks are not definitive, not until pre-commit can we be sure we're OK.
   //Checking next buffers is however, definitive.
-  Entity := EntitiesByName(SelLatest, OldName, pinEvolve);
+  Entity := EntitiesByName(SelLatest, OldName, pinEvolve, Tr.LocalContext, false);
   if not Assigned(Entity) then
     raise EMemDbAPIException.Create(S_API_ENTITY_NAME_NOT_FOUND);
 
@@ -1017,7 +1053,7 @@ begin
       raise EMemDbAPIException.Create(S_API_ENTITY_NAME_NOT_FOUND);
 
     //Check new name not used.
-    NNEntity := EntitiesByName(SelLatest, NewName, pinEvolve);
+    NNEntity := EntitiesByName(SelLatest, NewName, pinEvolve, Tr.LocalContext, false);
     if Assigned(NNEntity) then
     begin
       NNEntity.Proxy.Release;
@@ -1038,7 +1074,7 @@ begin
     Assert((not Assigned(RefNext)) or (RefNext = NextM));
     Assert(not (NextM is TMemDeleteSentinel));
     (NextM as TMemEntityMetadataItem).EntityName := NewName;
-    HandleAPITableRename(SelLatest, OldName, NewName);
+    HandleAPITableRename(Tr.Tid, Tr.LocalContext, OldName, NewName);
   finally
     Entity.Proxy.Release;
   end;
@@ -1053,13 +1089,13 @@ begin
   Tr := T as TMemDBTransaction;
   SelLatest := MakeLatestBufSelector(Tr.Tid);
   //Exists.
-  Entity := EntitiesByName(SelLatest, Name, pinEvolve);
+  Entity := EntitiesByName(SelLatest, Name, pinEvolve, Tr.LocalContext, false);
   if not Assigned(Entity) then
     raise EMemDbAPIException.Create(S_API_ENTITY_NAME_NOT_FOUND);
   try
     //Referenced by anything else?
     if Entity is TMemDbTablePersistent then
-      CheckAPITableDelete(SelLatest, Name);
+      CheckAPITableDelete(Tr.Tid, Tr.LocalContext, Name);
     Entity.META_Delete(Tr.Tid);
   finally
     Entity.Proxy.Release;
@@ -1070,22 +1106,26 @@ function TMemDBDatabase.API_GetEntityNames(T: TObject): TStringList;
 var
   Tr: TMemDBTransaction;
   AB: TBufSelector;
-  EntityList: TReffedList;
+  EList: TReffedList;
   Proxy: TMemDBEntityProxy;
   Entity: TMemDBEntity;
   i: integer;
   MDReffed: TMemDBStreamable;
   MDItem: TMemEntityMetadataItem;
   tmpBufSel: TABSelType;
+  CtxtLocal: TXTransactionLocalContext;
+
 begin
   Tr := T as TMemDbTransaction;
   AB := MakeLatestBufSelector(Tr.Tid);
   result := TStringList.Create;
-  EntityList := AssembleEntityList;
+  CtxtLocal := Tr.LocalContext;
+
+  EList := CtxtLocal.GetEntityList(Tr.Tid.Iso);
   try
-    for i := 0 to Pred(EntityList.Count) do
+    for i := 0 to Pred(EList.Count) do
     begin
-      Proxy := EntityList.Items[i] as TMemDBEntityProxy;
+      Proxy := EList.Items[i] as TMemDBEntityProxy;
       Entity := Proxy.Proxy as TMemDBEntity;
       case AB.SelType of
         abCurrent: MDReffed := Entity.META_PinCurrent(AB.TId, pinEvolve);
@@ -1102,7 +1142,7 @@ begin
       end;
     end;
   finally
-    EntityList.ReleaseToCache(FEntityListCache);
+    CtxtLocal.PutEntityList(EList);
   end;
 end;
 
@@ -1114,7 +1154,7 @@ var
 begin
   Tr := T as TMemDBTransaction;
   AB := MakeLatestBufSelector(Tr.Tid);
-  Entity := EntitiesByName(AB, Name, pinEvolve);
+  Entity := EntitiesByName(AB, Name, pinEvolve, Tr.LocalContext, false);
   result := nil;
   if Assigned(Entity) then
   begin
@@ -1365,7 +1405,7 @@ begin
     raise EMemDbAPIException.Create(S_API_INDEX_NAME_NOT_FOUND);
   Assert(AssignedNotSentinel(META_GetPinLatest(Tr.Tid, Selected, pinEvolve)));
   MT := META_GetPinLatest(Tr.Tid, Selected, pinEvolve) as TMemTableMetadataItem;
-  ParentDB.CheckAPIIndexDelete(sel, MT.EntityName, Name);
+  ParentDB.CheckAPIIndexDelete(Tr.Tid, Tr.LocalContext,  MT.EntityName, Name);
   //Delete index.
   IndexHelper.Delete(IndexIdx);
   //Do not need to adjust anything in fields.
@@ -1404,7 +1444,7 @@ begin
   Index := IndexHelper.Modify(IndexIdx) as TMemIndexDef;
   Index.IndexName := NewName;
   Assert(AssignedNotSentinel(META_GetPinLatest(Tr.Tid, selected, pinEvolve)));
-  ParentDB.HandleAPIIndexRename(Sel,
+  ParentDB.HandleAPIIndexRename(Tr.Tid, Tr.LocalContext,
     (META_GetPinLatest(Tr.Tid, selected, pinEvolve) as TMemTableMetadataItem).EntityName,
     OldName, NewName);
   TidLocal.UpdateLayout(pinEvolve);
@@ -1884,7 +1924,7 @@ begin
   with ParentDB do
   begin
     //Latest entities, this checks specified params are valid.
-    Entity := EntitiesByName(SelLatest, TableName, pinEvolve);
+    Entity := EntitiesByName(SelLatest, TableName, pinEvolve, Tr.LocalContext, false);
     try
       if not (Assigned(Entity) and (Entity is TMemDBTablePersistent)) then
         raise EMemDBAPIException.Create(S_API_ENTITY_NAME_NOT_FOUND);

@@ -3,7 +3,7 @@ object Form1: TForm1
   Top = 0
   Caption = 'Form1'
   ClientHeight = 480
-  ClientWidth = 580
+  ClientWidth = 584
   FormFactor.Width = 320
   FormFactor.Height = 480
   FormFactor.Devices = [dkDesktop, dkiPhone, dkiPad]
@@ -41,11 +41,11 @@ object Form1: TForm1
     OnClick = IndexTestClick
   end
   object ResMemo: TMemo
+    Align = alBottom
     Height = 281.000000000000000000
-    Position.X = 8.000000000000000000
-    Position.Y = 192.000000000000000000
+    Position.Y = 199.000000000000000000
     TabOrder = 3
-    Width = 625.000000000000000000
+    Width = 584.000000000000000000
   end
   object IndexTest2: TButton
     Height = 22.000000000000000000
@@ -151,7 +151,7 @@ object Form1: TForm1
     Position.X = 184.000000000000000000
     Position.Y = 72.000000000000000000
     TabOrder = 15
-    Text = 'Leak Txion'
+    Text = 'ZombieTest'
     Width = 80.000000000000000000
     OnClick = LeakTransClick
   end

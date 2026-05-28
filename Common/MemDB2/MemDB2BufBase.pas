@@ -73,7 +73,7 @@ Some notes on pinning and consistency / isolation:
   - Meta/index pinning to happens atomically at Txion start.
 }
 type
-  TMemDBPreCommitPhase = (pcpFKeys, pcpTables);
+  TMemDBPreCommitPhase = (pcpEntitySet, pcpFKeys, pcpTables);
   TMemDBCommitPhase = (ccpData, ccpMetaIndex, ccpCleardown);
   TMemDBRollbackPhase = (rbpIndexRollback, rbpMetaRollback, rbpDelayedRollback);
 
@@ -99,21 +99,21 @@ type
       var Deleted: boolean;
       var Null: boolean);
   public
-    procedure ToJournal(const Tid: TTransactionId; Stream: TStream); virtual; abstract;
-    procedure ToScratch(const PseudoTid:TTransactionId; Stream: TStream); virtual; abstract;
-    procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream); virtual; abstract;
-    procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet); virtual; abstract;
+    procedure ToJournal(const Tid: TTransactionId; Stream: TStream; Ctxt: TTXLocalContext); virtual; abstract;
+    procedure ToScratch(const PseudoTid:TTransactionId; Stream: TStream; Ctxt: TTXLocalContext); virtual; abstract;
+    procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream; Ctxt: TTXLocalContext); virtual; abstract;
+    procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet; Ctxt: TTXLocalContext); virtual; abstract;
 
     //In order of operation from one consistent state to another:
     //Check no A/B buffered changes. (Possibly debug only).
     //Then journal setup replay changes
-    function AnyChangesForTid(const TId: TTransactionId): boolean; virtual; abstract;
+    function AnyChangesForTid(const TId: TTransactionId; Ctxt: TTXLocalContext): boolean; virtual; abstract;
      //Just for journal replay, which should be atomic sequential
      //Tid to allow a pin to determine internal structure if necessary.
-    function AnyChanges(const Tid: TTransactionId): boolean; virtual; abstract;
+    function AnyChanges(const Tid: TTransactionId; Ctxt: TTXLocalContext): boolean; virtual; abstract;
 
     //Check A/B buffered changes consistent and logical (and/or atomic) before commit.
-    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet); virtual; abstract;
+    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext); virtual; abstract;
     //Save to journal / Make the changes.
     procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext); virtual; abstract;
     //Rollback changes, possibly promptly or delayed.
@@ -341,10 +341,10 @@ type
     //if you don't mind accruing pins along the way (internal structure).
 
     //Overrides of this might have to pin to get to internal structure.
-    function AnyChangesForTid(const TId: TTransactionId): boolean; override;
+    function AnyChangesForTid(const TId: TTransactionId; Ctxt: TTXLocalContext): boolean; override;
     //Overrides of this need a Tid to possibly pin to find internal structure.
     //Ideally tables maintain their own
-    function AnyChanges(const Tid: TTransactionId): boolean; override;
+    function AnyChanges(const Tid: TTransactionId; Ctxt: TTXLocalContext): boolean; override;
 
     procedure ChangeFlagsUnderCommitLock(const Tid: TTransactionId;
       var Added:boolean;
@@ -366,15 +366,15 @@ type
 
     //The "To" functions need to stream atomically from some point in time,
     //even if (currently) these things will be serialised under a commit lock.
-    procedure ToJournal(const Tid: TTransactionId; Stream: TStream);override;
-    procedure ToScratch(const PseudoTid:TTransactionId; Stream: TStream);override;
+    procedure ToJournal(const Tid: TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);override;
+    procedure ToScratch(const PseudoTid:TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);override;
 
     //With the "From" functions, we can be sure re-play is single threaded,
     //and serial.
-    procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream);override;
-    procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet);override;
+    procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);override;
+    procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet; Ctxt: TTXLocalContext);override;
 
-    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet); override;
+    procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext); override;
     procedure Commit(const TId: TTransactionId; Phase: TMemDBCommitPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext); override;
     procedure Rollback(const TId: TTransactionId; Phase: TMemDBRollbackPhase;  Opts:TOptimizeSet; Ctxt: TTXLocalContext); override;
 
@@ -459,7 +459,7 @@ type
 implementation
 
 uses
-  SysUtils, Reffed, IndexedStore;
+  SysUtils, Reffed, IndexedStore, PComp;
 
 const
   S_CHANGESET_BAD_LISTS = 'Changeset has lists of items that are not consistent';
@@ -943,7 +943,7 @@ begin
   DirectSetNext(PseudoTid, Data);
 end;
 
-function TMemDbMultiBuffered.AnyChangesForTid(const TId: TTransactionId): boolean;
+function TMemDbMultiBuffered.AnyChangesForTid(const TId: TTransactionId; Ctxt: TTXLocalContext): boolean;
 var
   PNext: PMemDBMultiItem;
 begin
@@ -957,7 +957,7 @@ begin
   end;
 end;
 
-function TMemDBMultiBuffered.AnyChanges(const TId: TTransactionID): boolean;
+function TMemDBMultiBuffered.AnyChanges(const TId: TTransactionID; Ctxt: TTXLocalContext): boolean;
 var
   Cur: PMemDbMultiItem;
   PNext: PDLEntry;
@@ -1216,7 +1216,7 @@ begin
   end;
 end;
 
-procedure TMemDBMultiBuffered.PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet);
+procedure TMemDBMultiBuffered.PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext);
 var
   Cur, Nxt: PMemDbMultiItem;
   Pin: PMemDbPinnedItem;
@@ -1917,7 +1917,7 @@ begin
   inherited;
 end;
 
-procedure TMemDbMultiBuffered.ToJournal(const Tid: TTransactionId; Stream: TStream);
+procedure TMemDbMultiBuffered.ToJournal(const Tid: TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);
 var
   Cur, Nxt: PMemDbMultiItem;
   Current, Next: TMemDbStreamable;
@@ -1971,7 +1971,7 @@ begin
   WrTag(Stream, mstDblBufferedEnd);
 end;
 
-procedure TMemDBMultiBuffered.ToScratch(const PseudoTid: TTransactionId; Stream: TStream);
+procedure TMemDBMultiBuffered.ToScratch(const PseudoTid: TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);
 var
   Current: TMemDbStreamable;
 begin
@@ -1991,7 +1991,7 @@ end;
 
 //With the "From" functions, we can be sure re-play is single threaded,
 //and serial.
-procedure TMemDBMultiBuffered.FromJournal(const PseudoTid: TTransactionId; Stream: TStream);
+procedure TMemDBMultiBuffered.FromJournal(const PseudoTid: TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);
 var
   ChangeType: TMDBChangeType;
   Next:TMemDBStreamable;
@@ -1999,7 +1999,7 @@ var
 begin
   inherited;
   //This not atomic, but journal replay, so not so worried.
-  if AnyChanges(PseudoTid) then
+  if AnyChanges(PseudoTid, Ctxt) then
     raise EMemDbInternalException.Create(S_JOURNAL_REPLAY_DUP_INST);
 
   Cur := PinCurrent(PseudoTid, pinEvolve);
@@ -2034,13 +2034,13 @@ begin
   ExpectTag(Stream, mstDblBufferedEnd);
 end;
 
-procedure TMemDbMultiBuffered.FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet);
+procedure TMemDbMultiBuffered.FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet; Ctxt: TTXLocalContext);
 var
   ChangeType: TMDBChangeType;
   Cur, Next: TMemDBStreamable;
 begin
   inherited;
-  if AnyChanges(PseudoTid) then
+  if AnyChanges(PseudoTid, Ctxt) then
     raise EMemDbInternalException.Create(S_JOURNAL_REPLAY_DUP_INST);
 
   Cur := PinCurrent(PseudoTid, pinEvolve);

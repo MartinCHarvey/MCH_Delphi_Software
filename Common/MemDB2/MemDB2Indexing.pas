@@ -215,7 +215,7 @@ const
 implementation
 
 uses
-  MemDB2Buffered, SysUtils, MemDB2BufBase;
+  MemDB2Buffered, SysUtils, MemDB2BufBase, PComp;
 
 { Misc functions }
 
