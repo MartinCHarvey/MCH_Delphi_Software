@@ -336,6 +336,9 @@ type
 
     function HoldIndexPinInLock(Pin: PMemDbIndexPin): PMemDBIndexPin;
     procedure ReleaseIndexPinOutsideLock(Pin: PMemDbIndexPin; NodeCacheHint: TMemDBNodeCache);
+
+    procedure InvalidateCachedCur(const Tid: TTransactionId); virtual;
+    procedure InvalidateCachedNxtTid(const Tid: TTransactionId); virtual;
   public
     //Determining changes for Tid's is easy to do for composite objects,
     //if you don't mind accruing pins along the way (internal structure).
@@ -1026,6 +1029,7 @@ begin
   finally
     UnlockSelf;
   end;
+  InvalidateCachedNxtTid(Tid);
   CPTidHandle(TidUp);
   DCPLazyHandle(RefUp);
 end;
@@ -1101,6 +1105,7 @@ begin
   finally
     UnlockSelf;
   end;
+  InvalidateCachedNxtTid(Tid);
   CPTidHandle(TidUp);
   DCPLazyHandle(RefUp);
 end;
@@ -1159,6 +1164,7 @@ begin
   finally
     UnlockSelf;
   end;
+  InvalidateCachedNxtTid(Tid);
   CPTidHandle(TidUp);
   DCPLazyHandle(RefUp);
 end;
@@ -1183,6 +1189,8 @@ begin
   finally
     UnlockSelf;
   end;
+  //Just for safety, invalidate any cached copies.
+  InvalidateCachedCur(Tid);
 end;
 
 procedure TMemDBMultiBuffered.PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext);
@@ -1291,6 +1299,8 @@ begin
   finally
     UnlockSelf;
   end;
+  InvalidateCachedCur(Tid);
+  InvalidateCachedNxtTid(Tid);
   CPTidHandle(TidUp);
   DCPLazyHandle(RefUp);
 end;
@@ -1335,6 +1345,8 @@ begin
   finally
     UnlockSelf;
   end;
+  InvalidateCachedCur(Tid);
+  InvalidateCachedNxtTid(Tid);
   CPTidHandle(TidUp);
   DCPLazyHandle(RefUp);
 end;
@@ -1400,8 +1412,10 @@ var
   CurPin: PMemDBPinnedItem;
   Item: TMemDBStreamable;
   Nxt, Cur: PMemDbMultiItem;
+  InvalidateCur: boolean;
 begin
   result := false;
+  InvalidateCur := false;
   LockSelf;
   try
     DCPPre(RefUp);
@@ -1457,7 +1471,10 @@ begin
       if Assigned(CurPin) then
         Item := ReUseCurrentPinForINode(Tid, CurPin, IPin, Reason)
       else
+      begin
+        InvalidateCur := true;
         Item := NewCurrentPinFromINode(Tid, IPin, Reason);
+      end;
     end;
     result := Assigned(Item);
     DCPPost(RefUp);
@@ -1465,6 +1482,8 @@ begin
   finally
     UnlockSelf;
   end;
+  if InvalidateCur then
+    InvalidateCachedCur(Tid);
   CPTidHandle(TidUp);
   DCPLazyHandle(RefUp);
 end;
@@ -1726,8 +1745,9 @@ var
   Pin: PMemDBPinnedItem;
   RefUp: TReferenceUpdate;
   TidUp: TTidUpdate;
-
+  InvalidateCur: boolean;
 begin
+  InvalidateCur := false;
   LockSelf;
   try
     DCPPre(RefUp);
@@ -1739,13 +1759,18 @@ begin
     if Assigned(Pin) then
       result := ReUseCurrentPinInternal(Pin, Reason)
     else
+    begin
+      InvalidateCur := true;
       result := NewCurrentPinInternal(Tid, Reason);
+    end;
 
     DCPPost(RefUp);
     CPTidPost(Tid, TidUp);
   finally
     UnlockSelf;
   end;
+  if InvalidateCur then
+    InvalidateCachedCur(Tid);
   CPTidHandle(TidUp);
   DCPLazyHandle(RefUp);
 end;
@@ -1788,8 +1813,9 @@ var
   Pin: PMemDbPinnedItem;
   RefUp: TReferenceUpdate;
   TidUp: TTidUpdate;
-
+  InvalidateCur: boolean;
 begin
+  InvalidateCur := false;
   LockSelf;
   try
     DCPPre(RefUp);
@@ -1812,7 +1838,10 @@ begin
       if Assigned(Pin) then
         result := ReUseCurrentPinInternal(Pin, Reason)
       else
+      begin
+        InvalidateCur := true;
         result := NewCurrentPinInternal(Tid, Reason);
+      end;
       BufSelected := abCurrent;
     end;
     DCPPost(RefUp);
@@ -1820,6 +1849,8 @@ begin
   finally
     UnlockSelf;
   end;
+  if InvalidateCur then
+    InvalidateCachedCur(Tid);
   CPTidHandle(TidUp);
   DCPLazyHandle(RefUp);
 end;
@@ -2035,6 +2066,16 @@ begin
     raise EMemDBException.Create(S_JOURNAL_REPLAY_CHANGETYPE_DISAGREES);
   end;
   ExpectTag(Stream, mstDblBufferedEnd);
+end;
+
+procedure TMemDbMultiBuffered.InvalidateCachedCur(const Tid: TTransactionId);
+begin
+  //NOP.
+end;
+
+procedure TMemDbMultiBuffered.InvalidateCachedNxtTid(const Tid: TTransactionId);
+begin
+  //NOP.
 end;
 
 {  TMemDBMultiBufferedTiny }

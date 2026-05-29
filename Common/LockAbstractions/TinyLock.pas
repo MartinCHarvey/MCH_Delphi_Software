@@ -37,7 +37,7 @@ implementation
 uses LockAbstractions, SysUtils;
 
 const
-  SPIN_COUNT = 200;
+  SPIN_COUNT = 2000; //Default spin count for windows spinlocks.
 
 procedure AcquireTinyLock(var Lock: TTinyLock);
 var
@@ -51,8 +51,9 @@ begin
       if LockAbstractions.InterlockedCompareExchange(Integer(Lock), 1, 0) = 0 then
         exit;
       Dec(Tries);
+      YieldProcessor;
     end;
-    Sleep(0); //Yield.
+    Sleep(0); //A bigger yield.
   end;
 end;
 

@@ -32,6 +32,7 @@ type
     Label2: TLabel;
     Label3: TLabel;
     OOMemory: TButton;
+    TblModMulti: TButton;
     procedure BasicTestBtnClick(Sender: TObject);
     procedure ResetClick(Sender: TObject);
     procedure IndexTestClick(Sender: TObject);
@@ -52,6 +53,7 @@ type
     procedure WModeComboChange(Sender: TObject);
     procedure IsoComboChange(Sender: TObject);
     procedure OOMemoryClick(Sender: TObject);
+    procedure TblModMultiClick(Sender: TObject);
   private
     { Private declarations }
     FTimeStamp: TDateTime;
@@ -65,6 +67,8 @@ type
     procedure FKTestSameTable(Sender: TObject);
     procedure MultiRRTrans(Sender: TObject);
     procedure BasicTraversal(Sender: TObject);
+    procedure DropBigFKeys;
+    procedure AddBigFKeys;
   public
     { Public declarations }
   end;
@@ -179,6 +183,9 @@ const
 var
   MaxTest: integer;
   TestNum: integer;
+  Tr: TMemDBTransaction;
+  DBAPI: TMemAPIDatabase;
+  TDat: TMemAPiTableData;
 begin
   if (RMode <> amReadWriteShared) or (WMode <> amReadWriteShared) then
     LogTimeIncr('Need both modes to be amReadWriteShared. Done nothing.')
@@ -199,7 +206,10 @@ begin
           DoZombie(TestNum);
           LogtimeIncr('Zombie test, leak transaction iteration: ' +IntToStr(MaxTest)
             + ' test number: ' +IntToStr(TestNum));
-          FSession.StartTransaction(RMode, amLazyWrite, Iso);
+          //Leak both a transaction, and a bunch of API abjects.
+          Tr := FSession.StartTransaction(RMode, amLazyWrite, Iso);
+          DBAPI := TR.GetAPI;
+          TDat := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
         end;
       end;
       LogtimeIncr('Zombie test, reload: ' +IntToStr(MaxTest));
@@ -576,19 +586,12 @@ begin
   LogTimeIncr('Total time: ' + ElapsedToTimeStr(ElTotal));
 end;
 
-procedure TForm1.BigTblModFast;
+procedure TForm1.DropBigFKeys;
 var
   Trans: TMemDbTransaction;
   DBAPI: TMemAPIDatabase;
-  FieldIndexI: integer;
   TabI: integer;
-  TDatAPI: TMemAPITableData;
-  Found: boolean;
-  Data: TMemDBFieldDataRec;
-  TMetAPI: TMemAPITableMetadata;
-  FKAPI: TMemAPIForeignKey;
 begin
-  FTimeStamp := Now;
   Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
@@ -611,6 +614,68 @@ begin
     end;
   end;
   LogTimeIncr('Big table dropped FKs OK.');
+end;
+
+procedure TForm1.AddBigFKeys;
+var
+  Trans: TMemDbTransaction;
+  DBAPI: TMemAPIDatabase;
+  TabI: integer;
+  FKAPI: TMemAPIForeignKey;
+  FieldIndexI: integer;
+begin
+  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      for TabI := 0 to Pred(BIG_NTABLES) do
+      begin
+        if (TabI > 0) then
+        begin
+          DBAPI.CreateForeignKey('BIGFK_'+InttoStr(TabI));
+          FKAPI := DBAPI.GetAPIObjectFromEntity('BIGFK_'+InttoStr(TabI), APIForeignKey) as TMemAPIForeignKey;
+          try
+            for FieldIndexI := 0 to Pred(BIG_NINDEXES) do
+            begin
+              FKAPI.SetReferencingChild('BIGTABLE_'+IntToStr(TabI), 'INDEX_'+IntToStr(FieldIndexI));
+              FKAPI.SetReferencedParent('BIGTABLE_'+IntToStr(TabI-1), 'INDEX_'+IntToStr(FieldIndexI));
+            end;
+          finally
+              FKAPI.Free;
+          end;
+        end;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      LogTimeIncr('Big table FKeys add failed' + E.Message);
+      raise;
+    end;
+  end;
+  LogTimeIncr('Big table FKeys added OK.');
+end;
+
+procedure TForm1.BigTblModFast;
+var
+  Trans: TMemDbTransaction;
+  DBAPI: TMemAPIDatabase;
+  FieldIndexI: integer;
+  TabI: integer;
+  TDatAPI: TMemAPITableData;
+  Found: boolean;
+  Data: TMemDBFieldDataRec;
+  TMetAPI: TMemAPITableMetadata;
+  FKAPI: TMemAPIForeignKey;
+begin
+  FTimeStamp := Now;
+
+  DropBigFKeys;
+
   Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
   try
     DBAPI := Trans.GetAPI;
@@ -705,40 +770,8 @@ begin
     end;
   end;
   LogTimeIncr('Big table indexes added OK.');
-  Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
-  try
-    DBAPI := Trans.GetAPI;
-    try
-      for TabI := 0 to Pred(BIG_NTABLES) do
-      begin
-        if (TabI > 0) then
-        begin
-          DBAPI.CreateForeignKey('BIGFK_'+InttoStr(TabI));
-          FKAPI := DBAPI.GetAPIObjectFromEntity('BIGFK_'+InttoStr(TabI), APIForeignKey) as TMemAPIForeignKey;
-          try
-            for FieldIndexI := 0 to Pred(BIG_NINDEXES) do
-            begin
-              FKAPI.SetReferencingChild('BIGTABLE_'+IntToStr(TabI), 'INDEX_'+IntToStr(FieldIndexI));
-              FKAPI.SetReferencedParent('BIGTABLE_'+IntToStr(TabI-1), 'INDEX_'+IntToStr(FieldIndexI));
-            end;
-          finally
-              FKAPI.Free;
-          end;
-        end;
-      end;
-    finally
-      DBAPI.Free;
-    end;
-    Trans.CommitAndFree;
-  except
-    on E: Exception do
-    begin
-      Trans.RollbackAndFree;
-      LogTimeIncr('Big table FKeys add failed' + E.Message);
-      raise;
-    end;
-  end;
-  LogTimeIncr('Big table FKeys added OK.');
+
+  AddBigFKeys;
 end;
 
 procedure TForm1.BigTblModSlow;
@@ -830,6 +863,197 @@ begin
   LogTimeIncr('DB started...');
   FSession := FDB.StartSession;
   LogTimeIncr('Session running.');
+end;
+
+type
+  TMultiModThread = class(TThread)
+    FIndex: integer;
+    FByTable: boolean;
+    FParent: TForm1;
+    FExcept: boolean;
+    FMsg: string;
+    procedure Execute; override;
+    procedure ModByTable;
+    procedure ModByRow;
+  end;
+
+procedure TMultiModThread.Execute;
+begin
+  if FByTable then
+    ModByTable
+  else
+    ModByRow;
+end;
+
+procedure TMultiModThread.ModByRow;
+var
+  Trans: TMemDBTransaction;
+  DBAPI: TMemAPIDatabase;
+  TabI, RowI: integer;
+  TDatAPI: TMemAPITableData;
+  Found: boolean;
+  FieldIndexI: integer;
+  Data: TMemDBFieldDataRec;
+begin
+  Trans := FSession.StartTransaction(FParent.WMode, amLazyWrite, FParent.Iso);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      for TabI := 0 to Pred(BIG_NTABLES) do
+      begin
+        TDatAPI := DBAPI.GetAPIObjectFromEntity('BIGTABLE_'+IntToStr(TabI), APITableData) as TMemAPITableData;
+        try
+          RowI := 0;
+          Found:= TDatAPI.Locate(ptFirst, '');
+          while Found do
+          begin
+            if (RowI mod BIG_NTABLES) = FIndex then
+            begin
+              for FieldIndexI := 0 to Pred(BIG_NINDEXES) do
+              begin
+                TDatAPI.ReadField('FIELD_'+InttoStr(FieldIndexI), Data);
+                Assert(Data.FieldType = ftInteger);
+                Data.i32Val := Data.i32Val + 10 * BIG_ROWS;
+                TDatAPI.WriteField('FIELD_'+InttoStr(FieldIndexI), Data);
+              end;
+              TDatAPI.Post;
+            end;
+            Found:= TDatAPI.Locate(ptNext, '');
+            Inc(RowI);
+          end;
+          Assert(RowI = BIG_ROWS);
+        finally
+          TDatAPI.Free;
+        end;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      FExcept := true;
+      FMsg := E.Message;
+    end;
+  end;
+end;
+
+procedure TMultiModThread.ModByTable;
+var
+  Trans: TMemDBTransaction;
+  DBAPI: TMemAPIDatabase;
+  TabI: integer;
+  TDatAPI: TMemAPITableData;
+  Found: boolean;
+  FieldIndexI: integer;
+  Data: TMemDBFieldDataRec;
+begin
+  Trans := FSession.StartTransaction(FParent.WMode, amLazyWrite, FParent.Iso);
+  try
+    DBAPI := Trans.GetAPI;
+    try
+      TDatAPI := DBAPI.GetAPIObjectFromEntity('BIGTABLE_'+IntToStr(FIndex), APITableData) as TMemAPITableData;
+      try
+        Found:= TDatAPI.Locate(ptFirst, '');
+        while Found do
+        begin
+          for FieldIndexI := 0 to Pred(BIG_NINDEXES) do
+          begin
+            TDatAPI.ReadField('FIELD_'+InttoStr(FieldIndexI), Data);
+            Assert(Data.FieldType = ftInteger);
+            Data.i32Val := Data.i32Val * 2;
+            TDatAPI.WriteField('FIELD_'+InttoStr(FieldIndexI), Data);
+          end;
+          TDatAPI.Post;
+          Found:= TDatAPI.Locate(ptNext, '');
+        end;
+      finally
+        TDatAPI.Free;
+      end;
+    finally
+      DBAPI.Free;
+    end;
+    Trans.CommitAndFree;
+  except
+    on E: Exception do
+    begin
+      Trans.RollbackAndFree;
+      FExcept := true;
+      FMsg := E.Message;
+    end;
+  end;
+end;
+
+procedure TForm1.TblModMultiClick(Sender: TObject);
+
+  procedure BigTblModGeneric(ByTable: boolean);
+  var
+    Threads: array of TMultiModThread;
+    TabI: integer;
+  begin
+    SetLength(Threads, BIG_NTABLES);
+    for TabI := 0 to Pred(BIG_NTABLES) do
+    begin
+      Threads[TabI] := TMultiModThread.Create(true) as TMultiModThread;
+      with Threads[TabI] do
+      begin
+        FIndex := TabI;
+        FByTable := ByTable;
+        FParent := self;
+        Resume;
+      end;
+    end;
+    for TabI := 0 to Pred(BIG_NTABLES) do
+      with Threads[TabI] do
+      begin
+        WaitFor;
+        if FExcept then
+          LogtimeIncr('A worker thread raised an exception (' + FMsg + ')');
+        Free;
+      end;
+  end;
+
+  procedure BigTblModMultiByTable;
+  begin
+    BigTblModGeneric(true);
+  end;
+
+  procedure BigTblModMultiByRow;
+  begin
+    BigTblModGeneric(false);
+  end;
+
+var
+  Start, N, ElFast, ElSlow: double;
+begin
+  if (WMode <> amReadWriteShared) then
+  begin
+    LogTimeIncr('Need write mode to be amReadWriteShared. Done nothing.');
+    exit;
+  end;
+  if (Iso >= ilSnapshot) then
+  begin
+    LogTimeIncr('Need iso to be < ilSnapshot (for row ordering). Done nothing.');
+    exit;
+  end;
+
+  FTimeStamp := Now;
+  LogTimeIncr('This will take a moment (comparing different methods)...');
+  Application.ProcessMessages;
+  Start := Now;
+  DropBigFKeys;
+  BigTblModMultiByTable;
+  LogTimeIncr('...');
+  AddBigFKeys;
+  N := Now;
+  ElFast := N - Start;
+  Start := N;
+  BigTblModMultiByRow;
+  ElSlow := Now - Start;
+  LogTimeIncr('Total time (one thread per table): ' + ElapsedToTimeStr(ElFast));
+  LogTimeIncr('Total time (threads interleaving rows): ' + ElapsedToTimeStr(ElSlow));
 end;
 
 procedure TForm1.TstBlobsClick(Sender: TObject);

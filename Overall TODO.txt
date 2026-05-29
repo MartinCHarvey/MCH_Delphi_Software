@@ -1,13 +1,7 @@
 
 MemDB2 TODO.
 
-- Refactor META_ / Pinning functions to use cached values.
-  - Todo: Debug bad multi-reader performance, see if this is indeed the cause.
-
-  Change "big table" tests to:
-  - Assign different threads to mod different tables.
-  - Assign different threads to mod odd / even rows :-)
-    - Should improve performance despite locking once made mods above.
+- OK. That's all the optimizations I can think of for the moment.
 
 - Any other optimizations you can think of.
 
