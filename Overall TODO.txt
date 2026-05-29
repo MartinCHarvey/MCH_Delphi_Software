@@ -1,11 +1,14 @@
 
 MemDB2 TODO.
 
-- OK. That's all the optimizations I can think of for the moment.
-
-- Any other optimizations you can think of.
+- Few remaining testcases for race conditions.
 
 - SQL Query engine.
+  - SQL parser.
+  - SQL execution engine.
+  - Common ResultSet class:
+    - Mapping onto TMemDBTable
+    - Also map functionality onto query results where possible.
+  - Support most common SQL features, but leave the tricky ones aside for the moment.
 
-
-
+- For later: Shim layer onto Native DAC components (TDataset etc etc ...)
