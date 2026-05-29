@@ -1245,6 +1245,9 @@ begin
         try
           FDatabase.StartTransaction(PseudoTid, Ctxt);
           FDatabase.CommitLock.Acquire; //This if we don't acquire at lrSharedRead for ever.
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+          DbgUnderCommitLock := true;
+{$ENDIF}
           try
             try
               FDatabase.ToScratch(PseudoTid, ChangesetStream, Ctxt);
@@ -1260,6 +1263,9 @@ begin
               end;
             end;
           finally
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+            DbgUnderCommitLock := false;
+{$ENDIF}
             FDatabase.CommitLock.Release;
             FDatabase.Rollback(PseudoTid, rbpDelayedRollback, CleardownOptSet, Ctxt);
           end;

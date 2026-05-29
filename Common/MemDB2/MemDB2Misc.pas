@@ -277,6 +277,11 @@ function CleardownOptSet: TOptimizeSet;
 function NoOptimizePolicies: TOptimizePolicies;
 function DefaultOptimizePolicies: TOptimizePolicies;
 
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+var
+  DbgUnderCommitLock: boolean;
+{$ENDIF}
+
 implementation
 
 uses
@@ -664,6 +669,10 @@ begin
 end;
 
 initialization
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+  DbgUnderCommitLock := false;
+{$ENDIF}
+
   AllIndexAttrs := GetAllIndexAttrs;
   with MemDBXlateExceptions do
   begin

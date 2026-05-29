@@ -1,23 +1,8 @@
 
 MemDB2 TODO.
 
-- Work on zombie tables:
-  - Leaked Txion leave old tables present with refs.
-  - Should still be possible to do a cleanup and exit.
-  - Most cases already fixed, but something is clearing down TidLocal too early.
-
 - Refactor META_ / Pinning functions to use cached values.
   - Todo: Debug bad multi-reader performance, see if this is indeed the cause.
-
-- Have CurrentInLock function.
-  - Check not duplicated work with FLagsInLock.
-  - Create boolean test flag for InLock
-    - Global, and MemDBTest only.
-  - Look for instances of PinCurrent durring commit cycle where clearly
-    not needed.
-
-- MinIso values  / require atomic. Way to make that cleaner?
-  - More careful scrutiny on what requires meta to be atomic and when.
 
   Change "big table" tests to:
   - Assign different threads to mod different tables.
@@ -25,12 +10,6 @@ MemDB2 TODO.
     - Should improve performance despite locking once made mods above.
 
 - Any other optimizations you can think of.
-
-- Disposal outside lock: Make TidLocal have a "Recycle" bin you can add reffed classes to.
-  - But might not play well with parallelization of cleardown.
-
-- After optimising straight line performance, look at performance under contention.
-  - TinyLock may not be the correct answer ...
 
 - SQL Query engine.
 

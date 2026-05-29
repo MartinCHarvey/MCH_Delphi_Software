@@ -365,6 +365,9 @@ begin
 
     //TODO, One day this will be improved with predicate locks?
     DB.CommitLock.Acquire;
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+    DbgUnderCommitLock := true;
+{$ENDIF}
     try
       DB.MetaIndexLock.Acquire;
       try
@@ -373,6 +376,9 @@ begin
         DB.MetaIndexLock.Release;
       end;
     finally
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+      DbgUnderCommitLock := false;
+{$ENDIF}
       DB.CommitLock.Release;
     end;
   end
@@ -406,6 +412,9 @@ begin
   PseudoTid := TTransactionId.NewTransactionID(ilSerialisable); //if only writer, should be serialisable.
   Ctxt := TXTransactionLocalContext.Create;
   Ctxt.SetPtrs(@EntSnapshot, @EntRegistered);
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+  DbgUnderCommitLock := true; //We are serialised ...
+{$ENDIF}
   try
     try
       DB.StartTransaction(PseudoTid, Ctxt);
@@ -438,6 +447,9 @@ begin
     Ctxt.Free;
     EntSnapshot.Release;
     EntRegistered.Release;
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+    DbgUnderCommitLock := false;
+{$ENDIF}
   end;
 end;
 
@@ -462,6 +474,9 @@ begin
     DB.Prepare(T.Tid, OptSet,false, T.LocalContext);
 
     DB.CommitLock.Acquire;
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+    DbgUnderCommitLock := true;
+{$ENDIF}
     try
       try
         DB.ToJournal(T.Tid, result, T.LocalContext);
@@ -492,6 +507,9 @@ begin
         raise;
       end;
     finally
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+      DbgUnderCommitLock := false;
+{$ENDIF}
       DB.CommitLock.Release;
     end;
     //Note final cleanup outside commit lock.
@@ -982,6 +1000,9 @@ begin
   NewTable := TMemDBTable.Create;
   NewTable.Init(Tr.Tid, self, Name, true);
   FCommitLock.Acquire;
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+  DbgUnderCommitLock := true;
+{$ENDIF}
   try
     FMetaIndexLock.Acquire;
     try
@@ -990,6 +1011,9 @@ begin
       FMetaIndexLock.Release;
     end;
   finally
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+    DbgUnderCommitLock := false;
+{$ENDIF}
     FCommitLock.Release;
   end;
   NewTable.Proxy.Release;

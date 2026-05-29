@@ -5,7 +5,7 @@
         <FrameworkType>FMX</FrameworkType>
         <MainSource>MemDB2Test.dpr</MainSource>
         <Base>True</Base>
-        <Config Condition="'$(Config)'==''">Debug</Config>
+        <Config Condition="'$(Config)'==''">Release</Config>
         <Platform Condition="'$(Platform)'==''">Win64</Platform>
         <TargetedPlatforms>3</TargetedPlatforms>
         <AppType>Application</AppType>
@@ -101,7 +101,7 @@
     <PropertyGroup Condition="'$(Cfg_1)'!=''">
         <DCC_RangeChecking>true</DCC_RangeChecking>
         <DCC_IntegerOverflowCheck>true</DCC_IntegerOverflowCheck>
-        <DCC_Define>DEBUG;USE_TRACKABLES;CHECK_TEARDOWN_REFS;$(DCC_Define)</DCC_Define>
+        <DCC_Define>DEBUG;USE_TRACKABLES;CHECK_TEARDOWN_REFS;DBG_UNDER_COMMIT_LOCK;$(DCC_Define)</DCC_Define>
         <DCC_DebugDCUs>true</DCC_DebugDCUs>
         <DCC_Optimize>false</DCC_Optimize>
         <DCC_GenerateStackFrames>true</DCC_GenerateStackFrames>
@@ -172,8 +172,6 @@
         <DCCReference Include="..\..\PatchFreeMem\PatchFreeMem.pas"/>
         <DCCReference Include="..\..\PComp\PComp.pas"/>
         <None Include="..\README_Conditionals.txt"/>
-        <None Include="..\README_Ideas, and TODO.txt"/>
-        <None Include="..\README_Known_Issues.txt"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>
