@@ -346,12 +346,6 @@ type
     //Ideally tables maintain their own
     function AnyChanges(const Tid: TTransactionId; Ctxt: TTXLocalContext): boolean; override;
 
-    procedure ChangeFlagsUnderCommitLock(const Tid: TTransactionId;
-      var Added:boolean;
-      var Changed: boolean;
-      var Deleted: boolean;
-      var Null: boolean);
-
     procedure Delete(const TId: TTransactionId;
       MinIso: TMDBIsolationLevel = Low(TMDBIsolationLevel)); override;
     procedure RequestChange(const Tid: TTransactionId;
@@ -973,31 +967,6 @@ begin
   end;
 end;
 
-procedure TMemDbMultiBuffered.ChangeFlagsUnderCommitLock(const Tid: TTransactionId;
-  var Added:boolean;
-  var Changed: boolean;
-  var Deleted: boolean;
-  var Null: boolean);
-var
-  Cur: PMemDBMultiItem;
-  Nxt: PMemDBMultiItem;
-  CurDat, NxtDat: TMemDBStreamable;
-begin
-  LockSelf;
-  try
-    Cur := FindCurMultiItem;
-    CurDat := Cur.Item;
-    Nxt := FindNxtMultiItem(Tid);
-    if Assigned(Nxt) then
-      NxtDat := Nxt.Item
-    else
-      NxtDat := nil;
-    ChangeFlagsFromPinned(CurDat, NxtDat, Added, Changed, Deleted, Null);
-  finally
-    UnlockSelf;
-  end;
-end;
-
 procedure TMemDBMultiBuffered.Delete(const Tid: TTransactionId; MinIso: TMDBIsolationLevel);
 var
   Cur, Nxt: PMemDbMultiItem;
@@ -1240,6 +1209,8 @@ begin
     begin
       Assert(Assigned(Nxt.Item));
       //Check next item parented from current (Write-after-write).
+
+      //If next assigned, then Next.ParentTid from Cur or Pin.
       if Nxt.ParentTid <> Cur.Sel.Tid then
         raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ABORT_WAW);
     end;
@@ -1783,6 +1754,9 @@ function TMemDbMultiBuffered.GetCurUnderCommitLock: TMemDBStreamable;
 var
   Cur: PMemDBMultiItem;
 begin
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+  Assert(DbgUnderCommitLock);
+{$ENDIF}
   Cur := FindCurMultiItem;
   Assert(Assigned(Cur));
   result := Cur.Item;
@@ -1976,7 +1950,7 @@ var
   Current: TMemDbStreamable;
 begin
   inherited;
-  Current := PinCurrent(PseudoTid, pinEvolve);
+  Current := GetCurUnderCommitLock;
   ToScratchPinnedMB(Stream, Current);
 end;
 
@@ -2002,7 +1976,7 @@ begin
   if AnyChanges(PseudoTid, Ctxt) then
     raise EMemDbInternalException.Create(S_JOURNAL_REPLAY_DUP_INST);
 
-  Cur := PinCurrent(PseudoTid, pinEvolve);
+  Cur := GetCurUnderCommitLock;
   ExpectTag(Stream, mstDblBufferedStart);
   ChangeType := RdStreamChangeType(Stream);
   case ChangeType of
@@ -2043,7 +2017,7 @@ begin
   if AnyChanges(PseudoTid, Ctxt) then
     raise EMemDbInternalException.Create(S_JOURNAL_REPLAY_DUP_INST);
 
-  Cur := PinCurrent(PseudoTid, pinEvolve);
+  Cur := GetCurUnderCommitLock;
   if AssignedNotSentinel(Cur) then
     raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
 

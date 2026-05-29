@@ -2169,6 +2169,7 @@ procedure TTidLocal.ToScratch(Stream: TStream);
 var
   IRec: TItemRec;
   Row: TMemDBRow;
+  Cur: TMemDBStreamable;
 begin
   WrTag(Stream, mstIndexedListStart);
   //TODO - Maybe do this in a way which doesn't lock the master list?
@@ -2179,7 +2180,8 @@ begin
     while Assigned(IRec) do
     begin
       Row := IRec.Item as TMemDBRow;
-      if Assigned(Row.PinCurrent(FTid, pinEvolve) as TMemDbStreamable) then
+      Cur := Row.GetCurUnderCommitLock;
+      if Assigned(Cur) then
         Row.ToScratch(self.FTid, Stream, nil);
       FParentTable.FMasterRowList.GetAnotherItem(IRec);
     end;
@@ -2197,6 +2199,7 @@ var
   SV: TRowSearchVal;
   RV: TISRetVal;
   IRec: TItemRec;
+  RCur: TMemDBStreamable;
 begin
   Created := false;
   Pos := Stream.Position;
@@ -2224,7 +2227,8 @@ begin
               result := IRec.Item as TMemDBRow;
               //From journal replay cases, we do not expect concurrent
               //modification of state
-              if not Assigned(result.PinCurrent(self.FTid, TPinReason.pinEvolve)) then
+              RCur := result.GetCurUnderCommitLock;
+              if not Assigned(RCur) then
                 raise EMemDBInternalException.Create(S_CONCURRENT_MODIFY_DURING_REPLAY);
             end
             else
@@ -2352,7 +2356,7 @@ begin
     while Assigned(IRec) do
     begin
       Row := IRec.Item as TMemDBRow;
-      RowCur := Row.PinCurrent(FTid, pinFinalCheck);
+      RowCur := Row.GetCurUnderCommitLock;
       RowNext := Row.GetNext(FTid);
       Row.ChangeFlagsFromPinned(RowCur, RowNext,
         Added, Changed, Deleted, Null);
@@ -3467,12 +3471,13 @@ begin
     while Assigned(IRec) do
     begin
       Row := IRec.Item as TMemDBRow;
+      //Re pre-commit handles out of date pinning.
       Row.PreCommit(FTid, pcpTables, [], nil);
 
       if Row.AnyChangesForTid(FTid, nil) then
       begin
-        //Combination of PreCommit and AnyChangesForTid Solves races between different versions of "current" here.
-        Cur := Row.PinCurrent(FTid, pinFinalCheck);
+        //Determine row change based on actual change from Current -> Next which will occur.
+        Cur := Row.GetCurUnderCommitLock;
         Nxt := Row.GetNext(FTid);
         Row.ChangeFlagsFromPinned(Cur, Nxt, Added, Changed, Deleted, Null);
         AddAcc := AddAcc or Added;
@@ -4387,6 +4392,7 @@ end;
 procedure TMemDBTablePersistent.ToScratch(const PseudoTid: TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);
 var
   TidLocal:TTidLocal;
+  MCur: TMemDBStreamable;
 begin
   TidLocal := GetTidLocal(PseudoTid);
   TidLocal.UpdateLayout(pinEvolve);
@@ -4395,8 +4401,8 @@ begin
 
   //In Entity list if CPTids, however does not guarantee has data.
   //Stream only if current metdata indicates not NULL.
-  // TODO - Do this for foreign keys too.
-  if Assigned(META_PinCurrent(PseudoTid, pinEvolve)) then
+  MCur := FMetadata.GetCurUnderCommitLock;
+  if Assigned(MCur) then
   begin
     WrTag(Stream, mstTableStart);
     FMetadata.ToScratch(PseudoTid, Stream, Ctxt);
@@ -4468,11 +4474,13 @@ procedure TMemDBTablePersistent.FromScratch(const PseudoTid: TTransactionId; Str
 var
   TidLocal:TTidLocal;
   Newly: boolean;
+  CC: TMemDBStreamable;
 begin
   FMasterRowLock.Acquire;
   try
+    CC := Metadata.GetCurUnderCommitLock;
     if FMetadata.AnyChangesForTid(PseudoTid, Ctxt)
-       or Assigned(Metadata.PinCurrent(PseudoTid, pinEvolve))
+       or Assigned(CC)
        or (FMasterRowList.Count > 0) then
       raise EMemDBInternalException.Create(S_FROM_SCRATCH_REQUIRES_EMPTY_OBJ);
 
@@ -4845,13 +4853,10 @@ end;
 
 procedure TMemDBForeignKeyPersistent.ToScratch(const PseudoTid:TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);
 var
-  CP, NP: TMemDBStreamable;
-  Added, Changed, Deleted, Null: boolean;
+  CP: TMemDBStreamable;
 begin
-  CP := FMetadata.PinCurrent(PseudoTid, pinEvolve);
-  NP := FMetadata.GetNext(PseudoTid);
-  ChangeFlagsFromPinned(CP, NP, Added, Changed, Deleted, Null);
-  if not Null then
+  CP := FMetadata.GetCurUnderCommitLock;
+  if Assigned(CP) then
   begin
     WrTag(Stream, mstFkStart);
     FMetadata.ToScratch(PseudoTid, Stream, Ctxt);
@@ -4873,7 +4878,7 @@ var
   CP, NP: TMemDBStreamable;
   Added, Changed, Deleted, Null: boolean;
 begin
-  CP := FMetadata.PinCurrent(PseudoTid, pinEvolve);
+  CP := FMetadata.GetCurUnderCommitLock;
   NP := FMetadata.GetNext(PseudoTid);
   ChangeFlagsFromPinned(CP, NP, Added, Changed, Deleted, Null);
   //Premise is that this is being called given appropriate previous lookahead
@@ -4961,7 +4966,6 @@ begin
     Meta.TableReferring := EntityReferring as TMemDBTablePersistent;
 
     Meta.TableReferring.Metadata.RequireCurrentAtomic(Tid);
-    //TODO - Loosen restrictions on atomicity?
 
     M := Meta.TableReferring.Metadata as TMemDBTableMetadata;
     Meta.IndexDefReferring := M.IndexByName(SelLatest, FKM.IndexReferer, Meta.IndexDefReferringAbsIdx, pinFinalCheck);
@@ -5032,7 +5036,6 @@ begin
     Meta.TableReferred := EntityReferred as TMemDBTablePersistent;
 
     Meta.TableReferred.Metadata.RequireCurrentAtomic(Tid);
-    //TODO - Loosen restrictions on atomicity?
 
     M := Meta.TableReferred.Metadata as TMemDBTableMetadata;
     Meta.IndexDefReferred := M.IndexByName(SelLatest, FKM.IndexReferred, Meta.IndexDefReferredAbsIdx, pinFinalCheck);
@@ -5229,11 +5232,10 @@ begin
     Row := IRec.Item as TMemDBRow;
     if MasterRows or Row.AnyChangesForTid(Meta.Tid, Meta.Ctxt) then
     begin
-      CC := Row.PinCurrent(Meta.Tid, pinFinalCheck);
+      CC := Row.GetCurUnderCommitLock;
       NC := Row.GetNext(Meta.Tid);
 
       Row.ChangeFlagsFromPinned(CC, NC, Added, Changed, Deleted, Null);
-      Row.RequireCurrentAtomic(Meta.Tid); //TODO - Atomicity.
       if not (Deleted or Null) then
       begin
         if Changed then
@@ -5301,9 +5303,9 @@ var
   DataFields: TMemRowFields;
 {$ENDIF}
   CC, NC: TMemDBStreamable;
+  CF, NF: TMemDBStreamable;
   Added, Changed, Deleted, Null: boolean;
   TidLocal: TTidLocal;
-  BufSel: TABSelType;
 begin
   CC := FMetadata.PinCurrent(Meta.Tid, pinFinalCheck);
   NC := FMetadata.GetNext(Meta.Tid);
@@ -5342,11 +5344,20 @@ begin
         while Assigned(LookasideIRec) do
         begin
           LookupRow := LookasideIRec.Item as TMemDbRow;
-          LookupFields := LookupRow.GetPinLatest(Meta.Tid, bufSel, pinFinalCheck) as  TMemRowFields;
-
-          if bufSel = abCurrent then
-            LookupRow.RequireCurrentAtomic(Meta.Tid);
-          //TODO - Atomicity of current, go via IPin from master index instead?
+          //Effectively GetPinLatest, but we can skip atomicity checks and
+          //look directly.
+          CF := LookupRow.GetCurUnderCommitLock;
+          NF := LookupRow.GetNext(Meta.Tid);
+          if Assigned(NF) then
+          begin
+            Assert(not (NF is TMemDeleteSentinel));
+            LookupFields := NF as TMemRowFields;
+          end
+          else
+          begin
+            Assert(not (CF is TMemDeleteSentinel));
+            LookupFields := CF as TMemRowFields;
+          end;
 
           //As we assume that Index has current and latest, we also assume
           //fields are not sparse, because no layout change required.
@@ -5423,10 +5434,9 @@ begin
         Row := IRec.Item as TMemDBRow;
         if Row.AnyChangesForTid(Meta.Tid, Meta.Ctxt) then
         begin
-          CC := Row.PinCurrent(Meta.Tid, pinFinalCheck);
+          CC := Row.GetCurUnderCommitLock;
           NC := Row.GetNext(Meta.Tid);
-          //Already caught at all Isos >= ilRepeatableRead, however...
-          Row.RequireCurrentAtomic(Meta.Tid); //TODO - Atomicity.
+
           Row.ChangeFlagsFromPinned(CC, NC, Added, Changed, Deleted, Null);
           if not Added then
           begin
@@ -5519,10 +5529,9 @@ begin
           Row := IRec.Item as TMemDBRow;
           if Row.AnyChangesForTid(Meta.Tid, Meta.Ctxt) then
           begin
-            CC :=  Row.PinCurrent(Meta.Tid, pinFinalCheck);
+            CC :=  Row.GetCurUnderCommitLock;
             NC := Row.GetNext(Meta.Tid);
 
-            Row.RequireCurrentAtomic(Meta.Tid); //TODO - Atomicity.
             Row.ChangeFlagsFromPinned(CC, NC, Added, Changed, Deleted, Null);
             if not Deleted then
             begin
@@ -5567,7 +5576,7 @@ begin
         begin
           DelRow := DeletedIRec.Item as TMemDBRow;
 
-          CC := DelRow.PinCurrent(Meta.Tid, pinFinalCheck);
+          CC := DelRow.GetCurUnderCommitLock;
           //Row already in lookaside, concurrency checks done.
           //Row is deleted row, so no further type checking needed.
           DelRowFields := CC as TMemRowFields;
@@ -5634,6 +5643,7 @@ var
   SearchOffsets: TFieldOffsets;
 {$ENDIF}
   bufSel: TABSelType;
+  CF, NF: TMemDbStreamable;
 begin
   //OK, so we now need to check:
   //1. That for every item in Referrer added, there is an entry in referred table.
@@ -5646,8 +5656,18 @@ begin
     while Assigned(ListIRec) do
     begin
       ListRow := ListIRec.Item as TMemDbRow;
-      //Row in lookaside lists, concurrency and sentinel checking done,
-      ListRowFields := ListRow.GetPinLatest(Meta.Tid, bufSel, pinFinalCheck) as TMemRowFields;
+      CF := ListRow.GetCurUnderCommitLock;
+      NF := ListRow.GetNext(Meta.Tid);
+      if Assigned(NF) then
+      begin
+        Assert(not (NF is TMemDeleteSentinel));
+        ListRowFields := NF as TMemRowFields;
+      end
+      else
+      begin
+        Assert(not (CF is TMemDeleteSentinel));
+        ListRowFields := CF as TMemRowFields;
+      end;
 
       //However, fields can be sparse in added list.
       if ListRowFields.Sparse then
@@ -5672,7 +5692,18 @@ begin
 {$IFOPT C+}
       //OK, check fields match.
       SearchRow := LeafRet.Row as TMemDBRow;
-      SearchRowFields := SearchRow.GetPinLatest(Meta.Tid, bufSel, pinFinalCheck) as TMemRowFields;
+      CF := SearchRow.GetCurUnderCommitLock;
+      NF := SearchRow.GetNext(Meta.Tid);
+      if Assigned(NF) then
+      begin
+        Assert(not (NF is TMemDeleteSentinel));
+        SearchRowFields := NF as TMemRowFields;
+      end
+      else
+      begin
+        Assert(not (CF is TMemDeleteSentinel));
+        SearchRowFields := CF as TMemRowFields;
+      end;
 
       //General offsets, can be sparse.
       if SearchRowFields.Sparse then
@@ -5697,7 +5728,7 @@ begin
     begin
       ListRow := ListIrec.Item as TMemDBRow;
       //Referred deleted, old values in abCurrent.
-      ListRowFields := ListRow.PinCurrent(Meta.Tid, pinFinalCheck) as TMemRowFields;
+      ListRowFields := ListRow.GetCurUnderCommitLock as TMemRowFields;
 
       //Referred deleted not sparse.
       if ListRowFields.Sparse then
@@ -5718,7 +5749,18 @@ begin
 {$IFOPT C+}
         //Just check the fields really match.
         SearchRow := LeafRet.Row as TMemDBRow;
-        SearchRowFields := SearchRow.GetPinLatest(Meta.Tid, bufSel, pinFinalCheck) as TMemRowFields;
+        CF := SearchRow.GetCurUnderCommitLock;
+        NF := SearchRow.GetNext(Meta.Tid);
+        if Assigned(NF) then
+        begin
+          Assert(not (NF is TMemDeleteSentinel));
+          SearchRowFields := NF as TMemRowFields;
+        end
+        else
+        begin
+          Assert(not (CF is TMemDeleteSentinel));
+          SearchRowFields := CF as TMemRowFields;
+        end;
 
         //General offsets, can be sparse.
         if SearchRowFields.Sparse then
@@ -6037,9 +6079,12 @@ end;
 
 procedure TMemDBRow.ToJournal(const Tid: TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);
 var
+  Cur, Nxt: TMemDBStreamable;
   Added, Changed, Deleted, Null: boolean;
 begin
-  ChangeFlagsUnderCommitLock(Tid, Added, Changed, Deleted, Null);
+  Cur := GetCurUnderCommitLock;
+  Nxt := GetNext(Tid);
+  ChangeFlagsFromPinned(Cur, Nxt, Added, Changed, Deleted, Null);
   if Added or Changed or Deleted then
   begin
     WrTag(Stream, mstRowStartV2);
@@ -6069,7 +6114,7 @@ begin
     raise EMemDBInternalException.Create(S_ROW_IDS_DISAGREE);
   inherited;
   ExpectTag(Stream, mstRowEnd);
-  Cur := PinCurrent(PseudoTid, pinEvolve);
+  Cur := GetCurUnderCommitLock;
   Nxt := GetNext(PseudoTid);
   if AssignedNotSentinel(Cur) then
     CheckItemCurrent := Cur as TMemStreamableList
@@ -6094,7 +6139,7 @@ begin
   inherited;
   ExpectTag(Stream, mstRowEnd);
   //Assuming no delete sentinels in A/B top level copies, and every row is an add.
-  Cur := PinCurrent(PseudoTid, pinEvolve);
+  Cur := GetCurUnderCommitLock;
   Nxt := GetNext(PseudoTid);
   if AssignedNotSentinel(Cur)
     or (NotAssignedOrSentinel(Nxt)) then
@@ -7481,8 +7526,6 @@ begin
   try
     for i := 0 to Pred(EList.Count) do
     begin
-      //NB. Do not need PinForUnorderedContainer here, because we get all of them
-      //at once, and use atomicity on the pins. The same is not the case for DB rows.
       Proxy := EList.Items[i] as TMemDbEntityProxy;
       Assert(Assigned(Proxy.Proxy) and (Proxy.Proxy is TMemDbEntity));
       Entity := Proxy.Proxy as TMemDbEntity;
@@ -7576,6 +7619,9 @@ begin
       finally
         EntityList.Release;
       end;
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+      DbgUnderCommitLock := true;
+{$ENDIF}
       Prepare(PseudoTid, CleardownOptSet, false, Ctxt);
       ToJournal(PseudoTid, NullStream, Ctxt);
       PreCommit(PseudoTid, pcpEntitySet, CleardownOptSet, Ctxt);
@@ -7584,6 +7630,9 @@ begin
       Commit(PseudoTid, ccpData, CleardownOptSet, Ctxt);
       Commit(PseudoTid, ccpMetaIndex, [], Ctxt);
       Commit(PseudoTid, ccpCleardown, CleardownOptSet, Ctxt);
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+      DbgUnderCommitLock := false;
+{$ENDIF}
     end;
   finally
     NullStream.Free;
