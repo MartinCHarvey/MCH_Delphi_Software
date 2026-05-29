@@ -4,13 +4,11 @@ GitHub repo for open sourced MCH Software.
 Most recent (2026) development is in Common/MemDB2:
 
 - Builds on MemDB code, quick, and developed up to the end of 2025.
-- They share the same file format so you can swap back and forth between them, and of course 32/64 bit builds can r/w the same format.
-- They also share very similar API's.
+- They share the same file format and API's.
 - MemDB best for single/lightly threaded straight-line workloads, and will be fastest for that use case.
-- MemDB2 better for more deeply parallel / async workloads.
-- MemDB2 _now suitable for alpha/beta testing_.
-- Now I have Delphi CE 12, I'll be checking for portability to ARM. (I expect it to be mostly seamless).
-- SQL support for both MemDB and MemDB2 to follow.
+- MemDB2 better for more deeply parallel / async workloads. Now suitable for Alpha testing.
+- SQL support for both MemDB and MemDB2 in progress.
+- Later: Check portability to ARM / Android.
 
 If any of you folks get some of this to compile / run under the FPC compiler, I'd be very interested to know.
 
