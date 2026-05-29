@@ -560,7 +560,9 @@ type
     procedure HandleRowProhibitOp(const Tid: TTRansactionId;
                                   Added, Changed, Deleted: boolean);
 
+{$IFOPT C+}
     function FindRowProhibitLock(const Tid: TTransactionId; AbortOther: boolean): PRowChangeLock;
+{$ENDIF}
     procedure FindRmRowProhibitLock(const Tid: TTransactionId; AbortOther: boolean);
     procedure FindRmRowProhibitLocks(const Tid: TTransactionId);
 
@@ -2180,6 +2182,9 @@ var
   FieldData: TMemFieldData;
   RowFields: TMemRowFields;
   NxtFieldDef, CurFieldDef: TMemFieldDef;
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+  OldUnderCommit: boolean;
+{$ENDIF}
 
 begin
   RNxt := FParentTable.FMetadata.GetNext(FTid);
@@ -2192,15 +2197,28 @@ begin
     Delete := NC.FieldDefs.Count = 0;
   end;
 
+  //AllRowProhibit serialised against DB commit lock to prevent all
+  //possible races - lock is against all changes since previous commit.
+  FParentTable.FParentDB.CommitLock.Acquire;
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+    OldUnderCommit := DbgUnderCommitLock;
+    DbgUnderCommitLock := true;
+{$ENDIF}
+  try
+    if not FParentTable.AddAllRowProhibitForTableMod(FTid) then
+      exit;
+  finally
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+    DbgUnderCommitLock := OldUnderCommit;
+{$ENDIF}
+    FParentTable.FParentDB.CommitLock.Release;
+  end;
+
   //TODO - We have the row addition lock, so we can do this in batches
   //without holding the master row lock for all of it.
   FParentTable.FMasterRowLock.Acquire;
   try
     try
-      //Need addition lock whether in batches or not - not atomic with commit/rollback.
-      if not FParentTable.AddAllRowProhibitForTableMod(FTid) then
-        exit; //Already adjusted table structure, perhaps previous abortive commit attempt
-
       //NB. If/when traveral locks work, IRec is valid between master lock acquisitions.
       IRec := FParentTable.FMasterRowList.GetAnItem;
       while Assigned(IRec) do
@@ -4208,6 +4226,8 @@ end;
 
 function TMemDBTablePersistent.AddAllRowProhibitForTableMod(const Tid:TTransactionId): boolean;
 begin
+  //Must serialise against all commit lock actions - both the check in
+  //pre-commit and subsequent row changes in commit.
   result := AddRowProhibitLock(Tid, true, true, true, true);
 end;
 
@@ -4222,33 +4242,44 @@ function TMemDBTablePersistent.AddRowProhibitLock(const Tid: TTransactionId;
 var
   Lock: PRowChangeLock;
 begin
-  Lock := PRowChangeLock(FRowChangeLocks.FLink.Owner);
-  while Assigned(Lock) do
-  begin
-    if (Lock.Tid = Tid) and (Lock.AbortOther = AbortOther) then
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+    Assert(DbgUnderCommitLock);
+{$ENDIF}
+  FMasterRowLock.Acquire;
+  try
+    Lock := PRowChangeLock(FRowChangeLocks.FLink.Owner);
+    while Assigned(Lock) do
     begin
-      result := false;
-      Lock.ProhibitAdd := Lock.ProhibitAdd or ProhibitAdd;
-      Lock.ProhibitChange := Lock.ProhibitChange or ProhibitChange;
-      Lock.ProhibitDelete := Lock.ProhibitDelete or ProhibitDelete;
-      exit;
+      if (Lock.Tid = Tid) and (Lock.AbortOther = AbortOther) then
+      begin
+        result := false;
+        Lock.ProhibitAdd := Lock.ProhibitAdd or ProhibitAdd;
+        Lock.ProhibitChange := Lock.ProhibitChange or ProhibitChange;
+        Lock.ProhibitDelete := Lock.ProhibitDelete or ProhibitDelete;
+        exit;
+      end;
+      Lock :=  PRowChangeLock(Lock.FSiblings.FLink.Owner);
     end;
-    Lock :=  PRowChangeLock(Lock.FSiblings.FLink.Owner);
+    result := true;
+    Lock := NewRowProhibitLock;
+    Lock.ProhibitAdd := ProhibitAdd;
+    Lock.ProhibitChange := ProhibitChange;
+    Lock.ProhibitDelete := ProhibitDelete;
+    Lock.AbortOther := AbortOther;
+    Lock.Tid := Tid;
+    DLListInsertTail(@FRowChangeLocks, @Lock.FSiblings);
+  finally
+    FMasterRowLock.Release;
   end;
-  result := true;
-  Lock := NewRowProhibitLock;
-  Lock.ProhibitAdd := ProhibitAdd;
-  Lock.ProhibitChange := ProhibitChange;
-  Lock.ProhibitDelete := ProhibitDelete;
-  Lock.AbortOther := AbortOther;
-  Lock.Tid := Tid;
-  DLListInsertTail(@FRowChangeLocks, @Lock.FSiblings);
 end;
 
 procedure TMemDBTablePersistent.CheckRowProhibitOps(const Tid: TTransactionId);
 var
   Lock: PRowChangeLock;
 begin
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+    Assert(DbgUnderCommitLock);
+{$ENDIF}
   FMasterRowLock.Acquire;
   try
     Lock := PRowChangeLock(FRowChangeLocks.FLink.Owner);
@@ -4270,6 +4301,9 @@ procedure TMemDBTablePersistent.HandleRowProhibitOp(const Tid: TTRansactionId;
 var
   Lock: PRowChangeLock;
 begin
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+    Assert(DbgUnderCommitLock);
+{$ENDIF}
   FMasterRowLock.Acquire;
   try
     Lock := PRowChangeLock(FRowChangeLocks.FLink.Owner);
@@ -4296,6 +4330,7 @@ begin
   end;
 end;
 
+{$IFOPT C+}
 function TMemDbTablePersistent.FindRowProhibitLock(const Tid: TTransactionId; AbortOther: boolean): PRowChangeLock;
 var
   PLock: PRowChangeLock;
@@ -4317,6 +4352,7 @@ begin
   end;
   result := nil;
 end;
+{$ENDIF}
 
 procedure TMemDBTablePersistent.FindRmRowProhibitLock(const Tid: TTransactionId; AbortOther: boolean);
 var
@@ -4712,6 +4748,8 @@ begin
        or (FMasterRowList.Count > 0) then
       raise EMemDBInternalException.Create(S_FROM_SCRATCH_REQUIRES_EMPTY_OBJ);
 
+      //Although it looks not necessary, adding this here
+      //simplifies the table mod lock checking earlier in this source file.
       Newly := AddAllRowProhibitForTableMod(PseudoTid);
       Assert(Newly);
   finally
@@ -4753,14 +4791,7 @@ begin
   //meta index lock, so that master rows guaranteed atomic with state
   //of indices.
   if Tid.Iso >= ilSerialisable then
-  begin
-    FMasterRowLock.Acquire;
-    try
-        AddRowAddProhibitForSerialisable(Tid);
-    finally
-      FMasterRowLock.Release;
-    end;
-  end;
+    AddRowAddProhibitForSerialisable(Tid);
 end;
 
 procedure TMemDBTablePersistent.SizeHint(const Tid: TTransactionId; var SizeHint: TDBSizeHint);
@@ -4873,6 +4904,7 @@ begin
       rbpDelayedRollback: begin
         TidLocal.Rollback;
         TidLocal.Free;
+        //Not particularly harmful if we remove table mod locks late.
         FindRmRowProhibitLocks(Tid);
       end;
     end;

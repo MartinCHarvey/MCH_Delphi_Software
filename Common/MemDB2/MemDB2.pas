@@ -1243,12 +1243,13 @@ begin
         ChangesetStream := TMemDBTempFileStream.Create(TmpName);
         PseudoTid := TTransactionId.NewTransactionID(ilSerialisable); //if no writes, should definitley be serialisable.
         try
-          FDatabase.StartTransaction(PseudoTid, Ctxt);
           FDatabase.CommitLock.Acquire; //This if we don't acquire at lrSharedRead for ever.
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
           DbgUnderCommitLock := true;
 {$ENDIF}
           try
+            //Serialisable so StartTransaction under commit lock.
+            FDatabase.StartTransaction(PseudoTid, Ctxt);
             try
               FDatabase.ToScratch(PseudoTid, ChangesetStream, Ctxt);
             finally
