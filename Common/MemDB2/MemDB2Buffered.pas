@@ -104,7 +104,11 @@ type
   TMemDbRowProxy = class(TReffedProxy)
   end;
 
+{$IFDEF USE_STRIPED_LOCK}
   TMemDBRow = class(TMemDbMultiBufferedStriped)
+{$ELSE}
+  TMemDBRow = class(TMemDBMultiBufferedTiny)
+{$ENDIF}
   private
     FRowID: TGUID;
     FTable: TMemDBTablePersistent;
@@ -166,10 +170,8 @@ type
     //A/B buffer holds TMemTableMetadataItem
     procedure CheckABListChanges(const Tid: TTransactionId);
   protected
-    //TODO - Recheck callers of these have TidLocal or use META_ functions.
-    function FieldsByNames(const AB: TBufSelector; const Names: TMDBFieldNames; var AbsIdxs: TFieldOffsets; Reason: TPinReason): TMemFieldDefs;
-    function FieldByName(const AB: TBufSelector; const Name: string; var AbsIndex: integer; Reason: TPinReason): TMemFieldDef;
-    function IndexByName(const AB: TBufSelector; const Name: string; var AbsIndex: integer; Reason: TPinReason): TMemIndexDef;
+    procedure InvalidateCachedCur(const Tid: TTransactionId); override;
+    procedure InvalidateCachedNxtTid(const Tid: TTransactionId); override;
   public
     procedure PreCommit(const TId: TTransactionId; Phase: TMemDBPreCommitPhase; Opts:TOptimizeSet; Ctxt: TTXLocalContext); override;
     procedure Init(const Tid: TTransactionId; Parent: TObject; Name:string; DSName: boolean); override;
@@ -213,17 +215,9 @@ type
     procedure HandleReleaseForAPI(Sender: TObject);
     procedure MetadataDCPHandle(Sender: TObject; const Update:TReferenceUpdate);
 
-    property Metadata: TMemDBEntityMetadata read FMetadata;
   public
     constructor Create;
     destructor Destroy; override;
-
-    function META_PinCurrent(const Tid: TTransactionId; Reason: TPinReason): TMemDBStreamable; virtual;
-    function META_GetNext(const Tid: TTransactionId): TMemDBStreamable; virtual;
-    function META_GetPinLatest(const Tid: TTransactionId;
-                            var BufSelected: TAbSelType; Reason: TPinReason): TMemDBStreamable; virtual;
-    procedure META_RequestChange(const Tid: TTransactionId); virtual;
-    procedure META_Delete(const Tid: TTransactionId); virtual;
 
     procedure SizeHint(const Tid: TTransactionId; var SizeHint: TDBSizeHint); virtual;
     procedure StartTransaction(const Tid: TTransactionId; Ctxt: TTXLocalContext); virtual;
@@ -237,6 +231,7 @@ type
     property ParentDB: TMemDBDatabasePersistent read FParentDB;
     property Proxy: TMemDBEntityProxy read FProxy;
     property Interfaced: TMemDBAPIInterfacedObject read FInterfaced;
+    property Metadata: TMemDBEntityMetadata read FMetadata;
   end;
 
   //TODO - Re-check this, I think it's OK,
@@ -398,6 +393,14 @@ type
     FInternalIndexChangeset: TIndexChangeset;
 
     FCPRows: TIndexedStoreO; //Rows changed or pinned by cur Txion.
+
+    //Cached metadata.
+    FCachedCur: TMemDbStreamable;
+    FCachedNxt: TMemDbStreamable;
+    FCachedCurValid, FCachedNxtValid: boolean;
+    //Re-entrancy check. A pin or mod by *anyone else* clears our caches.
+    FCacheReenter: boolean;
+
     function LookaheadHelper(Stream: TStream; Scratch: boolean; var Created: boolean): TMemDBRow;
 
     procedure CheckTableRowCount;
@@ -467,9 +470,27 @@ type
     function UserDeleteRow(Cursor: TMemDbCursor; AutoInc: boolean): TMemDBCursor;
     function UserWriteRowData(Cursor:TMemDbCursor; FieldList: TMemStreamableList): TMemDBCursor;
 
+    //Cached metadata functions.
+    //These ONLY to be invoked single-threadedly by User API code, not internal handling.
+    procedure META_CurIndexDefToFieldDefs(IndexDef: TMemIndexDef; var FieldDefs: TMemFieldDefs; var FieldAbsIdxs: TFieldOffsets);
+    function META_CurFieldDefList: TMemStreamableList;
+    function META_FieldsByNames(selType: TABSelType; const Names: TMDBFieldNames; var AbsIdxs: TFieldOffsets; PinReason: TPinReason): TMemFieldDefs;
+    function META_FieldByName(selType: TABSelType; const Name: string; var AbsIndex: integer; PinReason: TPinReason): TMemFieldDef;
+    function META_IndexByName(selType: TABSelType; const Name: string; var AbsIndex: integer; PinReason: TPinReason): TMemIndexDef;
+
+    procedure InvalidateCachedCur;
+    procedure InvalidateCachedNxtTid;
+    //Cached metadata functions.
+    //These ONLY to be invoked single-threadedly by User API code, not internal handling.
+    function META_PinCurrent(Reason: TPinReason): TMemDBStreamable;
+    function META_GetNext: TMemDBStreamable;
+    function META_GetPinLatest(var BufSelected: TAbSelType;
+                               Reason: TPinReason): TMemDBStreamable;
+
     property DataChanged: boolean read FDataChanged;
     property DataChangePrePrepare: boolean read FDataChangePrePrepare write FDataChangePrePrepare;
     property LayoutChangeRequired: boolean read FLayoutChangeRequired;
+    property Tid: TTransactionId read FTid;
   end;
 
   TRowIndexNode = class(TIndexNode)
@@ -556,7 +577,6 @@ type
     procedure HandleAddRefForData(Sender: TObject);
     procedure HandleReleaseForData(Sender: TObject);
 
-    function GetOptTidLocal(const Tid: TTransactionId): TTidLocal;
     function GetTidLocal(const Tid: TTransactionId): TTidLocal;
 
     function GetMakeListHelpers(const Tid: TTransactionId;
@@ -576,7 +596,12 @@ type
     procedure LookaheadHelper(Stream: TStream;
                               var MetadataInStream: boolean;
                               var DataInStream: boolean);
+
+    procedure InvalidateCachedCur(const Tid: TTransactionId);
+    procedure InvalidateCachedNxtTid(const Tid: TTransactionId);
   public
+    function GetOptTidLocal(const Tid: TTransactionId): TTidLocal;
+
     constructor Create;
     destructor Destroy; override;
 
@@ -598,18 +623,12 @@ type
     function AnyChanges(const Tid:TTransactionId; Ctxt: TTXLocalContext): boolean; override;
     function AnyChangesForTid(const Tid: TTransactionId; Ctxt: TTXLocalContext): boolean; override;
 
-    //TODO - Cache metadata for current access for API to reduce lock contention.
-    function META_PinCurrent(const Tid: TTransactionId; Reason: TPinReason): TMemDBStreamable; override;
-    function META_GetPinLatest(const Tid: TTransactionId;
-                            var BufSelected: TAbSelType; Reason: TPinReason): TMemDBStreamable; override;
-    procedure META_RequestChange(const Tid: TTransactionId); override;
-    procedure META_Delete(const Tid: TTransactionId); override;
-                            
-    function META_FieldsByNames(const AB: TBufSelector; const Names: TMDBFieldNames; var AbsIdxs: TFieldOffsets): TMemFieldDefs;
-    function META_FieldByName(const AB: TBufSelector; const Name: string; var AbsIndex: integer): TMemFieldDef;
-    function META_IndexByName(const AB: TBufSelector; const Name: string; var AbsIndex: integer): TMemIndexDef;
+    //Non-cached metadata access.
+    function FieldsByNames(const AB: TBufSelector; const Names: TMDBFieldNames; var AbsIdxs: TFieldOffsets; PinReason: TPinReason): TMemFieldDefs;
+    function FieldByName(const AB: TBufSelector; const Name: string; var AbsIndex: integer; PinReason: TPinReason): TMemFieldDef;
+    function IndexByName(const AB: TBufSelector; const Name: string; var AbsIndex: integer; PinReason: TPinReason): TMemIndexDef;
 
-    function GetUserTidLocalIndexRoot(const Tid: TTransactionId; var TidLocal: TTidLocal; var Idx: TMemIndexDef; IdxName: string): TMemDBIndexGeneric;
+    function GetUserTidLocalIndexRoot(TidLocal: TTidLocal; var Idx: TMemIndexDef; IdxName: string): TMemDBIndexGeneric;
   end;
 
   TMemDBEntityChangeType = (
@@ -1026,6 +1045,7 @@ const
   S_FKEYS_INTERNAL_39 = 'Foreign key checking internal error 39.';
   S_FKEYS_INTERNAL_40 = 'Foreign key checking internal error 40.';
   S_ENTITY_LIST_CONFUSION_CHECKING_CHANGES = 'Error: did not expect async mod of entity lists at this time.';
+  S_API_TABLE_METADATA_NOT_COMMITED = 'No committed metadata for this table (api level)';
 
 { Misc Functions }
 
@@ -1520,39 +1540,245 @@ begin
   FMetadata.Init(Tid, self, Name, DSName);
 end;
 
-function TMemDBEntity.META_PinCurrent(const Tid: TTransactionId; Reason: TPinReason): TMemDBStreamable;
-begin
-  result := FMetadata.PinCurrent(Tid, Reason);
-end;
-
-function TMemDBEntity.META_GetNext(const Tid: TTransactionId): TMemDBStreamable;
-begin
-  result := FMetadata.GetNext(Tid);
-end;
-
-function TMemDBEntity.META_GetPinLatest(const Tid: TTransactionId;
-                        var BufSelected: TAbSelType; Reason: TPinReason): TMemDBStreamable;
-begin
-  result := FMetadata.GetPinLatest(Tid, BufSelected, Reason);
-end;
-
-procedure TMemDBEntity.META_RequestChange(const Tid: TTransactionId);
-begin
-  FMetadata.RequestChange(Tid, ilReadRepeatable);
-end;
-
-procedure TMemDbEntity.META_Delete(const Tid: TTransactionId);
-begin
-  FMetadata.Delete(Tid, ilReadRepeatable);
-end;
-
 { TTidLocal }
+
+function TTidLocal.META_FieldByName(selType: TABSelType; const Name: string; var AbsIndex: integer; PinReason: TPinReason): TMemFieldDef;
+var
+  MC: TMemDbStreamable;
+  bufSel: TABSelType;
+begin
+  MC := nil;
+  case selType of
+    abCurrent: MC := self.META_PinCurrent(PinReason);
+    abNext: MC := self.META_GetNext;
+    abLatest: MC := self.META_GetPinLatest(bufSel, PinReason);
+  else
+    Assert(false);
+  end;
+  if AssignedNotSentinel(MC) then
+    result := FieldByNameInt(MC as TMemTableMetadataItem, Name, AbsIndex)
+  else
+    result := nil;
+end;
+
+function TTidLocal.META_FieldsByNames(selType: TABSelType; const Names: TMDBFieldNames; var AbsIdxs: TFieldOffsets; PinReason: TPinReason): TMemFieldDefs;
+var
+  MC: TMemDbStreamable;
+  bufSel: TABSelType;
+begin
+  MC := nil;
+  case selType of
+    abCurrent: MC := self.META_PinCurrent(PinReason);
+    abNext: MC := self.META_GetNext;
+    abLatest: MC := self.META_GetPinLatest(bufSel, PinReason);
+  else
+    Assert(false);
+  end;
+  if AssignedNotSentinel(MC) then
+    result := FieldsByNamesInt(MC as TMemTableMetadataItem, Names, AbsIdxs)
+  else
+  begin
+    SetLength(result, 0);
+    SetLength(AbsIdxs, 0);
+  end;
+end;
+
+function TTidLocal.META_IndexByName(selType: TABSelType; const Name: string; var AbsIndex: integer; PinReason: TPinReason): TMemIndexDef;
+var
+  MC: TMemDbStreamable;
+  bufSel: TABSelType;
+begin
+  MC := nil;
+  case selType of
+    abCurrent: MC := self.META_PinCurrent(PinReason);
+    abNext: MC := self.META_GetNext;
+    abLatest: MC := self.META_GetPinLatest(bufSel, PinReason);
+  else
+    Assert(false);
+  end;
+  if AssignedNotSentinel(MC) then
+    result := IndexByNameInt(MC as TMemTableMetadataItem, Name, AbsIndex)
+  else
+    result := nil;
+end;
+
+procedure TTidLocal.META_CurIndexDefToFieldDefs(IndexDef: TMemIndexDef; var FieldDefs: TMemFieldDefs; var FieldAbsIdxs: TFieldOffsets);
+begin
+  Assert(Assigned(IndexDef));
+  Assert(IndexDef.FieldNameCount > 0);
+  FieldDefs := META_FieldsByNames(abLatest, IndexDef.FieldArray, FieldAbsIdxs, PinEvolve);
+end;
+
+function TTidLocal.META_CurFieldDefList: TMemStreamableList;
+var
+  CB: TMemDBStreamable;
+  CurMetadata: TMemTableMetadataItem;
+begin
+  CB := META_PinCurrent(pinEvolve);
+  if NotAssignedOrSentinel(CB) then
+    raise EMemDBAPIException.Create(S_API_TABLE_METADATA_NOT_COMMITED);
+  CurMetadata := CB as TMemTableMetadataItem;
+  result := CurMetadata.FieldDefs;
+end;
+
+procedure TTidLocal.InvalidateCachedCur;
+begin
+  if not FCacheReenter then
+  begin
+    FCachedCur.Release;
+    FCachedCur := nil;
+    FCachedCurValid := false;
+  end;
+  inherited;
+end;
+
+procedure TTidLocal.InvalidateCachedNxtTid;
+begin
+  if not FCacheReenter then
+  begin
+    FCachedNxt.Release;
+    FCachedNxt := nil;
+    FCachedNxtValid := false;
+  end;
+  inherited;
+end;
+
+//Caching here to enable user and other API functions to avoid taking spinlocks
+//multiple times for each row processed.
+
+function TTidLocal.META_PinCurrent(Reason: TPinReason): TMemDBStreamable;
+begin
+  FCacheReenter := true;
+  try
+    if FCachedCurValid and (Reason <> PinFinalCheck) then
+    begin
+      result := FCachedCur;
+{$IFDEF CHECK_META_CACHING}
+      Assert(result = FParentTable.FMetadata.PinCurrent(self.FTid, Reason));
+{$ENDIF}
+    end
+    else
+    begin
+      result := FParentTable.FMetadata.PinCurrent(self.FTid, Reason);
+      FCachedCur.Release;
+{$IFDEF CHECK_META_CACHING}
+      FCachedCur := result.AddRef as TMemDBStreamable;
+{$ELSE}
+      FCachedCur := result.DeepClone(result) as TMemDBStreamable;
+{$ENDIF}
+      FCachedCurValid := true;
+    end;
+  finally
+    FCacheReenter := false;
+  end;
+end;
+
+function TTidLocal.META_GetNext: TMemDBStreamable;
+begin
+  FCacheReenter := true;
+  try
+    if FCachedNxtValid then
+    begin
+      result := FCachedNxt;
+{$IFDEF CHECK_META_CACHING}
+      Assert(result = FParentTable.FMetadata.GetNext(self.FTid));
+{$ENDIF}
+    end
+    else
+    begin
+      result := FParentTable.FMetadata.GetNext(self.FTid);
+      FCachedNxt.Release;
+{$IFDEF CHECK_META_CACHING}
+      FCachedNxt := result.AddRef as TMemDBStreamable;
+{$ELSE}
+      FCachedNxt := result.DeepClone(result) as TMemDBStreamable;
+{$ENDIF}
+      FCachedNxtValid := true;
+    end;
+  finally
+    FCacheReenter := false;
+  end;
+end;
+
+function TTidLocal.META_GetPinLatest(var BufSelected: TAbSelType;
+                           Reason: TPinReason): TMemDBStreamable;
+var
+  LBufSel:TAbSelType;
+begin
+  FCacheReenter := true;
+  try
+    if FCachedCurValid and FCachedNxtValid and (Reason <> PinFinalCheck) then
+    begin
+      //Not going to try to do clever stuff when only one of the flags is valid.
+      if Assigned(FCachedNxt) then
+      begin
+        result := FCachedNxt;
+        LBufSel := abNext;
+      end
+      else
+      begin
+        result := FCachedCur;
+        LBufSel := abCurrent;
+      end;
+{$IFDEF CHECK_META_CACHING}
+      Assert(result = FParentTable.FMetadata.GetPinLatest(Self.FTid, BufSelected, Reason));
+      Assert(BufSelected = LBufSel);
+{$ENDIF}
+      BufSelected := LBufSel;
+    end
+    else
+    begin
+      result := FParentTable.FMetadata.GetPinLatest(Self.FTid, BufSelected, Reason);
+      case BufSelected of
+        abCurrent: begin
+          if FCachedCurValid then
+          begin
+{$IFDEF CHECK_META_CACHING}
+            Assert(result = FCachedCur)
+{$ENDIF}
+          end
+          else
+          begin
+            FCachedCur.Release;
+{$IFDEF CHECK_META_CACHING}
+            FCachedCur := result.AddRef as TMemDBStreamable;
+{$ELSE}
+            FCachedCur := result.DeepClone(result) as TMemDBStreamable;
+{$ENDIF}
+            FCachedCurValid := true;
+          end;
+        end;
+        abNext: begin
+          if FCachedNxtValid then
+          begin
+{$IFDEF CHECK_META_CACHING}
+            Assert(result = FCachedNxt)
+{$ENDIF}
+          end
+          else
+          begin
+            FCachedNxt.Release;
+{$IFDEF CHECK_META_CACHING}
+            FCachedNxt := result.AddRef as TMemDBStreamable;
+{$ELSE}
+            FCachedNxt := result.DeepClone(result) as TMemDBStreamable;
+{$ENDIF}
+            FCachedNxtValid := true;
+          end;
+        end;
+        abLatest: Assert(false);
+      end;
+    end;
+  finally
+    FCacheReEnter := false;
+  end;
+end;
 
 procedure TTidLocal.HandleHelperChangeRequest(Sender: TObject);
 begin
   FParentTable.FMetadata.RequestChange(FTid, ilReadRepeatable);
   UpdateNHelpers;
-  //TODO - Clear cached copies, if they're here.
+  //Cache clearing done by metadata override func.
 end;
 
 procedure TTidLocal.UpdateLayout(PinReason: TPinReason);
@@ -1866,10 +2092,8 @@ begin
           //Check indexes reference same underlying field:
           //Same abs position in array for field index,
           //and also, field number change is same for field, and index.
-          FieldDefs1 := (FParentTable.FMetadata as TMemDBTableMetadata)
-            .FieldsByNames(selNext, IndexDef1.FieldArray, AbsIndexes1, PinReason);
-          FieldDefs2 := (FParentTable.FMetadata as TMemDBTableMetadata)
-            .FieldsByNames(selCurrent, IndexDef2.FieldArray, AbsIndexes2, PinReason);
+          FieldDefs1 := FParentTable.FieldsByNames(selNext, IndexDef1.FieldArray, AbsIndexes1, PinReason);
+          FieldDefs2 := FParentTable.FieldsByNames(selCurrent, IndexDef2.FieldArray, AbsIndexes2, PinReason);
 
           if not ((Length(FieldDefs1) > 0) // i < NCIndexCount
             and (Length(FieldDefs2) > 0) // i < CCIndexCount
@@ -1903,8 +2127,7 @@ begin
         end
         else
         begin
-          FieldDefs1 := (FParentTable.FMetadata as TMemDBTableMetadata)
-            .FieldsByNames(selNext, IndexDef1.FieldArray, AbsIndexes1, PinReason);
+          FieldDefs1 := FParentTable.FieldsByNames(selNext, IndexDef1.FieldArray, AbsIndexes1, PinReason);
 
           if not ((Length(FieldDefs1) > 0) // i < NCIndexCount
             and (Length(FieldDefs1) = Length(AbsIndexes1))) then
@@ -2131,6 +2354,13 @@ begin
       FParentTable.HandleReleaseForTidLocal(self);
   end;
 
+  FCachedCur.Release;
+  FCachedNxt.Release;
+  FCachedCur := nil;
+  FCachedNxt := nil;
+  FCachedCurValid := false;
+  FCachedNxtValid := false;
+
   FIndexHelper.Free;
   FFieldHelper.Free;
   FEmptyList.Release;
@@ -2337,7 +2567,7 @@ var
   RowCur, RowNext: TMemDBStreamable;
   Added, Changed, Deleted, Null:boolean;
 begin
-  LM := FParentTable.Metadata.GetPinLatest(FTid, BufSel, pinFinalCheck);
+  LM := FParentTable.Metadata.GetPinLatest(Tid, BufSel, pinFinalCheck);
   FieldsNull := NotAssignedOrSentinel(LM);
   if not FieldsNull then
   begin
@@ -2467,11 +2697,11 @@ begin
     NextBufSelector := MakeNextBufSelector(FTid);
 
     //Only get next metadata copy here, because del table -> No NC.
-    NC := FParentTable.Metadata.GetNext(FTid) as TMemTableMetadataItem;
+    NC := FParentTable.Metadata.GetNext(Tid) as TMemTableMetadataItem;
     Assert(Assigned(NC));
 
     IDef := NC.IndexDefs[i] as TMemIndexDef;
-    FieldDefs := (FParentTable.Metadata as TMemDbTableMetadata).FieldsByNames(NextBufSelector,
+    FieldDefs := FParentTable.FieldsByNames(NextBufSelector,
                                                                  IDef.FieldArray,
                                                                  SparseOffsets, pinEvolve); //TODO FinalCheck?
     Assert(Length(FieldDefs) = Length(SparseOffsets));
@@ -2959,8 +3189,7 @@ begin
   CCDef := CC.IndexDefs[i] as TMemIndexDef;
   if CCDef.IndexAttrs * [iaUnique, iaNotEmpty] <> [] then
   begin
-    FieldDefs := (FParentTable.Metadata as TMemDbTableMetadata).
-      FieldsByNames(CurrentBufSelector, CCDef.FieldArray, SparseOffsets, pinFinalCheck);
+    FieldDefs := FParentTable.FieldsByNames(CurrentBufSelector, CCDef.FieldArray, SparseOffsets, pinFinalCheck);
 
     Assert(Length(FieldDefs) = Length(SparseOffsets));
     if not CCDef.FieldNameCount = Length(FieldDefs) then
@@ -3552,14 +3781,12 @@ end;
 
 function TTidLocal.GetUserIndexRoot(var Idx: TMemIndexDef; IdxName: string): TMemDBIndexGeneric;
 var
-  Cur: TBufSelector;
   AbsIndex: integer;
 begin
-  Cur := MakeCurrentBufSelector(FTid);
   //Indexes are consistent with pinned current metadata.
   if Length(IdxName) > 0 then
   begin
-    Idx := (FParentTable.Metadata as TMemDBTableMetadata).IndexByName(Cur, IdxName, AbsIndex, pinEvolve);
+    Idx := META_IndexByName(abCurrent, IdxName, AbsIndex, PinEvolve);
     Assert(AbsIndex >= 0);
     Assert(AbsIndex < FLocalIndexCopies.Count);
     result := FLocalIndexCopies.Items[AbsIndex] as TMemDbIndex;
@@ -3766,7 +3993,7 @@ begin
     begin
       Row := ILeaf.Row as TMemDBRow;
 
-      S := FParentTable.Metadata.PinCurrent(FTid, pinEvolve);
+      S := META_PinCurrent(pinEvolve);
       if NotAssignedOrSentinel(S) then
         raise EMemDBInternalException.Create(S_NAV_TABLE_METADATA_NOT_COMMITED);
       Cur := S as TMemTableMetadataItem;
@@ -3889,7 +4116,8 @@ begin
   Appending := not Assigned(Cursor);
   Assert(Assigned(FieldList));
   //I am in TidLocal, so atomic Meta/Index pin has already happened.
-  CurMeta := FParentTable.META_PinCurrent(FTid, pinEvolve) as TMemTableMetadataItem;
+
+  CurMeta := META_PinCurrent(pinEvolve) as TMemTableMetadataItem;
   TMemDBRow.StaticCheckFormatAgainstMeta(FieldList, CurMeta);
   result := nil;
   if Appending then
@@ -4378,7 +4606,7 @@ begin
     else
     begin
       WrTag(Stream, mstTableUnchangedName);
-      Meta := META_GetPinLatest(Tid, tmpSelected, pinEvolve);
+      Meta := Metadata.GetPinLatest(Tid, tmpSelected, pinEvolve);
       WrStreamString(Stream, (Meta as TMemEntityMetadataItem).EntityName);
     end;
     if TidLocal.DataChangePrePrepare then
@@ -4455,7 +4683,7 @@ begin
   begin
     ExpectTag(Stream, mstTableUnchangedName);
     TblName := RdStreamString(Stream);
-    Cur := META_PinCurrent(PseudoTid, PinEvolve) as TMemTableMetadataItem;
+    Cur := Metadata.PinCurrent(PseudoTid, PinEvolve) as TMemTableMetadataItem;
     if CompareStr(TblName, Cur.EntityName) <> 0 then
       raise EMemDBInternalException.Create(S_JOURNAL_REPLAY_NAMES_INCONSISTENT);
   end;
@@ -4579,8 +4807,8 @@ var
 begin
   inherited;
 
-  Cur := META_PinCurrent(Tid, pinFinalCheck);
-  Next := META_GetNext(Tid);
+  Cur := Metadata.PinCurrent(Tid, pinFinalCheck);
+  Next := Metadata.GetNext(Tid);
   ChangeFlagsFromPinned(Cur, Next, Added, Changed, Deleted, Null);
   if Null then
     exit; //Deleted case, still check all the rows have been deleted.
@@ -4716,7 +4944,7 @@ begin
   IndexHelper := result.FIndexHelper;
 end;
 
-//TODO - Move this into TTidLocal?
+
 procedure TMemDBTablePersistent.GetCurrNxtMetaCopiesEx(const Tid: TTransactionId;
                                            var CC, NC: TMemTableMetadataItem;
                                            var CCFieldCount, CCIndexCount,
@@ -4759,57 +4987,88 @@ begin
   GetCurrNxtMetaCopiesEx(Tid, CC,NC, CCFieldCount, NCFieldCount, CCIndexCount, NCIndexCount, PinReason);
 end;
 
-function TMemDbTablePersistent.META_PinCurrent(const Tid: TTransactionId; Reason: TPinReason): TMemDBStreamable;
+procedure TMemDbTablePersistent.InvalidateCachedCur(const Tid: TTransactionId);
+var
+  TidLocal: TTidLocal;
 begin
-  GetTidLocal(Tid);
-  result := inherited;
+  TidLocal := GetOptTidLocal(Tid);
+  if Assigned(TidLocal) then
+    TidLocal.InvalidateCachedCur;
 end;
 
-function TMemDbTablePersistent.META_GetPinLatest(const Tid: TTransactionId;
-                        var BufSelected: TAbSelType; Reason: TPinReason): TMemDBStreamable;
+procedure TMemDbTablePersistent.InvalidateCachedNxtTid(const Tid: TTransactionId);
+var
+  TidLocal: TTidLocal;
 begin
-  GetTidLocal(Tid);
-  result := inherited;
+  TidLocal := GetOptTidLocal(Tid);
+  if Assigned(TidLocal) then
+    TidLocal.InvalidateCachedNxtTid;
 end;
 
-procedure TMemDbTablePersistent.META_RequestChange(const Tid: TTransactionId);
+function TMemDbTablePersistent.FieldsByNames(const AB: TBufSelector; const Names: TMDBFieldNames; var AbsIdxs: TFieldOffsets; PinReason: TPinReason): TMemFieldDefs;
+var
+  MC: TMemDbStreamable;
+  bufSel: TABSelType;
 begin
-  GetTidLocal(Tid);
-  inherited;
+  MC := nil;
+  case AB.SelType of
+    abCurrent: MC := Metadata.PinCurrent(AB.TId, PinReason);
+    abNext: MC := Metadata.GetNext(AB.TId);
+    abLatest: MC := Metadata.GetPinLatest(AB.TId, bufSel, PinReason);
+  else
+    Assert(false);
+  end;
+  if AssignedNotSentinel(MC) then
+    result := FieldsByNamesInt(MC as TMemTableMetadataItem, Names, AbsIdxs)
+  else
+  begin
+    SetLength(result, 0);
+    SetLength(AbsIdxs, 0);
+  end;
 end;
 
-procedure TMemDbTablePersistent.META_Delete(const Tid: TTransactionId);
+function TMemDbTablePersistent.FieldByName(const AB: TBufSelector; const Name: string; var AbsIndex: integer; PinReason: TPinReason): TMemFieldDef;
+var
+  MC: TMemDbStreamable;
+  bufSel: TABSelType;
 begin
-  GetTidLocal(Tid);
-  inherited;
+  MC := nil;
+  case AB.SelType of
+    abCurrent: MC := Metadata.PinCurrent(AB.TId, PinReason);
+    abNext: MC := Metadata.GetNext(AB.TId);
+    abLatest: MC := Metadata.GetPinLatest(AB.TId, bufSel, PinReason);
+  else
+    Assert(false);
+  end;
+  if AssignedNotSentinel(MC) then
+    result := FieldByNameInt(MC as TMemTableMetadataItem, Name, AbsIndex)
+  else
+    result := nil;
 end;
 
-function TMemDbTablePersistent.META_FieldsByNames(const AB: TBufSelector; const Names: TMDBFieldNames; var AbsIdxs: TFieldOffsets): TMemFieldDefs;
+function TMemDbTablePersistent.IndexByName(const AB: TBufSelector; const Name: string; var AbsIndex: integer; PinReason: TPinReason): TMemIndexDef;
+var
+  MC: TMemDbStreamable;
+  bufSel: TABSelType;
 begin
-  if AB.SelType <> TAbSelType.abNext then
-    GetTidLocal(AB.TId);
-  result := (Metadata as TMemDbTableMetadata).FieldsByNames(AB, Names, AbsIdxs, pinEvolve);
+  MC := nil;
+  case AB.SelType of
+    abCurrent: MC := Metadata.PinCurrent(AB.TId, PinReason);
+    abNext: MC := Metadata.GetNext(AB.TId);
+    abLatest: MC := Metadata.GetPinLatest(AB.TId, bufSel, PinReason);
+  else
+    Assert(false);
+  end;
+  if AssignedNotSentinel(MC) then
+    result := IndexByNameInt(MC as TMemTableMetadataItem, Name, AbsIndex)
+  else
+    result := nil;
 end;
 
-function TMemDbTablePersistent.META_FieldByName(const AB: TBufSelector; const Name: string; var AbsIndex: integer): TMemFieldDef;
+function TMemDbTablePersistent.GetUserTidLocalIndexRoot(TidLocal: TTidLocal; var Idx: TMemIndexDef; IdxName: string): TMemDBIndexGeneric;
 begin
-  if AB.SelType <> TAbSelType.abNext then
-    GetTidLocal(AB.TId);
-  result := (Metadata as TMemDBTableMetadata).FieldByName(AB, Name, AbsIndex, pinEvolve);
-end;
-
-function TMemDbTablePersistent.META_IndexByName(const AB: TBufSelector; const Name: string; var AbsIndex: integer): TMemIndexDef;
-begin
-  if AB.SelType <> TAbSelType.abNext then
-    GetTidLocal(AB.TId);
-  result := (Metadata as TMemDbTableMetadata).IndexByName(AB, Name, AbsIndex, pinEvolve);
-end;
-
-function TMemDbTablePersistent.GetUserTidLocalIndexRoot(const Tid: TTransactionId; var TidLocal: TTidLocal; var Idx: TMemIndexDef; IdxName: string): TMemDBIndexGeneric;
-begin
-  TidLocal := GetTidLocal(Tid);
   result := TidLocal.GetUserIndexRoot(Idx, IdxName);
-  if (Length(IdxName) = 0) and (Tid.Iso < ilSnapshot) then
+  if (Length(IdxName) = 0) and (TidLocal.Tid.Iso < ilSnapshot) then
   begin
     //Belt and braces in case caller tries to use internal index when shouldn't.
     Idx := nil;
@@ -4968,11 +5227,11 @@ begin
     Meta.TableReferring.Metadata.RequireCurrentAtomic(Tid);
 
     M := Meta.TableReferring.Metadata as TMemDBTableMetadata;
-    Meta.IndexDefReferring := M.IndexByName(SelLatest, FKM.IndexReferer, Meta.IndexDefReferringAbsIdx, pinFinalCheck);
+    Meta.IndexDefReferring := Meta.TableReferring.IndexByName(SelLatest, FKM.IndexReferer, Meta.IndexDefReferringAbsIdx, pinFinalCheck);
     if not Assigned(Meta.IndexDefReferring) then
       raise EMemDBException.Create(S_FK_INDEX_NOT_FOUND);
     //..and fields (names should already have been checked, tables before fkeys).
-    Meta.FieldDefsReferring := M.FieldsByNames(SelLatest, Meta.IndexDefReferring.FieldArray, Meta.FieldDefsReferringAbsIdx, pinFinalCheck);
+    Meta.FieldDefsReferring := Meta.TableReferring.FieldsByNames(SelLatest, Meta.IndexDefReferring.FieldArray, Meta.FieldDefsReferringAbsIdx, pinFinalCheck);
     if Length(Meta.FieldDefsReferring) = 0 then
       raise EMemDBInternalException.Create(S_FK_INDEX_FIELD_INTERNAL);
 
@@ -5038,11 +5297,11 @@ begin
     Meta.TableReferred.Metadata.RequireCurrentAtomic(Tid);
 
     M := Meta.TableReferred.Metadata as TMemDBTableMetadata;
-    Meta.IndexDefReferred := M.IndexByName(SelLatest, FKM.IndexReferred, Meta.IndexDefReferredAbsIdx, pinFinalCheck);
+    Meta.IndexDefReferred := Meta.TableReferred.IndexByName(SelLatest, FKM.IndexReferred, Meta.IndexDefReferredAbsIdx, pinFinalCheck);
     if not Assigned(Meta.IndexDefReferred) then
       raise EMemDBException.Create(S_FK_INDEX_NOT_FOUND);
     //...And fields (names should already have been checked, tables before fkeys).
-    Meta.FieldDefsReferred := M.FieldsByNames(SelLatest, Meta.IndexDefReferred.FieldArray, Meta.FieldDefsReferredAbsIdx, pinFinalCheck);
+    Meta.FieldDefsReferred := Meta.TableReferred.FieldsByNames(SelLatest, Meta.IndexDefReferred.FieldArray, Meta.FieldDefsReferredAbsIdx, pinFinalCheck);
     if Length(Meta.FieldDefsReferred) = 0 then
       raise EMemDBInternalException.Create(S_FK_INDEX_FIELD_INTERNAL);
 
@@ -5149,9 +5408,9 @@ begin
 
       //Indexes.
       M := CCMeta.TableReferring.Metadata as TMemDBTableMetadata;
-      CCMeta.IndexDefReferring := M.IndexByName(SelCurrent, FKMCC.IndexReferer, CCMeta.IndexDefReferringAbsIdx, pinFinalCheck);
+      CCMeta.IndexDefReferring := CCMeta.TableReferring.IndexByName(SelCurrent, FKMCC.IndexReferer, CCMeta.IndexDefReferringAbsIdx, pinFinalCheck);
       M := CCMeta.TableReferred.Metadata as TMemDBTableMetadata;
-      CCMeta.IndexDefReferred := M.IndexByName(SelCurrent, FKMCC.IndexReferred, CCMeta.IndexDefReferredAbsIdx, pinFinalCheck);
+      CCMeta.IndexDefReferred := CCMeta.TableReferred.IndexByName(SelCurrent, FKMCC.IndexReferred, CCMeta.IndexDefReferredAbsIdx, pinFinalCheck);
       //Index objs do not actually need to be the same object (copied on write),
       //and nor do they have to have the same name, or refer to the same fields,
       //but for them to be the "same" index, we expect the IndexIndex (which is AbsIndex, not NDIndex),
@@ -5162,9 +5421,9 @@ begin
 
       //Fields.
       M := CCMeta.TableReferring.Metadata as TMemDBTableMetadata;
-      CCMeta.FieldDefsReferring := M.FieldsByNames(SelCurrent, CCMeta.IndexDefReferring.FieldArray, CCMeta.FieldDefsReferringAbsIdx, pinFinalCheck);
+      CCMeta.FieldDefsReferring := CCMeta.TableReferring.FieldsByNames(SelCurrent, CCMeta.IndexDefReferring.FieldArray, CCMeta.FieldDefsReferringAbsIdx, pinFinalCheck);
       M := CCMeta.TableReferred.Metadata as TMemDBTableMetadata;
-      CCMeta.FieldDefsReferred := M.FieldsByNames(SelCurrent, CCMeta.IndexDefReferred.FieldArray, CCMeta.FieldDefsReferredAbsIdx, pinFinalCheck);
+      CCMeta.FieldDefsReferred := CCMeta.TableReferred.FieldsByNames(SelCurrent, CCMeta.IndexDefReferred.FieldArray, CCMeta.FieldDefsReferredAbsIdx, pinFinalCheck);
 
       //Expect CC meta to be as consistent as NCMeta....
       if Length(CCMeta.FieldDefsReferring) <> Length(CCMeta.FieldDefsReferred) then
@@ -5642,7 +5901,6 @@ var
   SearchRowFields: TMemRowFields;
   SearchOffsets: TFieldOffsets;
 {$ENDIF}
-  bufSel: TABSelType;
   CF, NF: TMemDbStreamable;
 begin
   //OK, so we now need to check:
@@ -5973,7 +6231,9 @@ procedure TMemDBRow.Init(Table: TMemDBTablePersistent; const Guid: TGUID);
 begin
   self.FTable := Table;
   self.FRowID := Guid;
+{$IFDEF USE_STRIPED_LOCK}
   self.FLock.Init(Guid, sizeof(Guid));
+{$ENDIF}
 end;
 
 procedure TMemDBRow.DCPHandle(const Update: TReferenceUpdate);
@@ -6456,64 +6716,14 @@ begin
   end;
 end;
 
-function TMemDBTableMetadata.FieldsByNames(const AB: TBufSelector; const Names: TMDBFieldNames; var AbsIdxs: TFieldOffsets; Reason: TPinReason): TMemFieldDefs;
-var
-  MC: TMemDbStreamable;
-  bufSel: TABSelType;
+procedure TMemDBTableMetadata.InvalidateCachedCur(const Tid: TTransactionId);
 begin
-  MC := nil;
-  case AB.SelType of
-    abCurrent: MC := self.PinCurrent(AB.TId, Reason);
-    abNext: MC := self.GetNext(AB.TId);
-    abLatest: MC := self.GetPinLatest(AB.TId, bufSel, Reason);
-  else
-    Assert(false);
-  end;
-  if AssignedNotSentinel(MC) then
-    result := FieldsByNamesInt(MC as TMemTableMetadataItem, Names, AbsIdxs)
-  else
-  begin
-    SetLength(result, 0);
-    SetLength(AbsIdxs, 0);
-  end;
+  (FEntity as TMemDBTablePersistent).InvalidateCachedCur(Tid);
 end;
 
-function TMemDbTableMetadata.FieldByName(const AB: TBufSelector; const Name: string; var AbsIndex: integer; Reason: TPinReason): TMemFieldDef;
-var
-  MC: TMemDbStreamable;
-  bufSel: TABSelType;
+procedure TMemDBTableMetadata.InvalidateCachedNxtTid(const Tid: TTransactionId);
 begin
-  MC := nil;
-  case AB.SelType of
-    abCurrent: MC := self.PinCurrent(AB.TId, Reason);
-    abNext: MC := self.GetNext(AB.TId);
-    abLatest: MC := self.GetPinLatest(AB.TId, bufSel, Reason);
-  else
-    Assert(false);
-  end;
-  if AssignedNotSentinel(MC) then
-    result := FieldByNameInt(MC as TMemTableMetadataItem, Name, AbsIndex)
-  else
-    result := nil;
-end;
-
-function TMemDBTableMetadata.IndexByName(const AB: TBufSelector; const Name: string; var AbsIndex: integer; Reason: TPinReason): TMemIndexDef;
-var
-  MC: TMemDbStreamable;
-  bufSel: TABSelType;
-begin
-  MC := nil;
-  case AB.SelType of
-    abCurrent: MC := self.PinCurrent(AB.TId, Reason);
-    abNext: MC := self.GetNext(AB.TId);
-    abLatest: MC := self.GetPinLatest(AB.TId, bufSel, Reason);
-  else
-    Assert(false);
-  end;
-  if AssignedNotSentinel(MC) then
-    result := IndexByNameInt(MC as TMemTableMetadataItem, Name, AbsIndex)
-  else
-    result := nil;
+  (FEntity as TMemDBTablePersistent).InvalidateCachedNxtTid(Tid);
 end;
 
 { TMemDBForeignKeyMetadata }
@@ -6779,12 +6989,12 @@ begin
           begin
             ProxI := EList.Items[i] as TMemDBEntityProxy;
             ObjI := ProxI.Proxy as TMemDbEntity;
-            ICur := ObjI.META_PinCurrent(Tid, pinFinalCheck);
-            INxt := ObjI.META_GetNext(Tid);
+            ICur := ObjI.Metadata.PinCurrent(Tid, pinFinalCheck);
+            INxt := ObjI.Metadata.GetNext(Tid);
             ChangeFlagsFromPinned(ICur, INxt, IAdded, IChanged, IDeleted, INull);
             if not (INull or IDeleted) then
             begin
-              ILat := ObjI.META_GetPinLatest(Tid, SelType, pinFinalCheck) as TMemEntityMetadataItem;
+              ILat := ObjI.Metadata.GetPinLatest(Tid, SelType, pinFinalCheck) as TMemEntityMetadataItem;
               Names.Add(ILat.EntityName);
             end;
           end;
@@ -7530,9 +7740,9 @@ begin
       Assert(Assigned(Proxy.Proxy) and (Proxy.Proxy is TMemDbEntity));
       Entity := Proxy.Proxy as TMemDbEntity;
       case AB.SelType of
-        abCurrent: EntMetaS := Entity.META_PinCurrent(AB.Tid, PinReason);
-        abNext: EntMetaS := Entity.META_GetNext(AB.Tid);
-        abLatest: EntMetaS := Entity.META_GetPinLatest(AB.Tid, SelType, PinReason);
+        abCurrent: EntMetaS := Entity.Metadata.PinCurrent(AB.Tid, PinReason);
+        abNext: EntMetaS := Entity.Metadata.GetNext(AB.Tid);
+        abLatest: EntMetaS := Entity.Metadata.GetPinLatest(AB.Tid, SelType, PinReason);
       else
         Assert(false);
         EntMetaS := nil;

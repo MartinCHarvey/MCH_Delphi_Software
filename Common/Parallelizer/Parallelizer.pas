@@ -61,7 +61,7 @@ uses
 
 const
   S_UNEXPECTED_WAIT_RET = 'Unexpected return from parallel wait: ';
-  S_FWD_EXCEPTION = 'Exception forwaded between threads (untranslated): ';
+  S_FWD_EXCEPTION = 'Exception forwarded between threads (untranslated): ';
 
 type
   TParallelHandlerThread = class(TThread)
