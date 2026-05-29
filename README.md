@@ -7,10 +7,8 @@ Most recent (2026) development is in Common/MemDB2:
 - They share the same file format so you can swap back and forth between them, and of course 32/64 bit builds can r/w the same format.
 - They also share very similar API's.
 - MemDB best for single/lightly threaded straight-line workloads, and will be fastest for that use case.
-- MemDB2 hopefully will be better for more deeply parallel / async workloads.
-- MemDB2 is slowly coming up to scratch.
-  - Still a few rough edges around metadata caching / pinning consistency to be worked out.
-  - _Probably OK for casual use, but I'm not declaring it bulletproof yet._
+- MemDB2 better for more deeply parallel / async workloads.
+- MemDB2 _now suitable for alpha/beta testing_.
 - Now I have Delphi CE 12, I'll be checking for portability to ARM. (I expect it to be mostly seamless).
 - SQL support for both MemDB and MemDB2 to follow.
 
