@@ -36,11 +36,14 @@ function GoPatchFreeMem: boolean;
 implementation
 
 uses
+  SysUtils
 {$IFOPT C+}
-  SysUtils,
-  GlobalLog,
+  ,GlobalLog
 {$ENDIF}
-  Windows;
+{$IFDEF MSWINDOWS}
+  ,Windows
+{$ENDIF}
+  ;
 
 {$IF Defined(VER250) and Defined(WIN64)}
   // XE4 64-bit only

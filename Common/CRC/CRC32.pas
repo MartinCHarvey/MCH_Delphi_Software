@@ -10,7 +10,6 @@ unit CRC32;
 
 interface
 
-uses Windows;
 
 function StartCRC32: longword; inline;
 function UpdateCrc32(const Buf; const Size: longword; const OldCRC: longword =

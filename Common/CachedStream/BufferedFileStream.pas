@@ -25,6 +25,8 @@ IN THE SOFTWARE.
 
 interface
 
+{$IFDEF MSWINDOWS}
+
 uses
   SysUtils, Math, Classes, Windows;
 
@@ -132,7 +134,20 @@ type
     function Write(const Buffer; Count: Longint): Longint; override;
   end;
 
+{$ELSE}
+
+uses
+  Classes;
+
+type
+  //TODO - Write an appropriate caching layer for Android.
+  TWriteCachedFileStream = TFileStream;
+  TReadOnlyCachedFileStream = TFileStream;
+{$ENDIF}
+
 implementation
+
+{$IFDEF MSWINDOWS}
 
 function GetFileSizeEx(hFile: THandle; var FileSize: Int64): BOOL; stdcall; external kernel32;
 function SetFilePointerEx(hFile: THandle; DistanceToMove: Int64; lpNewFilePointer: PInt64; dwMoveMethod: DWORD): BOOL; stdcall; external kernel32;
@@ -522,5 +537,7 @@ begin
   end;
   FFileSize := Max(FFileSize, FPosition);
 end;
+
+{$ENDIF}
 
 end.

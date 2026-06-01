@@ -67,14 +67,12 @@ type
   TIndexNodeLink = class;
   TSIndex = class;
 
-  //Was tempted to put templates in here, but it then breaks the metaclassing,
-  //so to keep our sanity, will avoid template use.
-{$IF DEFINED(CPUX86)}
-  TTagType = type Int64;
-{$ELSEIF DEFINED(CPUX64)}
-  TTagType = type NativeInt;
+{$IF Defined(CPUX64) or Defined(CPUARM64)}
+  TTagType = NativeInt;   // 64-bit platforms
+{$ELSEIF Defined(CPUX86) or Defined(CPUARM32)}
+  TTagType = Integer;     // 32-bit platforms
 {$ELSE}
-{$ERROR Set the tag type up to be at least as big as a ptr}
+  {$ERROR Unsupported platform: define TTagType appropriately}
 {$ENDIF}
 
   //Node in a particular index.

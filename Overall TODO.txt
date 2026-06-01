@@ -1,8 +1,6 @@
 
 MemDB2 TODO.
 
-- Few remaining testcases for race conditions.
-
 - SQL Query engine.
   - SQL parser.
   - SQL execution engine.

@@ -483,7 +483,12 @@ end;
 constructor TMemDBTempFileStream.Create(const FileName: string);
 begin
   FFileName := FileName;
+{$IFDEF MSWINDOWS}
   inherited Create(FileName, FILE_CACHE_SIZE);
+{$ELSE}
+  //TODO - Write cached construct on android.
+  inherited Create(FileName, fmCreate);
+{$ENDIF}
 {$IFDEF USE_TRACKABLES}
   FProxy := TTrackProxy.Create;
   FProxy.Init(self);
