@@ -7,6 +7,7 @@ Most recent (2026) development is in Common/MemDB2:
 - They share the same file format and API's.
 - MemDB best for single/lightly threaded straight-line workloads, and will be fastest for that use case.
 - MemDB2 better for more deeply parallel / async workloads. Now suitable for Alpha testing.
+- MemDB2 now compiles & runs on both **Win32/64 and Android 32/64** 
 - SQL support for both MemDB and MemDB2 in progress.
 - Later: Check portability to ARM / Android.
 
