@@ -33,6 +33,7 @@ type
     Label3: TLabel;
     OOMemory: TButton;
     TblModMulti: TButton;
+    ConcurrencyBtn: TButton;
     procedure BasicTestBtnClick(Sender: TObject);
     procedure ResetClick(Sender: TObject);
     procedure IndexTestClick(Sender: TObject);
@@ -54,6 +55,7 @@ type
     procedure IsoComboChange(Sender: TObject);
     procedure OOMemoryClick(Sender: TObject);
     procedure TblModMultiClick(Sender: TObject);
+    procedure ConcurrencyBtnClick(Sender: TObject);
   private
     { Private declarations }
     FTimeStamp: TDateTime;
@@ -863,6 +865,562 @@ begin
   LogTimeIncr('DB started...');
   FSession := FDB.StartSession;
   LogTimeIncr('Session running.');
+end;
+
+type
+  TConcurrentModThread = class(TThread)
+    FFormatChange: boolean;
+    FSession: TMemDBSession;
+    FEvent: TEvent;
+    FExcept: boolean;
+    FMsg: string;
+    procedure Execute; override;
+  end;
+
+procedure TConcurrentModThread.Execute;
+var
+  T: TMemDBTransaction;
+  DBAPI: TMemAPIDatabase;
+  Dat: TMemAPITableData;
+  Meta: TMemAPITableMetadata;
+  DataRec: TMemDbFieldDataRec;
+
+begin
+  try
+    if FFormatChange then
+    begin
+      T := FSession.StartTransaction(amReadWriteShared);
+      try
+        DBAPI := T.GetAPI;
+        try
+          Meta := DBAPI.GetAPIObjectFromEntity('Test table', APITableMetadata) as TMemAPITableMetadata;
+          try
+            Meta.CreateField('IntField2', ftInteger);
+            Meta.CreateIndex('IntIndex2', 'IntField2', []);
+          finally
+            Meta.Free;
+          end;
+        finally
+          DBAPI.Free;
+        end;
+        FEvent.SetEvent;
+        T.CommitAndFree;
+      except
+        T.RollbackAndFree;
+        raise;
+      end;
+    end
+    else
+    begin
+      FEvent.WaitFor(INFINITE);
+      Sleep(500); //Long enough for other thread to start modifying.
+      T := FSession.StartTransaction(amReadWriteShared);
+      try
+        DBAPI := T.GetAPI;
+        try
+          Dat := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
+          try
+            DataRec.FieldType := ftInteger;
+            DataRec.i32Val := 42;
+            Dat.FindByIndex('IntIndex', DataRec);
+            DataRec.i32Val := 43;
+            Dat.WriteField('IntField', DataRec);
+            Dat.Post;
+          finally
+            Dat.Free;
+          end;
+        finally
+          DBAPI.Free;
+        end;
+        T.CommitAndFree;
+      except
+        T.RollbackAndFree;
+        raise;
+      end;
+    end;
+  except
+    on E: Exception do
+    begin
+      FExcept := true;
+      FMsg := E.Message;
+    end;
+  end;
+end;
+
+procedure TForm1.ConcurrencyBtnClick(Sender: TObject);
+
+  { Specifically test some concurrency edge cases.
+    Some of these can be tested deterministically, some can't. }
+  procedure Setup;
+  var
+    T: TMemDBTransaction;
+    DBAPI: TMemAPIDatabase;
+    Meta: TMemAPITableMetadata;
+  begin
+    BasicTestBtnClick(Sender);
+    T := FSession.StartTransaction(amReadWriteShared);
+    try
+      DBAPI := T.GetAPI;
+      try
+        Meta := DBAPI.GetAPIObjectFromEntity('Test table', APITableMetadata) as TMemAPITableMetadata;
+        try
+          Meta.CreateIndex('Index1', 'Int', [iaUnique, iaNotEmpty]);
+        finally
+          Meta.Free;
+        end;
+      finally
+        DBAPI.Free;
+      end;
+      T.CommitAndFree;
+      LogTimeIncr('Concurrency test setup OK');
+    except
+      on E: Exception do
+      begin
+        T.RollbackAndFree;
+        LogTimeIncr(E.Message);
+        raise;
+      end;
+    end;
+  end;
+
+  procedure SimulRowEdit;
+  var
+    T1, T2: TMemDBTransaction;
+    DBAPI1, DBAPI2: TMemAPIDatabase;
+    Dat1, Dat2: TMemAPITableData;
+    DataRec: TMemDbFieldDataRec;
+    Pass: boolean;
+  begin
+    Pass := false;
+    if Limit < 42 then
+    begin
+      LogTimeIncr('Skipped test. Set LIMIT >= 41');
+      exit;
+    end;
+    //Reminder, table contains only odd numbered rows.
+
+    //Check conflict occurs even at lowest serialization level.
+    T1 := FSession.StartTransaction(amReadWriteShared, amLazyWrite, ilReadComitted);
+    T2 := FSession.StartTransaction(amReadWriteShared, amLazyWrite, ilReadComitted);
+    try
+      try
+        try
+          DBAPI1 := T1.GetAPI;
+          DBAPI2 := T2.GetAPI;
+          try
+            Dat1 := DBAPI1.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
+            Dat2 := DBAPI2.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
+            try
+              DataRec.FieldType := ftInteger;
+              DataRec.i32Val := 41;
+              Dat1.FindByIndex('Index1', DataRec);
+              Dat2.FindByIndex('Index1', DataRec);
+              DataRec.i32Val := 84;
+              Dat1.WriteField('Int', DataRec);
+              Dat2.WriteField('Int', DataRec);
+              Dat1.Post;
+              Dat2.Post;
+            finally
+              Dat1.Free;
+              Dat2.Free;
+            end;
+          finally
+            DBAPI1.Free;
+            DBAPI2.Free;
+          end;
+          T1.CommitAndFree;
+          T1 := nil;
+          Pass := true;
+        except
+          on E: Exception do
+          begin
+            LogTimeIncr('Error: ' + E.Message);
+            raise;
+          end;
+        end;
+        T2.CommitAndFree;
+        T2 := nil;
+        LogTimeIncr('Error: Transaction completed when expected conflict.');
+      except
+        on E: Exception do
+        begin
+          T2.RollbackAndFree;
+          T2 := nil;
+          if Pass then
+            LogTimeIncr('Simultaneous row edit detected OK (' + E.Message + ')')
+          else
+            raise;
+        end;
+      end;
+    finally
+      if Assigned(T1) then
+        T1.RollbackAndFree;
+      if Assigned(T2) then
+        T2.RollbackAndFree;
+    end;
+  end;
+
+  procedure SerialisableRead;
+  var
+    T1, T2: TMemDBTransaction;
+    DBAPI1, DBAPI2: TMemAPIDatabase;
+    Dat1, Dat2: TMemAPITableData;
+    DataRec: TMemDbFieldDataRec;
+    Pass: boolean;
+  begin
+    Pass := false;
+    if Limit < 42 then
+    begin
+      LogTimeIncr('Skipped test. Set LIMIT >= 41');
+      exit;
+    end;
+    //Reminder, table contains only odd numbered rows.
+
+    //Check serialisable reads atomic
+    T1 := FSession.StartTransaction(amReadWriteShared, amLazyWrite, ilReadComitted);
+    T2 := FSession.StartTransaction(amReadWriteShared, amLazyWrite, ilSerialisable);
+    try
+      try
+        try
+          DBAPI1 := T1.GetAPI;
+          DBAPI2 := T2.GetAPI;
+          try
+            Dat1 := DBAPI1.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
+            Dat2 := DBAPI2.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
+            try
+              DataRec.FieldType := ftInteger;
+              DataRec.i32Val := 41;
+              Dat1.FindByIndex('Index1', DataRec);
+              Dat2.FindByIndex('Index1', DataRec);
+              //Transaction 2 does not write field, only reads it.
+              DataRec.i32Val := 84;
+              Dat1.WriteField('Int', DataRec);
+              Dat1.Post;
+            finally
+              Dat1.Free;
+              Dat2.Free;
+            end;
+          finally
+            DBAPI1.Free;
+            DBAPI2.Free;
+          end;
+          T1.CommitAndFree;
+          T1 := nil;
+          Pass := true;
+        except
+          on E: Exception do
+          begin
+            LogTimeIncr('Error: ' + E.Message);
+            raise;
+          end;
+        end;
+        T2.CommitAndFree;
+        T2 := nil;
+        LogTimeIncr('Error: Transaction completed when expected conflict.');
+      except
+        on E: Exception do
+        begin
+          T2.RollbackAndFree;
+          T2 := nil;
+          if Pass then
+            LogTimeIncr('Serialisable read conflict detected OK (' + E.Message + ')')
+          else
+            raise;
+        end;
+      end;
+    finally
+      if Assigned(T1) then
+        T1.RollbackAndFree;
+      if Assigned(T2) then
+        T2.RollbackAndFree;
+    end;
+  end;
+
+  procedure RepeatableRead;
+  var
+    T1, T2: TMemDBTransaction;
+    DBAPI1, DBAPI2: TMemAPIDatabase;
+    Dat1, Dat2: TMemAPITableData;
+    DataRec: TMemDbFieldDataRec;
+    Pass: boolean;
+  begin
+    Pass := false;
+    if Limit < 42 then
+    begin
+      LogTimeIncr('Skipped test. Set LIMIT >= 41');
+      exit;
+    end;
+    //Reminder, table contains only odd numbered rows.
+
+    //Check conflict occurs at ilReadRepeatable and above.
+    T1 := FSession.StartTransaction(amReadWriteShared, amLazyWrite, ilReadComitted);
+    T2 := FSession.StartTransaction(amReadWriteShared, amLazyWrite, ilReadRepeatable);
+    try
+      try
+        try
+          try
+            DBAPI1 := T1.GetAPI;
+            DBAPI2 := T2.GetAPI;
+            try
+              Dat1 := DBAPI1.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
+              Dat2 := DBAPI2.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
+              try
+                DataRec.FieldType := ftInteger;
+                DataRec.i32Val := 41;
+                Dat1.FindByIndex('Index1', DataRec);
+                Dat2.FindByIndex('Index1', DataRec);
+                DataRec.i32Val := 84;
+                Dat1.WriteField('Int', DataRec);
+                Dat1.Post;
+              finally
+                Dat1.Free;
+              end;
+            finally
+              DBAPI1.Free;
+            end;
+            T1.CommitAndFree;
+            T1 := nil;
+          except
+            on E: Exception do
+            begin
+              LogTimeIncr('Error: ' + E.Message);
+              raise;
+            end;
+          end;
+          Pass := true;
+          Dat2.WriteField('Int', DataRec);
+          Dat2.Post;
+        finally
+          Dat2.Free;
+          DBAPI2.Free;
+        end;
+        T2.CommitAndFree;
+        T2 := nil;
+        LogTimeIncr('Error: Transaction completed when expected conflict.');
+      except
+        on E: Exception do
+        begin
+          T2.RollbackAndFree;
+          T2 := nil;
+          if Pass then
+            LogTimeIncr('Repeatable read conflict detected OK(' + E.Message + ')')
+          else
+            raise;
+        end;
+      end;
+    finally
+      if Assigned(T1) then
+        T1.RollbackAndFree;
+      if Assigned(T2) then
+        T2.RollbackAndFree;
+    end;
+  end;
+
+  procedure SerialisableRowAdd;
+  var
+    T1, T2: TMemDBTransaction;
+    DBAPI1, DBAPI2: TMemAPIDatabase;
+    Dat1, Dat2: TMemAPITableData;
+    DataRec: TMemDbFieldDataRec;
+    Pass: boolean;
+  begin
+    Pass := false;
+    if Limit < 42 then
+    begin
+      LogTimeIncr('Skipped test. Set LIMIT >= 41');
+      exit;
+    end;
+    //Reminder, table contains only odd numbered rows.
+
+    //Check serialisable reads atomic
+    T1 := FSession.StartTransaction(amReadWriteShared, amLazyWrite, ilReadComitted);
+    T2 := FSession.StartTransaction(amReadWriteShared, amLazyWrite, ilSerialisable);
+    try
+      try
+        try
+          DBAPI1 := T1.GetAPI;
+          DBAPI2 := T2.GetAPI;
+          try
+            Dat1 := DBAPI1.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
+            Dat2 := DBAPI2.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
+            try
+              DataRec.FieldType := ftInteger;
+              DataRec.i32Val := 41;
+              Dat1.FindByIndex('Index1', DataRec);
+              Dat2.FindByIndex('Index1', DataRec);
+              //Transaction 2 does not write field, only reads it.
+              Dat1.Append;
+              DataRec.i32Val := LIMIT + 20;
+              Dat1.WriteField('Int', DataRec);
+              Dat1.Post;
+            finally
+              Dat1.Free;
+              Dat2.Free;
+            end;
+          finally
+            DBAPI1.Free;
+            DBAPI2.Free;
+          end;
+          T1.CommitAndFree;
+          T1 := nil;
+          Pass := true;
+        except
+          on E: Exception do
+          begin
+            LogTimeIncr('Error: ' + E.Message);
+            raise;
+          end;
+        end;
+        T2.CommitAndFree;
+        T2 := nil;
+        LogTimeIncr('Error: Transaction completed when expected conflict.');
+      except
+        on E: Exception do
+        begin
+          T2.RollbackAndFree;
+          T2 := nil;
+          if Pass then
+            LogTimeIncr('Serialisable row addition conflict detected OK (' + E.Message + ')')
+          else
+            raise;
+        end;
+      end;
+    finally
+      if Assigned(T1) then
+        T1.RollbackAndFree;
+      if Assigned(T2) then
+        T2.RollbackAndFree;
+    end;
+  end;
+
+  procedure ConcurrentFormatChange;
+
+  var
+    T: TMemDBTransaction;
+    DBAPI: TMemAPIDatabase;
+    TMeta: TMemAPITableMetadata;
+    TDat: TMemAPITableData;
+    i: integer;
+    DataRec: TMemDbFieldDataRec;
+    SyncEvent: TEvent;
+    Mod1, Mod2: TConcurrentModThread;
+
+  begin
+    ResetClick(Sender);
+    T := FSession.StartTransaction(amWriteExclusive);
+    try
+      DBAPI := T.GetAPI;
+      try
+        DBAPI.CreateTable('Test table');
+        TMeta := DBAPI.GetAPIObjectFromEntity('Test table', APITableMetadata) as TMemAPITableMetadata;
+        try
+          TMeta.CreateField('IntField', ftInteger);
+          TMeta.CreateIndex('IntIndex', 'IntField', []);
+        finally
+          TMeta.Free;
+        end;
+      finally
+        DBAPI.Free;
+      end;
+      T.CommitAndFree;
+    except
+      on E: Exception do
+      begin
+        T.RollbackAndFree;
+        LogTimeIncr('Error: ' + E.Message);
+        raise;
+      end;
+    end;
+    T := FSession.StartTransaction(amWriteExclusive);
+    try
+      DBAPI := T.GetAPI;
+      try
+        TDat := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
+        try
+          DataRec.FieldType := ftInteger;
+          for i := 0 to Pred(BIG_ROWS div 5) do
+          begin
+            TDat.Append;
+            DataRec.i32Val := i;
+            TDat.WriteField('IntField', DataRec);
+            TDat.Post;
+          end;
+        finally
+          TDat.Free;
+        end;
+      finally
+        DBAPI.Free;
+      end;
+      T.CommitAndFree;
+    except
+      on E: Exception do
+      begin
+        T.RollbackAndFree;
+        LogTimeIncr('Error: ' + E.Message);
+        raise;
+      end;
+    end;
+    LogTimeIncr('Concurrent format change set-up OK');
+
+    SyncEvent := TEvent.Create(nil, true, false, '');
+    try
+      Mod1 := nil;
+      Mod2 := nil;
+      try
+        Mod1 := TConcurrentModThread.Create(true);
+        with Mod1 do
+        begin
+          FFormatChange := true;
+          FSession := MemDB2TestForm.FSession;
+          FEvent := SyncEvent;
+        end;
+        Mod2 := TConcurrentModThread.Create(true);
+        with Mod2 do
+        begin
+          FFormatChange := false;
+          FSession := MemDB2TestForm.FSession;
+          FEvent := SyncEvent;
+        end;
+        Mod2.Resume;
+        Mod1.Resume;
+        Mod1.WaitFor;
+        Mod2.WaitFor;
+        if Mod2.FExcept and not Mod1.FExcept then
+        begin
+          LogTimeIncr('Detected table modification conflict OK (' + Mod2.FMsg + ')');
+        end
+        else
+        begin
+          LogTimeIncr('FAIL: Unexpected exceptions :');
+          LogTimeIncr(' Format change thread: ' + Mod1.FMsg);
+          LogTimeIncr(' RowMod thread: ' + Mod2.FMsg);
+        end;
+      finally
+        Mod1.Free;
+        Mod2.Free;
+      end;
+    finally
+      SyncEvent.Free;
+    end;
+  end;
+
+begin
+  { Setup }
+  { Simultaneous row edit }
+  Setup;
+  SimulRowEdit;
+  { Serialisable read conflict }
+  Setup;
+  SerialisableRead;
+  { Repeatable read write-conflict }
+  Setup;
+  RepeatableRead;
+  { Serialisable row add }
+  Setup;
+  SerialisableRowAdd;
+  { Change-format row mod }
+  LogTimeIncr('Warning: This test not deterministic, might fail ...');
+  ConcurrentFormatChange;
 end;
 
 type
