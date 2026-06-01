@@ -1666,7 +1666,7 @@ begin
 {$IFDEF CHECK_META_CACHING}
       FCachedCur := result.AddRef as TMemDBStreamable;
 {$ELSE}
-      FCachedCur := result.DeepClone(result) as TMemDBStreamable;
+      FCachedCur := TMemDBStreamable.DeepClone(result);
 {$ENDIF}
       FCachedCurValid := true;
     end;
@@ -1693,7 +1693,7 @@ begin
 {$IFDEF CHECK_META_CACHING}
       FCachedNxt := result.AddRef as TMemDBStreamable;
 {$ELSE}
-      FCachedNxt := result.DeepClone(result) as TMemDBStreamable;
+      FCachedNxt := TMemDBStreamable.DeepClone(result);
 {$ENDIF}
       FCachedNxtValid := true;
     end;
@@ -1745,7 +1745,7 @@ begin
 {$IFDEF CHECK_META_CACHING}
             FCachedCur := result.AddRef as TMemDBStreamable;
 {$ELSE}
-            FCachedCur := result.DeepClone(result) as TMemDBStreamable;
+            FCachedCur := TMemDBStreamable.DeepClone(result);
 {$ENDIF}
             FCachedCurValid := true;
           end;
@@ -1763,7 +1763,7 @@ begin
 {$IFDEF CHECK_META_CACHING}
             FCachedNxt := result.AddRef as TMemDBStreamable;
 {$ELSE}
-            FCachedNxt := result.DeepClone(result) as TMemDBStreamable;
+            FCachedNxt := TMemDBStreamable.DeepClone(result);
 {$ENDIF}
             FCachedNxtValid := true;
           end;

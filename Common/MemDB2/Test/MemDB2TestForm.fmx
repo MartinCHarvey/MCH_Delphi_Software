@@ -221,4 +221,13 @@ object Form1: TForm1
     Width = 97.000000000000000000
     OnClick = TblModMultiClick
   end
+  object ConcurrencyBtn: TButton
+    Height = 22.000000000000000000
+    Position.X = 472.000000000000000000
+    Position.Y = 72.000000000000000000
+    TabOrder = 24
+    Text = 'Concurrency'
+    Width = 97.000000000000000000
+    OnClick = ConcurrencyBtnClick
+  end
 end
