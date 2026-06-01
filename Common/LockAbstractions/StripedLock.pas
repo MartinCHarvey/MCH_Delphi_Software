@@ -50,8 +50,10 @@ type
 
 implementation
 
+{$IFDEF MSWINDOWS}
 uses
   Windows;
+{$ENDIF}
 
 const
   LOCK_ARRAY_SIZE = Succ(High(Word));
@@ -72,11 +74,17 @@ var
 { TStripedLock }
 
 procedure TSPinModCriticalSection.SetSpinCount(Count: cardinal);
+{$IFDEF MSWINDOWS}
 var
   Ret: DWord;
 begin
   Ret := SetCriticalSectionSpinCount(FSection, Count);
 end;
+{$ELSE}
+begin
+  //NOP.
+end;
+{$ENDIF}
 
 { TStripedLock }
 

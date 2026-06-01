@@ -75,8 +75,8 @@ type
     { Public declarations }
   end;
 
-const
-  DB_LOCATION = 'c:\temp\MemDB2';
+var
+  DB_LOCATION: string;
 
 var
   Form1: TForm1;
@@ -3395,7 +3395,7 @@ var
 begin
   FTimeStamp := DBStartTime;
   LogTimeIncr('DB load time.');
-
+  LogTimeIncr(DB_LOCATION);
   Item := TListBoxItem.Create(RModeCombo);
   Item.Text := MDBAccessModeStrings[amReadShared];
   Item.Tag := Ord(amReadShared);
@@ -5523,6 +5523,8 @@ begin
 end;
 
 initialization
+  DB_LOCATION := TPath.Combine(TPath.GetDocumentsPath, 'MemDB2');
+
   Randomize;
   LIMIT_CUBEROOT := Trunc(Math.Power(LIMIT, (1/3)));
   if LIMIT_CUBEROOT < 2 then

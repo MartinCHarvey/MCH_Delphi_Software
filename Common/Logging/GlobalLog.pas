@@ -32,7 +32,15 @@ IN THE SOFTWARE.
 
 interface
 
-uses SysUtils, Windows, Classes, Messages, Trackables;
+uses SysUtils,
+{$IFDEF MSWINDOWS}
+     Windows,
+{$ENDIF}
+     Classes,
+{$IFDEF MSWINDOWS}
+     Messages,
+{$ENDIF}
+     Trackables, SyncObjs;
 
 const
   MinLogFileSize = 1; //In K
@@ -78,7 +86,7 @@ type
     FIdxChanged: TIdxChangeEvent;
     FSeverities: TSeveritySet;
 
-    FCrit: TRTLCriticalSection;
+    FCrit: TCriticalSection;
     FQueuedLogs: TList;
     FShowUnhandledExceptions: boolean;
     FOnMessageToDisplay: TLogEvent;
@@ -131,7 +139,10 @@ type
       write SetMessageToDisplay;
   end;
 
+{$IFDEF MSWINDOWS}
 function GLogFormatSysError(LastError: integer): string; forward;
+{$ENDIF}
+
 function AmVCLThread: boolean;
 
 type
@@ -159,7 +170,9 @@ uses
   IoUtils;
 
 const
+{$IFDEF MSWINDOWS}
   WM_LOG_QUEUED_MSGS = WM_APP;
+{$ENDIF}
 
   S_NOT_LOGGING = 'Warning: Can''t write log entry (Logging disabled).';
   S_UNHANDLED = 'Unhandled exception: ';
@@ -182,7 +195,7 @@ const
     'Not allowed to manipulate log events from non VCL thread';
 
 var
-  VCLTHreadID: DWORD;
+  VCLTHreadID: LongWord;
 
 (************************************
  * TQueueThread                     *
@@ -208,7 +221,7 @@ procedure TGlobalLog.SetNumStrings(NewSize: integer);
 var
   Excess, NumDel, DelPos: integer;
 begin
-  EnterCriticalSection(FCrit);
+  FCrit.Acquire;
   try
     if AmVCLThread then
     begin
@@ -247,17 +260,17 @@ begin
     else
       Log(SV_CRIT, S_STRINGS_OP_FROM_OTHER_THREAD);
   finally
-    LeaveCriticalSection(FCrit);
+    FCrit.Release;
   end;
 end;
 
 function TGlobalLog.GetLoggingToFile: boolean;
 begin
-  EnterCriticalSection(FCrit);
+  FCrit.Acquire;
   try
     result := Assigned(FFile);
   finally
-    LeaveCriticalSection(FCrit);
+    FCrit.Release;
   end;
 end;
 
@@ -269,22 +282,22 @@ end;
 
 procedure TGlobalLog.SetSeveritySet(NewSet: TSeveritySet);
 begin
-  EnterCriticalSection(FCrit);
+  FCrit.Acquire;
   try
     FSeverities := NewSet + [SV_CRIT];
   finally
-    LeaveCriticalSection(FCrit);
+    FCrit.Release;
   end;
 end;
 
 procedure TGlobalLog.CloseFileLog;
 begin
-  EnterCriticalSection(FCrit);
+  FCrit.Acquire;
   try
     FFile.Free;
     FFile := nil;
   finally
-    LeaveCriticalSection(FCrit);
+    FCrit.Release;
   end;
 end;
 
@@ -292,7 +305,7 @@ procedure TGlobalLog.LogUnhandledException(Sender: TObject; E: Exception);
 begin
   if not (E is EAbort) then
   begin
-    EnterCriticalSection(FCrit);
+    FCrit.Acquire;
     try
       if not FLoggingAppException then
       begin
@@ -304,7 +317,7 @@ begin
         FLoggingAppException := false;
       end;
     finally
-      LeaveCriticalSection(FCrit);
+      FCrit.Release;
     end;
   end;
 end;
@@ -312,7 +325,7 @@ end;
 constructor TGlobalLog.Create;
 begin
   inherited;
-  InitializeCriticalSection(FCrit);
+  FCrit := TCriticalSection.Create;
   FQueuedLogs := TList.Create;
 end;
 
@@ -320,13 +333,13 @@ destructor TGlobalLog.Destroy;
 begin
   CloseFileLog;
   FQueuedLogs.Free;
-  DeleteCriticalSection(FCrit);
+  FCrit.Free;
   inherited;
 end;
 
 function TGlobalLog.OpenFileLog(FileName: string): boolean;
 begin
-  EnterCriticalSection(FCrit);
+  FCrit.Acquire;
   try
     if Assigned(FFile) then
     begin
@@ -341,7 +354,7 @@ begin
       on EStreamError do result := false;
     end;
   finally
-    LeaveCriticalSection(FCrit);
+    FCrit.Release;
   end;
 end;
 
@@ -392,7 +405,7 @@ end;
 
 function TGlobalLog.GetNumStrings: integer;
 begin
-  EnterCriticalSection(FCrit);
+  FCrit.Acquire;
   try
     if AmVCLThread then
       result := FMaxNumStrings
@@ -402,33 +415,33 @@ begin
       Log(SV_CRIT, S_STRINGS_OP_FROM_OTHER_THREAD);
     end;
   finally
-    LeaveCriticalSection(FCrit);
+    FCrit.Release;
   end;
 end;
 
 function TGlobalLog.GetSeveritySet: TSeveritySet;
 begin
-  EnterCriticalSection(FCrit);
+  FCrit.Acquire;
   try
     result := FSeverities;
   finally
-    LeaveCriticalSection(FCrit);
+    FCrit.Release;
   end;
 end;
 
 function TGlobalLog.GetFileName: string;
 begin
-  EnterCriticalSection(FCrit);
+  FCrit.Acquire;
   try
     result := FFileName;
   finally
-    LeaveCriticalSection(FCrit);
+    FCrit.Release;
   end;
 end;
 
 function TGlobalLog.GetStrings: TStrings;
 begin
-  EnterCriticalSection(FCrit);
+  FCrit.Acquire;
   try
     if AmVCLThread then
       result := FStrings
@@ -438,26 +451,26 @@ begin
       Log(SV_CRIT, S_STRINGS_OP_FROM_OTHER_THREAD);
     end;
   finally
-    LeaveCriticalSection(FCrit);
+    FCrit.Release;
   end;
 end;
 
 procedure TGlobalLog.SetStrings(NewStrings: TStrings);
 begin
-  EnterCriticalSection(FCrit);
+  FCrit.Acquire;
   try
     if AmVCLThread then
       FStrings := NewStrings
     else
       Log(SV_CRIT, S_STRINGS_OP_FROM_OTHER_THREAD)
   finally
-    LeaveCriticalSection(FCrit);
+    FCrit.Release;
   end;
 end;
 
 function TGlobalLog.GetMessageLogged: TLogEvent;
 begin
-  EnterCriticalSection(FCrit);
+  FCrit.Acquire;
   try
     if AmVCLThread then
       result := FMessageLogged
@@ -467,26 +480,26 @@ begin
       Log(SV_CRIT, S_EVENT_OP_FROM_OTHER_THREAD);
     end;
   finally
-    LeaveCriticalSection(FCrit);
+    FCrit.Release;
   end;
 end;
 
 procedure TGlobalLog.SetMessageLogged(NewMessageLogged: TLogEvent);
 begin
-  EnterCriticalSection(FCrit);
+  FCrit.Acquire;
   try
     if AmVCLThread then
       FMessageLogged := NewMessageLogged
     else
       Log(SV_CRIT, S_EVENT_OP_FROM_OTHER_THREAD);
   finally
-    LeaveCriticalSection(FCrit);
+    FCrit.Release;
   end;
 end;
 
 function TGlobalLog.GetIdxChanged: TIdxChangeEvent;
 begin
-  EnterCriticalSection(FCrit);
+  FCrit.Acquire;
   try
     if AmVCLThread then
       result := FIdxChanged
@@ -496,26 +509,26 @@ begin
       Log(SV_CRIT, S_EVENT_OP_FROM_OTHER_THREAD);
     end;
   finally
-    LeaveCriticalSection(FCrit);
+    FCrit.Release;
   end;
 end;
 
 procedure TGlobalLog.SetIdxChanged(NewChanged: TIdxChangeEvent);
 begin
-  EnterCriticalSection(FCrit);
+  FCrit.Acquire;
   try
     if AmVCLThread then
       FIdxChanged := NewChanged
     else
       Log(SV_CRIT, S_EVENT_OP_FROM_OTHER_THREAD);
   finally
-    LeaveCriticalSection(FCrit);
+    FCrit.Release;
   end;
 end;
 
 function TGlobalLog.GetStringWritePos: integer;
 begin
-  EnterCriticalSection(FCrit);
+  FCrit.Acquire;
   try
     if AmVCLThread then
       result := FStringWritePos
@@ -525,7 +538,7 @@ begin
       Log(SV_CRIT, S_STRINGS_OP_FROM_OTHER_THREAD);
     end;
   finally
-    LeaveCriticalSection(FCrit);
+    FCrit.Release;
   end;
 end;
 
@@ -546,14 +559,14 @@ end;
 
 procedure TGlobalLog.Log(Severity: TLogSeverity; Text: string);
 begin
-  EnterCriticalSection(FCrit);
+  FCrit.Acquire;
   try
     if AmVCLThread then
       MainThreadLog(Severity, Text)
     else
       OtherThreadLog(Severity, Text);
   finally
-    LeaveCriticalSection(FCrit);
+    FCrit.Release;
   end;
 end;
 
@@ -579,7 +592,7 @@ var
   Idx: integer;
   QItem: PQueuedLog;
 begin
-  EnterCriticalSection(FCrit);
+  FCrit.Acquire;
   try
     for Idx := 0 to Pred(FQueuedLogs.Count) do
     begin
@@ -589,7 +602,7 @@ begin
     end;
     FQueuedLogs.Clear;
   finally
-    LeaveCriticalSection(FCrit);
+    FCrit.Release;
   end;
 end;
 
@@ -601,20 +614,20 @@ end;
 
 procedure TGlobalLog.SetMessageToDisplay(NewMsgProc: TLogEvent);
 begin
-  EnterCriticalSection(FCrit);
+  FCrit.Acquire;
   try
     if AmVCLThread then
       FOnMessageToDisplay := NewMsgProc
     else
       Log(SV_CRIT, S_ONMSG_OP_FROM_OTHER_THREAD);
   finally
-    LeaveCriticalSection(FCrit);
+    FCrit.Release;
   end;
 end;
 
 function TGlobalLog.GetMessageToDisplay: TLogEvent;
 begin
-  EnterCriticalSection(FCrit);
+  FCrit.Acquire;
   try
     if AmVCLThread then
       result := FOnMessageToDisplay
@@ -624,7 +637,7 @@ begin
       Log(SV_CRIT, S_ONMSG_OP_FROM_OTHER_THREAD);
     end;
   finally
-    LeaveCriticalSection(FCrit);
+    FCrit.Release;
   end;
 end;
 
@@ -651,6 +664,7 @@ begin
 {$ENDIF}
 end;
 
+{$IFDEF MSWINDOWS}
 function GLogFormatSysError(LastError: integer): string;
 const
   S_NEWLINE = #13 + #10;
@@ -672,17 +686,27 @@ begin
   LocalFree(Cardinal(SysError));
   result := Trim(StrSysError);
 end;
+{$ENDIF}
 
 function AmVCLThread: boolean;
 begin
-  result := GetCurrentThreadID = VCLThreadID;
+{$IFDEF MSWINDOWS}
+  result := LongWord(GetCurrentThreadID) = VCLThreadID;
+{$ELSE}
+  result := TThread.Current.ThreadID = VCLThreadID;
+{$ENDIF}
 end;
 
 var
   TmpName: string;
 
 initialization
-  VCLThreadID := GetCurrentThreadID;
+{$IFDEF MSWINDOWS}
+  Assert(Sizeof(LongWord) = Sizeof(DWORD));
+  VCLThreadID := LongWord(GetCurrentThreadID);
+{$ELSE}
+  VCLThreadID := TThread.Current.ThreadID;
+{$ENDIF}
   AppGlobalLog := TGlobalLog.Create;
   AppGlobalLog.SetSeveritySet([SV_TRACE, SV_INFO, SV_WARN, SV_FAIL, SV_CRIT]);
   TmpName := TPath.GetTempFileName;

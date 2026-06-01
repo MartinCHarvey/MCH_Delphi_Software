@@ -26,6 +26,8 @@ IN THE SOFTWARE.
 
 interface
 
+{$IFDEF MSWINDOWS}
+
 uses
 {$IFDEF USE_TRACKABLES}
   Trackables,
@@ -74,7 +76,11 @@ type
     procedure EndWrite; inline;
   end;
 
+{$ENDIF}
+
 implementation
+
+{$IFDEF MSWINDOWS}
 
 { Linking functions }
 
@@ -226,5 +232,7 @@ procedure TSRWLock.EndWrite;
 begin
   ReleaseExclusive;
 end;
+
+{$ENDIF}
 
 end.
