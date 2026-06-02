@@ -9,7 +9,6 @@ Most recent (2026) development is in Common/MemDB2:
 - MemDB2 better for more deeply parallel / async workloads. Now suitable for Alpha testing.
 - MemDB2 now compiles & runs on both **Win32/64 and Android 32/64** 
 - SQL support for both MemDB and MemDB2 in progress.
-- Later: Check portability to ARM / Android.
 
 If any of you folks get some of this to compile / run under the FPC compiler, I'd be very interested to know.
 
