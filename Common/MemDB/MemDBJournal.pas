@@ -1,10 +1,10 @@
-unit MemDBJournal;
+ï»¿unit MemDBJournal;
 {
 
-Copyright © 2020 Martin Harvey <martin_c_harvey@hotmail.com>
+Copyright ï¿½ 2020 Martin Harvey <martin_c_harvey@hotmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the “Software”), to deal in
+this software and associated documentation files (the ï¿½Softwareï¿½), to deal in
 the Software without restriction, including without limitation the rights to
 use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
 of the Software, and to permit persons to whom the Software is furnished to do
@@ -13,7 +13,7 @@ so, subject to the following conditions:
 The above copyright notice and this permission notice shall be included in
 all copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+THE SOFTWARE IS PROVIDED ï¿½AS ISï¿½, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
@@ -181,7 +181,18 @@ type
 
 implementation
 
-uses MemDB, Windows, SysUtils, BufferedFileStream;
+{$IFDEF MSWINDOWS}
+{$DEFINE WINDOWS_FLUSH}
+{$ENDIF}
+
+uses MemDB,
+     SysUtils, BufferedFileStream
+{$IFDEF WINDOWS_FLUSH}
+     , Windows
+{$ELSE}
+    , Posix.Unistd
+{$ENDIF}
+     ;
 
 const
   JOURNAL_PENDING_QUEUE_LIMIT = 4096;
@@ -359,7 +370,14 @@ begin
           begin
             OK := PerformInitialLoad(Action, AnyFiles, CreateCheckpoint, ErrMsg);
             HighPriorityDone;
-            DoJournalInitialized(OK, AnyFiles, CreateCheckpoint, ErrMsg);
+            try
+              DoJournalInitialized(OK, AnyFiles, CreateCheckpoint, ErrMsg);
+            except
+              on E: Exception do
+              begin
+                DoJournalError(E.Message);
+              end;
+            end;
           end;
           jatCommitTransaction:
           begin
@@ -569,8 +587,8 @@ function TMemDbDefaultJournal.GetInitialFileList: TList;
 var
   SearchStr: string;
   FileType: TJournalFileType;
-  FindHandle: THandle;
-  FindData: TWin32FindDataW;
+  FindRet: integer;
+  FindData: TSearchRec;
   FileName: string;
   RList: TList;
   FileSeq: UInt64;
@@ -579,42 +597,37 @@ begin
   RList := TList.Create;
   result := nil;
   try
+    FillChar(FindData, SizeOf(FindData), 0);
     for FileType := Low(FileType) to High(FileType) do
     begin
       SearchStr := FBaseDirectory + '*' + FileExts[FileType];
-      FindHandle := FindFirstFileW(@SearchStr[1], FindData);
-      while FindHandle <> INVALID_HANDLE_VALUE do
+      FindRet := SysUtils.FindFirst(SearchStr, faNormal, FindData);
+      while FindRet = 0 do
       begin
-        //Filter out things which are not regular files.
-        if (FindData.dwFileAttributes and (FILE_ATTRIBUTE_SYSTEM or
-          FILE_ATTRIBUTE_DIRECTORY or FILE_ATTRIBUTE_DEVICE)) = 0 then
+        FileName := FindData.Name;
+        //Check filename is some sort of UInt64 we understand, if not, throw out.
+        if Pos(FileExts[FileType], FileName) <>
+          Succ(Length(FileName) - Length(FileExts[FileType])) then
         begin
-          //Check filename is some sort of UInt64 we understand, if not, throw out.
-          FileName := FindData.cFileName; //Maybe ....
-          if Pos(FileExts[FileType], FileName) <>
-            Succ(Length(FileName) - Length(FileExts[FileType])) then
-          begin
-            Assert(false);
-            exit;
-          end;
-          FileName := Copy(FileName, 1,
-            Length(FileName) - Length(FileExts[FileType]));
-          try
-            FileSeq := StrToInt64(FileName);
-
-            DBInfo := TDBFileInfo.Create;
-            DBInfo.FileSeq := FileSeq;
-            DBInfo.FileType := FileType;
-            DBInfo.FileSize := FindData.nFileSizeLow or
-              (UInt64(FindData.nFileSizeHigh) shl 32);
-            RList.Add(DBInfo)
-          except
-            on E: EConvertError do ; //Continue round loop.
-          end;
+          Assert(false);
+          exit;
         end;
-        if not FindNextFileW(FindHandle, FindData) then
-          FindHandle := INVALID_HANDLE_VALUE;
+        FileName := Copy(FileName, 1,
+          Length(FileName) - Length(FileExts[FileType]));
+        try
+          FileSeq := StrToInt64(FileName);
+
+          DBInfo := TDBFileInfo.Create;
+          DBInfo.FileSeq := FileSeq;
+          DBInfo.FileType := FileType;
+          DBInfo.FileSize := FindData.Size;
+          RList.Add(DBInfo)
+        except
+          on E: EConvertError do ; //Continue round loop.
+        end;
+        FindRet := SysUtils.FindNext(FindData);
       end;
+      SysUtils.FindClose(FindData);
     end;
     RList.Sort(CompareDBInfos);
     result := RList;
@@ -718,7 +731,7 @@ begin
     begin
       FileName := FBaseDirectory + IntToStr(DBInfo.FileSeq)
         + FileExts[DbInfo.FileType];
-      DeleteFile(FileName);
+      SysUtils.DeleteFile(FileName);
     end;
   end;
 end;
@@ -741,14 +754,11 @@ begin
   Assert(Action.ActionType = jatInitialLoad);
   //First of all, create (or open the) initial directory.
   AppendTrailingDirSlash(FBaseDirectory);
-  if not CreateDirectoryW(@FBaseDirectory[1], nil) then
+  if not ForceDirectories(FBaseDirectory) then
   begin
-    if not GetLastError = ERROR_ALREADY_EXISTS then
-    begin
-      result := false;
-      ErrMsg := S_COULDNT_CREATE_DIR + FBaseDirectory;
-      exit;
-    end;
+    result := false;
+    ErrMsg := S_COULDNT_CREATE_DIR + FBaseDirectory;
+    exit;
   end;
   result := GetListAndInitialSeqs(RList, InitialSeq, FinalSeq);
   if not result then
@@ -780,7 +790,11 @@ begin
           + FileExts[DbInfo.FileType];
         Stream := nil;
         try
+          {$IFDEF MSWINDOWS}
           Stream := TReadOnlyCachedFileStream.Create(FileName, FILE_CACHE_SIZE);
+        {$ELSE}
+          Stream := TReadOnlyCachedFileStream.Create(FileName, fmOpenRead);
+        {$ENDIF}
           try
             DoJournalReplay(Stream, (DBInfo.FileSeq = InitialSeq));
           except
@@ -803,7 +817,7 @@ begin
           and LastFileBlank then
         begin
           Dec(FinalSeq);
-          DeleteFile(FileName);
+          SysUtils.DeleteFile(FileName);
         end;
       end;
     end;
@@ -847,7 +861,11 @@ var
 begin
   try
     FileName := FBaseDirectory + IntToStr(FWriteSeq) + FileExts[jftIncremental];
+{$IFDEF MSWINDOWS}
     OutputStream := TWriteCachedFileStream.Create(FileName, FILE_CACHE_SIZE);
+{$ELSE}
+    OutputStream := TWriteCachedFileStream.Create(FileName, fmCreate);
+{$ENDIF}
     DoFlush := false;
     try
       for Idx := 0 to Pred(Transactions.Count) do
@@ -859,9 +877,13 @@ begin
       end;
       if DoFlush then
       begin
+{$IFDEF WINDOWS_FLUSH}
         (OutputStream as TWriteCachedFileStream).FlushCache;
         FlushOK := FlushFileBuffers((OutputStream as TWriteCachedFileStream).Handle);
         Assert(FlushOK);
+{$ELSE}
+        //TODO - Need posixly nice file cache function, and fd to flush.
+{$ENDIF}
       end;
       for Idx := 0 to Pred(Transactions.Count) do
       begin
@@ -899,7 +921,11 @@ var
 begin
   try
     FileName := FBaseDirectory + IntToStr(FWriteSeq) + FileExts[jftInitOrCheckpoint];
+{$IFDEF MSWINDOWS}
     OutputStream := TWriteCachedFileStream.Create(FileName, FILE_CACHE_SIZE);
+{$ELSE}
+    OutputStream := TWriteCachedFileStream.Create(FileName, fmCreate);
+{$ENDIF}
     try
       try
         Assert(Assigned(Action));

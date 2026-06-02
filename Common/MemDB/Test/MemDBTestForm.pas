@@ -53,8 +53,8 @@ type
     { Public declarations }
   end;
 
-const
-  DB_LOCATION = 'c:\temp\MemDB';
+var
+  DB_LOCATION: string;
 
 var
   Form1: TForm1;
@@ -2506,6 +2506,7 @@ procedure TForm1.FormCreate(Sender: TObject);
 begin
   FTimeStamp := DBStartTime;
   LogTimeIncr('DB load time.');
+  LogTimeIncr(DB_LOCATION);
 end;
 
 procedure TForm1.IndexTest2Click(Sender: TObject);
@@ -4346,6 +4347,7 @@ begin
 end;
 
 initialization
+  DB_LOCATION := TPath.Combine(TPath.GetDocumentsPath, 'MemDB');
   Randomize;
   LIMIT_CUBEROOT := Trunc(Math.Power(LIMIT, (1/3)));
   if LIMIT_CUBEROOT < 2 then
