@@ -69,8 +69,8 @@ type
 
   TMemAPITable = class(TMemDBAPI)
   protected
+    //Sorry, checks for data and layout changes in separate places.
     procedure CheckNoDataChanges;
-    procedure CheckNoLayoutChanges;
 
     function GetInterfacedObject: TMemDBTable;
     property Table: TMemDBTable read GetInterfacedObject;
@@ -290,7 +290,6 @@ const
     'Blob data: Size must be consistent with pointer validity.';
   S_API_FIND_EDGE_FIRST_OR_LAST = 'FindEdgeByIndex requires you to specify the first or last position.';
   S_API_NO_ROW_SELECTED = 'No row selected/located for read, write, or delete';
-  S_API_TOO_MANY_INDICES = 'Too many indices referring to the same field';
   S_API_ENTITY_NAME_CONFLICT =
     'Something already exists with that name. Perhaps commit previous renames / deletions?';
   S_API_ENTITY_NAME_NOT_FOUND = 'Couldn''t find anything with that name.';
@@ -299,11 +298,9 @@ const
   S_API_FIELD_NAME_NOT_FOUND = 'Field name not found.';
   S_API_FIELDS_IN_INDEX_MUST_BE_DISJOINT = 'Cannot specify a field name more than once in an index.';
   S_API_INDEX_REFERENCES_FIELD = 'Cannot delete field, it is referenced by an index.';
-  S_API_INTERNAL_ERROR = 'API implementation internal error.';
   S_API_INDEX_NAME_NULL = 'Index name should be non-empty.';
   S_API_INDEX_NAME_CONFLICT = 'An index already exists with that name. Perhaps commit previous renames / deletions?';
   S_API_INDEX_MUST_HAVE_FIELDS = 'You must specify some fields to index on';
-  S_API_INTERNAL_TAG_DATA_BAD = 'Index does not correspond with a valid tag';
   S_API_INTERNAL_READING_ROW = 'Internal error reading row data.';
   S_API_INTERNAL_CHANGING_ROW = 'Internal error changing row data.';
   S_API_ROW_BAD_STRUCTURE = 'Error changing row, field layout different from table.';
@@ -313,10 +310,7 @@ const
   S_API_NO_FIELDS_IN_TABLE_AT_APPEND_TIME = 'Cannot append a record until you have added fields to the table.';
   S_API_NO_ROW_FOR_DELETE = 'You need to navigate to a row before you can delete it.';
   S_API_INDEX_FOR_FK_UNIQUE_ATTR = 'Foreign key: referenced index must have unique attribute set.';
-  S_FROM_SCRATCH_NOT_ALLOWED_MULTI = 'Checkpoint and first init changesets should not be in a multi-transaction';
-  S_TABLE_FORMAT_CONCURRENTLY_CHANGED_1 = 'Concurrency: Table format changed whilst iterating (1).';
-  S_TABLE_FORMAT_CONCURRENTLY_CHANGED_2 = 'Concurrency: Table format changed whilst iterating (2).';
-  S_TABLE_FORMAT_CONCURRENTLY_CHANGED_3 = 'Concurrency: Table format changed whilst reading (3).';
+  S_TABLE_FORMAT_CONCURRENTLY_CHANGED = 'Concurrency: Table format changed whilst iterating.';
 
 function MakeStream(StorageMode: TTempStorageMode): TStream;
 var
@@ -584,18 +578,7 @@ begin
   T := Table;
   Tr := self.FAssociatedTransaction as TMemDBTransaction;
   if T.DataChangedForTid(Tr.Tid) then
-    raise EMemDBAPIException.Create(S_FIELD_LAYOUT_CHANGED);
-end;
-
-procedure TMemAPITable.CheckNoLayoutChanges;
-var
-  T: TMemDbTable;
-  Tr: TMemDbTransaction;
-begin
-  T := Table;
-  Tr := self.FAssociatedTransaction as TMemDBTransaction;
-  if T.LayoutChangesRequiredForTid(TR.Tid) then
-    raise EMemDBAPIException.Create(S_FIELD_LAYOUT_CHANGED);
+    raise EMemDBAPIException.Create(S_TABLE_DATA_CHANGED);
 end;
 
 { TMemAPITableMetadata }
@@ -1644,13 +1627,13 @@ begin
         begin
           //Isolation be damned, it's gonna break.
           if not Cur.Row.CheckFormatAgainstMetaDefs(Tr.Tid, abLatest, AllFieldDefs, pinEvolve) then
-            raise EMemDBConcurrencyException.Create(S_TABLE_FORMAT_CONCURRENTLY_CHANGED_1);
+            raise EMemDBConcurrencyException.Create(S_TABLE_FORMAT_CONCURRENTLY_CHANGED);
             //Might get raised if buggy format, but normally only concurrency.
           ResultFields := Cur.Row.GetPinLatest(Tr.Tid, bufSel, pinEvolve) as TMemStreamableList;
 
           //Isolation be damned, it's gonna break.
           if not Next.Row.CheckFormatAgainstMetaDefs(Tr.Tid, abLatest, AllFieldDefs, pinEvolve) then
-            raise EMemDBConcurrencyException.Create(S_TABLE_FORMAT_CONCURRENTLY_CHANGED_2);
+            raise EMemDBConcurrencyException.Create(S_TABLE_FORMAT_CONCURRENTLY_CHANGED);
             //Might get raised if buggy format, but normally only concurrency.
           NextFields := Next.Row.GetPinLatest(Tr.Tid, bufSel, pinEvolve) as TMemStreamableList;
 
@@ -1688,7 +1671,7 @@ begin
   AllFieldDefs := TidLocalHint.META_CurFieldDefList;
 
   if not Cursor.Row.CheckFormatAgainstMetaDefs(Tr.Tid, abLatest, AllFieldDefs, pinEvolve) then
-    raise EMemDBConcurrencyException.Create(S_TABLE_FORMAT_CONCURRENTLY_CHANGED_3);
+    raise EMemDBConcurrencyException.Create(S_TABLE_FORMAT_CONCURRENTLY_CHANGED);
     //Might get raised if buggy format, but normally only concurrency.
 
   RowFields := Cursor.Row.GetPinLatest(Tr.Tid, bufSel, pinEvolve) as TMemStreamableList;

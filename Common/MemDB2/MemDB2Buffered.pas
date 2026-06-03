@@ -766,7 +766,6 @@ function FieldOffsetsSame(const A: TFieldOffsets; const B: TFieldOffsets): boole
 const
   S_TABLE_DATA_CHANGED = 'Cannot change table field layout when uncommitted data changes.';
   S_FIELD_LAYOUT_CHANGED = 'Cannot change table data when uncommited field layout changes.';
-  S_QUICK_LIST_DUPLICATE_INSERTION = 'Quick lookaside lists: Duplicate insertion.';
   //Now indexes are CoW Tid local, a small amount of API code finds its way here.
   S_API_INDEX_NAME_NOT_FOUND = 'Index name not found.';
 
@@ -776,9 +775,6 @@ uses
   SysUtils, MemDB2, NullStream, MemDB2Api, Parallelizer;
 
 const
-  S_REPLAY_CHECK_FAILED = 'Journal replay: pre or postcondition checks failed: ';
-  S_JOURNAL_REPLAY_BAD_INST = 'Journal replay failed, missing class instance or type. ';
-  S_PRE_COMMIT_INTERNAL = 'Pre-commit setup failed, internal error';
   S_COMMMIT_CONSISTENCY_OBJS = 'Commit consistency check failed: Duplicate table or foreign key names.';
   S_MISSING_FIELD_DEF = 'Field definition missing.';
   S_NO_FIELDS_IN_INDEX = 'No fields in index';
@@ -793,21 +789,14 @@ const
   S_INDEX_FIELD_COUNT_SHOULD_BE_CONSTANT = 'Indexes should referencea constant number of fields once created.';
   S_INDEX_DOES_NOT_REFERENCE_FIELD = 'Index does not reference a valid field';
   S_INDEX_UNDERLYING_FIELD_CHANGED = 'Can''t change index to reference a different field.';
-  S_INDEXES_INCONSISTENT = 'Index references inconsistent field names and offsets.';
   S_INDEXED_FIELD_CHANGED_TYPE = 'Can''t change field type if it is indexed.';
   S_INDEX_CHANGED_ATTRS = 'Index has changed attributes since created, not allowed.';
   S_INDEX_BAD_FIELD_TYPE = 'This type of field cannot be indexed (float or blob?)';
-  S_INDEX_TAG_NOT_FOUND = 'Index tag not found';
-  S_INDEX_TAG_DUPLICATE = 'Index tag already exists';
-  S_INDEX_CONSTRAINTS_FIELDMOVE = 'Do not expect field numbers to be changing during partial index validation.';
   S_INDEX_CONSTRAINT_ZERO = 'Index attributes require fields not zero.';
   S_INDEX_CONSTRAINT_UNIQUE = 'Index attributes require fields unique.';
-  S_COMMIT_ROLLBACK_FAILED_INDEXES_CORRUPTED = 'Commit or rollback for a DB row failed. Indexes or index tags corrupted.';
   S_FROM_SCRATCH_REQUIRES_EMPTY_OBJ = 'Journal replay from scratch must start with empty objects.';
   S_INTERNAL_CHECKING_STRUCTURE = 'Internal error checking changed row structure';
-  S_INTERNAL_CHECKING_INDEXES = 'Internal error checking indexed fields';
   S_FIELDS_NOT_SAME_AS_META = 'Changed fields not the same as metadata';
-  S_LIST_HELPER_INTERNAL = 'List helper internal exception';
   S_TABLE_WITH_NO_FIELDS_HAS_ROWS = 'Streamed in table has rows but no fields!';
   S_JOURNAL_REPLAY_NAMES_INCONSISTENT = 'Journal replay, names inconsistent.';
   S_FK_FIELD_MISSING = 'Foreign key relationship: required data is missing.';
@@ -815,30 +804,14 @@ const
   S_FK_REFERENCES_INDEX = 'Cannot delete index, it is referenced by a foreign key.';
 
   S_API_TRANSACTION_IS_RO = 'Write operation attempted in read-only transaction.';
-  S_API_TRANSACTION_NOT_RWEX = 'Write-exclusive operation attempted in write-shared or read-only transaction.';
   S_API_NO_SUCH_API_OBJECT = 'No API object, bad handle, or API ID not supported.';
-  S_API_MODIFYING_META_FOR_DELETED_TABLE = 'Trying to modify metadata for previously deleted table. Commit or rollback first.';
-  S_INDEX_NOT_YET_CREATED = 'Row navigation not possible, index not yet created (next commit).';
   S_API_NEXT_PREV_REQUIRES_CURRENT_ROW =
     'Navigating to next or previous row requires that you be on a row to start with.';
-  S_API_NEXT_PREV_INTERNAL_ERROR = 'Internal error, couldn''t find current row';
   S_API_SEARCH_VAL_BAD_TYPE = 'Search key data must be of same type as field.';
   S_API_SEARCH_BAD_FIELD_COUNT = 'Bad field count in search data, or indexed fields';
   S_API_SEARCH_NO_INDEX_SPECIFIED = 'No index tag specified for API search on user index';
-  S_API_SEARCH_INTERNAL = 'Data A/B buffer type disagrees with transaction isolation level';
-  S_API_UNDELETING_ROW_AT_POST_TIME = 'Can''t modify a record previously deleted in same transaction';
-  S_API_POST_COMMITTED_OVERWRITE =
-    'Can''t modify a record read with "ReadComitted" isolation' +
-    ' level if a previous read-write operation has already changed it.';
-  S_API_DELETE_OVERWRITE =
-    'Can''t delete a record read with "ReadComitted" isolation' +
-    ' level if a previous read-write operation has already changed it.';
-  S_API_READ_ROW_INTERNAL = 'No data in A/B buffer trying to read a row.';
-  S_API_POST_INTERNAL = 'Internal indexing error trying to post changes.';
-  S_API_DELETE_INTERNAL = 'Internal indexing error trying to delete a record.';
   S_FK_TABLE_NOT_FOUND = 'Table not found checking foreign key relationship.';
   S_FK_INDEX_NOT_FOUND = 'Index not found checking foreign key relationship.';
-  S_FK_ONLY_ON_SF_INDEXES = 'Foreign key relationship only allowed between single field indexes at the moment.';
   S_FK_INDEX_FIELD_INTERNAL = 'Internal error checking foreign keys: field/index rearrangement.';
   S_INDEX_FOR_FK_UNIQUE_ATTR = 'Index referenced by foreign key must have unique attr set.';
   S_FK_INDEXES_DIFF_FIELDCOUNT = 'Indexes in foreign key must have same number of associated fields.';
@@ -851,19 +824,6 @@ const
   S_INDEXED_LIST_LOOKAHEAD_FAILED = 'Indexed list lookahead failed, tag: ';
   S_TABLE_LOOKAHEAD_FAILED = 'Table lookahead failed, tag: ';
   S_DATABASE_LOOKAHEAD_FAILED = 'Main DB lookahead failed, tag: ';
-  S_ASYNC_PROCESS_CANCELLED = 'Asynchronous computation cancelled in pre-commit step';
-  S_INTERNAL_PARALLEL_OP = 'Internal error scheduling parallel operation';
-  S_CHECK_TAGDATA_NO_TAG = 'Check Index Tag Data: does not exist';
-  S_CHECK_TAGDATA_ARRAYSIZE = 'Check Index Tag Data: Tag lookaside bad size or out of date.';
-  S_CHECK_TAGDATA_NOT_EXPECTED = 'Check Index Tag Data: Index tag to be checked not the one we expected at this IndexIndex.';
-  S_CHECK_TAGDATA_NO_META = 'Check Index Tag Data: Expected current or next metadata copy to be available at this time.';
-  S_CHECK_TAGDATA_NO_FIELD = 'Check Index Tag Data: Expected to find field referenced by index at this time';
-  S_TAG_FAILED_INDEX_CLASS_CHECK = 'Check Index Tag Data: Index tag did not have the expected index class set';
-  S_TAG_FAILED_DEFAULT_OFFSET_CHECK = 'Check Index Tag Data: Default field index in tag does not agree with metadata';
-  S_TAG_FAILED_EXTRA_OFFSET_CHECK = 'Check Index Tag Data: Extra field index in tag does not agree with metadata';
-  S_TAG_INDEX_BUILT_NOT_AS_EXPECTED = 'Check Index Tag Data: Index has not been built or destroyed when expected.';
-  S_ADJUST_INDICES_NO_INDEX = 'Internal error: No index metadata item found when adjusting indices';
-  S_ADJUST_INDICES_NO_FIELD = 'Internal error: No field metadata item found when adjusting indices';
   S_FOREIGN_KEY_UNDERLYING_TABLE_CHANGED = 'Table underlying foreign key changed location. Should be constant in spite of multi-renames.';
   S_FOREIGN_KEY_UNDERLYING_INDEX_CHANGED = 'Index underlying foreign key changed location. Should be constant in spite of multi-renames.';
   S_FOREIGN_KEY_UNDERLYING_FIELD_CHANGED = 'Field underlying foreign key changed location. Should be constant in spite of multi-renames.';
@@ -875,19 +835,11 @@ const
   S_FIELD_LIST_BAD_FOR_COMPARISON = 'Bad field list object comparing sets of fields.';
   S_ZERO_LENGTH_FIELD_LIST_COMPARING = 'Comparing sets of fields, given a zero length field list.';
   S_DIFF_LENGTH_FIELD_LIST_COMPARING = 'Comparing sets of fields, given different length field lists.';
-  S_ASYNC_INDEX_OP_FAILED = 'Asynchronous index build failed. Indexes are probably toast.';
   S_CURSOR_HAS_NO_ROW_AT_MODIFY = 'User mod of fields broken: no cursor assigned.';
   S_CURSOR_NOT_ASSIGNED_AT_DELETE = 'User delete of row broken: no cursor assigned';
-  S_CURSOR_HAS_NO_ROW_AT_DELETE = 'User delete of row broken: no row associated with cursor';
-  S_INTERNAL_UNSTREAM_EDIT = 'Internal indexing error during unstream operation';
-  S_INTERNAL_META_EDIT = 'Internal indexing error during metadata processing';
-  S_COMMIT_DELETES_API_OBECTS = 'Commit deletes an object underlying some API''s. Free the API''s first please.';
   S_JOURNAL_ROW_NOT_NEW = 'Expected row to be newly added, but it isn''t.';
-  S_MODIFIED_CONCURRENT_ABORT = 'Data modified concurrently by another transaction, aborting. This might work if you retry, or lock exclusive.';
   S_JOURNAL_REPLAY_DUP_INST_ENTITY = 'Journal replay failed, trying to overwrite duplicate named entity.';
   S_JOURNAL_REPLAY_DUP_INST_ID = 'Journal replay failed, duplicate Row ID.';
-  S_NEW_TAGS_UNEXPECTED_COUNT = 'Unexpected count of tags checking tag arrays.';
-  S_NEW_TAGS_UNEXPECTED_OBJECT = 'Unexpected object encountered checking tag arrays';
   S_INTERNAL_INDEXING_ERROR = 'Internal indexing error (RowId''s).';
   S_JOURNAL_DATA_WITH_LAYOUT_CHANGE = 'Not allowed: Journal entry has both field rearrangement and data.';
   S_DATA_AND_LAYOUT_CHANGE_TO_JOURNAL = 'Not allowed: Table has both changed data and layout to journal!';
@@ -895,12 +847,7 @@ const
   S_CONCURRENT_MODIFY_DURING_REPLAY = 'Unexpected concurrent journal modification during replay.';
   S_MODIFIED_CONCURRENT_ROW_OP = 'Aborted. Concurrency conflict. (Changing rows whilst other tx changes layout). Retry?';
   S_MODIFIED_CONCURRENT_ROW_OP2 = 'Aborted. Concurrency conflict (2). (Other Tx added rows, but we are ilSerialisable). Retry?';
-  S_INTERNAL_REGEN_CHANGESETS_1 = 'Internal error regenating changesets (1).';
-  S_INTERNAL_REGEN_CHANGESETS_2 = 'Internal error regenating changesets (2).';
-  S_INTERNAL_REGEN_CHANGESETS_3 = 'Internal error regenating changesets (3).';
-  S_INTERNAL_REGEN_CHANGESETS_4 = 'Internal error regenating changesets (4).';
-  S_INTERNAL_REGEN_CHANGESETS_5 = 'Internal error regenating changesets (5).';
-  S_INTERNAL_REGEN_CHANGESETS_6 = 'Internal error regenating changesets (6).';
+  S_INTERNAL_REGEN_CHANGESETS = 'Internal error regenating changesets.';
   S_INDEX_FIELD_COUNTS_BAD_1 = 'Regen changesets: Query fields for index gave bad data (1).';
   S_INDEX_FIELD_COUNTS_BAD_2 = 'Regen changesets: Query fields for index gave bad data (2).';
   S_INDEX_REARRANGE_BAD = 'Regen changesets: Abs/Rel index field check failed despite previous checks.';
@@ -925,12 +872,9 @@ const
   S_SV_FIELDS_DIFFERENT_FORMAT = 'Field formats do not match (seachval comparison)';
   S_TABLE_FORMAT_CONCURRENTLY_CHANGED_NAV_0 = 'Concurrency: Table format changed whilst iterating (Nav 0).';
   S_TABLE_FORMAT_CONCURRENTLY_CHANGED_NAV_1 = 'Concurrency: Table format changed whilst iterating (Nav 1).';
-  S_TABLE_FORMAT_CONCURRENTLY_CHANGED_NAV_2 = 'Concurrency: Table format changed whilst iterating (Nav 2).';
   S_ROW_DELETED_NAV_0 = 'Row unexpectedly deleted (Nav 0).';
   S_ROW_DELETED_NAV_1 = 'Row unexpectedly deleted (Nav 1).';
-  S_ROW_DELETED_NAV_2 = 'Row unexpectedly deleted (Nav 2).';
   S_FIELDS_DONT_MATCH_IN_SEARCH = 'Internal error: Search Succeeded. but fields don''t match.';
-  S_NEXT_PREV_BY_IDX_NO_INODE = 'Next/Previous by Idx. Cursor, but no INode!';
   S_NEXT_PREV_BY_IDX_INODE_FIND_FAILED = 'Next/Previous by Idx. Couldn''t find INode for index (see note).';
   //Note. Possible to not get the INode if row deleted by a different API object in same Txion,
   //regardless of concurrency issues.
@@ -939,7 +883,6 @@ const
   S_PIN_FAILED_DURING_INTERNAL_INDEX_BUILD = 'Pin for INode failed during internal index build';
   S_INSERT_FAILED_DURING_INDEX_BUILD = 'Tree insertion failed during index build.';
   S_INSERT_FAILED_DURING_INTERNAL_INDEX_BUILD = 'Tree insertion failed during internal index build.';
-  S_PIN_FAILURE_DURING_INDEX_VALIDATE = 'Pin for cursor failed during index validation.';
   S_PIN_FIELDS_FAILURE_DURING_INDEX_VALIDATE = 'Pin fields failed during index validate, despite OK cursor.';
   S_SPARSENESS_DIFFERS_CHECKING_INDEX = 'Row formats differ checking index (should be all sparse, or all compact).';
   S_ERROR_IPINS_MODIFYING_INDEX = 'Confusion with IPins modifying index.';
@@ -965,39 +908,6 @@ const
   S_FKEYS_INTERNAL_5 = 'Foreign key checking internal error 5.';
   S_FKEYS_INTERNAL_6 = 'Foreign key checking internal error 6.';
   S_FKEYS_INTERNAL_7 = 'Foreign key checking internal error 7.';
-  S_FKEYS_INTERNAL_8 = 'Foreign key checking internal error 8.';
-  S_FKEYS_INTERNAL_9 = 'Foreign key checking internal error 9.';
-  S_FKEYS_INTERNAL_10 = 'Foreign key checking internal error 10.';
-  S_FKEYS_INTERNAL_11 = 'Foreign key checking internal error 11.';
-  S_FKEYS_INTERNAL_12 = 'Foreign key checking internal error 12.';
-  S_FKEYS_INTERNAL_13 = 'Foreign key checking internal error 13.';
-  S_FKEYS_INTERNAL_14 = 'Foreign key checking internal error 14.';
-  S_FKEYS_INTERNAL_15 = 'Foreign key checking internal error 15.';
-  S_FKEYS_INTERNAL_16 = 'Foreign key checking internal error 16.';
-  S_FKEYS_INTERNAL_17 = 'Foreign key checking internal error 17.';
-  S_FKEYS_INTERNAL_18 = 'Foreign key checking internal error 18.';
-  S_FKEYS_INTERNAL_19 = 'Foreign key checking internal error 19.';
-  S_FKEYS_INTERNAL_20 = 'Foreign key checking internal error 20.';
-  S_FKEYS_INTERNAL_21 = 'Foreign key checking internal error 21.';
-  S_FKEYS_INTERNAL_22 = 'Foreign key checking internal error 22.';
-  S_FKEYS_INTERNAL_23 = 'Foreign key checking internal error 23.';
-  S_FKEYS_INTERNAL_24 = 'Foreign key checking internal error 24.';
-  S_FKEYS_INTERNAL_25 = 'Foreign key checking internal error 25.';
-  S_FKEYS_INTERNAL_26 = 'Foreign key checking internal error 26.';
-  S_FKEYS_INTERNAL_27 = 'Foreign key checking internal error 27.';
-  S_FKEYS_INTERNAL_28 = 'Foreign key checking internal error 28.';
-  S_FKEYS_INTERNAL_29 = 'Foreign key checking internal error 29.';
-  S_FKEYS_INTERNAL_30 = 'Foreign key checking internal error 30.';
-  S_FKEYS_INTERNAL_31 = 'Foreign key checking internal error 31.';
-  S_FKEYS_INTERNAL_32 = 'Foreign key checking internal error 32.';
-  S_FKEYS_INTERNAL_33 = 'Foreign key checking internal error 33.';
-  S_FKEYS_INTERNAL_34 = 'Foreign key checking internal error 34.';
-  S_FKEYS_INTERNAL_35 = 'Foreign key checking internal error 35.';
-  S_FKEYS_INTERNAL_36 = 'Foreign key checking internal error 36.';
-  S_FKEYS_INTERNAL_37 = 'Foreign key checking internal error 37.';
-  S_FKEYS_INTERNAL_38 = 'Foreign key checking internal error 38.';
-  S_FKEYS_INTERNAL_39 = 'Foreign key checking internal error 39.';
-  S_FKEYS_INTERNAL_40 = 'Foreign key checking internal error 40.';
   S_ENTITY_LIST_CONFUSION_CHECKING_CHANGES = 'Error: did not expect async mod of entity lists at this time.';
   S_API_TABLE_METADATA_NOT_COMMITED = 'No committed metadata for this table (api level)';
 
@@ -1880,7 +1790,7 @@ begin
 
   //Expect NCFieldCount to be >= CCFieldCount or 0.
   if not ((NCFieldCount >= CCFieldCount) or (NCFieldCount = 0)) then
-    raise EMemDbInternalException.Create(S_INTERNAL_REGEN_CHANGESETS_1);
+    raise EMemDbInternalException.Create(S_INTERNAL_REGEN_CHANGESETS);
 
   //Fields: Check definitions in new copy (if there are some).
   NDIndex := 0;
@@ -1915,7 +1825,7 @@ begin
   end;
 
   if not ((NCIndexCount >= CCIndexCount) or (NCIndexCount = 0)) then
-    raise EMemDbInternalException.Create(S_INTERNAL_REGEN_CHANGESETS_2);
+    raise EMemDbInternalException.Create(S_INTERNAL_REGEN_CHANGESETS);
 
   //Indexes: Check definitions in new copy (if there are some).
   NDIndex := 0;
@@ -1960,13 +1870,13 @@ begin
     //Deleted or no change.
     if not ((Length(FFieldChangesets) = CCFieldCount)
       or (Length(FFieldChangesets) = 0)) then
-      raise EMemDbInternalException.Create(S_INTERNAL_REGEN_CHANGESETS_3);
+      raise EMemDbInternalException.Create(S_INTERNAL_REGEN_CHANGESETS);
   end
   else
   begin
     //Added or changed.
     if Length(FFieldChangesets) <> NCFieldCount then
-      raise EMemDbInternalException.Create(S_INTERNAL_REGEN_CHANGESETS_4);
+      raise EMemDbInternalException.Create(S_INTERNAL_REGEN_CHANGESETS);
   end;
 
   //Fields: Comparitive for changeset, and fill out *all* items
@@ -2012,13 +1922,13 @@ begin
     //Deleted or no change.
     if not ((Length(FIndexChangesets) = CCIndexCount)
       or (Length(FIndexChangesets) = 0)) then
-      raise EMemDbInternalException.Create(S_INTERNAL_REGEN_CHANGESETS_5);
+      raise EMemDbInternalException.Create(S_INTERNAL_REGEN_CHANGESETS);
   end
   else
   begin
     //Added or changed.
     if Length(FIndexChangesets) <> NCIndexCount then
-      raise EMemDbInternalException.Create(S_INTERNAL_REGEN_CHANGESETS_6);
+      raise EMemDbInternalException.Create(S_INTERNAL_REGEN_CHANGESETS);
   end;
 
   selCurrent := MakeCurrentBufSelector(FTid);
@@ -5095,7 +5005,7 @@ begin
     FKM := nil;
 
   if NotAssignedOrsentinel(FKM) then
-    raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_2);
+    raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_1);
 
   //Metadata latest selector.
   SelLatest := MakeLatestBufSelector(Tid);
@@ -5126,7 +5036,7 @@ begin
       raise EMemDBInternalException.Create(S_FK_INDEX_FIELD_INTERNAL);
 
     if (Length(Meta.FieldDefsReferring) <> Length(Meta.FieldDefsReferringAbsIdx)) then
-      raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_3);
+      raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_1);
 
     //Setup Meta struct for index referring.
     TidLocal := Meta.TableReferring.GetTidLocal(Tid);
@@ -5143,13 +5053,13 @@ begin
       //Should be using final offsets which agree with abx idxs.
       if not (FieldOffsetsSame(Meta.IndexReferring.FinalFieldOffsets,
           Meta.FieldDefsReferringAbsIdx)) then
-          raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_33);
+          raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_1);
 
       //Even if row is temporarily marked as sparse for some later field
       //rearrangement for some later index, it should not affect this idx.
       if not (FieldOffsetsSame(Meta.IndexReferring.SparseFieldOffsets,
           Meta.FieldDefsReferringAbsIdx)) then
-          raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_34);
+          raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_1);
     end
     else
     begin
@@ -5167,14 +5077,14 @@ begin
         //Expect index to be using sparse offsets.
         if not (FieldOffsetsSame(Meta.IndexReferring.SparseFieldOffsets,
             Meta.FieldDefsReferringAbsIdx)) then
-            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_35);
+            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_1);
         //Don't check final offsets here, we're not worried about them.
       end
       else
       begin
         if not (FieldOffsetsSame(Meta.IndexReferring.FinalFieldOffsets,
             Meta.FieldDefsReferringAbsIdx)) then
-            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_36);
+            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_1);
       end;
     end;
 
@@ -5196,7 +5106,7 @@ begin
       raise EMemDBInternalException.Create(S_FK_INDEX_FIELD_INTERNAL);
 
     if (Length(Meta.FieldDefsReferred) <> Length(Meta.FieldDefsReferredAbsIdx)) then
-      raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_4);
+      raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_1);
 
 
     //Setup Meta struct for index referred.
@@ -5214,13 +5124,13 @@ begin
       //Should be using final offsets which agree with abx idxs.
       if not (FieldOffsetsSame(Meta.IndexReferred.FinalFieldOffsets,
           Meta.FieldDefsReferredAbsIdx)) then
-          raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_37);
+          raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_1);
 
       //Even if row is temporarily marked as sparse for some later field
       //rearrangement for some later index, it should not affect this idx.
       if not (FieldOffsetsSame(Meta.IndexReferred.SparseFieldOffsets,
           Meta.FieldDefsReferredAbsIdx)) then
-          raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_38);
+          raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_1);
     end
     else
     begin
@@ -5238,14 +5148,14 @@ begin
         //Expect index to be using sparse offsets.
         if not (FieldOffsetsSame(Meta.IndexReferred.SparseFieldOffsets,
             Meta.FieldDefsReferredAbsIdx)) then
-            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_39);
+            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_1);
         //Don't check final offsets here, we're not worried about them.
       end
       else
       begin
         if not (FieldOffsetsSame(Meta.IndexReferred.FinalFieldOffsets,
             Meta.FieldDefsReferredAbsIdx)) then
-            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_40);
+            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_1);
       end;
     end;
 
@@ -5278,7 +5188,7 @@ begin
       FillChar(CCMeta, sizeof(CCMeta), 0);
       FKMCC := CP as TMemForeignKeyMetadataItem;
       if NotAssignedOrSentinel(FKMCC) then
-        raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_5);
+        raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_1);
 
       //If we have a current copy (not added), then it must have referred to
       //existing table objects, and those existing table objects must have
@@ -5401,7 +5311,7 @@ begin
             //Not TidLocal.LayoutChangeRequired, so neither of these fields
             //should be sparse.
             if CF.Sparse or NF.Sparse then
-              raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_6);
+              raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_2);
             AddToList := not SameLayoutFieldsSame(CF, NF,
               Meta.IndexReferring.FinalFieldOffsets);
           end;
@@ -5410,14 +5320,14 @@ begin
         begin
           //Must be row added, or MasterRows (meta added, add all rows).
           if not (Added or MasterRows) then
-            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_7);
+            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_2);
           AddToList := true;
         end;
         if AddToList then
         begin
           IRet := Meta.Lists.FReferringAdded.AddItem(Row, IRecAdd);
           if (IRet <> rvOK) then
-            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_14);
+            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_2);
         end;
       end;
     end;
@@ -5487,7 +5397,7 @@ begin
         //Hoist meta check out of loop.
         if not FieldOffsetsSame(Meta.FieldDefsReferringAbsIdx,
                Meta.IndexReferring.FinalFieldOffsets) then
-          raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_9);
+          raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_3);
 
         LookasideIRec := Meta.Lists.FReferringAdded.GetAnItem;
         while Assigned(LookasideIRec) do
@@ -5511,7 +5421,7 @@ begin
           //As we assume that Index has current and latest, we also assume
           //fields are not sparse, because no layout change required.
           if LookupFields.Sparse then
-            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_8);
+            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_3);
 
           LookupFieldRecs := BuildMultiDataRecs(LookupFields,
             Meta.IndexReferring.FinalFieldOffsets);
@@ -5527,21 +5437,21 @@ begin
             Assert(TObject(INode.Pin) is PMemDBIndexPin);
             DataFields := PMemDBIndexPin(INode.Pin).PinnedItem as TMemRowFields;
             if DataFields.Sparse then
-              raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_10);
+              raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_3);
             if not SameLayoutFieldsSame(LookupFields, DataFields,
               Meta.IndexReferring.FinalFieldOffsets) then
-              raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_11);
+              raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_3);
 {$ENDIF}
           end;
           NextLookasideIRec := LookasideIRec;
           LookasideRV := Meta.Lists.FReferringAdded.GetAnotherItem(NextLookasideIRec);
           if not (LookasideRV in [rvOK, rvNotFound]) then
-            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_12);
+            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_3);
           if Assigned(INode) then
           begin
             LookasideRV := Meta.Lists.FReferringAdded.RemoveItem(LookasideIRec);
             if LookasideRV <> rvOK then
-              raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_13);
+              raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_3);
           end;
           LookasideIRec := NextLookasideIRec;
         end;
@@ -5575,7 +5485,7 @@ begin
       //Hoist meta check out of loop.
       if not FieldOffsetsSame(Meta.IndexReferred.FinalFieldOffsets,
         Meta.FieldDefsReferredAbsIdx) then
-        raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_15);
+        raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_4);
 
       IRec := TidLocal.FCPRows.GetAnItem;
       while Assigned(IRec) do
@@ -5598,19 +5508,19 @@ begin
               //Deleted rows / value sets cannot be sparse, previous changes
               //must have been committed.
               if CurFields.Sparse or NxtFields.Sparse then
-                raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_16);
+                raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_4);
 
               AddToList := not SameLayoutFieldsSame(CurFields, NxtFields,
                 Meta.IndexReferred.FinalFieldOffsets);
             end
             else //Should always be added, deleted or changed.
-              raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_17);
+              raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_4);
 
             if AddToList then
             begin
               RV := Meta.Lists.FReferredDeleted.AddItem(Row, IRecAdd);
               if RV <> rvOK then
-                raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_18);
+                raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_4);
             end;
           end;
         end;
@@ -5669,7 +5579,7 @@ begin
         //Hoist meta check out of loop, we'll need this index in a bit.
         if not FieldOffsetsSame(Meta.FieldDefsReferredAbsIdx,
                Meta.IndexReferred.FinalFieldOffsets) then
-          raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_19);
+          raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_5);
 
         IRec := TidLocal.FCPRows.GetAnItem;
         //Created referred added list.
@@ -5693,7 +5603,7 @@ begin
                   NextFields := NC as TMemRowFields;
 
                   if CurFields.Sparse or NextFields.Sparse then
-                    raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_20);
+                    raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_5);
 
                   AddToList := not SameLayoutFieldsSame(CurFields, NextFields,
                     Meta.FieldDefsReferredAbsIdx);
@@ -5701,7 +5611,7 @@ begin
               end
               else //Do not expect unchanged rows here.
               begin
-                raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_21);
+                raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_5);
                 AddToList := false; //Placate compiler.
               end;
               //OK, add to lookaside.
@@ -5709,7 +5619,7 @@ begin
               begin
                 RV := Meta.Lists.FReferredAdded.AddItem(Row, IRecAdd);
                 if not (RV in [rvOK, rvDuplicateKey]) then
-                  raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_22);
+                  raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_5);
               end;
             end;
           end;
@@ -5736,7 +5646,7 @@ begin
           AddedRV := Meta.Lists.FReferredAdded.FindByIndex(
             @Meta, SearchVal, AddedIRec);
           if not (AddedRV in [rvOK, rvNotFound]) then
-            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_23);
+            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_5);
           //DelDel => Entry in referred deleted also in referred added.
           DelDel := AddedRV = rvOK;
 
@@ -5744,7 +5654,7 @@ begin
           NextDeletedIRec := DeletedIRec;
           DeletedRV := Meta.Lists.FReferredDeleted.GetAnotherItem(NextDeletedIRec);
           if not (DeletedRV in [rvOK, rvNotFound]) then
-            raise EMemDbInternalException.Create(S_FKEYS_INTERNAL_24);
+            raise EMemDbInternalException.Create(S_FKEYS_INTERNAL_5);
 
           if DelDel then
           begin
@@ -5759,7 +5669,7 @@ begin
 
             //No fields sparse: if layout change no lists here to trim.
             if AddRowFields.Sparse or DelRowFields.Sparse then
-              raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_25);
+              raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_5);
 
             Assert(SameLayoutFieldsSame(AddRowFields,
               DelRowFields, Meta.FieldDefsReferredAbsIdx));
@@ -5824,7 +5734,7 @@ begin
         Offsets := Meta.IndexReferring.FinalFieldOffsets;
 
       if not FieldOffsetsSame(Offsets, Meta.FieldDefsReferringAbsIdx) then
-        raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_26);
+        raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_6);
 
       //Referring added, new values in abLatest, cos can add from scratch too.
       ListDataRecs := BuildMultiDataRecs(ListRowFields,
@@ -5860,11 +5770,11 @@ begin
         SearchOffsets := Meta.IndexReferred.FinalFieldOffsets;
 
       if not FieldOffsetsSame(SearchOffsets, Meta.FieldDefsReferredAbsIdx) then
-        raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_27);
+        raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_6);
 
       if not (DiffLayoutFieldsSame(ListRowFields, Offsets,
                                    SearchRowFields, SearchOffsets)) then
-        raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_28);
+        raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_6);
 {$ENDIF}
       Meta.Lists.FReferringAdded.GetAnotherItem(ListIRec);
     end;
@@ -5880,11 +5790,11 @@ begin
 
       //Referred deleted not sparse.
       if ListRowFields.Sparse then
-        raise EMemDbInternalException.Create(S_FKEYS_INTERNAL_29);
+        raise EMemDbInternalException.Create(S_FKEYS_INTERNAL_6);
 
       Offsets := Meta.IndexReferred.FinalFieldOffsets;
       if not FieldOffsetsSame(Offsets, Meta.FieldDefsReferredAbsIdx) then
-        raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_30);
+        raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_6);
 
       ListDataRecs := BuildMultiDataRecs(ListRowFields, Meta.IndexReferred.FinalFieldOffsets);
 
@@ -5917,11 +5827,11 @@ begin
           SearchOffsets := Meta.IndexReferring.FinalFieldOffsets;
 
         if not FieldOffsetsSame(SearchOffsets, Meta.FieldDefsReferringAbsIdx) then
-          raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_31);
+          raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_6);
 
         if not DiffLayoutFieldsSame(ListRowFields, Offsets,
                                     SearchRowFields, SearchOffsets) then
-          raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_32);
+          raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_6);
 {$ENDIF}
         raise EMemDBConsistencyException.Create(S_FK_IN_REFERRING_TABLE);
       end;
@@ -5979,7 +5889,7 @@ begin
     FReferredAdded := TIndexedStoreO.Create;
     RV := FReferredAdded.AddIndex(TMemDBRowLookasideIndexNode, @Meta, false);
     if RV <> rvOK then
-      raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_19);
+      raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_7);
   end;
 
   try

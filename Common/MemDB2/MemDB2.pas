@@ -217,7 +217,7 @@ const
   S_DB_HAS_SESSIONS = 'DB has open sessions.';
   S_DB_SESSION_HAS_TRANSACTIONS = 'Session has open transactions';
   S_DB_TRANSACTION_NOT_FOUND = 'Transaction not found';
-  S_COMMIT_ROLLBACK_IN_PROGRESS = 'Commit, rollback or mini-op for this transaction already in progress.';
+  S_COMMIT_ROLLBACK_IN_PROGRESS = 'Commit or rollback for this transaction already in progress.';
   S_COMMIT_OR_ROLLBACK_BEFORE_FREE = 'Transactions should be committed or rolled back before destroying. Are you calling an inherited ''Free'' function? ';
   S_ERRORPHASE_ERROR = 'Can''t start transaction, error state: ';
   S_ERRORPHASE_COMMIT_ERROR = 'Can''t stop transaction, error state: ';

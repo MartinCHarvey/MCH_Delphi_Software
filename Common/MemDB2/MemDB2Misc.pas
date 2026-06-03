@@ -285,22 +285,6 @@ uses
 {$ENDIF}
   MemDB2Indexing, PatchFreeMem;
 
-const
-  S_TAG_FREED_IDX_SET = 'Index tag data freed whilst index still set.';
-  S_IDXTAG_BAD_REFCOUNT = 'Index tag reference counting bad.';
-  S_IDXTAG_BAD_INIT = 'Bad or duplicate initialization of index tag data.';
-  S_IDXTAG_NOT_PERMANENT = 'Index tag not user permanent index, cannot make temporary.';
-  S_IDXTAG_NOT_TEMPORARY = 'Index tag not temporary reindex, cannot make permanent.';
-  S_IDXS_ALREADY_SET = 'Index tag link to store already set.';
-  S_IDXS_NOT_SET = 'Index tag link to store not set.';
-  S_INDEX_ADD_FAILED = 'Failed to add an index.';
-  S_INDEX_DELETE_FAILED = 'Failed to delete an index';
-  S_IDXS_NOT_USER = 'Index tag data not for a user index, cannot add/remove in this way.';
-  S_IDXS_NOT_INTERNAL = 'Index tag data not for an internal index, cannot add/remove in this way';
-  S_INTERNAL_INDEX_HAS_STORE_LINK = 'Internal index tagdata attached to specific db';
-  S_INDEXTAG_DATA_NOT_VALID = 'Data in index tag not valid for this index type';
-  S_OPTIMIZED_INDEX_SWIZZLE_FAILED = 'Internal error, optimised index building failed';
-
 { Misc functions - Optimizations }
 
 function OptApplies(Opt: TOptimization; Opts: TOptimizeSet): boolean;

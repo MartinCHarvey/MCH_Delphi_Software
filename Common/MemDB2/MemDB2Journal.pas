@@ -196,9 +196,7 @@ const
   S_COULDNT_CREATE_DIR = 'Couldn''t create or open directory: ';
   S_COULDNT_FIND_EXPECTED_DB_FILES = 'Couldn''t find sequentially numbered db files.';
   S_DB_FILES_NUMBERING_BAD = 'Db file numbering and types disagree.';
-  S_CORRUPTED_FILE = 'Corrupted file: ';
   S_EXCEPTION = 'Internal error, exception: ';
-  S_STREAM_SYSTEM_INTERNAL = 'Stream system internal error writing to file.';
 
   CHECKPOINT_RATIO = 10; { More than 1/10th data in journal, re-checkpoint }
 
