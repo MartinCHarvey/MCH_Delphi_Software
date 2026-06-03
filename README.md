@@ -85,8 +85,6 @@ Future development plans:
 
 - Clean up parser error recovery code with a "standard" lexer.
 - MemDB: Query engine.
-- MemDB (long term): Have a "pessimistic" buffering and locking model (as currently) for full SQL compatiblity, and a "lightweight parallel" mode which does not allow composite ops, and/or big restructuring, but does allow lightweght parallel write operations.
 - Investigate compilability under FreePascal compiler.
-- Investigate portability to mobile apps.
 
 Comments / queries to martin_c_harvey@hotmail.com
