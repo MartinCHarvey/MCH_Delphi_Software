@@ -34,8 +34,6 @@ interface
   Example uses are then provided in the other files.
 }
 
-//TODO - Optional "NoCow" mode when it's allowed.
-
 // N.B. TCowTreeItem is a child of TReffed, so using trackables
 // will slow this down quite a bit (there are a lot of alloc/deallocs).
 

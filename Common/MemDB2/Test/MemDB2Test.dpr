@@ -16,7 +16,6 @@ uses
   DLThreadQueue in '..\..\WorkItems\DLThreadQueue.pas',
   MemDB2Api in '..\MemDB2Api.pas',
   BufferedFileStream in '..\..\CachedStream\BufferedFileStream.pas',
-  GlobalLog in '..\..\Logging\GlobalLog.pas',
   Parallelizer in '..\..\Parallelizer\Parallelizer.pas',
   NullStream in '..\..\NullStream\NullStream.pas',
   LockAbstractions in '..\..\LockAbstractions\LockAbstractions.pas',

@@ -672,7 +672,6 @@ var
   Found: boolean;
   Data: TMemDBFieldDataRec;
   TMetAPI: TMemAPITableMetadata;
-  FKAPI: TMemAPIForeignKey;
 begin
   FTimeStamp := Now;
 
@@ -1502,7 +1501,6 @@ procedure TMultiModThread.ModByTable;
 var
   Trans: TMemDBTransaction;
   DBAPI: TMemAPIDatabase;
-  TabI: integer;
   TDatAPI: TMemAPITableData;
   Found: boolean;
   FieldIndexI: integer;
@@ -3071,10 +3069,6 @@ begin
   //Check FK checking OK, even when index being added.
   DupFieldsNewFK;
 
-  //TODO TODO Temp.
-  //Just checking 3c does not bork the index, it does not.
-{$IFDEF TMP_DEBUGGING_REMOVE}
-
   //Test 3c.
   //Add data to dependent table whilst deleting fields from master.
   Pass := false;
@@ -3129,8 +3123,6 @@ begin
     end;
   end;
 
-{$ENDIF}
-
   //Test 3d.
   //Delete data from master table whilst deleting fields from child.
   Pass := false;
@@ -3155,15 +3147,7 @@ begin
       end;
       TableData := DBAPI.GetAPIObjectFromEntity('FKTestTableMaster', APITableData) as TMemAPITableData;
       try
-{$IFDEF TEMP_DEBUGGING_REMOVE}
-        TableData.Locate(ptFirst, '');
-{$ELSE}
-        //Quick check whether interation by non master index here is also
-        //broken.
         TableData.Locate(ptFirst, 'MasterKeyIdx');
-        //OK, this is specifically an internal indec iteration problem.
-        //it's not being kept up to date in some cases.
-{$ENDIF}
         TableData.Delete;
       finally
         TableData.Free;
@@ -4221,9 +4205,6 @@ begin
       raise;
     end;
   end;
-
-  //TODO - Test index evolution when changing data, no index changes.
-
 
     //Delete index and associated field.
   Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);

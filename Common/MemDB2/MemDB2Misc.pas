@@ -1,10 +1,10 @@
 ﻿unit MemDB2Misc;
 {
 
-Copyright � 2026 Martin Harvey <martin_c_harvey@hotmail.com>
+Copyright © 2026 Martin Harvey <martin_c_harvey@hotmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the �Software�), to deal in
+this software and associated documentation files (the "Software"), to deal in
 the Software without restriction, including without limitation the rights to
 use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
 of the Software, and to permit persons to whom the Software is furnished to do
@@ -13,7 +13,7 @@ so, subject to the following conditions:
 The above copyright notice and this permission notice shall be included in
 all copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED �AS IS�, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
@@ -146,8 +146,6 @@ type
 
   function DBAccessModeToLockReason(Am: TMDBAccessMode): TRWWLockReason;
 
-  //TODO - Don't really think buf selectors are gonna work the same way.
-  //esp now have separate get/pin functions.
   function MakeCurrentBufSelector(const Tid: TTransactionId): TBufSelector;
   function MakeNextBufSelector(const Tid: TTransactionId): TBufSelector;
   function MakeLatestBufSelector(const Tid: TTransactionId): TBufSelector;
@@ -179,14 +177,11 @@ type
     mdbClosingWaitClients, mdbClosingWaitPersist, mdbClosed,
     mdbError);
 
-  //TODO - Separate out pre-commit / commit / rollback parallelization?
   TOptimization = (
     optEntitiesParallel,
     optIndexBuildParallel,
     optIndexEvolveParallel,
-    optGuaranteedSerial  //Journal replay, no thread conflicts.
-    //optIndexDeleteParallel, TODO?
-    //optFKListsParallel TODO?
+    optGuaranteedSerial
   );
 
 const
@@ -240,7 +235,7 @@ const
                                            ftBlob];
   MDBIsoStrings: TMDBIsoStrings = ('ilReadComitted', 'ilReadRepeatable', 'ilSnapshot', 'ilSerialisable');
   MDBABStrings: TMDBABSelTypeStrings = ('abCurrent', 'abNext', 'abLatest');
-  //TODO - check all cases where this is passed around. (New value).
+
   MemAPIPositionStrings:TMemAPIPositionStrings
     = ('ptFirst', 'ptLast', 'ptNext', 'ptPrevious', 'ptInvalid');
 
@@ -331,8 +326,6 @@ begin
     optContext: DoOpt := (Policy.EnabledReplayFirst and InitFirstTrans) or
                          (Policy.EnabledReplayNext and InitNextTrans) or
                          (Policy.EnabledUserOps and UserOp);
-    //TODO - optTxionSize can overestimate Txion size based on file size,
-    //and create threads for a bunch of tiny transactions.
     optTxionSize: DoOpt := (DBSizeHint.ChangedRows + DBSizeHint.IndexBuildRows
                               > Policy.EnabledRowChangeCount) or
                            (TxionSizeEstimate > Policy.EnabledTxionBufSize) or
@@ -486,7 +479,6 @@ begin
 {$IFDEF MSWINDOWS}
   inherited Create(FileName, FILE_CACHE_SIZE);
 {$ELSE}
-  //TODO - Write cached construct on android.
   inherited Create(FileName, fmCreate);
 {$ENDIF}
 {$IFDEF USE_TRACKABLES}

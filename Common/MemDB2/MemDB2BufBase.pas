@@ -1,10 +1,10 @@
 ﻿unit MemDB2BufBase;
 {
 
-Copyright � 2026 Martin Harvey <martin_c_harvey@hotmail.com>
+Copyright © 2026 Martin Harvey <martin_c_harvey@hotmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the �Software�), to deal in
+this software and associated documentation files (the "Software"), to deal in
 the Software without restriction, including without limitation the rights to
 use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
 of the Software, and to permit persons to whom the Software is furnished to do
@@ -13,7 +13,7 @@ so, subject to the following conditions:
 The above copyright notice and this permission notice shall be included in
 all copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED �AS IS�, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
@@ -91,8 +91,6 @@ type
   TMemDBJournalCreator = class
 {$ENDIF}
   protected
-    //TODO - Check all cases where this is used, and we should be using what the
-    //*actual* change flags are.
     class procedure ChangeFlagsFromPinned(PinnedCurrent, PinnedNext: TMemDBStreamable;
       var Added:boolean;
       var Changed: boolean;
@@ -125,9 +123,6 @@ type
 
   TMemDBChangeable = class(TMemDBJournalCreator)
   public
-    //TODO - Check whether still need this after all is said and done.
-    //TODO - Nullness here is binary-tid-local, not same as
-    //multibuf nullness, which indicates empty and nothing pinned.
     procedure Delete(const TId: TTransactionId;
       MinIso: TMDBIsolationLevel = Low(TMDBIsolationLevel)); virtual; abstract;
     procedure RequestChange(const Tid: TTransactionId;
@@ -244,8 +239,6 @@ type
   PMemDbPinnedItem = ^TMemDbPinnedItem;
 {$ENDIF}
 
-//TODO - May be able to optimise this structure out with
-//an extra link field in TMemDbIndexLeafGeneric.
 {$IFOPT C+}
   TMemDBIndexPin = class(TTrackable)
 {$ELSE}
@@ -321,7 +314,6 @@ type
     function NewCurrentPinFromINode(const Tid:TTransactionId; IPin: PMemDBIndexPin; Reason:TPinReason): TMemDBStreamable;
     function ReUseCurrentPinForINode(const Tid: TTransactionId; Pin: PMemDbPinnedItem; IPin: PMemDBIndexPin; Reason: TPinReason): TMemDbStreamable;
 
-    //TODO - Move this somewhere else?
     procedure CheckABStreamableListChange(Current, Next: TMemStreamableList);
     procedure LookaheadHelper(const PseudoTid: TTransactionId; Stream: TStream);
 
@@ -987,10 +979,6 @@ begin
     Cur := FindCurMultiItem;
     Assert(Assigned(Cur));
     CurPin := FindPin(Tid);
-{$IFDEF DEBUG_SNAPSHOT}
-    //TODO - Move this back down below pin checking
-    Nxt := FindNxtMultiItem(Tid);
-{$ENDIF}
     if Assigned(CurPin) then
     begin
       //Less stringent checking (repeatable read), where we read, modify, write
@@ -999,9 +987,7 @@ begin
           raise EMemDBConcurrencyException.Create(S_MODIFIED_CONCURRENT_ABORT_WAR_2);
     end;
 
-{$IFNDEF DEBUG_SNAPSHOT}
     Nxt := FindNxtMultiItem(Tid);
-{$ENDIF}
     if Assigned(Cur.Item) or Assigned(Nxt) then
     begin
       if not Assigned(Nxt) then
@@ -1200,7 +1186,7 @@ var
 begin
   LockSelf;
   try
-    inherited; //TODO Will do this under lock, check it doesn't do much.
+    inherited;
     Cur := FindCurMultiItem;
     Nxt := FindNxtMultiItem(Tid);
     Pin := FindPin(Tid);
@@ -1240,7 +1226,7 @@ begin
     DCPPre(RefUp);
     CPTidPre(Tid, TidUp);
 
-    inherited; //TODO Will do this under lock, check it doesn't do much.
+    inherited;
     Cur := FindCurMultiItem;
     Nxt := FindNxtMultiItem(Tid);
     Pin := FindPin(Tid);

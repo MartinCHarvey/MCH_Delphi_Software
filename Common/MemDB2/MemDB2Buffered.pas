@@ -1,10 +1,10 @@
 ﻿unit MemDB2Buffered;
 {
 
-Copyright � 2026 Martin Harvey <martin_c_harvey@hotmail.com>
+Copyright © 2026 Martin Harvey <martin_c_harvey@hotmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the �Software�), to deal in
+this software and associated documentation files (the "Software"), to deal in
 the Software without restriction, including without limitation the rights to
 use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
 of the Software, and to permit persons to whom the Software is furnished to do
@@ -13,7 +13,7 @@ so, subject to the following conditions:
 The above copyright notice and this permission notice shall be included in
 all copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED �AS IS�, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
@@ -29,15 +29,7 @@ IN THE SOFTWARE.
   Also main logic for table and DB handling, ACID evolution.
 }
 
-// TODO - When all is up and working, look at possibly
-// out of memory exception paths, and how to make them better.
-// Just go thru all the cases by class type and alloc position.
-
 interface
-
-{$IFDEF DEBUG_DATABASE_DELETE}
-{$DEFINE DEBUG_DATABASE_NAVIGATE}
-{$ENDIF}
 
 uses
 {$IFDEF USE_TRACKABLES}
@@ -96,8 +88,6 @@ type
     property Parent: TObject read FParent;
   end;
 
-//TODO - Go through and sort all MEMDB2_TMP_REMOVE declarations
-
   TMemDBTablePersistent = class;
   TTidLocal = class;
 
@@ -112,11 +102,6 @@ type
   private
     FRowID: TGUID;
     FTable: TMemDBTablePersistent;
-    //TODO - Not even convinced we need Row proxy, remove it?
-    //I think DCP handlers are enough (no external references
-    //outside transaction, all handled by pins).
-    //Depends what query engine stuff might do - probably refs
-    //data items itself.
     FProxy: TMemDBRowProxy;
     FMasterRec: TItemRec;
   protected
@@ -130,7 +115,6 @@ type
     //This function checks formats enough so algorithms don't die, but
     //is not the final concurrency check (which is done via Tid comparison).
 
-    //TODO - One day, a list of format changes so we can fix-up on the fly?
     function CheckFormatAgainstMeta(const Tid: TTransactionId; AB: TAbSelType; MD: TMemTableMetadataItem; PinReason: TPinReason): boolean;
     class function StaticCheckFormatAgainstMeta(Data: TMemDBStreamable; MD: TMemTableMetadataItem): boolean;
     function CheckFormatAgainstMetaDefs(const Tid: TTransactionId; AB: TAbSelType; MetaFieldDefs: TMemStreamableList; PinReason: TPinReason): boolean;
@@ -146,11 +130,6 @@ type
 
     property RowId:TGUID read FRowId write FRowId;
   end;
-
-  //TODO Lack of atomicity in metadata names etc currently protected
-  //by commit lock, multi-write only on table data.
-  //This may change in future.
-
 
   TMemDBEntity = class;
 
@@ -208,8 +187,6 @@ type
     FInterfaced: TMemDBAPIInterfacedObject;
   protected
     FMetadata: TMemDBEntityMetadata;
-
-    //TODO - Atomic pinning and flags here.
     function HandleInterfacedObjRequest(Transaction: TObject; ID: TMemDBAPIId): TMemDBAPI;virtual;
     procedure HandleAddRefForAPI(Sender: TObject);
     procedure HandleReleaseForAPI(Sender: TObject);
@@ -234,21 +211,10 @@ type
     property Metadata: TMemDBEntityMetadata read FMetadata;
   end;
 
-  //TODO - Re-check this, I think it's OK,
-  //however, calc via index tags ....
-  TMemDBFKMetaTags = record
-    abBuf: TBufSelector;
-    FieldAbsIdxs: TFieldOffsets;
-  end;
-  PMemDBMetaTags = ^TMemDbFKMetaTags;
-
   TMemDBFKMetaLists = record
     FReferringAdded,
     FReferredDeleted,
     FReferredAdded: TIndexedStoreO;
-
-    //Only need one extra index out of a possible six!
-    TagReferredAddedNext: TMemDbFkMetaTags;
   end;
 
   //A temp struct we pass up the stack, to let functions
@@ -529,7 +495,6 @@ type
 
   TMemDBTablePersistent = class(TMemDBEntity)
   private
-    //TODO - Determine and check some locking order.
     FMasterRowLock: TCriticalSection;
     FRowChangeLocks: TDLEntry;
     //Addition locks possibly the first of many smaller scale locks, but
@@ -589,11 +554,11 @@ type
                                      var CC, NC: TMemTableMetadataItem;
                                      var CCFieldCount, CCIndexCount,
                                      NCFieldCount, NCINdexCount: integer;
-                                     PinReason: TPinReason); //TODO - Do we need pin reason?
+                                     PinReason: TPinReason);
 
     procedure GetCurrNxtMetaCopies(const Tid: TTransactionId;
                                    var CC, NC: TMemTableMetadataItem;
-                                   PinReason: TPinReason);  //TODO - Do we need pin reason?
+                                   PinReason: TPinReason);
 
     procedure LookaheadHelper(Stream: TStream;
                               var MetadataInStream: boolean;
@@ -660,9 +625,6 @@ type
     FEntityLock: TCriticalSection;
     FEntityList: TDLEntry;
 
-    //TODO: Thorn in my side. Pre-commit commit lock currently vital
-    //for ensuring consistency of indices and foreign keys.
-    //Big TODO is eventually getting rid of it.
     FCommitLock: TCriticalSection;
     FMetaIndexLock: TCriticalSection;
 
@@ -777,7 +739,6 @@ type
     property ChildDeleted[Idx: integer]: boolean read GetChildDeleted;
     property ChildNull[Idx: integer]: boolean read GetChildNull;
 
-    //TODO - Handle pinning and parent MultiBuffered class.
     property List[const AB: TAbSelType]: TMemStreamableList read GetABList write SetABList;
     property OnChangeRequest: TNotifyEvent read FOnChangeRequest write FOnChangeRequest;
   end;
@@ -789,9 +750,6 @@ function IndexByNameInt(MetadataCopy: TMemTableMetadataItem; const Name:string; 
 
 //Would like to put in Mics, but requires streamable list decl.
 
-//TODO - Building multi data recs for index validation / comparison may prove
-//to be a bit slow and costly. Consider refactoring in a way which does
-//not need mem alloc.
 function BuildMultiDataRecs(FieldList: TMemStreamableList;
                             const AbsFieldOffsets: TFieldOffsets): TMemDbFieldDataRecs;
 
@@ -815,12 +773,6 @@ const
 implementation
 
 uses
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-  GlobalLog,
-{$ENDIF}
-{$IFDEF DEBUG_SNAPSHOT}
-  GlobalLog,
-{$ENDIF}
   SysUtils, MemDB2, NullStream, MemDB2Api, Parallelizer;
 
 const
@@ -2720,8 +2672,8 @@ begin
 
     IDef := NC.IndexDefs[i] as TMemIndexDef;
     FieldDefs := FParentTable.FieldsByNames(NextBufSelector,
-                                                                 IDef.FieldArray,
-                                                                 SparseOffsets, pinEvolve); //TODO FinalCheck?
+                                            IDef.FieldArray,
+                                            SparseOffsets, pinEvolve);
     Assert(Length(FieldDefs) = Length(SparseOffsets));
     if not IDef.FieldNameCount = Length(FieldDefs) then
       raise EMemDbInternalException.Create(S_ERROR_GETTING_OFFSETS_IN_INDEX_BUILD);
@@ -2731,13 +2683,6 @@ begin
       CompactOffsets[j] := FieldDefs[j].FieldIndex;
 
     NewIndex := TMemDBIndex.Create;
-
-  {$IFDEF DEBUG_SNAPSHOT}
-    GLogLog(SV_INFO, 'T: ' + IntToStr(NativeUInt(FParentTable)) +
-            ' Build New UIdx [' +IntToStr(i) + '] ' +
-            '(' + IntToStr(NativeUint(NewIndex)) + ')' +
-            'Outside lock: ' +BoolToStr(LocalIter));
-  {$ENDIF}
 
     with NewIndex as TMemDBIndex do
     begin
@@ -2874,13 +2819,6 @@ begin
   try
     Context := PBuildValidateIdxParallelContext(Ref1);
     NewIndex := TMemDBIndexInternal.Create;
-
-  {$IFDEF DEBUG_SNAPSHOT}
-      GLogLog(SV_INFO, 'T: ' + IntToStr(NativeUInt(FParentTable)) +
-              ' Build New IntIdx [' +IntToStr(-1) + '] ' +
-              '(' + IntToStr(NativeUint(NewIndex)) + ')' +
-              'Outside lock: ' +BoolToStr(LocalIter));
-  {$ENDIF}
 
     if Context.LocalIter then
       IRec := FCPRows.GetAnItem
@@ -3126,19 +3064,10 @@ begin
   Index := FParentTable.FMasterIndexes[i] as TMemDbIndex;
   Index.RootToNext; //All manipulation here in abNext copy of index.
 
-{$IFDEF DEBUG_SNAPSHOT}
-  GLogLog(SV_INFO, 'T: ' + IntToStr(NativeUInt(FParentTable)) +
-          ' Evolve UIdx [' +IntToStr(i) + '] ' +
-          '(' + IntToStr(NativeUint(Index)) + ')');
-{$ENDIF}
-
   ListTmp := nil;
   try
-    //Worst case is 3/2 number of changed nodes: An entire tree,
-    //plus rewrites of every node above top level, plus small cache size
-    //for temps.
-    //If mem alloc fails, no problem, it'll just go at snail pace.
-    //TODO - tune this.
+    //This is not big enough for small changes,
+    //but is big enough for entire tree. TODO - tune this.
     Index.PushLargeCache(((3* FCPRows.Count) div 2) + SMALL_NODE_PIN_CACHE_SIZE);
 
     //TidLocal row set will not change under commit lock.
@@ -3329,20 +3258,11 @@ begin
   Index := FParentTable.FMasterInternalIndex;
   Index.RootToNext; //All manipulation here in abNext copy of index.
 
-{$IFDEF DEBUG_SNAPSHOT}
-  GLogLog(SV_INFO, 'T: ' + IntToStr(NativeUInt(FParentTable)) +
-          ' Evolve IntIdx [' +IntToStr(-1) + '] ' +
-          '(' + IntToStr(NativeUint(Index)) + ')');
-{$ENDIF}
-
   //TidLocal row set will not change under commit lock.
   ListTmp := nil;
   try
-    //Worst case is 3/2 number of changed nodes: An entire tree,
-    //plus rewrites of every node above top level, plus small cache size
-    //for temps.
-    //If mem alloc fails, no problem, it'll just go at snail pace.
-    //TODO - tune this.
+    //This is not big enough for small changes,
+    //but is big enough for entire tree. TODO - tune this.
     Index.PushLargeCache(((3* FCPRows.Count) div 2) + SMALL_NODE_PIN_CACHE_SIZE);
 
     IRec := FCPRows.GetAnItem;
@@ -3531,12 +3451,6 @@ begin
         Index := (FNewBuildIndices[i] as TMemDBIndex);
         Index.SparseFieldOffsets := Index.FinalFieldOffsets;
 
-{$IFDEF DEBUG_SNAPSHOT}
-        GLogLog(SV_INFO, 'T: ' + IntToStr(NativeUInt(FParentTable)) +
-                ' Commit new build UIdx [' +IntToStr(i) + '] ' +
-                '(' + IntToStr(NativeUint(Index)) + ')');
-{$ENDIF}
-
         //FMasterIndexes might have a previous index here on re-build.
         Index := FParentTable.FMasterIndexes[i] as TMemDBIndex; //Old index to swizzle off.
         FParentTable.FMasterIndexes[i] := FNewBuildIndices[i];
@@ -3551,12 +3465,6 @@ begin
         Assert(not Assigned(FNewBuildIndices[i]));
         Assert(Assigned(FParentTable.FMasterIndexes[i]));
 
-{$IFDEF DEBUG_SNAPSHOT}
-        GLogLog(SV_INFO, 'T: ' + IntToStr(NativeUInt(FParentTable)) +
-                ' Delete old UIdx [' +IntToStr(i) + '] ' +
-                '(' + IntToStr(NativeUint(FParentTable.FMasterIndexes[i])) + ')');
-{$ENDIF}
-
         FNewBuildIndices[i] := FParentTable.FMasterIndexes[i];
         FParentTable.FMasterIndexes[i] := nil;
       end
@@ -3564,12 +3472,6 @@ begin
       begin
         //No large scale manipulation, commit index to next iteration.
         Index := FParentTable.FMasterIndexes[i] as TMemDbIndex;
-
-{$IFDEF DEBUG_SNAPSHOT}
-        GLogLog(SV_INFO, 'T: ' + IntToStr(NativeUInt(FParentTable)) +
-                ' Commit evolved UIdx (1)[' +IntToStr(i) + '] ' +
-                '(' + IntToStr(NativeUint(Index)) + ')');
-{$ENDIF}
 
         Index.CommitNextToRoot(true);
         (Ctxt as TXTransactionLocalContext).AddCache(Index.PopLargeCache);
@@ -3590,12 +3492,6 @@ begin
       Assert(not Assigned(FParentTable.FMasterInternalIndex));
       Assert(Assigned(FInternalIndexCopy));
 
-{$IFDEF DEBUG_SNAPSHOT}
-      GLogLog(SV_INFO, 'T: ' + IntToStr(NativeUInt(FParentTable)) +
-              ' Commit new build IntIdx [' +IntToStr(-1) + '] ' +
-              '(' + IntToStr(NativeUint(FInternalIndexCopy)) + ')');
-{$ENDIF}
-
       FParentTable.FMasterInternalIndex := FInternalIndexCopy;
       FInternalIndexCopy := nil;
     end
@@ -3604,12 +3500,6 @@ begin
       Assert(Assigned(FParentTable.FMasterInternalIndex));
       Assert(Assigned(FInternalIndexCopy));
       Assert(not Assigned(FTmpDeleting));
-
-{$IFDEF DEBUG_SNAPSHOT}
-        GLogLog(SV_INFO, 'T: ' + IntToStr(NativeUInt(FParentTable)) +
-                ' Delete old IntIdx [' +IntToStr(-1) + '] ' +
-                '(' + IntToStr(NativeUint(FParentTable.FMasterInternalIndex)) + ')');
-{$ENDIF}
 
       FTmpDeleting := FParentTable.FMasterInternalIndex;
       FParentTable.FMasterInternalIndex := nil;
@@ -3626,11 +3516,6 @@ begin
       Assert(Assigned(FParentTable.FMasterInternalIndex));
       if Assigned(FParentTable.FMasterInternalIndex) then
       begin
-{$IFDEF DEBUG_SNAPSHOT}
-        GLogLog(SV_INFO, 'T: ' + IntToStr(NativeUInt(FParentTable)) +
-                '*** Commit evolved IntIdx [' +IntToStr(-1) + '] ' +
-                '(' + IntToStr(NativeUint(FParentTable.FMasterInternalIndex)) + ')');
-{$ENDIF}
         FParentTable.FMasterInternalIndex.CommitNextToRoot(true);
         (Ctxt as TXTransactionLocalContext).AddCache(FParentTable.FMasterInternalIndex.PopLargeCache);
       end;
@@ -3642,12 +3527,6 @@ begin
     begin
       Index := FParentTable.FMasterIndexes[i] as TMemDbIndex;
 
-{$IFDEF DEBUG_SNAPSHOT}
-        GLogLog(SV_INFO, 'T: ' + IntToStr(NativeUInt(FParentTable)) +
-                ' Commit evolved UIdx (2)[' +IntToStr(i) + '] ' +
-                '(' + IntToStr(NativeUint(Index)) + ')');
-{$ENDIF}
-
       Index.CommitNextToRoot(true);
       (Ctxt as TXTransactionLocalContext).AddCache(Index.PopLargeCache);
     end;
@@ -3655,11 +3534,6 @@ begin
     //index (removed from table at final commit, local clones may exist).
     if Assigned(FParentTable.FMasterInternalIndex) then
     begin
-{$IFDEF DEBUG_SNAPSHOT}
-        GLogLog(SV_INFO, 'T: ' + IntToStr(NativeUInt(FParentTable)) +
-                ' Commit evolved IntIdx [' +IntToStr(-1) + '] ' +
-                '(' + IntToStr(NativeUint(FParentTable.FMasterInternalIndex)) + ')');
-{$ENDIF}
       FParentTable.FMasterInternalIndex.CommitNextToRoot(true);
       (Ctxt as TXTransactionLocalContext).AddCache(FParentTable.FMasterInternalIndex.PopLargeCache);
     end;
@@ -3676,23 +3550,12 @@ begin
   begin
     Index := FParentTable.FMasterIndexes.Items[i] as TMemDBIndex;
 
-{$IFDEF DEBUG_SNAPSHOT}
-    GLogLog(SV_INFO, 'T: ' + IntToStr(NativeUInt(FParentTable)) +
-            ' Rollback UIdx [' +IntToStr(i) + '] ' +
-            '(' + IntToStr(NativeUint(Index)) + ')');
-{$ENDIF}
-
     Index.DiscardNext(true);
     (Ctxt as TXTransactionLocalContext).AddCache(Index.PopLargeCache);
   end;
   //Master internal index not always assigned in rollback case (new index build).
   if Assigned(FParentTable.FMasterInternalIndex) then
   begin
-{$IFDEF DEBUG_SNAPSHOT}
-    GLogLog(SV_INFO, 'T: ' + IntToStr(NativeUInt(FParentTable)) +
-            ' Rollback IntIdx [' +IntToStr(-1) + '] ' +
-            '(' + IntToStr(NativeUint(FParentTable.FMasterInternalIndex)) + ')');
-{$ENDIF}
     FParentTable.FMasterInternalIndex.DiscardNext(true);
     (Ctxt as TXTransactionLocalContext).AddCache(FParentTable.FMasterInternalIndex.PopLargeCache);
   end;
@@ -3840,8 +3703,8 @@ begin
   if not Assigned(IRoot) then
   begin
     INode := nil;
-    //TODO - Not do all traversal / skipping of NULL under index lock?
-    //It's not expensive until someone deletes the table / all the rows...
+    //TODO - Not do all traversal / skipping of NULL under master row lock?
+    //It's not expensive until someone deletes a lot of rows...
     FParentTable.FMasterRowLock.Acquire;
     try
       case Pos of
@@ -3871,7 +3734,7 @@ begin
       begin
         Row := IRec.Item as TMemDBRow;
         Retry := not Row.PinForCursor(FTid);
-        //TODO - Number of acceptable retries before we raise concurrency exception?
+        //TODO - Number of acceptable retries?
         if Retry then
         begin
           //OK, no luck with that one, try next along the line.
@@ -3938,7 +3801,7 @@ begin
         Row := INode.Row as TMemDBRow;
         IRec := Row.FMasterRec;
         Retry := not Row.PinForCursorFromInode(FTid, INode, pinEvolve);
-        //TODO - Number of acceptable retries before we raise concurrency exception?
+        //TODO - Number of acceptable retries?
         if Retry then
         begin
           INode := IRoot.Locate(abCurrent, RetryPos, INode);
@@ -4525,7 +4388,6 @@ begin
         RV := FMasterRowList.AddItem(Item, Res);
         if RV <> rvOK then
           raise EMemDbInternalException.Create(S_JOURNAL_REPLAY_DUP_INST_ID);
-          //TODO - Get some ideas of all the diverse ways this might percolate out.
         Item.FMasterRec := Res;
       finally
         FMasterRowLock.Release;
@@ -4540,7 +4402,6 @@ begin
         RV := FMasterRowList.RemoveItem(Item.FMasterRec);
         if RV <> rvOK then
           raise EMemDbInternalException.Create(S_INTERNAL_INDEXING_ERROR);
-          //TODO - Get some ideas of all the diverse ways this might percolate out.
         Item.FMasterRec := nil;
         RefChange := FMasterRowList.Count = 0;
       finally
@@ -4630,8 +4491,8 @@ var
   tmpSelected: TABSelType;
 begin
   TidLocal := GetTidLocal(Tid);
-  //TODO - Do I absolutely need to update layout here or not?
-  //I don't think so if always updated on field change.
+  //Prepare has updated layout. ToJournal should be OK,
+  //Subsequent PreCommit checks whether is OK.
   MetaChange := FMetadata.AnyChangesForTid(Tid, Ctxt);
 
   if MetaChange or TidLocal.DataChangePrePrepare then
@@ -4660,9 +4521,6 @@ var
 begin
   TidLocal := GetTidLocal(PseudoTid);
   TidLocal.UpdateLayout(pinEvolve);
-  //TODO - Do I absolutely need to update layout here or not?
-  //I don't think so if always updated on field change.
-
   //In Entity list if CPTids, however does not guarantee has data.
   //Stream only if current metdata indicates not NULL.
   MCur := FMetadata.GetCurUnderCommitLock;
@@ -4981,7 +4839,7 @@ procedure TMemDBTablePersistent.GetCurrNxtMetaCopiesEx(const Tid: TTransactionId
                                            var CC, NC: TMemTableMetadataItem;
                                            var CCFieldCount, CCIndexCount,
                                            NCFieldCount, NCINdexCount: integer;
-                                           PinReason: TPinReason); //TODO - Do we need pin reason.
+                                           PinReason: TPinReason);
 var
   Current, Next: TMemDBStreamable;
 begin
@@ -6124,7 +5982,6 @@ begin
       raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_19);
   end;
 
-  //TODO - FKLists parallel.
   try
     //N.B. Indexed store gives us a "duplicate key" error code, which we should use.
     CreateReferringAddedList(Meta);
