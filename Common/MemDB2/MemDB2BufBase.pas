@@ -454,12 +454,10 @@ const
   S_CHANGESET_BAD_LISTS = 'Changeset has lists of items that are not consistent';
   S_DBL_BUF_LOOKAHEAD_FAILED = 'Double buffered lookahead failed, tag: ';
   S_REQUESTED_CHANGE_OF_DELETE_SENTINEL = 'Changing a deleted row would undelete it, not allowed.';
-  S_REQUESTED_CHANGE_OF_NULL_CURRENT = 'Requested change but item is null';
   S_DIRECT_SET_OVER_PREVIOUS = 'Direct set function used, but would overwrite pre-exusting data.';
   S_MODIFIED_NO_PRECOMMIT = 'Error. Pre-commit check not performed on concurrent data.';
   S_JOURNAL_REPLAY_DUP_INST = 'Journal replay failed, trying to overwrite duplicate changes.';
   S_JOURNAL_REPLAY_CHANGETYPE_DISAGREES = 'Journal replay failed, change type disagrees with data.';
-  S_CANNOT_PIN_INSIDE_CHECKLOCK = 'Cannot pin between pre-commit and commit';
   S_MODIFIED_CONCURRENT_ABORT_WAR = 'Aborted. Concurrency conflict (write-after-read). (Case 1). Retry?';
   S_MODIFIED_CONCURRENT_ABORT_WAR_2 = 'Aborted. Concurrency conflict (write-after-read). (Case 2). Retry?';
   S_MODIFIED_CONCURRENT_ABORT_WAR_3 = 'Aborted. Concurrency conflict (write-after-read). (Case 3). Retry?';
@@ -469,8 +467,7 @@ const
   S_MODIFIED_CONCURRENT_ABORT_WAR_7 = 'Aborted. Concurrency conflict (write-after-read). (Case 7). Retry?';
   S_MODIFIED_CONCURRENT_ABORT_WAW = 'Aborted. Concurrency conflict (write-after-write). Retry?';
   S_MODIFIED_CONCURRENT_ABORT_RAW = 'Aborted. Concurrency conflict (read-after-write). Retry?';
-  S_PIN_EVOLVE_TOO_LATE_1 = 'Cannot pin for change at this time (already final-checking). (Case 1)';
-  S_PIN_EVOLVE_TOO_LATE_2 = 'Cannot pin for change at this time (already final-checking). (Case 2)';
+  S_PIN_EVOLVE_TOO_LATE = 'Cannot pin for change at this time (already final-checking).';
   S_MODIFIED_CONCURRENT_WOULD_UNDELETE = 'Aborted. Non-repeatable reads should not allow you to undelete.';
   S_CREATE_CLASS_NOT_SLIST = 'Class type for list creation not streamable list.';
   S_CREATE_CLASS_NOT_SET = 'Class type for list creation not set';
@@ -478,8 +475,6 @@ const
   S_INDEX_PIN_NOT_FOUND = 'Index pin not found when unpinning';
   S_ERROR_BAD_INODE_DURING_PIN = 'Bad INode getting cursor pin from INode.';
   S_ERROR_BAD_IPIN_DURING_PIN = 'Bad IPin getting cursor pin from INode.';
-  S_ERROR_BAD_IPIN_DURING_PIN_CURRENT = 'Bad IPin getting current pin from INode';
-  S_ERROR_BAD_INODE_DURING_PIN_CURRENT = 'Bad INode getting current pin from INode';
 
 { Misc }
 
@@ -1720,7 +1715,7 @@ begin
 
   //Email martin_c_harvey@hotmail.com if you'd like this changed.
   if (Reason = pinEvolve) and (Pin.FinalCheck) then
-    raise EMemDBException.Create(S_PIN_EVOLVE_TOO_LATE_1);
+    raise EMemDBException.Create(S_PIN_EVOLVE_TOO_LATE);
   Pin.FinalCheck := Pin.FinalCheck or (Reason = pinFinalCheck);
   Assert(Assigned(Pin.Item));
   result := Pin.Item;
