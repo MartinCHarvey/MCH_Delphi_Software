@@ -37,9 +37,6 @@ implementation
 
 uses
   SysUtils
-{$IFOPT C+}
-  ,GlobalLog
-{$ENDIF}
 {$IFDEF MSWINDOWS}
   ,Windows
 {$ENDIF}

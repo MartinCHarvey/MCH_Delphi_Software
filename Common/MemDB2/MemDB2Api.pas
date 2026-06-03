@@ -1,9 +1,9 @@
 ﻿unit MemDB2Api;
 {
-Copyright � 2020 Martin Harvey <martin_c_harvey@hotmail.com>
+Copyright © 2020 Martin Harvey <martin_c_harvey@hotmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the �Software�), to deal in
+this software and associated documentation files (the "Software"), to deal in
 the Software without restriction, including without limitation the rights to
 use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
 of the Software, and to permit persons to whom the Software is furnished to do
@@ -12,7 +12,7 @@ so, subject to the following conditions:
 The above copyright notice and this permission notice shall be included in
 all copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED �AS IS�, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
@@ -26,10 +26,6 @@ IN THE SOFTWARE.
   Basic DB and transaction setup accessible via the MemDB unit }
 
 interface
-
-{$IFDEF DEBUG_DATABASE_DELETE}
-{$DEFINE DEBUG_DATABASE_NAVIGATE}
-{$ENDIF}
 
 uses
   MemDB2Buffered, MemDb2Misc, MemDb2Streamable, MemDB2Indexing, Classes,
@@ -162,9 +158,6 @@ type
                                   var IndexName: string);
   end;
 
-  //TODO TODO - Make sure no metadata pinning here
-  //unless tidLocal initialized.
-
   //Extensions to double buffered persistent objects to perform
   //API operations. These perform consistency checking on the operations,
   //and do not maintain an per-transaction state.
@@ -280,13 +273,7 @@ function MakeStream(StorageMode: TTempStorageMode): TStream;
 
 implementation
 
-//TODO - Optimise stuff that only uses latest (or current, or ...)
-//buf selector.
-
 uses
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-  GlobalLog,
-{$ENDIF}
   MemDB2, SysUtils, IoUtils, BufferedFileStream, Math, NullStream,
   Reffed;
 
@@ -499,8 +486,6 @@ begin
           DB.MetaIndexLock.Release;
         end;
       except
-        //TODO - No lock acquisition needed here?
-        //temp indexes protected under commit lock.
         DB.MetaIndexLock.Acquire;
         try
           DB.Rollback(T.Tid, rbpIndexRollback, OptSet, T.LocalContext);
@@ -1132,7 +1117,6 @@ end;
 function TMemDBDatabase.API_GetEntityNames(T: TObject): TStringList;
 var
   Tr: TMemDBTransaction;
-  AB: TBufSelector;
   EList: TReffedList;
   Proxy: TMemDBEntityProxy;
   Entity: TMemDBEntity;
@@ -1557,20 +1541,6 @@ begin
     if not Assigned(IRoot) then
       raise EMemDBAPIException.Create(S_API_SEARCH_REQUIRES_INDEX);
   end;
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-  if Assigned(Cursor) then
-  begin
-    GLogLog(SV_INFO, 'API_DataLocate (with prev cursor): '
-      + MDBIsoStrings[Iso] + ' ' + MemApiPositionStrings[Pos]
-      + ' Index name: ' + IdxName);
-  end
-  else
-  begin
-    GLogLog(SV_INFO, 'API_DataLocate (no prev cursor): '
-      + MDBIsoStrings[Iso] + ' ' + MemApiPositionStrings[Pos]
-      + ' Index name: ' + IdxName);
-  end;
-{$ENDIF}
   result := TidLocalHint.UserMoveToRowByIndexRoot(IRoot, Cursor, Pos);
 end;
 
@@ -1587,9 +1557,6 @@ var
   FieldDefs: TMemFieldDefs;
   FieldAbsIdxs: TFieldOffsets;
 
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-  i: integer;
-{$ENDIF}
 begin
   Tr := T as TMemDBTransaction;
   Assert(Tr.Tid = TidLocalHint.Tid);
@@ -1609,14 +1576,6 @@ begin
   if Length(DataRecs)<> Length(FieldDefs) then
     raise EMemDBAPIException.Create(S_API_SEARCH_REQURES_CORRECT_FIELD_COUNT);
   //More detailed check of field format later on.
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-  GLogLog(SV_INFO, 'FIND by index, IndexName: ' + Idx.IndexName);
-  for i := 0 to Pred(Length(FieldDefs)) do
-  begin
-    GLogLog(SV_INFO, 'FieldName[' + InttoStr(i) + ']: ' + FieldDefs[i].FieldName + ' FieldNDIndex: ' +
-    IntToStr(FieldDefs[i].FieldIndex) + ' FieldAbsIdx: ' + IntToStr(FieldAbsIdxs[i]));
-  end;
-{$ENDIF}
   result := TidLocalHint.UserFindRowByIndexRoot(Idx, FieldDefs, FieldAbsIdxs, IRoot, DataRecs);
 end;
 
@@ -1636,9 +1595,6 @@ var
   Cur,Next: TMemDBCursor;
   NextFields, ResultFields: TMemStreamableList;
   bufSel: TABSelType;
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-  i: integer;
-{$ENDIF}
 begin
   if Length(IdxName) = 0 then
     raise EMemDBAPIException.Create(S_API_SEARCH_REQUIRES_INDEX);
@@ -1662,30 +1618,10 @@ begin
   if Length(DataRecs) <> Length(IndexFieldDefs) then
     raise EMemDBAPIException.Create(S_API_SEARCH_REQURES_CORRECT_FIELD_COUNT);
   //More detailed check of field format later on.
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-  GLogLog(SV_INFO, 'EDGE by index, IndexName: ' + Idx.IndexName);
-  for i := 0 to Pred(Length(FieldDefs)) do
-  begin
-    GLogLog(SV_INFO,  ' FieldName['+ IntToStr(i) +']: ' + FieldDefs[i].FieldName + ' FieldNDIndex: ' +
-      IntToStr(FieldDefs[i].FieldIndex) + ' FieldAbsIdx: ' + IntToStr(FieldAbsIdxs[i]));
-  end;
-{$ENDIF}
   Cur := TidLocalHint.UserFindRowByIndexRoot(Idx, IndexFieldDefs, FieldAbsIdxs, IRoot, DataRecs);
   Next := nil;
   result := nil;
   try
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-    if Assigned(Cur) then
-    begin
-      GLogLog(SV_INFO, 'EDGE by Index, initial find '
-        + MemAPIPositionStrings[Pos] + ' ' + MDBIsoStrings[Iso] + ' OK');
-    end
-    else
-    begin
-      GLogLog(SV_INFO, 'EDGE by Index, initial find '
-        + MemAPIPositionStrings[Pos] + ' ' + MDBIsoStrings[Iso] + ' Failed');
-    end;
-{$ENDIF}
     if Assigned(Cur) then
     begin
       case Pos of
@@ -1694,9 +1630,6 @@ begin
       else
         Assert(false);
       end;
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-      GLogLog(SV_INFO, 'EDGE by Index, move extremity ' + MemAPIPositionStrings[Pos]);
-{$ENDIF}
       Next := nil;
       repeat
         if Assigned(Next) then
@@ -1709,9 +1642,6 @@ begin
         Next := TidLocalHint.UserMoveToRowByIndexRoot(IRoot, Cur, Pos);
         if Assigned(Next) then
         begin
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-      GLogLog(SV_INFO, 'EDGE by Index, found ' + MemAPIPositionStrings[Pos] + ' row');
-{$ENDIF}
           //Isolation be damned, it's gonna break.
           if not Cur.Row.CheckFormatAgainstMetaDefs(Tr.Tid, abLatest, AllFieldDefs, pinEvolve) then
             raise EMemDBConcurrencyException.Create(S_TABLE_FORMAT_CONCURRENTLY_CHANGED_1);
@@ -1724,29 +1654,6 @@ begin
             //Might get raised if buggy format, but normally only concurrency.
           NextFields := Next.Row.GetPinLatest(Tr.Tid, bufSel, pinEvolve) as TMemStreamableList;
 
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-          //Compare all fields.
-          if SameLayoutFieldsSame(NextFields, ResultFields, FieldAbsIdxs) then
-          begin
-            GLogLog(SV_INFO, 'EDGE by Index ' + MemAPIPositionStrings[Pos] + ' row has same fields.');
-            for i := 0 to Pred(Length(FieldDefs)) do
-            begin
-              if (NextFields.Items[FieldAbsIdxs[i]] as TMemFieldData).FDataRec.FieldType = ftUnicodeString then
-                GLogLog(SV_INFO, 'Field['+ InttoStr(i) +'] is: ' +
-                  (NextFields.Items[FieldAbsIdxs[i]] as TMemFieldData).FDataRec.sVal);
-            end;
-          end
-          else
-          begin
-            GLogLog(SV_INFO, 'EDGE by Index ' + MemAPIPositionStrings[Pos] + ' row differs.');
-            for i := 0 to Pred(Length(FieldDefs)) do
-            begin
-              if (NextFields.Items[FieldAbsIdxs[i]] as TMemFieldData).FDataRec.FieldType = ftUnicodeString then
-                GLogLog(SV_INFO, 'Field['+ InttoStr(i) +'] is: ' +
-                  (NextFields.Items[FieldAbsIdxs[i]] as TMemFieldData).FDataRec.sVal);
-            end;
-          end;
-{$ENDIF}
           if not SameLayoutFieldsSame(NextFields, ResultFields, FieldAbsIdxs) then
           begin
             Next.Free;
@@ -1875,9 +1782,6 @@ begin
     raise EMemDBAPIException.Create(S_FIELD_LAYOUT_CHANGED);
   if not Assigned(Cursor) then
     raise EMemDBAPIException.Create(S_API_NO_ROW_FOR_DELETE);
-{$IFDEF DEBUG_DATABASE_NAVIGATE}
-  GLogLog(SV_INFO, 'API_DataRowDelete: Actual deletion.');
-{$ENDIF}
   result := TidLocalHint.UserDeleteRow(Cursor, AutoInc);
 end;
 

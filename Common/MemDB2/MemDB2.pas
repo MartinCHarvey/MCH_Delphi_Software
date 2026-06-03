@@ -1,10 +1,10 @@
 ﻿unit MemDB2;
 {
 
-Copyright � 2020 Martin Harvey <martin_c_harvey@hotmail.com>
+Copyright © 2020 Martin Harvey <martin_c_harvey@hotmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the �Software�), to deal in
+this software and associated documentation files (the "Software"), to deal in
 the Software without restriction, including without limitation the rights to
 use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
 of the Software, and to permit persons to whom the Software is furnished to do
@@ -13,7 +13,7 @@ so, subject to the following conditions:
 The above copyright notice and this permission notice shall be included in
 all copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED �AS IS�, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
@@ -107,8 +107,6 @@ type
     procedure CommitAndFree;
     procedure RollbackAndFree;
 
-    //TODO - These should not be client accessible, used internally.
-    //Find a way to sort the visibility on this.
     procedure RegisterCreatedApi(Api: TMemDBApi);
     procedure DeregisterCreatedApi(Api: TMemDBApi);
     procedure CheckNoDanglingTransactionRefs(CanRaise: boolean);
@@ -120,8 +118,7 @@ type
 
     property Mode: TMDBAccessMode read FMode;
     property Sync: TMDBSyncMode read FSync;
-    //TODO - Need selector at this level, or gets generated
-    //more in MemDBBuffered?
+
     property Tid: TTransactionId read FTid;
     property FlushFinishedEvent: TEvent read FFlushFinishedEvent;
     property ParentSession: TMemDBSession read FSession;
@@ -130,13 +127,6 @@ type
     property LocalContext: TXTransactionLocalContext read FLocalContext;
   end;
 
-  //TODO - Might like to think about whether we actually need a session
-  //at all, but just hold a list of transactions.
-  //at the moment, no-per-user privilege checking in DB, and only
-  //one transaction per session.
-
-  //TODO - Keep an eye on the size / number of session / transaction lists and
-  //whether they are sorted or not - for further profiling.
 {$IFDEF USE_TRACKABLES}
   TMemDBSession = class(TTrackable)
 {$ELSE}
@@ -219,11 +209,7 @@ type
 
 implementation
 
-uses IoUtils, Types
-{$IFDEF DEBUG_DATABASE}
- , GlobalLog
-{$ENDIF}
-  ;
+uses IoUtils, Types;
 
 const
   S_DB_CLOSING_OR_NOT_OPEN = 'DB closing, or not open: ';
@@ -473,15 +459,21 @@ end;
 function TMemDBSession.GetTempStorageMode: TTempStorageMode;
 begin
   FDB.FSessionLock.Acquire;
-  result := FTempStorageMode;
-  FDB.FSessionLock.Release;
+  try
+    result := FTempStorageMode;
+  finally
+    FDB.FSessionLock.Release;
+  end;
 end;
 
 procedure TMemDBSession.SetTempStorageMode(NewMode: TTempStorageMode);
 begin
   FDB.FSessionLock.Acquire;
+  try
   FTempStorageMode := NewMode;
-  FDB.FSessionLock.Release;
+  finally
+    FDB.FSessionLock.Release;
+  end;
 end;
 
 function TMemDBSession.StartTransaction(Mode: TMDBAccessMode; Sync: TMDBSyncMode; Iso: TMDBIsolationLevel)
@@ -1153,7 +1145,7 @@ begin
   try
     //Assert(FPhase = mdbRunning);
     FPhase := mdbError;
-    //TODO - Unblock all threads waiting for cleardown?
+    //Unblocking of threads etc handled by user destruction of DB.
     FLastError := ErrMsg;
   finally
     FSessionLock.Release;
@@ -1173,9 +1165,6 @@ var
   API: TMemAPIDatabaseInternal;
   CStream: TStream;
 begin
-{$IFDEF DEBUG_DATABASE}
-  GLogLog(SV_INFO, DateTimeToStr(Now) +  ' Journal replay transaction Start');
-{$ENDIF}
   API := FDatabase.Interfaced.GetAPIObject(nil, APIInternalCommitRollback)
     as TMemAPIDatabaseInternal;
   try
@@ -1189,9 +1178,6 @@ begin
     end;
   finally
     API.Free;
-{$IFDEF DEBUG_DATABASE}
-  GLogLog(SV_INFO, DateTimeToStr(Now) +  ' Journal replay transaction Done');
-{$ENDIF}
   end;
 end;
 
@@ -1225,10 +1211,6 @@ begin
   finally
     FSessionLock.Release;
   end;
-  //TODO - There is a race here, ensuring that the checkpoint xaction
-  //is the very first xaction written to disk when initializing.
-
-  {ref BUG_MCH_1_2_2025 }
   if result then
   begin
     FRWWLock.Acquire(lrSharedRead);

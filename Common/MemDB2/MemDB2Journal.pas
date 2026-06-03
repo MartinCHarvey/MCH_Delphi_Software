@@ -1,10 +1,10 @@
 ﻿unit MemDB2Journal;
 {
 
-Copyright � 2020 Martin Harvey <martin_c_harvey@hotmail.com>
+Copyright © 2020 Martin Harvey <martin_c_harvey@hotmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the �Software�), to deal in
+this software and associated documentation files (the "Software"), to deal in
 the Software without restriction, including without limitation the rights to
 use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
 of the Software, and to permit persons to whom the Software is furnished to do
@@ -13,7 +13,7 @@ so, subject to the following conditions:
 The above copyright notice and this permission notice shall be included in
 all copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED �AS IS�, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
@@ -174,10 +174,6 @@ type
     property BaseDirectory:string read FBaseDirectory write FBaseDirectory;
     property JournalType: TMemDBJournalType read FJournalType write FJournalType;
   end;
-
-//TODO - V2 changesets:
-//Generally a memory stream if not too large, unless
-//a checkpoint, in which case assume may be huge, and use a temporary file.
 
 implementation
 
@@ -910,9 +906,6 @@ begin
     DoJournalError(ErrMsg);
 end;
 
-//TODO - Potentially consider whether to remove copying of streams in a bit,
-//depends when/where temporary stream gets created,
-//whether it's a file stream, and whether we can do a suitable copy/move/rename
 procedure TMemDbDefaultJournal.PerformCheckpoint(Action: TMemDBJournalAction);
 var
   FileName: string;
