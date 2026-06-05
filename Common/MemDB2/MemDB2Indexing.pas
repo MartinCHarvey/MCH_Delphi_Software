@@ -77,7 +77,9 @@ type
     //We don't inc/dec the ref for leaves with user ops here,
     //but other cursor handling code might.
     function Locate(Sel: TAbSelType; Pos: TMemAPIPosition; Cur: TMemDBIndexLeafGeneric): TMemDBIndexLeafGeneric;
-    function CheckNonAliasedPresent(Sel: TAbSelType; Node: TMemDBIndexLeafGeneric): boolean;
+    function CheckNonAliasedPresent(Sel: TAbSelType;
+                                    Node: TMemDBIndexLeafGeneric;
+                                    var FoundAlias:TMemDBIndexLeafGeneric): boolean;
 
     //Add / remove guaranteed to add or remove in the tree, but
     //you may have to do a bit of hunting to find the right node from the row.
@@ -597,10 +599,13 @@ begin
 end;
 
 
-function TMemDbIndexGeneric.CheckNonAliasedPresent(Sel: TAbSelType; Node: TMemDBIndexLeafGeneric): boolean;
+function TMemDbIndexGeneric.CheckNonAliasedPresent(Sel: TAbSelType;
+                                                   Node: TMemDBIndexLeafGeneric;
+                                                   var FoundAlias: TMemDBIndexLeafGeneric): boolean;
 var
   Root, Leaf: TMemDbIndexLeafGeneric;
 begin
+  FoundAlias := nil;
   Root := SelToRoot(Sel);
   Assert(Assigned(Node));
   Leaf := SearchNode(Node, Root) as TMemDBIndexLeaf;
@@ -609,7 +614,10 @@ begin
   //could allow specific (local / non-local) optimizations for certain cases,
   //but that's a whole class of hard-to-repro bugs which I'd rather not deal with.
   if Assigned(Leaf) and (Leaf <> Node) then
+  begin
+    FoundAlias := Leaf;
     Leaf := nil;
+  end;
   result := Assigned(Leaf);
 end;
 

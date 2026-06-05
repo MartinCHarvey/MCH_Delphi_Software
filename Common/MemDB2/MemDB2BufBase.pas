@@ -170,11 +170,11 @@ type
 {$IFOPT C+}
     procedure DCPPre(Data, Changes, Pins: boolean; var Update: TReferenceUpdate);
     procedure DCPPost(Data, Changes, Pins: boolean; var Update: TReferenceUpdate);
-    procedure DCPLazyHandle(const Update: TReferenceUpdate);
+    function DCPLazyHandle(const Update: TReferenceUpdate): boolean;
 {$ELSE}
     procedure DCPPre(Data, Changes, Pins: boolean; var Update: TReferenceUpdate); inline;
     procedure DCPPost(Data, Changes, Pins: boolean; var Update: TReferenceUpdate); inline;
-    procedure DCPLazyHandle(const Update: TReferenceUpdate); inline;
+    function DCPLazyHandle(const Update: TReferenceUpdate): boolean; inline;
 {$ENDIF}
     procedure DCPHandle(const Update: TReferenceUpdate); virtual;
 
@@ -656,9 +656,10 @@ begin
   Update.Post := Data or Changes or Pins;
 end;
 
-procedure TMemDBReferenceReporter.DCPLazyHandle(const Update: TReferenceUpdate);
+function TMemDBReferenceReporter.DCPLazyHandle(const Update: TReferenceUpdate): boolean;
 begin
-  if Update.Pre <> Update.Post then
+  result := Update.Pre <> Update.Post;
+  if result then
     DCPHandle(Update);
 end;
 
@@ -1387,19 +1388,24 @@ end;
 
 function TMemDBMultiBuffered.PinForCursorFromInode(const Tid: TTRansactionId; INode: TMemDBIndexLeafGeneric; Reason: TPinReason): boolean;
 var
-  RefUp: TReferenceUpdate;
   TidUp: TTidUpdate;
   IPin: PMemDBIndexPin;
   CurPin: PMemDBPinnedItem;
   Item: TMemDBStreamable;
   Nxt, Cur: PMemDbMultiItem;
   InvalidateCur: boolean;
+{$IFOPT C+}
+  DCPChange: boolean;
+  RefUp: TReferenceUpdate;
+{$ENDIF}
 begin
   result := false;
   InvalidateCur := false;
   LockSelf;
   try
+{$IFOPT C+}
     DCPPre(RefUp);
+{$ENDIF}
     CPTidPre(Tid, TidUp);
     Assert(Tid <> TTransactionId.Empty);
     //First things first, check the INode is actually one of ours.
@@ -1458,7 +1464,9 @@ begin
       end;
     end;
     result := Assigned(Item);
+{$IFOPT C+}
     DCPPost(RefUp);
+{$ENDIF}
     CPTidPost(Tid, TidUp);
   finally
     UnlockSelf;
@@ -1466,23 +1474,31 @@ begin
   if InvalidateCur then
     InvalidateCachedCur(Tid);
   CPTidHandle(TidUp);
-  DCPLazyHandle(RefUp);
+{$IFOPT C+}
+  DCPChange := DCPLazyHandle(RefUp);
+  Assert(not DCPChange);
+{$ENDIF}
 end;
 
 
 function TMemDbMultiBuffered.PinForIndex(const Tid: TTransactionId; ItemSel: TAbSelType;
                      IndexNode: TMemDbIndexLeafGeneric): boolean;
 var
-  RefUp: TReferenceUpdate;
   Pin: PMemDBIndexPin;
   Item: TMemDBStreamable;
   Multi: PMemDBMultiItem;
   PinTid: TTransactionId;
+{$IFOPT C+}
+  DCPChange: boolean;
+  RefUp: TReferenceUpdate;
+{$ENDIF}
 begin
   result := false;
   LockSelf;
   try
+{$IFOPT C+}
     DCPPre(RefUp);
+{$ENDIF}
     if Assigned(IndexNode.Pin) or Assigned(IndexNode.Row) then
       raise EMemDbInternalException.Create(S_INDEX_ALREADY_PINNED);
     //Always pin with respect to current, next or latest, regardless of
@@ -1552,19 +1568,26 @@ begin
 
     DLListInsertTail(@FIndexPins, @Pin.Link);
 
+{$IFOPT C+}
     DCPPost(RefUp);
+{$ENDIF}
     result := true;
   finally
     UnlockSelf;
   end;
-  DCPLazyHandle(RefUp);
+{$IFOPT C+}
+  DCPChange := DCPLazyHandle(RefUp);
+  Assert(not DCPChange);
+{$ENDIF}
 end;
 
 procedure TMemDBMultiBuffered.DupIndexPin(SourceNode, DestNode: TMemDBIndexLeafGeneric; PCache: TMemDBIPinCache);
 var
-  RefUp: TReferenceUpdate;
   Pin, NewPin: PMemDBIndexPin;
-
+{$IFOPT C+}
+  DCPChange: boolean;
+  RefUp: TReferenceUpdate;
+{$ENDIF}
 begin
   //No race condition here: both nodes are known to exist in a tree
   //which is undergoing manipulation, and the dup is called at the point
@@ -1572,7 +1595,9 @@ begin
   NewPin := nil;
   LockSelf;
   try
+{$IFOPT C+}
     DCPPre(RefUp);
+{$ENDIF}
     //Check existing pin is all wired up good.
     Assert(SourceNode.Row = Self);
 {$IFOPT C+}
@@ -1602,11 +1627,16 @@ begin
 
     DLListInsertTail(@FIndexPins, @NewPin.Link);
 
+{$IFOPT C+}
     DCPPost(RefUp);
+{$ENDIF}
   finally
     UnlockSelf;
   end;
-  DCPLazyHandle(RefUp);
+{$IFOPT C+}
+  DCPChange := DCPLazyHandle(RefUp);
+  Assert(not DCPChange);
+{$ENDIF}
 end;
 
 
@@ -1724,14 +1754,19 @@ end;
 function TMemDBMultiBuffered.PinCurrent(const Tid: TTransactionId; Reason: TPinReason): TMemDBStreamable;
 var
   Pin: PMemDBPinnedItem;
-  RefUp: TReferenceUpdate;
   TidUp: TTidUpdate;
   InvalidateCur: boolean;
+{$IFOPT C+}
+  DCPChange: boolean;
+  RefUp: TReferenceUpdate;
+{$ENDIF}
 begin
   InvalidateCur := false;
   LockSelf;
   try
+{$IFOPT C+}
     DCPPre(RefUp);
+{$ENDIF}
     CPTidPre(Tid, TidUp);
     Assert(Tid <> TTransactionId.Empty);
     result := nil;
@@ -1745,7 +1780,9 @@ begin
       result := NewCurrentPinInternal(Tid, Reason);
     end;
 
+{$IFOPT C+}
     DCPPost(RefUp);
+{$ENDIF}
     CPTidPost(Tid, TidUp);
   finally
     UnlockSelf;
@@ -1753,7 +1790,10 @@ begin
   if InvalidateCur then
     InvalidateCachedCur(Tid);
   CPTidHandle(TidUp);
-  DCPLazyHandle(RefUp);
+{$IFOPT C+}
+  DCPChange := DCPLazyHandle(RefUp);
+  Assert(not DCPChange);
+{$ENDIF}
 end;
 
 function TMemDbMultiBuffered.GetCurUnderCommitLock: TMemDBStreamable;
@@ -1792,14 +1832,19 @@ function TMemDBMultiBuffered.GetPinLatest(const Tid: TTransactionId;
 var
   Nxt: PMemDBMultiItem;
   Pin: PMemDbPinnedItem;
-  RefUp: TReferenceUpdate;
   TidUp: TTidUpdate;
   InvalidateCur: boolean;
+{$IFOPT C+}
+  DCPChange: boolean;
+  RefUp: TReferenceUpdate;
+{$ENDIF}
 begin
   InvalidateCur := false;
   LockSelf;
   try
+{$IFOPT C+}
     DCPPre(RefUp);
+{$ENDIF}
     CPTidPre(Tid, TidUp);
     Assert(Tid <> TTransactionId.Empty);
 
@@ -1825,7 +1870,9 @@ begin
       end;
       BufSelected := abCurrent;
     end;
+{$IFOPT C+}
     DCPPost(RefUp);
+{$ENDIF}
     CPTidPost(Tid, TidUp);
   finally
     UnlockSelf;
@@ -1833,7 +1880,10 @@ begin
   if InvalidateCur then
     InvalidateCachedCur(Tid);
   CPTidHandle(TidUp);
-  DCPLazyHandle(RefUp);
+{$IFOPT C+}
+  DCPChange := DCPLazyHandle(RefUp);
+  Assert(not DCPChange);
+{$ENDIF}
 end;
 
 constructor TMemDbMultiBuffered.Create;

@@ -886,6 +886,7 @@ const
   S_PIN_FIELDS_FAILURE_DURING_INDEX_VALIDATE = 'Pin fields failed during index validate, despite OK cursor.';
   S_SPARSENESS_DIFFERS_CHECKING_INDEX = 'Row formats differ checking index (should be all sparse, or all compact).';
   S_ERROR_IPINS_MODIFYING_INDEX = 'Confusion with IPins modifying index.';
+  S_ERROR_IPINS_MODIFYING_INDEX_ALIAS = 'Confusion with IPins modifying index (Alias optimization).';
   S_ERROR_MODIFYING_INDEX_REMOVE = 'Failed to remove from tree during index modification.';
   S_ERROR_MODIFYING_INTERNAL_INDEX_REMOVE = 'Failed to remove from tree during internal index modification.';
   S_ERROR_FINDING_PIN_FOR_INDEX_REMOVE = 'Error finding INode/Pin for index remove';
@@ -2897,17 +2898,19 @@ end;
 
 function TTidLocal.GetIPinForIndex(Row: TMemDBRow; Index: TMemDbIndexGeneric; IndexSel: TAbSelType; var IPinListTmp: TList): PMemDbIndexPin;
 var
-  j, fnd: integer;
+  j, k, fnd: integer;
+  Alias, FndAlias: TMemDbIndexLeafGeneric;
 begin
   //Humm. We need to PinCurrent from the INode's point of view.
   //Bit clunky, but safer.
   result := nil;
+  FndAlias := nil;
   Row.MakeCandidateIPins(Index, IPinListTmp); //Probably only one, actually.
   try
     fnd := 0;
     for j := 0 to Pred(IPinListTmp.Count) do
     begin
-      if Index.CheckNonAliasedPresent(IndexSel, PMemDbIndexPin(IPinListTmp[j]).INode) then
+      if Index.CheckNonAliasedPresent(IndexSel, PMemDbIndexPin(IPinListTmp[j]).INode, Alias) then
       begin
         result := PMemDbIndexPin(IPinListTmp[j]);
         Inc(fnd);
@@ -2915,11 +2918,41 @@ begin
         break;
 {$ENDIF}
       end
+      else
+      begin
+        //Couldn't find node in tree, but have found an alias,
+        //which is the one we want, and quicker than tree searches.
+        if Assigned(Alias) and (not Assigned(FndAlias)) then
+        begin
+          for k := Succ(j) to Pred(IPinListTmp.Count) do
+          begin
+            if PMemDbIndexPin(IPinListTmp[k]).INode = Alias then
+            begin
+              FndAlias := Alias;
+              break;
+            end;
+          end;
+{$IFOPT C-}
+          if Assigned(FndAlias) then
+          begin
+            result := PMemDbIndexPin(IPinListTmp[k]);
+            Inc(fnd);
+            break;
+          end;
+{$ENDIF}
+        end;
+      end;
     end;
     if fnd > 1 then
     begin
       result := nil;
       raise EMemDBInternalException.Create(S_ERROR_IPINS_MODIFYING_INDEX);
+    end
+    else if (fnd > 0) and Assigned(FndAlias) then
+    begin
+      //Check that the alias we found was indeed the index node we were looking for.
+      if result.INode <> FndAlias then
+        raise EMemDBInternalException.Create(S_ERROR_IPINS_MODIFYING_INDEX_ALIAS);
     end;
   finally
     for j := 0 to Pred(IPinListTmp.Count) do
@@ -3595,7 +3628,7 @@ function TTidLocal.UserMoveToRowByIndexRoot(IRoot: TMemDbIndexGeneric;
 var
   Row: TMemDBRow;
   IRec: TItemRec;
-  INode: TMemDbIndexLeafGeneric;
+  INode, TmpAlias: TMemDbIndexLeafGeneric;
   IPin: PMemDbIndexPin;
   RetryPos: TMemApiPosition;
   Retry: boolean;
@@ -3679,7 +3712,7 @@ begin
           begin
             //Treat the INode as a hint, not as gospel.
             if Assigned(Cursor.IterInode) and
-               IRoot.CheckNonAliasedPresent(abCurrent, Cursor.IterInode) then
+               IRoot.CheckNonAliasedPresent(abCurrent, Cursor.IterInode, TmpAlias) then
               INode := Cursor.IterInode;
           end;
 
