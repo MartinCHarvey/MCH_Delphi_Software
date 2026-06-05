@@ -94,7 +94,7 @@ type
 
   TABSelType = (abCurrent, abNext, abLatest);
 
-  TTransactionID = packed record
+  TTransactionID = record
     G: TGuid;
     Iso: TMDBIsolationLevel;
     class operator Equal(const Left, Right: TTransactionID): Boolean;
@@ -265,7 +265,8 @@ function OptApplies(Opt: TOptimization; Opts: TOptimizeSet): boolean;
 function MakeOptimizationSet(const Policies: TOptimizePolicies;
                              InitFirstTrans, InitNextTrans, UserOp: boolean;
                              DBSizeHint: TDBSizeHint;
-                             TxionSizeEstimate: int64): TOptimizeSet;
+                             TxionSizeEstimate: int64;
+                             Mode:TMDBAccessMode): TOptimizeSet;
 
 function CleardownOptSet: TOptimizeSet;
 
@@ -295,7 +296,8 @@ end;
 function MakeOptimizationSet(const Policies: TOptimizePolicies;
                              InitFirstTrans, InitNextTrans, UserOp: boolean;
                              DBSizeHint: TDBSizeHint;
-                             TxionSizeEstimate: int64): TOptimizeSet;
+                             TxionSizeEstimate: int64;
+                             Mode:TMDBAccessMode): TOptimizeSet;
 var
   Opt: TOptimization;
   Policy: POptimizePolicy;
@@ -321,7 +323,7 @@ begin
    if DoOpt then
     result := result + [Opt];
   end;
-  if InitFirstTrans or InitNextTrans then
+  if InitFirstTrans or InitNextTrans or (Mode = amWriteExclusive) then
     result := result + [optGuaranteedSerial];
 end;
 

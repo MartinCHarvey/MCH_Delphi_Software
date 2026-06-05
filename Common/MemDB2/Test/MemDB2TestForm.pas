@@ -34,6 +34,7 @@ type
     OOMemory: TButton;
     TblModMulti: TButton;
     ConcurrencyBtn: TButton;
+    DbgLabel: TLabel;
     procedure BasicTestBtnClick(Sender: TObject);
     procedure ResetClick(Sender: TObject);
     procedure IndexTestClick(Sender: TObject);
@@ -3425,6 +3426,9 @@ begin
   IsoCombo.AddObject(Item);
 
   IsoCombo.ItemIndex := 1; //ilReadRepeatable
+{$IFOPT C-}
+  FreeAndNil(DbgLabel);
+{$ENDIF}
 end;
 
 procedure TForm1.IndexTest2Click(Sender: TObject);

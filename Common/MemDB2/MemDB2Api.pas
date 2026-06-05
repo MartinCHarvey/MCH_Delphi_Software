@@ -391,7 +391,13 @@ begin
   EntRegistered := nil;
   FillChar(SizeHint, sizeof(SizeHint), 0);
   GetTxionSizeEstimate(JournalEntry, TxionSizeEstimate);
-  OptSet := MakeOptimizationSet(DB.Policies, Initial, not Initial, false, SizeHint, TxionSizeEstimate);
+  OptSet := MakeOptimizationSet(DB.Policies,
+                                Initial,
+                                not Initial,
+                                false,
+                                SizeHint,
+                                TxionSizeEstimate,
+                                amWriteExclusive);
 
   PseudoTid := TTransactionId.NewTransactionID(ilSerialisable); //if only writer, should be serialisable.
   Ctxt := TXTransactionLocalContext.Create;
@@ -451,7 +457,8 @@ begin
     FillChar(SizeHint, sizeof(SizeHint), 0);
     SizeHint.ShouldUpdateLayout := true;
     DB.SizeHint(T.Tid, SizeHint, T.LocalContext);
-    OptSet := MakeOptimizationSet(DB.Policies, false, false, true, SizeHint, 0);
+    OptSet := MakeOptimizationSet(DB.Policies, false, false, true,
+                                  SizeHint, 0, T.Mode);
     if T.LocalContext.FCacheList.Capacity < SizeHint.TotalIndexes then
       T.LocalContext.FCacheList.Capacity := SizeHint.TotalIndexes;
 
@@ -514,7 +521,7 @@ begin
 
   FillChar(SizeHint, sizeof(SizeHint), 0);
   DB.SizeHint(T.Tid, SizeHint, T.LocalContext);
-  OptSet := MakeOptimizationSet(DB.Policies, false, false, true, SizeHint, 0);
+  OptSet := MakeOptimizationSet(DB.Policies, false, false, true, SizeHint, 0, T.Mode);
 
   DB.MetaIndexLock.Acquire;
   try
