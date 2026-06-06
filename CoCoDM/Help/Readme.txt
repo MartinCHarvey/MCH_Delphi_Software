@@ -1,0 +1,1 @@
+Coco/R for Delphi help is written in Help and Manual 4 (http://www.helpandmanual.com/)

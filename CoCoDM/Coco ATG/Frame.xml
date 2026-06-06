@@ -1,0 +1,11 @@
+<?xml version="1.0" ?>
+<CocoRDelphi>
+  <Files>
+    <File Type="Source" Display="Source File" FileName="C:\MCH stuff\Delphi XE Progs\CoCoDM\Coco ATG\Frame.ATG" />
+    <File Type="Info" Display="Trace Listing" FileName="C:\MCH stuff\Delphi XE Progs\CoCoDM\Coco ATG\Frame.LST" />
+  </Files>
+  <Errors>
+    <Error Severity="Warning" Type="2" Description="LL(1) error" Code="201" Text=" in Section:  &quot;--&gt;&quot; is the start of several alternatives" Line="283" Col="0" Data=" in Section:  &quot;--&gt;&quot;" />
+    <Error Severity="Warning" Type="2" Description="LL(1) error" Code="201" Text=" in Section:  &quot;/%&quot; is the start of several alternatives" Line="292" Col="0" Data=" in Section:  &quot;/%&quot;" />
+  </Errors>
+</CocoRDelphi>

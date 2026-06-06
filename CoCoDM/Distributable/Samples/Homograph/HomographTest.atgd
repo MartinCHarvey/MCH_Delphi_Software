@@ -1,0 +1,134 @@
+$C-  //Generate Delphi test project
+$M-  //Use TRichEdit in test project
+$R-  //Save DFM as resource
+$E-  //Generate a component registration unit
+$Z-  //Generate console app
+$V+  //Generate version information
+$B+  //Auto-increment build number
+$O-  //Generate comment events
+$H+ TinyHash, HashSecondaryOne  //Use Hash functions to lookup literals
+$Y+  //Use SysUtils.SameText function for case insensitive compares
+$D-  //Append a semi-colon to semantic actions
+
+COMPILER HomographTest 
+
+DELPHI
+  ERRORS
+     200: Result := 'invalid text after end of script';
+  PRIVATE
+    fInProperty : boolean;
+    fInParamList : boolean;
+    fUseHomograph : boolean;
+    function OnHomograph(const aToken: string; const aNextToken : string;
+        aNextSymbol : integer; SymId: integer; DefaultSymId: integer): integer;
+    procedure SetUseHomograph(const Value : boolean);
+  PUBLIC
+    property UseHomograph : boolean read fUseHomograph write SetUseHomograph;
+  CREATE                  
+    fInProperty := FALSE;    
+    fInParamList := FALSE;
+    fUseHomograph := TRUE;
+    GetScanner.OnHomograph := OnHomograph;
+END_DELPHI
+
+function T-->Grammar<--.OnHomograph(const aToken: string; const aNextToken : string;
+        aNextSymbol : integer; SymId: integer; DefaultSymId: integer): integer;
+begin
+  Result := SymId;
+  if ((Uppercase(aToken) = 'READ') or (Uppercase(aToken) = 'WRITE')) then
+  begin
+    if not fInProperty then
+      Result := DefaultSymId;
+  end
+  else if (Uppercase(aToken) = 'OUT') then
+  begin
+    if fInParamList AND (aNextSymbol = wordSym) then
+      Result := SymId
+    else
+      Result := DefaultSymId;
+  end;
+end; {OnHomograph}
+
+procedure T-->Grammar<--.SetUseHomograph(const Value : boolean);
+begin                   
+  fUseHomograph := Value;
+  if fUseHomograph then  
+    GetScanner.OnHomograph := OnHomograph
+  else
+    GetScanner.OnHomograph := NIL;
+end;
+
+(* Arbitrary Code *)
+
+IGNORE CASE
+
+CHARACTERS       
+  period = "." .
+  letter = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_" .
+  digit = '1234567890' .
+  
+TOKENS
+  DEFAULT word DESCRIPTION "identifier"
+          = letter { letter | digit } .
+  integer = digit { digit } . 
+            
+IGNORE CHR(1)..CHR(31)  
+
+PRODUCTIONS
+  HomographTest = ( CodeSnippit { CodeSnippit } )
+            (. if fCurrentInputSymbol <> EOFSYMB then
+               SynError(200); .) 
+ .
+
+  CodeSnippit = OP_Property OR ProcCall OR ProcDecl.
+  
+  OP_Property =
+                                       (. fInProperty := TRUE;
+                                          try .) 
+      BEGIN
+        "PROPERTY" word                (. _StreamLine('Property=' + LexString); .) 
+        [ ":" word { "." word } ] 
+        [ HOMOGRAPH "READ"             (. _StreamLine('   Property Read Specifier=' + LexString); .)  
+          word ] 
+        [ HOMOGRAPH "WRITE"            (. _StreamLine('   Property Write Specifier=' + LexString); .) 
+          word ] ";"
+      END                              (. finally
+                                            _StreamLine('');
+                                            fInProperty := FALSE;
+                                          end; .) 
+      . 
+
+  ProcCall = word                     (. _StreamLine('Procedure Call=' + LexString); .) 
+      ["(" ParamList ")"] ";" .                
+      
+  ParamList = word {"," word } .
+  
+  ProcDecl = "PROCEDURE" word         (. _StreamLine('Procedure Decl=' + LexString); .) 
+      ["." word]
+      [                                 
+                                      (. fInParamList := TRUE;
+                                         try .)
+        BEGIN 
+          "("                            
+          ParamDeclList 
+          ")" 
+        END                          (. finally
+                                           _StreamLine('');
+                                           fInParamList := FALSE;
+                                         end; .)
+      ] ";" .
+      
+  ParamDeclList = ParamDeclItem { ";" ParamDeclItem } .
+  
+  ParamDeclItem = 
+      OPTION
+        HOMOGRAPH "OUT"               (. _StreamLine('   Param Modifier=' + LexString); .)
+        OR "VAR"                      (. _StreamLine('   Param Modifier=' + LexString); .)
+        OR "CONST"                    (. _StreamLine('   Param Modifier=' + LexString); .)
+      END_OPTION 
+      word                            (. _StreamLine('   Param Name=' + LexString); .)
+      { "," word 
+      } ":" word ["." word] .
+  
+END HomographTest .
+

@@ -1,0 +1,325 @@
+$C-  //Generate Delphi test project
+$M-  //Use TRichEdit in test project
+$R-  //Save DFM as resource
+$E-  //Generate a component registration unit
+$Z-  //Generate console app
+$V+  //Generate version information
+$B+  //Auto-increment build number
+$O-  //Generate comment events
+$H+ TinyHash, HashSecondaryOne  //Use Hash functions to lookup literals
+$Y+  //Use SysUtils.SameText function for case insensitive compares
+$D-  //Append a semi-colon to semantic actions
+COMPILER Frame
+
+DELPHI
+  USES (INTERFACE)
+    FrameTools, CRT, CocoDefs, AnsiStrings
+  PRIVATE
+    FStream : TFileStream;
+    FFileName : AnsiString;
+    FGrammarName : AnsiString;
+    
+    CurrentLine : integer;
+    ModLine : AnsiString;
+    PosDelta : integer;
+    PosStart : integer;
+    fTableHandler: TTableHandler; 
+    fFrameTools : TFrameTools;
+
+    procedure Clear;
+    procedure InsertCode(CodeSection : AnsiString);
+    procedure AddString(S : AnsiString; Col : integer);
+    procedure StreamOther;
+    procedure StreamModLine;
+    procedure aStreamLn(const s : AnsiString);
+    procedure aStreamLine(S : AnsiString); overload;
+    procedure aStreamLine; overload;
+  PUBLIC
+    procedure Init;
+    property Stream : TFileStream read FStream write FStream;
+    property GrammarName : AnsiString read fGrammarName write fGrammarName;
+    property FrameTools : TFrameTools read fFrameTools write fFrameTools;
+    property TableHandler : TTableHandler read fTableHandler write fTableHandler;
+  PUBLISHED
+    property FileName : AnsiString read FFileName write FFileName;
+END_DELPHI
+
+(* Arbitrary Code *)
+
+procedure T-->Grammar<--.Init;
+begin
+  Stream := TFileStream.Create(FileName, fmCreate);
+  CurrentLine := 1;
+  PosDelta := 0;       
+  PosStart := 0;
+  ModLine := '';
+end;
+                               
+procedure T-->Grammar<--.Clear;
+begin
+  if ModLine <> '' then
+    aStreamLine(ModLine + '    ');
+  Stream.Free;
+  ModLine := '';
+  CurrentLine := 1;
+  PosDelta := 0;
+  PosStart := 0;
+end;
+
+procedure T-->Grammar<--.aStreamLn(const s : AnsiString);
+begin
+  if Length(S) > 0 then
+    Stream.WriteBuffer(S[1], length(S));
+end;
+
+procedure T-->Grammar<--.aStreamLine(S : AnsiString);
+begin
+  S := S + #13#10;
+  aStreamLn(S);
+end;
+
+procedure T-->Grammar<--.aStreamLine;
+begin
+  aStreamLine('');
+end;
+
+procedure T-->Grammar<--.StreamModLine;
+var
+  i : integer;
+begin
+  if ModLine > '' then
+    aStreamLine(ModLine);
+  for i := CurrentLine to GetScanner.CurrentSymbol.Line - 2 do
+    aStreamLine;
+  CurrentLine := GetScanner.CurrentSymbol.Line;
+  ModLine := '';
+  PosDelta := 0;
+end;
+
+procedure T-->Grammar<--.AddString(S : AnsiString; Col : integer);
+var
+  NewCol : integer;
+begin              
+  NewCol := Col - length(ModLine) - 2 - PosDelta;
+  ModLine := ModLine + PadL(s,' ',NewCol + length(s));
+end;
+
+procedure T-->Grammar<--.StreamOther;
+begin
+  if CurrentLine < 1 then
+    CurrentLine := 1;
+  if (CurrentLine <> GetScanner.CurrentSymbol.Line) then
+    StreamModLine;
+  AddString(LexString, GetScanner.CurrentSymbol.Col);
+end;
+
+procedure T-->Grammar<--.InsertCode(CodeSection : AnsiString);
+var
+  s : AnsiString;
+begin                                 
+  S := '';                                  
+  if CurrentLine <> GetScanner.CurrentSymbol.Line then
+    StreamModLine;
+  if LexName = 'GRAMMAR' then
+    S := GrammarName
+  else if LexName = 'SCANNER' then
+    S := GrammarName + 'Scanner'    
+  else if LexName = 'GRAMMARVERSION' then
+    S := fFrameTools.GetGrammarVersion
+  else if LexName = 'GRAMMARVERSIONLASTBUILD' then
+    S := fFrameTools.GetGrammarVersionLastBuild
+  else if LexName = 'GRAMMARVERSIONINFO' then
+    S := fFrameTools.GetGrammarVersionInfo
+  else if LexName = 'CONSOLE_VERSION' then
+    fFrameTools.ConsoleVersion(Stream)
+  else if LexName = 'VERSIONBTNDEC' then
+    fFrameTools.VersionBtnDec(Stream)
+  else if LexName = 'VERSIONBTN' then
+    fFrameTools.VersionBtn(Stream)
+  else if LexName = 'VERSIONBTNDFM' then
+    fFrameTools.VersionBtnDfm(Stream)
+  else if LexName = 'CONSTANTS' then
+    fFrameTools.WriteConstants(Stream)
+  else if LexName = 'DELPHIPRIVATE' then
+  begin 
+    if fTableHandler.PrivateDeclPos.TextPresent then
+      aStreamLn('  private'#13#10'    ');
+    fFrameTools.WriteSourcePart(Stream,fTableHandler.PrivateDeclPos,0);
+  end 
+  else if LexName = 'DELPHIPROTECTED' then
+  begin
+    if fTableHandler.ProtectedDeclPos.TextPresent then
+      aStreamLn('  protected'#13#10'    ');
+    fFrameTools.WriteSourcePart(Stream,fTableHandler.ProtectedDeclPos,0);
+  end 
+  else if LexName = 'DELPHIPUBLIC' then
+  begin
+    if fTableHandler.PublicDeclPos.TextPresent then
+      aStreamLn('  public'#13#10'    ');
+    fFrameTools.WriteSourcePart(Stream,fTableHandler.PublicDeclPos,0);
+  end 
+  else if LexName = 'DELPHIPUBLISHED' then
+  begin
+    if fTableHandler.PublishedDeclPos.TextPresent then
+      aStreamLn('  published'#13#10'    ');
+    fFrameTools.WriteSourcePart(Stream,fTableHandler.PublishedDeclPos,0);
+  end 
+  else if LexName = 'PRODUCTIONSDEC' then
+    fFrameTools.WriteProductionsDec(Stream)      
+  else if LexName = 'CONST' then
+    fFrameTools.WriteConst(Stream)   
+  else if LexName = 'ARBITRARYCODE' then 
+  begin                                     
+    fTableHandler.semDeclPos.TextPresent := true;
+    fFrameTools.WriteSourcePart(Stream,fTableHandler.semDeclPos,0);
+  end
+  else if LexName = 'PRAGMAS' then
+    fFrameTools.GenPragmaCode(Stream,0)  
+  else if LexName = 'DELPHICONST' then
+    fFrameTools.WriteSourcePart(Stream,fTableHandler.ConstDeclPos,0) 
+  else if LexName = 'DELPHITYPE' then
+    fFrameTools.WriteSourcePart(Stream,fTableHandler.TypeDeclPos,0) 
+  else if LexName = 'DELPHICREATE' then
+    fFrameTools.WriteSourcePart(Stream,fTableHandler.CreateDeclPos,0) 
+  else if LexName = 'DELPHIDESTROY' then
+    fFrameTools.WriteSourcePart(Stream,fTableHandler.DestroyDeclPos,0) 
+  else if LexName = 'DELPHIERRORS' then
+    fFrameTools.WriteSourcePart(Stream,fTableHandler.ErrorsDeclPos,0)
+  else if LexName = 'VERSIONMETHODS' then
+    fFrameTools.VersionMethods(Stream)
+  else if LexName = 'VERSIONPROPERTIES' then
+    fFrameTools.VersionProperties(Stream)
+  else if LexName = 'VERSIONSTRING' then
+    fFrameTools.VersionString(Stream)
+  else if LexName = 'VERSIONIMPL' then
+    fFrameTools.VersionImpl(Stream)
+  else if LexName = 'WEAKMETHODS' then
+    fFrameTools.WriteWeakMethods(Stream)
+  else if LexName = 'WEAKIMPL' then
+    fFrameTools.WriteWeakImpl(Stream)
+  else if LexName = 'ANCESTOR' then
+    fFrameTools.WriteAncestor(Stream)
+  else if LexName = 'COMMENT' then
+    fFrameTools.WriteComponentComment(Stream)
+  else if LexName = 'LITERALSUPPORT' then
+    fFrameTools.WriteLiterals(Stream)
+  else if LexName = 'LITERALSUPPORTDECL' then
+    fFrameTools.WriteLiteralSupportDecl(Stream)
+  else if LexName = 'GETSYA' then
+    fFrameTools.WriteCommentImplementation(Stream)
+  else if LexName = 'GETSYB' then
+    fFrameTools.WriteGetSyB(Stream)
+  else if LexName = 'SCANNERINIT' then
+    fFrameTools.WriteScannerInit(Stream)
+  else if LexName = 'PRODUCTIONSBODY' then
+    fFrameTools.WriteProductions(Stream)
+  else if LexName = 'PARSEROOT' then
+    fFrameTools.WriteParseRoot(Stream)
+  else if LexName = 'PARSERINIT' then
+    fFrameTools.WriteParserInit(Stream)
+  else if LexName = 'MEMOTYPE' then
+    S := fFrameTools.GetMemoType 
+  else if LexName = 'MEMOPROPERTIES' then
+    S := fFrameTools.GetMemoProperties
+  else if LexName = 'SCANNERDESTROYDECL' then
+    fFrameTools.WriteScannerDestroyDecl(Stream)  
+  else if LexName = 'SCANNERDESTROYIMPL' then
+    fFrameTools.WriteScannerDestroyImpl(Stream)
+  else if LexName = 'SCANNERHASHFIELD' then
+    fFrameTools.WriteScannerHashField(Stream)
+  else if LexName = 'ONHOMOGRAPHEVENT' then
+    fFrameTools.WriteOnHomographEvent(Stream)
+  else if LexName = 'ONHOMOGRAPHPROPERTY' then
+    fFrameTools.WriteOnHomographProperty(Stream)
+  else if LexName = 'ONHOMOGRAPHFIELD' then
+    fFrameTools.WriteOnHomographField(Stream)
+  else if LexName = 'GRAMMARGETCOMMENT' then
+    fFrameTools.WriteGrammarGetComment(Stream)
+  else if LexName = 'SCANNERCOMMENTFIELD' then
+    fFrameTools.WriteScannerCommentField(Stream)
+  else if LexName = 'SCANNERCOMMENT' then
+    fFrameTools.WriteScannerComment(Stream)
+  else if LexName = 'GRAMMARCOMMENTFIELD' then
+    fFrameTools.WriteGrammarCommentField(Stream)
+  else if LexName = 'GRAMMARCOMMENTPROPERTY' then
+    fFrameTools.WriteGrammarCommentProperty(Stream)
+  else
+    S := '-->' + LexName + '<--';
+  
+  if S > '' then
+    AddString(S,PosStart);
+  PosDelta := PosDelta + (Length(LexName) - length(S) + 6);
+end;
+
+(* End of Arbitrary Code *)
+
+IGNORE CASE
+
+CHARACTERS       
+  period = "." .
+  letter = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_" .
+  eol = CHR(13) .
+  noEOL = ANY - eol .
+  
+TOKENS
+  word = letter { letter } .
+            
+ PRAGMAS
+   CompilerDirective DESCRIPTION "Coco/R Compiler Directive" 
+      = "[$" noEOL 
+        "]" .
+
+IGNORE CHR(1)..CHR(31)  
+
+COMMENTS FROM "/*" TO "*/"
+
+PRODUCTIONS
+  Frame = (Section 
+            { Section })       (. fFrameTools.WriteCleanup(Stream, GrammarName);
+                                  Clear; .) .
+  
+  Section = CodePart | UsesClause | Other .
+  
+  CodePart = "-->"             (. PosStart := GetScanner.CurrentSymbol.Col; .) 
+    word                       (. InsertCode(LexName); .)
+    "<--"  .
+    
+  UsesClause (. var 
+                  isInterface : boolean;
+                  StrList : TStringList;
+                  i : integer; 
+                  UsesStr : AnsiString; .) =
+    "/%"                       (. UsesStr := '';
+                                  isInterface := false; .)
+    "Uses"           
+    ("(Interface)"             (. isInterface := true; .)   
+      | "(Implementation)"     (. isInterface := false; .)
+      )   
+    [ word                     (. UsesStr := UsesStr + LexString; .)
+    { ","                      (. UsesStr := UsesStr + LexString; .)
+    word                       (. UsesStr := UsesStr + LexString; .) 
+    } ]                               
+    "%/"                       (. if isInterface then
+                                    StrList := fTableHandler.InterfaceUses
+                                  else
+                                    StrList := fTableHandler.ImplementationUses;
+                                  for i := 0 to StrList.Count - 1 do 
+                                  begin
+                                    if i = 0 then
+                                    begin
+                                      if Trim(UsesStr) > '' then
+                                        UsesStr := UsesStr + ',' + StrList[i]
+                                      else
+                                        UsesStr := StrList[i];
+                                    end
+                                    else
+                                      UsesStr := UsesStr + ',' + StrList[i];
+                                  end;
+                                  if Trim(UsesStr) > '' then
+                                    ModLine := ModLine + #13#10'uses ' + UsesStr + ';'; .) 
+    .  
+
+  Other = ANY                  (. StreamOther; .) 
+    .
+  
+END Frame .
