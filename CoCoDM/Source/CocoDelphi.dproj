@@ -8,7 +8,7 @@
         <AppType>Console</AppType>
         <FrameworkType>VCL</FrameworkType>
         <ProjectVersion>14.6</ProjectVersion>
-        <Platform Condition="'$(Platform)'==''">Win32</Platform>
+        <Platform Condition="'$(Platform)'==''">Win64</Platform>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Base' or '$(Base)'!=''">
         <Base>true</Base>
@@ -93,7 +93,7 @@
         <Debugger_RunParams>&quot;C:\MCH Stuff\Delphi XE Progs\Common\HTMLParser\HTMLGrammar&quot;</Debugger_RunParams>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_2_Win64)'!=''">
-        <Debugger_RunParams>&quot;c:\MCH stuff\Delphi XE Progs\Common\HTMLParser\CSSGrammar.ATG&quot;</Debugger_RunParams>
+        <Debugger_RunParams>&quot;C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\SQL92Grammar\SQL92Grammar.atg&quot;</Debugger_RunParams>
     </PropertyGroup>
     <ItemGroup>
         <DelphiCompile Include="$(MainSource)">

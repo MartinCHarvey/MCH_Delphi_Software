@@ -1,0 +1,1319 @@
+$C-  //Generate Delphi test project
+$M-  //Use TRichEdit in test project
+$R-  //Save DFM as resource
+$E-  //Generate a component registration unit
+$Z-  //Generate console app
+$V+  //Generate version information
+$B+  //Auto-increment build number
+$O-  //Generate comment events
+$H+ TinyHash, HashSecondaryOne  //Use Hash functions to lookup literals
+$Y+  //Use SysUtils.SameText function for case insensitive compares
+$D-  //Append a semi-colon to semantic actions
+
+(* COCO/R grammar used to generate the COCO/R for Delphi component. *) 
+
+COMPILER Coco
+
+DELPHI
+  USES (INTERFACE) 
+    CRT, CRA, CRTypes, CocoOptions, CocoSwitch, CocoDefs, Dialogs
+  USES (IMPLEMENTATION)
+    Sets
+  TYPE
+    TTokenObj = class(TObject)
+    private
+      fIsPragma : boolean;
+      fIndex : integer;
+      fPosition : TSymbolPosition;
+    public
+      constructor Create;
+      destructor Destroy; override;
+      property IsPragma : boolean read fIsPragma write fIsPragma;
+      property Index : integer read fIndex write fIndex;
+      property Position : TSymbolPosition read fPosition write fPosition;
+    end; //TTokenObj
+  PRIVATE
+    FOutput : TStringList;
+    FLL1Count : integer;
+    FLL1TestConducted : boolean;
+    FGrammarCount : integer;
+    FWarningCount : integer;
+    FErrorCount : integer;
+    FErrorCnt : integer;
+    fCRAbortErr : AnsiString;
+    fTokenList : TStringList;
+    fTableHandler: TTableHandler;
+    fAutomaton: TAutomaton;
+    fOptions: TCocoOptions;
+    fOnInsertComment: TInsertCommentAtTop;
+
+    procedure FixString (var name: AnsiString; len: integer);
+    function RemoveQuotes(const S : AnsiString) : AnsiString;
+    procedure MatchLiteral (sp: integer);
+    procedure SetCtx (gp: integer);
+    function ValidOptionParams(Op : TCocoSwitch;
+        OptionState : boolean; ParamList : TStringList) : boolean;
+    procedure SetOption(const OptionName: AnsiString; OptionState : boolean;
+        ParamList : TStringList);
+    procedure OptionsModify(Op : TCocoSwitch; AddOption : boolean);
+    procedure ClearTokenList;
+    procedure SetOptions(const Value: TCocoOptions);
+    procedure SetCRAbortErr(const Value: AnsiString);
+    function GetErrorData(const Token1 : integer; const Token2 : integer) : AnsiString;
+    procedure InDistinguishedError(const Token : integer; const Data : AnsiString);
+    function GetTokenIndex(const sp : integer) : integer;
+  PROTECTED
+    function GetSuccessful: boolean; override;
+  PUBLIC
+    procedure ResetCocoR;
+    procedure PrintDivider;
+    procedure Msg(S : AnsiString; Output : TStrings);
+    function GetCharAt(BufferPosition: int64): AnsiChar;
+    function GetCurrentSymbol: TSymbolPosition;
+    procedure GetScannerError(const ErrorCode: integer;
+        const Symbol: TSymbolPosition; const Data: AnsiString;
+        const ErrorType: integer);
+
+    property Output : TStringList read FOutput write FOutput;
+    property ErrorCount : integer read FErrorCount write FErrorCount;
+    property LL1Count : integer read FLL1Count write FLL1Count;
+    property LL1TestConducted : boolean read fLL1TestConducted write fLL1TestConducted;
+    property GrammarCount : integer read FGrammarCount write FGrammarCount;
+    property WarningCount : integer read FWarningCount write FWarningCount;
+
+    property ErrorCnt : integer read fErrorCnt write FErrorCnt;
+    property CRAbortErr : AnsiString read fCRAbortErr write fCRAbortErr;
+    property TokenList : TStringList read fTokenList;
+
+    property TableHandler : TTableHandler read fTableHandler write fTableHandler;
+    property Automaton : TAutomaton read fAutomaton write fAutomaton;
+    property Options : TCocoOptions read fOptions write SetOptions;
+    property OnInsertComment : TInsertCommentAtTop read fOnInsertComment
+        write fOnInsertComment; 
+  CREATE
+    fOutput := TStringList.Create;
+    fTokenList := TStringList.Create;
+    fTableHandler := TTableHandler.Create;
+    fTableHandler.OnStreamLn := StreamToListFile;
+    fTableHandler.OnPrintDivider := PrintDivider;
+    fTableHandler.OnScannerError := GetScannerError;
+    fTableHandler.OnErrorStr := ErrorStr;
+    fTableHandler.OnAbortErrorMessage := SetCRAbortErr;
+  
+    fAutomaton := TAutomaton.Create;
+    fAutomaton.TableHandler := fTableHandler;
+    fAutomaton.OnStreamLn := StreamToListFile;
+    fAutomaton.OnPrintDivider := PrintDivider;
+    fAutomaton.OnScannerError := GetScannerError;
+    fAutomaton.OnErrorStr := ErrorStr;
+    fAutomaton.OnGetCurrentSymbol := GetCurrentSymbol;
+    fAutomaton.OnGetErrorData := GetErrorData;
+    fAutomaton.OnInDistinguishedError := InDistinguishedError;
+  DESTROY
+    fOutput.Clear;
+    fOutput.Free;     
+    fOutput := NIL; 
+    
+    ClearTokenList;               
+    fTokenList.Free;    
+    fTokenList := NIL;
+
+    fAutomaton.Finalize;
+    fAutomaton.Free;
+    fAutomaton := NIL;
+
+    fTableHandler.Clear;
+    fTableHandler.Free;
+    fTableHandler := NIL;
+  ERRORS
+    102 : Result := 'string literal may not extend over line end';
+    103 : Result := 'a literal must not have attributes';
+    104 : Result := 'this symbol kind not allowed in production';
+    105 : Result := 'attribute mismatch between declaration and use';
+    106 : Result := 'undefined string in production';
+    107 : Result := 'name declared twice';
+    108 : Result := 'this type not allowed on left side of production';
+    109 : Result := 'earlier semantic action was not terminated';
+    111 : Result := 'missing production for grammar name';
+    112 : Result := 'grammar symbol must not have attributes';
+    113 : Result := 'a literal must not be declared with a structure';
+    114 : Result := 'semantic action not allowed here';
+    115 : Result := 'undefined name';
+    116 : Result := 'attributes not allowed in token declaration';
+    117 : Result := 'name does not match grammar name';
+    118 : Result := 'unacceptable constant value';
+    119 : Result := 'may not ignore CHR(0)';
+    120 : Result := 'token may not be empty';
+    121 : Result := 'token must not start with an iteration';
+    122 : Result := 'only characters allowed in comment declaration';
+    123 : Result := 'only terminals may be weak';
+    124 : Result := 'literal tokens may not contain white space';
+    125 : Result := 'comment delimiter must be 1 or 2 characters long';
+    126 : Result := 'character set contains more than one character';
+    127 : Result := 'could not make deterministic automaton';
+    128 : Result := 'semantic action text too long - please split it';
+    129 : Result := 'literal tokens may not be empty';
+    130 : Result := 'IGNORE CASE must appear earlier';
+    131 : Result := '"' + Data + '" is an invalid option'; 
+    132 : Result := 'invalid modifiers for option "' + Data + '"';
+    
+    150 : Result := Data;
+    151 : Result := 'only one ' + Data + ' allowed';
+    152 : Result := 'could not generate ' + Data;
+    153 : Result := 'only one "' + Data + '" Delphi code section allowed';
+    154 : Result := Data + ' cannot be distinguished';
+    155 : Result := 'only one "DEFAULT" token allowed';
+    156 : Result := 'must have a "DEFAULT" token defined'; 
+    157 : Result := 'The option "' + fOptions.Switches.SwitchString(crsUseHashFunctions)
+              + '" must be enabled to use "HOMOGRAPH" and "DEFAULT" modifiers';
+
+    158 : Result := 'Cannot have an ELSE statement in this location of an OPTION';
+    159 : Result := 'Cannot have an IF statement as the first thing in a REPEAT';
+    160 : Result := 'Cannot have a semantic action in this location';
+        
+    200 : Result := Data + ' is a deletable symbol';
+    201 : Result := Data + ' is the start of several alternatives';
+    202 : Result := Data + ' is the start & successor of a deletable structure';
+    203 : Result := Data + ' is an ANY node that matches no symbol';
+    204 : Result := Data + ' is an undefined nonterminal';
+    205 : Result := Data + ' is an unreachable nonterminal';
+    206 : Result := Data + ' is an underivable nonterminal';
+    207 : Result := Data + ' is a circular derivation';
+
+   1000 : Result := 'Abort Error: ' + Data;
+   1001 : Result := 'Source not found';
+   1002 : Result := 'Something broken here has disabled scanner generation.';
+END_DELPHI
+
+const
+  _identSym = 0;   // symbol kinds 
+  _stringSym = 1;   
+
+constructor TTokenObj.Create;
+begin
+  inherited;
+  fPosition := TSymbolPosition.Create;
+end; {Create}
+
+destructor TTokenObj.Destroy;
+begin
+  fPosition.Free;
+  inherited;
+end; {Destroy}
+  
+procedure T-->Grammar<--.FixString(var name : AnsiString; len : integer);
+var
+  double, spaces : boolean;
+  i : integer;
+begin
+  if len = 2 then
+  begin
+    SemError(129, '');
+    exit;
+  end;
+  if fTableHandler.IgnoreCase then    // force uppercase 
+    for i := 2 to len - 1 do
+      name[i] := UpCase(name[i]);
+  double := false;
+  spaces := false;
+  for i := 2 to len - 1 do   // search for interior " or spaces 
+  begin
+    if name[i] = '"' then
+      double := true;
+    if name[i] <= ' ' then
+      spaces := true;
+  end;
+  if not double then  // force delimiters to be " quotes 
+    name[1] := '"'; name[len] := '"';
+  if spaces then SemError(124, '');
+end; {FixString}
+
+procedure T-->Grammar<--.MatchLiteral(sp : integer);
+// store string either as token or as literal 
+var
+  sn, sn1 : CRTSymbolNode;
+  matchedSp : integer;
+begin
+  fTableHandler.GetSym(sp, sn);
+  fAutomaton.MatchDFA(sn.name, sp, matchedSp);
+  if matchedSp <> CRTnoSym then
+  begin
+    fTableHandler.GetSym(matchedSp, sn1);
+    sn1.struct := CRTclassLitToken;
+    fTableHandler.PutSym(matchedSp, sn1);
+    sn.struct := CRTlitToken;
+  end
+  else
+    sn.struct := CRTclassToken;
+  fTableHandler.PutSym(sp, sn);
+end; {MatchLiteral}
+
+procedure T-->Grammar<--.SetCtx(gp : integer);
+// set transition code to contextTrans 
+var
+  gn : CRTGraphNode;
+begin
+  while gp > 0 do
+  begin
+    fTableHandler.GetNode(gp, gn);
+    if (gn.typ = CRTchart) or (gn.typ = CRTchrclass) then
+    begin 
+      gn.p2 := contextTrans;
+      fTableHandler.PutNode(gp, gn);
+    end
+    else if (gn.typ = CRTopt) or (gn.typ = CRTiter) then
+      SetCtx(gn.p1)
+    else if gn.typ = CRTalt then
+    begin 
+      SetCtx(gn.p1);
+      SetCtx(gn.p2);
+    end;
+    gp := gn.next;
+  end;
+end; {SetCtx}
+
+procedure T-->Grammar<--.OptionsModify(Op : TCocoSwitch; AddOption : boolean);
+begin
+  if AddOption then
+    fOptions.Switches.SwitchSet := fOptions.Switches.SwitchSet + [Op]
+  else
+    fOptions.Switches.SwitchSet := fOptions.Switches.SwitchSet - [Op];
+end; {OptionsModify}
+
+function T-->Grammar<--.ValidOptionParams(Op : TCocoSwitch;
+    OptionState : boolean; ParamList : TStringList) : boolean;
+begin
+  if OptionState then
+  begin
+    case Op of
+      crsGenRegistration : Result := ParamList.Count = 1;
+      crsUseHashFunctions : Result := ParamList.Count = 2;
+      else
+        Result := ParamList.Count = 0;
+    end; {case}
+  end
+  else
+    Result := ParamList.Count = 0;
+end; {ValidOptionParams}
+
+function T-->Grammar<--.RemoveQuotes(const S : AnsiString) : AnsiString;
+begin        
+  if (S > '') AND (S[1] IN ['"', #39]) then
+    Result := copy(S,2,Length(S) - 2)
+  else
+    Result := S;
+end; {RemoveQuotes}
+
+procedure T-->Grammar<--.SetOption(const OptionName: AnsiString; OptionState : boolean;
+    ParamList : TStringList);
+var
+  Op : TCocoSwitch;
+begin
+  if length(OptionName) > 1 then
+    SemError(131,OptionName)
+  else
+  begin
+     case OptionName[1] of 
+      'A' : Op := crsTraceAutomaton;
+      'B' : Op := crsAutoIncBuild;
+      'C' : Op := crsGenTestProgram;
+      'D' : Op := crsAppendSemiColon;
+      'E' : Op := crsGenRegistration;
+      'F' : Op := crsStartFollowSets;
+      'G' : Op := crsPrintGraph;
+      'H' : Op := crsUseHashFunctions;
+      'I' : Op := crsTraceStartSets;
+      'L' : Op := crsForceListing;
+      'M' : Op := crsUseRichEdit;
+      'O' : Op := crsGenCommentEvents;
+      'R' : Op := crsDfmAsResource;
+      'S' : Op := crsPrintSymbolTable;
+      'T' : Op := crsGrammarTestsOnly;
+      'V' : Op := crsGenVersionInfo;
+      'W' : Op := crsSpaceAsWhitespace;
+      'X' : Op := crsPrintXRef;  
+      'Y' : Op := crsUseSameTextCompare;
+      'Z' : Op := crsGenConsoleApp;
+      else
+      begin
+        SemError(131, OptionName);
+        Exit;
+      end;
+    end;  // case 
+    if ValidOptionParams(Op, OptionState, ParamList) then
+    begin
+      OptionsModify(Op, OptionState);
+      if (Op = crsGenRegistration) AND OptionState then
+        fOptions.AGI.RegistrationPalette := RemoveQuotes(ParamList[0])
+      else if (Op = crsUseHashFunctions) AND OptionState then
+      begin
+        fOptions.AGI.HashPrimary := RemoveQuotes(ParamList[0]); 
+        fOptions.AGI.HashSecondary := RemoveQuotes(ParamList[1]); 
+      end; 
+    end
+    else
+      SemError(132,OptionName)
+  end;
+end; {SetOp}         
+
+procedure T-->Grammar<--.Msg(S : AnsiString;
+  Output : TStrings);
+begin
+  Output.Add(S);
+end; {Msg}
+
+procedure T-->Grammar<--.PrintDivider;
+begin
+  StreamToListFile('', TRUE);
+  StreamToListFile('================================================================================', TRUE);
+end; {PrintDivider}
+
+procedure T-->Grammar<--.ClearTokenList;
+var
+  i : integer;
+begin
+  for i := 0 to TokenList.Count - 1 do
+    TokenList.Objects[i].Free;
+  TokenList.Clear;
+end; {ClearTokenList}
+
+procedure T-->Grammar<--.ResetCocoR;
+begin
+  ClearTokenList;
+  ErrorCnt := 0;
+  fLL1TestConducted := FALSE;
+  CRAbortErr := '';
+  Output.Clear;
+end; {ResetCocoR}
+
+procedure T-->Grammar<--.SetOptions(const Value: TCocoOptions);
+begin
+  fOptions := Value;
+  fTableHandler.SwitchSet := fOptions.Switches.SwitchSet;
+end; {SetOptions}
+
+procedure T-->Grammar<--.GetScannerError(const ErrorCode: integer;
+  const Symbol: TSymbolPosition; const Data: AnsiString;
+  const ErrorType: integer);
+begin
+  GetScanner.ScannerError(ErrorCode, Symbol, Data, ErrorType);
+end; {GetScannerError}
+
+procedure T-->Grammar<--.SetCRAbortErr(const Value: AnsiString);
+var
+  Error : TCocoError;
+begin
+  Error := TCocoError.Create;
+  Error.ErrorType := etMetaError;
+  Error.ErrorCode := META_ERROR_ABORT_ERROR;
+  Error.Line := 0;
+  Error.Col := 0;
+  Error.Data := Value;
+  ErrorList.Add(Error);
+  fCRAbortErr := Value;
+end; {SetCRAbortErr}
+
+function T-->Grammar<--.GetCurrentSymbol: TSymbolPosition;
+begin
+  Result := GetScanner.CurrentSymbol;
+end; {GetCurrentSymbol}
+
+function T-->Grammar<--.GetErrorData(const Token1 : integer; const Token2 : integer) : AnsiString;
+var
+  Token1Index : integer;
+  Token2Index : integer;
+begin
+  {TODO: Obtain information on where the first token is}
+  Token1Index := GetTokenIndex(Token1);
+  Token2Index := GetTokenIndex(Token2);
+  if TTokenObj(TokenList.Objects[Token1Index]).IsPragma then
+    Result := 'Pragma (' + TokenList[Token1Index] + ') and '
+  else
+    Result := 'Token (' + TokenList[Token1Index] + ') and ';
+  if TTokenObj(TokenList.Objects[Token2Index]).IsPragma then
+    Result := Result + 'Pragma (' + TokenList[Token2Index] + ')'
+  else
+    Result := Result + 'Token (' + TokenList[Token2Index] + ')';
+end; {GetErrorData}
+
+procedure T-->Grammar<--.InDistinguishedError(const Token : integer; const Data : AnsiString);
+var
+  TokenIdx : integer;
+  Position : TSymbolPosition;
+begin
+  Position := TSymbolPosition.Create;
+  try
+    TokenIdx := GetTokenIndex(Token);
+    TTokenObj(TokenList.Objects[TokenIdx]).Position.Assign(Position);
+    Position.Col := 0;
+    GetScanner.ScannerError(154, Position, Data, etGrammar);
+  finally
+    FreeAndNIL(Position);
+  end;
+end; {InDistinguishedError}
+
+function T-->Grammar<--.GetTokenIndex(const sp : integer) : integer;
+var
+  i : integer;
+begin
+  Result := 0;
+  for i := 0 to TokenList.Count - 1 do
+  begin
+    if TTokenObj(TokenList.Objects[i]).Index = sp then
+    begin
+      Result := i;
+      Break;
+    end;
+  end;
+end; {GetTokenIndex}
+
+function T-->Grammar<--.GetCharAt(BufferPosition: int64): AnsiChar;
+begin
+  Result := GetScanner.CharAt(BufferPosition);
+end; {GetCharAt}
+
+function T-->Grammar<--.GetSuccessful: boolean;
+var
+  i : integer;
+begin
+  {Don't call inherited}
+  Result := TRUE;
+  for i := 0 to ErrorList.Count - 1 do
+    if TCocoError(ErrorList[i]).ErrorType IN [etGrammar, etGeneration] then
+    begin
+      Result := FALSE;
+      Break;  {@Break for speed}
+    end;
+end; {GetSuccessful}
+
+(*----------------------------------------------------------------------------*)
+
+CHARACTERS
+  letter = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_" .
+  digit = "0123456789" .
+  ctrl = CHR(1)..CHR(31) .
+  tab = CHR(9) .
+  eol = CHR(13) .
+  lf = CHR(10) .
+  noQuote1 = ANY - '"' - ctrl .
+  noQuote2 = ANY - "'" - ctrl .
+  noEOL = ANY - eol .
+
+IGNORE tab + eol + lf
+
+TOKENS
+  ident DESCRIPTION "identifier"
+      = letter REPEAT letter | digit END_REPEAT .
+  string DESCRIPTION "string"
+      = '"' REPEAT noQuote1 END_REPEAT '"' OR "'" REPEAT noQuote2 END_REPEAT "'" .
+  badstring DESCRIPTION "bad string"
+      = '"' REPEAT noQuote1 END_REPEAT (eol OR lf) 
+              OR "'" REPEAT noQuote2 END_REPEAT (eol OR lf) .
+  integer_ DESCRIPTION "integer"
+      = digit REPEAT digit END_REPEAT .
+  
+ PRAGMAS
+   CompilerDirective DESCRIPTION "Coco/R Compiler Directive" 
+      = "[$" noEOL                  
+        "]" . (. ShowMessage(LexString); .) 
+
+COMMENTS FROM "(*" TO "*)" NESTED
+COMMENTS FROM "/*" TO "*/"
+COMMENTS FROM "//" TO eol
+
+PRODUCTIONS
+
+Coco DESCRIPTION "Coco/R for Delphi grammar"
+                               (. var
+                                    startedDFA : boolean;
+                                    ok : boolean;
+                                    undef : boolean;
+                                    hasAttrs: boolean;
+                                    gR : integer;
+                                    gramLine : integer;
+                                    sp : integer;
+                                    name : CRTName;
+                                    gramName :  CRTName;
+                                    sn : CRTSymbolNode;
+                                    .)
+=
+OPTION
+  CocoOptionList
+END_OPTION
+
+"COMPILER"
+                               (. gramLine := GetScanner.CurrentSymbol.line;
+                                  fTableHandler.NewSym(CRTt, 'EOF', 0);
+                                  fTableHandler.GenScanner := TRUE; 
+                                  fTableHandler.IgnoreCase := FALSE;
+                                  Sets.Clear(fTableHandler.IgnoredCharSet);
+                                  startedDFA := FALSE; .)
+Ident <gramName>
+
+OPTION 
+  DelphiSection 
+END_OPTION
+
+                               (. fTableHandler.SemDeclPos.TextPresent := TRUE;
+                                  fTableHandler.SemDeclPos.StartText := GetScanner.NextSymbol.Pos; .)
+REPEAT
+  ANY 
+END_REPEAT
+                               (. fTableHandler.SemDeclPos.TextLength := GetScanner.NextSymbol.Pos - fTableHandler.SemDeclPos.StartText;
+                                  fTableHandler.SemDeclPos.Column := 0; .)
+
+REPEAT
+  Declaration <startedDFA> 
+END_REPEAT
+
+SYNC
+"PRODUCTIONS"                  (. ok := Successful;
+                                  if ok AND fTableHandler.GenScanner then
+                                    fAutomaton.MakeDeterministic(ok);
+                                  if NOT ok then
+                                    SemError(127,'');
+                                  fTableHandler.nNodes := 0; .)
+REPEAT
+  Ident  <name>                (. sp := fTableHandler.FindSym(name); 
+                                  undef := sp = CRTnoSym;
+                                  if undef then 
+                                  begin
+                                    sp := fTableHandler.NewSym(CRTnt, name, GetScanner.CurrentSymbol.line);
+                                    fTableHandler.GetSym(sp, sn)
+                                  end
+                                  else 
+                                  begin
+                                    fTableHandler.GetSym(sp, sn);
+                                    if sn.typ = CRTnt then
+                                    begin 
+                                      if sn.struct > 0 then 
+                                        SemError(107,'') 
+                                    end
+                                    else 
+                                      SemError(108,'');
+                                    sn.line := GetScanner.CurrentSymbol.line;
+                                  end;
+                                  hasAttrs := sn.attrPos.beg >= 0; .)
+  BEGIN 
+    Attribs <sn.attrPos>       (. if NOT undef AND NOT hasAttrs then 
+                                    SemError(105,'');
+                                  fTableHandler.PutSym(sp, sn); .)
+    OR                         (. if NOT undef AND hasAttrs then 
+                                    SemError(105,''); .)
+  END
+  
+  OPTION
+    Description <sn>
+  END_OPTION
+  
+  OPTION
+    SemText <sn.semPos>
+  END_OPTION
+  
+  WEAK "="
+  Expression <sn.struct, gR>   (. fTableHandler.CompleteGraph(gR); 
+                                  fTableHandler.PutSym(sp, sn); .)
+  WEAK "."
+END_REPEAT
+  "END" Ident <name>           (. sp := fTableHandler.FindSym(gramName);
+                                  if sp = CRTnoSym then 
+                                    SemError(111,'')
+                                  else 
+                                  begin
+                                    fTableHandler.GetSym(sp, sn);
+                                    if sn.attrPos.beg >= 0 then 
+                                      SemError(112,'');
+                                    fTableHandler.Root := fTableHandler.NewNode(CRTnt, sp, gramLine);
+                                  end;
+                                  if name <> gramName then
+                                    SemError(117,''); .)
+"."                            (. fTableHandler.NewSym(CRTt, 'not', 0);
+                                  if  crsUseHashFunctions  IN  fOptions.Switches.SwitchSet  then
+                                    fTableHandler.InterfaceUses.Add('mwStringHashList'); .)
+.
+
+(*----------------------------------------------------------------------------*)
+
+DelphiSection DESCRIPTION "Delphi section" = 
+    "DELPHI"
+    REPEAT 
+      UsesClause OR DelphiSourceParts 
+    END_REPEAT
+    "END_DELPHI" .                              
+
+DelphiSourceParts DESCRIPTION "Delphi source part"
+                                 (. var
+                                      SrcPos : TCRTPosition; .) 
+   =
+                                 (. SrcPos := NIL; .)
+   BEGIN 
+     BEGIN
+       "CONST"                   (. SrcPos := fTableHandler.ConstDeclPos; .)
+       OR "TYPE"                 (. SrcPos := fTableHandler.TypeDeclPos; .)
+       OR "PRIVATE"              (. SrcPos := fTableHandler.PrivateDeclPos; .)
+       OR "PROTECTED"            (. SrcPos := fTableHandler.ProtectedDeclPos; .)
+       OR "PUBLIC"               (. SrcPos := fTableHandler.PublicDeclPos; .)
+       OR "PUBLISHED"            (. SrcPos := fTableHandler.PublishedDeclPos; .)
+       OR "ERRORS"               (. SrcPos := fTableHandler.ErrorsDeclPos; .)
+       OR "CREATE"               (. SrcPos := fTableHandler.CreateDeclPos; .)
+       OR "DESTROY"              (. SrcPos := fTableHandler.DestroyDeclPos; .)
+     END
+                                 (. if Assigned(SrcPos) then
+                                    begin
+                                      if SrcPos.TextPresent then
+                                        SemError(153,LexString);
+                                      SrcPos.TextPresent := true;
+                                      SrcPos.StartText := GetScanner.NextSymbol.Pos;
+                                    end; .)
+     BEGIN
+       REPEAT
+         ANY
+       END_REPEAT
+     END
+                                 (. if Assigned(SrcPos) then
+                                    begin
+                                      SrcPos.TextLength := GetScanner.NextSymbol.Pos - SrcPos.StartText - 2;
+                                      SrcPos.Column := 0;
+                                    end; .)
+   END
+   .
+
+UsesClause DESCRIPTION "uses clause"
+                               (. var
+                                    isInterface : boolean; .) =
+ "USES"                        (. isInterface := FALSE; .)
+  BEGIN
+    "(INTERFACE)"              (. if fTableHandler.InterfaceUses.Count > 0 then
+                                    SemError(151,'interface uses clause');
+                                  isInterface := TRUE; .)
+    OR "(IMPLEMENTATION)"      (. if fTableHandler.ImplementationUses.Count > 0 then
+                                    SemError(151,'implementation uses clause');
+                                  isInterface := FALSE; .)
+  END
+  ident                          (. if isInterface then
+                                      fTableHandler.InterfaceUses.Add(LexString)
+                                    else
+                                      fTableHandler.ImplementationUses.Add(LexString); .)
+  REPEAT
+    ","
+    ident                        (. if isInterface then
+                                      fTableHandler.InterfaceUses.Add(LexString)
+                                    else
+                                      fTableHandler.ImplementationUses.Add(LexString); .)
+  END_REPEAT .
+
+Declaration<var startedDFA : boolean> DESCRIPTION "Coco/R Declaration"
+                               (. var
+                                    gL1 : integer;
+                                    gR1 : integer;
+                                    gL2 : integer;
+                                    gR2 : integer;
+                                    nested : boolean; .)
+=                              (. nested := FALSE; .)  
+  BEGIN
+    "CHARACTERS"   REPEAT SetDecl END_REPEAT
+    OR "TOKENS"    REPEAT TokenDecl <CRTt> END_REPEAT
+    OR "NAMES"     REPEAT NameDecl END_REPEAT
+    OR "PRAGMAS"   REPEAT TokenDecl <CRTpr> END_REPEAT
+    OR "COMMENTS" "FROM" TokenExpr <gL1, gR1> "TO" TokenExpr <gL2, gR2>
+
+    BEGIN 
+      "NESTED"                 (. nested := TRUE; .)
+      OR                       (. nested := FALSE; .)
+    END
+                               (. if Assigned(fOnInsertComment) then
+                                    fOnInsertComment(gL1, gL2, nested); .)
+    OR "IGNORE"
+    BEGIN "CASE"               (. if startedDFA then 
+                                    SemError(130,'');
+                                  fTableHandler.IgnoreCase := TRUE; .)
+      OR Set <fTableHandler.IgnoredCharSet> 
+                               (. if Sets.IsIn(fTableHandler.IgnoredCharSet, 0) then
+                                    SemError(119,''); .)
+    END                                                                
+  END                          (. startedDFA := TRUE; .)
+.
+
+
+(*----------------------------------------------------------------------------*)
+
+SetDecl DESCRIPTION "set declaration"
+                               (. var
+                                    c : integer;
+                                    oneSet :  CRTSet;
+                                    name : CRTName; .)
+= Ident <name>                 (. c := fTableHandler.ClassWithName(name);
+                                  if c >= 0 then
+                                    SemError(107,''); .)
+  "=" Set <oneSet>             (. fTableHandler.NewClass(name, oneSet); .)
+  ".".
+
+(*----------------------------------------------------------------------------*)
+
+Set <var oneSet: CRTSet> DESCRIPTION "Coco/R set"
+                               (. var
+                                    set2 : CRTSet; .)
+= SimSet <oneSet>
+  REPEAT 
+    "+" SimSet <set2>          (. Sets.Unite(oneSet, set2); .)
+    OR "-" SimSet <set2>       (. Sets.Differ(oneSet, set2); .)
+  END_REPEAT .
+
+(*----------------------------------------------------------------------*)
+
+SimSet <var oneSet: CRTSet> DESCRIPTION "simple set"
+                               (. var
+                                    i : integer;
+                                    n1 : integer;
+                                    n2 : integer;
+                                    c : integer;
+                                    name : CRTName;
+                                    s : AnsiString; .)
+= Ident <name>                 (. c := fTableHandler.ClassWithName(name);
+                                  if c < 0 then
+                                  begin
+                                    SemError(115,''); 
+                                    Sets.Clear(oneSet)
+                                  end
+                                  else
+                                    fTableHandler.GetClass(c, oneSet); .)
+OR string                       (. s := Scanner.GetName(GetScanner.CurrentSymbol);
+                                  Sets.Clear(oneSet); i := 2;
+                                  while s[i] <> s[1] do 
+                                  begin
+                                    if fTableHandler.IgnoreCase then
+                                      s[i] := UpCase(s[i]);
+                                    Sets.Incl(oneSet, ORD(s[i]));
+                                    INC(i)
+                                  end; .)
+OR SingleChar <n1>
+                               (. Sets.Clear(oneSet);
+                                  Sets.Incl(oneSet, n1); .)
+
+  OPTION
+    ".." SingleChar <n2>       (. for i := n1 to n2 do 
+                                    Sets.Incl(oneSet, i); .)
+  END_OPTION
+  
+OR "ANY"                        (. Sets.Fill(oneSet); .)
+OR "NONE"                       (. Sets.Clear(oneSet); .)
+.
+
+(*----------------------------------------------------------------------------*)
+
+SingleChar <var n: INTEGER> DESCRIPTION "single character" 
+                               (. var
+                                    i : integer;
+                                    s : AnsiString; .)
+  =
+    "CHR" "(" 
+      BEGIN
+        integer_               (. s := Scanner.GetName(GetScanner.CurrentSymbol);
+                                  Val(s, n, i);
+                                  if n > 255 then 
+                                  begin
+                                    SemError(118,''); 
+                                    n := n mod 256;
+                                  end;
+                                  if fTableHandler.IgnoreCase then
+                                    n := ORD(UpCase(AnsiChar(n))); .)
+        OR string              (. s := Scanner.GetName(GetScanner.CurrentSymbol);
+                                  if GetScanner.CurrentSymbol.len <> 3 then
+                                    SemError(118,'');
+                                  if fTableHandler.IgnoreCase then
+                                    s[2] := UpCase(s[2]);
+                                  n := ORD(s[2]); .)
+      END
+                                  
+     ")" .
+
+(*----------------------------------------------------------------------------*)
+
+TokenDecl <typ: INTEGER> DESCRIPTION "token declaration"
+                               (. var
+                                    kind : integer;
+                                    name : CRTName;
+                                    pos : CRTPosition;
+                                    sp : integer;
+                                    gL : integer;
+                                    gR : integer;
+                                    sn : CRTSymbolNode;
+                                    TokenObj : TTokenObj;
+                                    HGType : THomographType;
+                                    TempHGType : THomographType; .)
+=                              (. HGType := htNone; .)
+  BEGIN
+    OPTION    
+      "DEFAULT"                (. HGType := htDefaultIdent; .)
+    END_OPTION
+    Symbol <name, kind, TempHGType> 
+                               (. sp := 0;
+                                  if fTableHandler.FindSym(name) <> CRTnoSym then 
+                                    SemError(107,'')
+                                  else
+                                  begin
+                                    TokenObj := TTokenObj.Create;
+                                    if typ = CRTt then
+                                      TokenObj.IsPragma := FALSE
+                                    else
+                                      TokenObj.IsPragma := TRUE;
+                                    TokenObj.Position.Line := GetScanner.CurrentSymbol.Line;
+                                    TokenObj.Position.Col := GetScanner.CurrentSymbol.Col;
+                                    TokenObj.Position.Len := GetScanner.CurrentSymbol.Len;
+                                    TokenObj.Position.Pos := GetScanner.CurrentSymbol.Pos;
+
+                                    sp := fTableHandler.NewSym(typ, name, GetScanner.CurrentSymbol.line);
+                                    TokenObj.Index := sp;
+                                    TokenList.AddObject(name, TokenObj);
+                                    fTableHandler.GetSym(sp, sn); 
+                                    sn.struct := CRTclassToken;
+                                    if (sn.HomographType = htNone) AND (HGType <> htNone) then
+                                      sn.HomographType := HGType;
+                                  end; .)
+
+  OPTION                                
+    Description <sn>
+  END_OPTION
+
+    SYNC
+    BEGIN 
+      "="
+      TokenExpr <gL, gR>       (. if kind <> _identSym then
+                                    SemError(113,'');
+                                  fTableHandler.CompleteGraph(gR);
+                                  fAutomaton.ConvertToStates(gL, sp); .)
+      "."
+      OR                         (. if kind = _identSym then
+                                    begin
+                                      fTableHandler.GenScanner := FALSE;
+                                      SemError(1002,'');
+                                    end
+                                  else 
+                                    MatchLiteral(sp); .)
+    END
+    OPTION
+      SemText <pos>            (. if typ = CRTt then
+                                    SemError(114,'');
+                                  sn.semPos := pos; .)
+    END_OPTION 
+  END                          (. fTableHandler.PutSym(sp, sn); .)
+
+  .
+
+(*----------------------------------------------------------------------------*)
+
+Expression <var gL, gR: INTEGER> DESCRIPTION "Coco/R expression"
+                               (. var
+                                    gL2 : integer;
+                                    gR2 : integer;
+                                    first : boolean; .)
+= Term <gL, gR>                (. first := TRUE; .)
+  REPEAT 
+    BEGIN 
+      ( WEAK "|" ) OR ( WEAK "OR" ) 
+    END
+    Term <gL2, gR2>            (. if first then
+                                  begin
+                                    fTableHandler.MakeFirstAlt(gL, gR); 
+                                    first := FALSE;
+                                  end;
+                                  fTableHandler.ConcatAlt(gL, gR, gL2, gR2); .)
+  END_REPEAT .
+
+(*----------------------------------------------------------------------------*)
+
+Term <var gL, gR: INTEGER> DESCRIPTION "Coco/R term"
+                               (. var
+                                    gL2 : integer;
+                                    gR2 : integer; .)
+=                              (. gL := 0; 
+                                  gR := 0; .)
+BEGIN 
+  Factor <gL, gR>
+    REPEAT 
+      Factor <gL2, gR2>        (. fTableHandler.ConcatSeq(gL, gR, gL2, gR2); .)
+    END_REPEAT
+  OR                           (. gL := fTableHandler.NewNode(CRTeps, 0, 0); 
+                                  gR := gL; .)
+END .
+
+(*----------------------------------------------------------------------------*)
+
+Factor <var gL, gR: INTEGER> DESCRIPTION "Coco/R factor"
+                               (. var
+                                    sp : integer;
+                                    kind : integer;
+                                    name : CRTName;
+                                    gn : CRTGraphNode;
+                                    sn : CRTSymbolNode;
+                                    oneSet : CRTSet;
+                                    undef : boolean;
+                                    weak : boolean;
+                                    pos : CRTPosition;
+                                    HGType : THomographType; 
+                                    .)
+=                              (. gL := 0; 
+                                  gR := 0; 
+                                  weak := FALSE; .)
+BEGIN 
+  OPTION 
+    "WEAK"                     (. weak := TRUE;
+                                  fTableHandler.HasWeak := true; .)
+  END_OPTION
+  Symbol <name, kind, HGType>  (. sp := fTableHandler.FindSym(name); 
+                                  undef := sp = CRTnoSym;
+                                  if undef then
+                                    if kind = _identSym then (* forward nt *)
+                                      sp := fTableHandler.NewSym(CRTnt, name, 0)
+                                    else if fTableHandler.GenScanner then
+                                    begin
+                                      sp := fTableHandler.NewSym(CRTt, name, GetScanner.CurrentSymbol.line);
+                                      MatchLiteral(sp)
+                                    end
+                                    else
+                                    begin (* undefined string in production *)
+                                      SemError(106,''); sp := 0
+                                    end;
+                                  fTableHandler.GetSym(sp, sn);
+                                  if (sn.HomographType = htNone) AND (HGType <> htNone) then
+                                  begin
+                                    sn.HomographType := HGType;
+                                    fTableHandler.PutSym(sp, sn);
+                                  end;
+                                  if (sn.typ <> CRTt) AND (sn.typ <> CRTnt) then
+                                    SemError(104,'');
+                                  if weak then
+                                    if sn.typ = CRTt then 
+                                      sn.typ := CRTwt
+                                    else
+                                      SemError(123,'');
+                                  gL := fTableHandler.NewNode(sn.typ, sp, GetScanner.CurrentSymbol.line); 
+                                  gR := gL; .)
+  BEGIN 
+    Attribs <pos>              (. fTableHandler.GetNode(gL, gn); 
+                                  gn.pos := pos;
+                                  fTableHandler.PutNode(gL, gn);
+                                  fTableHandler.GetSym(sp, sn);
+                                  if sn.typ <> CRTnt then 
+                                    SemError(103,'');
+                                  if undef then
+                                  begin
+                                    sn.attrPos := pos; 
+                                    fTableHandler.PutSym(sp, sn) 
+                                  end
+                                  else if sn.attrPos.beg < 0 then
+                                    SemError(105,''); .)
+    OR                         (. fTableHandler.GetSym(sp, sn);
+                                  if sn.attrPos.beg >= 0 then
+                                    SemError(105,''); .)
+  END
+OR IfStatement <gL, gR>
+OR "(" Expression <gL, gR> ")"
+OR "BEGIN" Expression <gL, gR> 
+   "END" 
+OR "[" Expression <gL, gR> "]"  (. fTableHandler.MakeOption(gL, gR); .)
+OR "OPTION" Expression <gL, gR> 
+   "END_OPTION"                 (. fTableHandler.MakeOption(gL, gR); .)
+OR "{" Expression <gL, gR> "}"  (. fTableHandler.MakeIteration(gL, gR); .)
+OR "REPEAT" Expression <gL, gR> 
+   "END_REPEAT"                 (. fTableHandler.MakeIteration(gL, gR); .)
+
+OR SemText <pos>                (. gL := fTableHandler.NewNode(CRTsem, 0, 0); 
+                                   gR := gL;
+                                   fTableHandler.GetNode(gL, gn);
+                                   gn.pos := pos;
+                                   fTableHandler.PutNode(gL, gn); .)
+OR "ANY"                        (. Sets.Fill(oneSet);
+                                   Sets.Excl(oneSet, CRTeofSy);
+                                   gL := fTableHandler.NewNode(CRTany, fTableHandler.NewSet(oneSet), 0); 
+                                   gR := gL; .)
+OR "SYNC"                       (. gL := fTableHandler.NewNode(CRTsync, 0, 0); 
+                                   gR := gL; .)
+END .
+
+(*----------------------------------------------------------------------------*)
+
+SimpleMethodCall <out BooleanFunction : AnsiString> DESCRIPTION "Simple Method Call"
+    =                          
+      BEGIN
+        ident                  (. BooleanFunction := LexString; .)
+        OPTION    
+          "("                  (. BooleanFunction := BooleanFunction + LexString; .)
+          ident                (. BooleanFunction := BooleanFunction + LexString; .)
+          REPEAT
+            ","                (. BooleanFunction := BooleanFunction + LexString; .)
+            ident              (. BooleanFunction := BooleanFunction + LexString; .)
+          END_REPEAT
+          ")"                  (. BooleanFunction := BooleanFunction + LexString; .)
+        END_OPTION 
+      END
+    .
+
+IfStatement <var gL, gR: INTEGER> DESCRIPTION "If Statement"
+                               (. var 
+                                    BooleanFunction : AnsiString;
+                                    gn : CRTGraphNode;
+                                    IfNode : integer;
+                                    IfEnd : integer;
+                                    ElseNode : integer;
+                               .)
+    = BEGIN
+      "IF" 
+      SimpleMethodCall <BooleanFunction> (* must be a boolean function of the object *)
+      "THEN"         
+      "BEGIN"                  (. IfNode := fTableHandler.NewNode(CRTif, 0, 0); 
+                                  fTableHandler.GetNode(IfNode, gn);
+                                  gn.BooleanFunction := BooleanFunction;
+                                  fTableHandler.PutNode(IfNode, gn); .)
+      BEGIN
+        Expression <gL,gR>     (. fTableHandler.GetNode(IfNode, gn);
+                                  gn.Next := gL;
+                                  fTableHandler.PutNode(IfNode, gn); .)
+      END       
+      "END"                    (. IfEnd := fTableHandler.NewNode(CRTendsc, 0, 0);
+                                  fTableHandler.GetNode(IfEnd, gn);
+                                  gn.P1 := IfNode;
+                                  fTableHandler.PutNode(IfEnd, gn);
+              
+                                  fTableHandler.GetNode(IfNode, gn);
+                                  gn.P1 := IfEnd;
+                                  fTableHandler.PutNode(IfNode, gn);
+                                  
+                                  fTableHandler.GetNode(gR, gn);
+                                  gn.Next := IfEnd;
+                                  fTableHandler.PutNode(gR, gn);
+                                  gR := IfEnd; .) 
+       OPTION
+         BEGIN
+           "ELSE"              
+           "BEGIN"             (. ElseNode := fTableHandler.NewNode(CRTelse, 0, 0);
+                                  fTableHandler.GetNode(ElseNode, gn);
+                                  gn.P1 := IfNode;
+                                  fTableHandler.PutNode(ElseNode, gn);
+                                   
+                                  fTableHandler.GetNode(IfNode, gn);
+                                  gn.p2 := ElseNode; 
+                                  fTableHandler.PutNode(IfNode, gn);             
+
+                                  fTableHandler.GetNode(IfEnd, gn);
+                                  gn.Next := ElseNode; 
+                                  gn.typ := CRTend;
+                                  fTableHandler.PutNode(IfEnd, gn); .)             
+           BEGIN 
+             Expression <gL, gR> (. fTableHandler.GetNode(ElseNode, gn);
+                                    gn.Next := gL;
+                                    fTableHandler.PutNode(ElseNode, gn); .)
+           END 
+           "END"               (. IfEnd := fTableHandler.NewNode(CRTendsc, 0, 0);
+                                  fTableHandler.GetNode(IfEnd, gn);
+                                  gn.P1 := ElseNode;
+                                  fTableHandler.PutNode(IfEnd, gn);
+
+                                  fTableHandler.GetNode(gR, gn);
+                                  gn.Next := IfEnd;
+                                  fTableHandler.PutNode(gR, gn);
+                                  gR := IfEnd;              
+                               .)
+         END
+       END_OPTION
+       END                     (. gL := IfNode; {the letf node is always the "if" node} .)                     
+        
+    .
+
+(*----------------------------------------------------------------------------*)
+
+TokenExpr <var gL, gR: INTEGER> DESCRIPTION "token expression"
+                               (. var
+                                    gL2 : integer;
+                                    gR2 : integer;
+                                    first : boolean; .)
+= TokenTerm <gL, gR>           (. first := TRUE; .)
+  REPEAT 
+    BEGIN 
+      ( WEAK "|" ) OR ( WEAK "OR" )
+    END
+    TokenTerm <gL2, gR2>       (. if first then 
+                                  begin
+                                    fTableHandler.MakeFirstAlt(gL, gR); 
+                                    first := FALSE
+                                  end;
+                                  fTableHandler.ConcatAlt(gL, gR, gL2, gR2); .)
+  END_REPEAT .
+
+(*----------------------------------------------------------------------------*)
+
+TokenTerm <var gL, gR: INTEGER> DESCRIPTION "token term"
+                               (. var
+                                    gL2 : integer;
+                                    gR2 : integer; .)
+= TokenFactor <gL, gR>
+  REPEAT 
+    TokenFactor <gL2, gR2>     (. fTableHandler.ConcatSeq(gL, gR, gL2, gR2); .)
+  END_REPEAT
+  OPTION
+    "CONTEXT"
+    "(" TokenExpr <gL2, gR2>   (. SetCtx(gL2); fTableHandler.ConcatSeq(gL, gR, gL2, gR2); .)
+    ")"
+  END_OPTION .
+
+(*----------------------------------------------------------------------------*)
+
+TokenFactor <var gL, gR: INTEGER> DESCRIPTION "token factor"
+                               (. var
+                                    kind : integer;
+                                    c : integer;
+                                    oneSet : CRTSet;
+                                    name : CRTName;
+                                    HGType : THomographType; 
+                                    .)
+=                              (. gL :=0; 
+                                  gR := 0; .)
+BEGIN 
+  Symbol <name, kind, HGType>  (. if kind = _identSym then
+                                  begin
+                                    c := fTableHandler.ClassWithName(name);
+                                    if c < 0 then
+                                    begin
+                                      SemError(115,'');
+                                      Sets.Clear(oneSet);
+                                      c := fTableHandler.NewClass(name, oneSet);
+                                    end;
+                                    gL := fTableHandler.NewNode(CRTchrclass, c, 0); 
+                                    gR := gL
+                                  end
+                                  else // string
+                                    fTableHandler.StrToGraph(name, gL, gR); .)
+  OR "(" TokenExpr <gL, gR> ")"
+  OR "BEGIN" TokenExpr <gL, gR> "END"
+  OR "[" TokenExpr <gL, gR> "]"   (. fTableHandler.MakeOption(gL, gR); .)
+  OR "OPTION" TokenExpr <gL, gR> 
+     "END_OPTION"                 (. fTableHandler.MakeOption(gL, gR); .)
+  OR "{" TokenExpr <gL, gR> "}"   (. fTableHandler.MakeIteration(gL, gR); .)
+  OR "REPEAT" TokenExpr <gL, gR> 
+     "END_REPEAT"                 (. fTableHandler.MakeIteration(gL, gR); .)
+END .
+
+(*----------------------------------------------------------------------------*)
+
+Ident <var name: CRTName> DESCRIPTION "identifier"
+                               (. var
+                                    str : AnsiString; .)
+  = ident                      (. str := Scanner.GetName(GetScanner.CurrentSymbol);
+                                  name := str; .).
+
+(*----------------------------------------------------------------------------*)
+
+Symbol <var name: CRTName; var kind: INTEGER; var HGType : THomographType>
+  DESCRIPTION "symbol"
+                               (. var
+                                    myName : AnsiString; .)
+  =                            (. HGType := htNone; .)
+  BEGIN
+    Ident <name>               (. kind := _identSym; .)
+    OR 
+      BEGIN
+        OPTION 
+          "HOMOGRAPH"          (. HGType := htHomograph; .) 
+        END_OPTION
+        string                 (. myName := Scanner.GetName(GetScanner.CurrentSymbol);
+                                  kind := _stringSym;
+                                  FixString(myName, GetScanner.CurrentSymbol.len);
+                                  name := myName; .)
+      END
+  END .
+
+(*----------------------------------------------------------------------------*)
+
+Attribs <var attrPos: CRTPosition> DESCRIPTION "Attributes" 
+  = 
+  "<"                          (. attrPos.beg := GetScanner.CurrentSymbol.pos + 1; 
+                                  attrPos.col := GetScanner.CurrentSymbol.col + 1; .)
+  REPEAT
+    ANY OR badstring           (. SemError(102,''); .)
+  END_REPEAT
+  ">"                          (. attrPos.len := (GetScanner.CurrentSymbol.pos - attrPos.beg); .)
+  OR
+    "<."                       (. attrPos.beg := GetScanner.CurrentSymbol.pos + 2; 
+                                  attrPos.col := GetScanner.CurrentSymbol.col + 2; .)
+    REPEAT 
+      ANY OR badstring         (. SemError(102,''); .)
+    END_REPEAT
+    ".>"                       (. attrPos.len := (GetScanner.CurrentSymbol.pos - attrPos.beg); .).
+
+(*----------------------------------------------------------------------------*)
+
+SemText <var semPos: CRTPosition> DESCRIPTION "semantic text" 
+  =
+  "(."                         (. semPos.beg := GetScanner.CurrentSymbol.pos + 2; 
+                                  semPos.col := GetScanner.CurrentSymbol.col + 2; .)
+  REPEAT 
+    ANY 
+    OR badstring                (. SemError(102,''); .)
+    OR "(."                     (. SemError(109,''); .)
+  END_REPEAT
+  ".)"                          (. semPos.len := (GetScanner.CurrentSymbol.pos - semPos.beg); .)
+  .
+
+(*----------------------------------------------------------------------------*)
+
+Description <var sn : CRTSymbolNode> DESCRIPTION "Production or Token description" 
+  =
+  "DESCRIPTION" string         (. if sn.ErrorDesc > '' then
+                                    SemError(151,'error description')
+                                  else
+                                    sn.ErrorDesc := LexString; .)
+  .
+             
+(*----------------------------------------------------------------------------*)
+
+NameDecl DESCRIPTION "name declaration"                      
+                               (. var
+                                    name : CRTName;
+                                    str : AnsiString; .)
+  = Ident <name> "="
+    BEGIN 
+      ident                    (. str := Scanner.GetName(GetScanner.CurrentSymbol); .)
+      OR string                (. str := Scanner.GetName(GetScanner.CurrentSymbol);
+                                  FixString(str, GetScanner.CurrentSymbol.len); .)
+    END                        (. fTableHandler.NewName(name, str); .)
+  "." .
+
+CocoOptionList DESCRIPTION "Coco/R for Delphi option list"
+  = CocoOption
+    REPEAT
+      CocoOption
+    END_REPEAT
+    .           
+    
+CocoOption DESCRIPTION "Coco/R for Delphi option"
+                               (. var
+                                    OptionName : AnsiString;
+                                    OptionState : boolean;
+                                    ParamList : TStringList; .)
+  =                            (. ParamList := TStringList.Create;
+                                  try .)
+    BEGIN
+      "$" ident                (. OptionName := LexString; .)                   
+      BEGIN
+        "+" OR "-"
+      END                      (. OptionState := LexName = '+'; .)                         
+      OPTION 
+        BEGIN
+          ident OR string
+        END                    (. ParamList.Add(LexString); .) 
+        REPEAT 
+          "," 
+          BEGIN
+            ident OR string            
+          END                  (. ParamList.Add(LexString); .) 
+        END_REPEAT 
+      END_OPTION
+    END                        (. SetOption(OptionName, OptionState, ParamList);
+                                  finally
+                                    ParamList.Free;
+                                  end; .)
+    .
+    
+(*----------------------------------------------------------------------------*)
+
+END Coco.
