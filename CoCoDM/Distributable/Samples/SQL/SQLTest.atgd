@@ -1,0 +1,712 @@
+COMPILER SQLTest     
+(*
+  Things this SQL implementation cannot do:
+    1) Calculations within the BETWEEN comparison. i.e.
+         x between 10 and 1000                      /* this works */
+         x between (quota * 10) and (quota * 1000)  /* does not work but is equivalent to*/
+            (x >= (quota * 10)) AND (x <= (quota * 1000))
+    2) IS UNKNOWN, IS TRUE or IS FALSE tests
+    3) Parenthesis around union statements 
+    4) Union Join
+    5) Cannot handle a table qualifier except in the from clause.  i.e.
+         select bob.birthdays.birth_date from bob.birthdays   /* this does not work but is equivlent to */
+         select b.birth_date from bob.birthdays b             /* this does work */
+    6) does not handle joins with the syntax *= or =* or *=*
+    7) does not handle Existence (EXISTS) or Quantified Tests (ANY and ALL)         
+*)
+
+DELPHI
+  PRIVATE
+    fOutputStream : TMemoryStream;
+    fSubSelectDepth : integer;
+    fInNaturalJoin : boolean;
+            
+    procedure Init;
+    procedure Final;
+    procedure WriteStr(S : string);
+    procedure WriteClause(S : string);
+    procedure WriteKeyword;
+    procedure WriteSymbol;
+    procedure WriteType(S : string);
+    procedure WriteRelation;
+                
+    property OutputStream : TMemoryStream read fOutputStream write fOutputStream;
+    property SubSelectDepth : integer read fSubSelectDepth write fSubSelectDepth;
+    property InNaturalJoin : boolean read fInNaturalJoin write fInNaturalJoin;
+  CREATE 
+    fOutputStream := TMemoryStream.Create;
+  DESTROY                     
+    fOutputStream.Free;
+  ERRORS
+    200 : Result := 'Unexpected end of command';
+    201 : Result := '"ON" or "USING" clause may not be used with "NATURAL"';
+    202 : Result := '"UNION JOIN" not supported';
+    203 : Result := '"NULL" keyword cannot be used here - use "IS" or "IS NOT"';  
+END_DELPHI
+
+(* Arbitrary Code *)
+
+const
+  PadLen = 20;
+                        
+function PadR(S : string; Ch : char; L : integer) : string;
+var
+  i : integer;
+begin
+  for i := 1 to L - (Length(s)) do
+    s := s + Ch;
+  Result := s;
+end;
+
+procedure T-->Grammar<--.Init;
+begin
+  OutputStream.Clear;
+  SubSelectDepth := 0;
+  WriteStr('=================================================================================');
+end;
+
+procedure T-->Grammar<--.Final;
+begin
+  WriteStr('=================================================================================');
+  OutputStream.Position := 0;
+  OutputStream.SaveToStream(ListStream);
+  OutputStream.Clear;
+end;
+
+procedure T-->Grammar<--.WriteStr(S : string);
+begin                               
+  S := S + #13#10;
+  OutputStream.WriteBuffer(S[1],length(S));
+end;                                  
+
+procedure T-->Grammar<--.WriteClause(S : string);
+var
+  s1 : string;
+begin        
+  S := ' ' + S + ' ';
+  S1 := PadL(S,'-',PadLen - SubSelectDepth + length(S) - 1);
+  WriteStr(PadL(s1,'>',SubSelectDepth + length(S1)));
+end;                        
+
+procedure T-->Grammar<--.WriteKeyword;
+begin
+  WriteStr(PadR(PadL('Keyword:','>',SubSelectDepth + 8),' ',PadLen) + LexString);
+end;
+    
+procedure T-->Grammar<--.WriteSymbol;
+begin
+  WriteStr(PadR(PadL('Symbol:','>',SubSelectDepth + 7),' ',PadLen) + LexString);
+end;
+    
+procedure T-->Grammar<--.WriteRelation;
+begin
+  WriteStr(PadR(PadL('Comparison:','>',SubSelectDepth + 11),' ',PadLen) + LexString);
+end;
+    
+procedure T-->Grammar<--.WriteType(S : string);
+begin
+  WriteStr(PadR(PadL(S,'>',SubSelectDepth + length(s)),' ',PadLen) + LexString);
+end;
+
+(* End of Arbitrary Code *)
+
+IGNORE CASE
+
+CHARACTERS
+  eol     = CHR(13) .
+  Special = '"' + "%&'()*+,-./:;<=>?|".
+  Digit   = "0123456789" .
+  Letter  = CHR(33)..CHR(255) - Special - Digit .
+  noQuote = ANY - "'" - eol .               
+
+TOKENS
+  ident     = Letter { Letter | Digit }.
+  integer_  = Digit { Digit }.
+  float     = [ Digit { Digit } ] "." Digit { Digit } .
+  SQLString = "'" { noQuote | "''" } "'" .
+
+COMMENTS FROM "/*" TO "*/" NESTED
+
+IGNORE CHR(1)..CHR(32)
+
+PRODUCTIONS
+  SQLTest         =                         (. Init; .)
+                    ((SelectSQL
+                    | UpdateSQL
+                    | InsertSQL
+                    | DeleteSQL
+                    | Transaction
+                    | CreateExpr
+                    | Drop
+                    | AlterTable
+                    )
+                    [";"                    (. WriteSymbol; .)
+                    ])
+                                            (. if fCurrentInputSymbol <> EOFSYMB then
+                                                 SynError(200); 
+                                               Final; .)
+                  .  
+                      
+  SelectSQL       = (SelectStmt { 
+                    "UNION"                 (. if LookaheadName = 'JOIN' then
+                                                 SynError(202)
+                                               else
+                                                 WriteClause('Union Clause'); .)  
+                    [ "ALL"                 (. WriteKeyword; .)
+                    ]           
+                    SelectStmt
+                    }) . 
+
+  SubSelectSQL    =                         (. SubSelectDepth := SubSelectDepth + 1; .)
+                    SelectSQL               (. SubSelectDepth := SubSelectDepth - 1; .)
+                  .  
+                      
+  UpdateSQL       =                         (. WriteClause('Update Clause'); .)
+                    UpdateStmt .
+
+  InsertSQL       =                         (. WriteClause('Insert Clause'); .)
+                    InsertStmt . 
+
+  DeleteSQL       =                         (. WriteClause('Delete Clause'); .) 
+                    DeleteStmt .  
+  
+  UpdateStmt      = "UPDATE"                (. WriteKeyword; .)             
+                    Table 
+                    "SET"                   (. WriteKeyword; .)
+                    UpdateFieldList 
+                    [ WhereClause ] .
+
+  UpdateField     = ColumnName 
+                    "="                     (. WriteSymbol; .)              
+                    Expression .
+
+  UpdateFieldList = UpdateField 
+                    { ItemSeparator
+                    UpdateField } .
+  
+  InsertStmt      = "INSERT"                (. WriteKeyword; .)
+                    "INTO"                  (. WriteKeyword; .)
+                    Table 
+                    [ 
+                    OpenParens
+                      ColumnList 
+                    CloseParens
+                    ] 
+                    ((
+                    "VALUES"                (. WriteKeyword; .)
+                    OpenParens             
+                      FieldList 
+                    CloseParens
+                    ) | SelectSQL)
+                    .
+                     
+  DeleteStmt      = "DELETE"                (. WriteKeyword; .)
+                    "FROM"                  (. WriteKeyword; .)
+                    Table 
+                    [WhereClause]
+                    .  
+  
+  SelectStmt      =                         (. WriteClause('Select Clause'); .)
+                    (SelectClause 
+                    FromClause 
+                    [WhereClause] 
+                    [GroupByClause] 
+                    [HavingClause] 
+                    [OrderByClause])       
+                    .
+
+  SelectClause    = "SELECT"                (. WriteKeyword; .)
+                    [                       
+                    "DISTINCT"              (. WriteKeyword; .)
+                    | "ALL"                 (. WriteKeyword; .)
+                    ] 
+                    SelectFieldList
+                    .
+
+  FromClause      = SYNC "FROM"             (. WriteClause('From Clause');
+                                               WriteKeyword; .)
+                    FromTableList .
+
+  FromTableList   = QualifiedTable                
+                    {                       
+                      ( ItemSeparator
+                      QualifiedTable ) 
+                    | JoinStmt 
+                    } .
+
+  QualifiedTable  = ident                   (. if LookAheadString = '.' then
+                                                 WriteType('Table Qualifier:')
+                                               else
+                                                 WriteType('From Table:'); .)
+                    ["."
+                    ident                   (. WriteType('From Table:'); .)
+                    ]
+                    [["AS"                  (. WriteKeyword; .)
+                     ] Alias                (. WriteType('Table Alias:'); .)
+                    ] .      
+
+  JoinStmt        =                         (. InNaturalJoin := false; .)
+                    (CrossJoin
+                    | ([ JoinType ] 
+                    "JOIN"                  (. WriteKeyword; .)
+                    QualifiedTable 
+                    [                       (. if InNaturalJoin then
+                                                 SynError(201); .) 
+                     JoinExpr ])) .
+                      
+  CrossJoin       = "CROSS"                 (. WriteKeyword; .)
+                    "JOIN"                  (. WriteKeyword; .)
+                    QualifiedTable .                  
+                    
+  JoinType        = ["NATURAL"              (. WriteKeyword;
+                                               InNaturalJoin := true; .)
+                    ]
+                    ("INNER"                (. WriteKeyword; .)
+                    |(("FULL"
+                    | "LEFT"
+                    | "RIGHT")              (. WriteKeyword; .)                      
+                     [ "OUTER"              (. WriteKeyword; .)
+                      ]) 
+                    )
+                     . 
+  JoinExpr        = ("ON"                   (. WriteKeyword; .)
+                    Expression) 
+                    | ("USING"              (. WriteKeyword; .)
+                    OpenParens
+                      ColumnList 
+                    CloseParens
+                    ) . 
+  
+  WhereClause     = SYNC "WHERE"            (. WriteClause('Where Clause');
+                                               WriteKeyword; .)
+                    SearchCondition . 
+
+  HavingClause    = SYNC "HAVING"           (. WriteClause('Having Clause');
+                                               WriteKeyword; .)
+                    SearchCondition . 
+
+  OrderByClause   = SYNC "ORDER"            (. WriteClause('Order By Clause');
+                                               WriteKeyword; .)
+                    "BY"                    (. WriteKeyword; .)
+                    OrderByFldList .
+
+  GroupByClause   = SYNC "GROUP"            (. WriteClause('Group By Clause');
+                                               WriteKeyword; .)
+                    "BY"                    (. WriteKeyword; .)
+                    FieldList .
+
+  SelectFieldList = SelectField 
+                    { ItemSeparator
+                    SelectField } .
+
+  SelectField     = ( 
+                    Expression 
+                    ["AS"                   (. WriteKeyword; .)
+                    Alias                   (. WriteType('Field Alias:'); .)
+                    ]) 
+                    | "*"                   (. WriteType('All Columns:'); .)                  
+                    .  
+
+  FunctionExpr    = ( "TIMESTAMP"
+                    | "UPPER" 
+                    | "MONTH"
+                    | "YEAR"          
+                    )                       (. WriteType('Function'); .)
+                    OpenParens
+                      Expression
+                      { ItemSeparator
+                      Expression }
+                    CloseParens 
+                    .
+                                      
+  ColumnFunction = ("COUNT"
+                    | "SUM"                
+                    | "MAX"                
+                    | "MIN"                 
+                    | "AVG")                (. WriteType('Column Function:'); .)                
+                    OpenParens
+                      ("*"                  (. WriteType('All Columns:'); .)                    
+                      | (["DISTINCT"        (. WriteKeyword; .)
+                      ] 
+                      Expression)) 
+                    CloseParens 
+                    .                                 
+
+  ColumnList  = ColumnName 
+                    { ItemSeparator
+                    ColumnName} .
+                    
+  ColumnName      = ident                   (. if LookaheadString = '.' then
+                                                 WriteType('Table Alias:')
+                                               else
+                                                 WriteType('Column Name:'); .)
+                    [
+                    "."                     (. WriteSymbol; .) 
+                    (ident                  (. WriteType('Column Name:'); .)
+                    | "*"                   (. WriteType('All Columns:'); .)
+                    )] . 
+                    
+  SimpleColumnName= ident                   (. WriteType('Column Name:'); .)
+                    .
+
+  SimpleColumnList= SimpleColumnName
+                    { ItemSeparator
+                      SimpleColumnName
+                      } .
+
+  SimpleColumnParam= OpenParens
+                       SimpleColumnList
+                     CloseParens
+                     .
+                    
+  FieldList       = Field
+                    { ItemSeparator
+                    Field} .
+                    
+  Field           = ColumnName
+                    | Null                  
+                    | float                 (. WriteType('Float:'); .)
+                    | integer_              (. WriteType('Integer:'); .)
+                    | SQLString             (. WriteType('String:'); .)
+                    | Param
+                    .
+                                            
+  Null            = "NULL"                  (. WriteType('NULL:'); .)
+                    .
+  Table           = ident                   (. WriteType('Table:'); .)
+                    .
+  Alias           = ident
+                    .
+
+  OrderByFldList  = OrderByField
+                    { ( ItemSeparator
+                    OrderByField ) } .
+
+  OrderByField    = (ColumnName |
+                     integer_               (. WriteType('Field Idx:'); .)
+                     )
+                    [ ("DESC"               (. WriteKeyword; .)
+                       | "ASC"              (. WriteKeyword; .)
+                      )
+                    ] .
+
+  SearchCondition = Expression
+                    .
+
+  Expression      = SimpleExpression
+                    { Relation
+                    SimpleExpression } .
+
+  SimpleExpression= [ NotOperator ] 
+                    Term
+                    { Operator
+                    [ NotOperator ]
+                    Term } .
+
+  Term            = ["-"                    (. WriteSymbol; .)
+                    ]
+                    (
+                      (Field
+                        [ TestExpr ]
+                        )
+                    | ColumnFunction
+                    | FunctionExpr
+                    | (OpenParens
+                        (Expression
+                         |
+                         SubSelectSQL
+                        )
+                      CloseParens
+                      )
+                    ) .
+
+  Param           = ":"                     (. WriteSymbol; .)
+                     ident                  (. WriteType('Param:'); .)
+                     .
+
+  NotOperator     = "NOT"                   (. WriteKeyword; .)
+                    .
+
+  Operator        = MathOperator | WordOperator .
+
+//  SimpleCalc      = Field | {MathOperator Field}.
+
+  MathOperator    = ( "*"                    
+                    | "/"                      
+                    | "+"                   
+                    | "-"                   
+                    )                       (. WriteSymbol; .)
+                    .
+
+  WordOperator    = ("AND"
+                    | "OR")                 (. WriteKeyword; .)
+                    .
+
+  LikeTest        = "LIKE"                  (. WriteKeyword; .) 
+                    (SQLString              (. WriteType('String:'); .)
+                     | Param
+                     )
+                    [ "ESCAPE"              (. WriteKeyword; .)
+                    SQLString               (. WriteType('String:'); .)
+                    ]
+                    .                    
+
+  NullTest        = "IS"                    (. WriteKeyword; .)
+                    [NotOperator] 
+                    Null 
+                    .                    
+                   
+  Relation        = ("="                    
+                    | "<>"                  
+                    | "<"                   
+                    | "<="                  
+                    | ">"                   
+                    | ">="                  
+                    )                       (. WriteRelation;
+                                               if LookAheadName = 'NULL' then
+                                                 SynError(203); .)
+                    .
+
+  TestExpr        = NullTest 
+                    | [NotOperator] 
+                    ( InSetExpr 
+                     | BetweenExpr
+                     | LikeTest ). 
+                     
+  BetweenExpr     = "BETWEEN"               (. WriteKeyword; .)
+                    Field                   // this should be a SimpleCalc
+                    "AND"                   (. WriteKeyword; .)
+                    Field                   // this should be a SimpleCalc
+                    .
+    
+  InSetExpr       = "IN"                    (. WriteKeyword; .)
+                    OpenParens
+                      (FieldList 
+                      | SubSelectSQL) 
+                    CloseParens
+                    .
+  Transaction     = ('COMMIT' | 'ROLLBACK') (. WriteType('Transaction:'); .) 
+                    ['WORK'                 (. WriteKeyword; .)
+                    ] .
+                                       
+  len             = integer_                (. WriteType('Length:'); .)
+                    .                    
+
+  lenParam        = OpenParens
+                      len
+                    CloseParens
+                    .                    
+                    
+  precision       = integer_                (. WriteType('Precision:'); .) 
+                    ItemSeparator 
+                    integer_                (. WriteType('Scale:'); .)
+                    .
+                    
+  DataType        = (("CHAR" | "CHARACTER") (. WriteType('Data Type:'); .) 
+                      lenParam
+                      )
+                    | ("VARCHAR"            (. WriteType('Data Type:'); .)
+                      lenParam
+                      )                    
+                    | ("INTEGER" | "INT")   (. WriteType('Data Type:'); .)
+                    | "SMALLINT"            (. WriteType('Data Type:'); .)
+                    | ("NUMERIC"            (. WriteType('Data Type:'); .)
+                      OpenParens 
+                        precision 
+                      CloseParens
+                      )
+                    | "DATE"                (. WriteType('Data Type:'); .)
+                    | ("TIME"               (. WriteType('Data Type:'); .)
+                      lenParam
+                      )
+                    | ("TIMESTAMP"          (. WriteType('Data Type:'); .)
+                      lenParam
+                      )                    
+                    .
+
+  ColumnDefault   =  "DEFAULT"              (. WriteKeyword; .)
+                       (SQLString           (. WriteType('String:'); .) 
+                       | integer_           (. WriteType('Integer:'); .) 
+                       | float              (. WriteType('Float:'); .)
+                       ).
+
+  ColumnDefList   = ColumnDef
+                    { ItemSeparator
+                      ColumnDef
+                    }.
+                    
+  ColumnDef       = SimpleColumnName
+                    DataType
+                    { ColumnDefault
+                      |
+                     (NotOperator
+                      Null 
+                      )
+                    }
+                    .
+
+  PrimaryKey      = "PRIMARY"               (. WriteType('Primary Key:'); .)
+                    "KEY"                   (. WriteKeyword; .)
+                    SimpleColumnParam
+                    .                     
+                    
+  RelationName    = ident                   (. WriteType('Relation Name:'); .)               
+                    .                 
+  
+  ConstraintName  = ident                   (. WriteType('Constraint Name:'); .)
+                    .
+                    
+  ForeignKey      = "FOREIGN"               (. WriteType('Foreign Key:'); .)
+                    "KEY"                   (. WriteKeyword; .)
+                    RelationName
+                    SimpleColumnParam
+                    "REFERENCES"            (. WriteKeyword; .)
+                    Table
+                    ["MATCH"                (. WriteKeyword; .) 
+                      ("FULL" | "PARTIAL")  (. WriteType('Match Type:'); .)
+                      ]
+                    {"ON"                   (. WriteKeyword; .) 
+                       ("DELETE" 
+                         | "UPDATE")        (. WriteKeyword; .)
+                       ("CASCADE"           (. WriteKeyword; .)
+                         | ("SET"           (. WriteKeyword; .) 
+                         (Null 
+                           | "DEFAULT")     (. WriteKeyword; .)
+                         ))
+                       | ("NO"              (. WriteKeyword; .) 
+                          "ACTION"          (. WriteKeyword; .)
+                          )
+                       }
+                    .
+                            
+  Unique          = "UNIQUE"                (. WriteKeyword; .) 
+                    SimpleColumnParam
+                    .
+                    
+  CheckConstraint = "CHECK"                 (. WriteKeyword; .)
+                    OpenParens
+                      Expression
+                    CloseParens
+                    .                                         
+                     
+  CreatePart      = ColumnDef
+                    | PrimaryKey
+                    | ForeignKey
+                    | Unique
+                    | CheckConstraint
+                    .
+
+  CreateExpr      = "CREATE"                (. WriteKeyword; .)
+                    (CreateTable
+                     |
+                     CreateIndex)
+                    .
+                    
+  CreateTable     = "TABLE"                 (. WriteKeyword; .)
+                    Table 
+                    OpenParens
+                      CreatePart
+                      { ItemSeparator
+                      CreatePart
+                      }                    
+                    CloseParens
+                    .                    
+
+  CascadeRestrict= ("CASCADE" | "RESTRICT") (. WriteKeyword; .)
+                   .
+                    
+  Drop           = "DROP"                   (. WriteKeyword; .)
+                   (DropTable
+                    | IndexAndName)
+                   .
+
+  DropTable      = "TABLE"                  (. WriteKeyword; .)
+                   QualifiedTable
+                   [CascadeRestrict]
+                   .
+
+  Add            = "ADD"                    (. WriteKeyword; .)
+                   (ColumnDefList
+                    | PrimaryKey
+                    | ForeignKey
+                    | Unique
+                    | CheckConstraint
+                   )
+                   .                    
+
+  Alter          = "ALTER"                  (. WriteKeyword; .)
+                   SimpleColumnName 
+                   (("DROP"                 (. WriteKeyword; .)
+                    "DEFAULT"               (. WriteKeyword; .)
+                    )
+                    | ("SET"                (. WriteKeyword; .)
+                       ColumnDefault
+                      )
+                   )
+                   .
+
+  DropPart       = "DROP"                   (. WriteKeyword; .)
+                   (
+                   (SimpleColumnName
+                   CascadeRestrict)
+                   | ("PRIMARY"             (. WriteKeyword; .)
+                      "KEY"                 (. WriteKeyword; .)
+                      )
+                   | ("FOREIGN"             (. WriteKeyword; .)
+                      "KEY"                 (. WriteKeyword; .)
+                      RelationName
+                     )
+                   | ("CONSTRAINT"          (. WriteKeyword; .)
+                      ConstraintName
+                      CascadeRestrict
+                     )
+                   )
+                   .
+                                                               
+  AlterTable     = "ALTER"                  (. WriteKeyword; .)
+                   "TABLE"                  (. WriteKeyword; .)
+                   QualifiedTable
+                   (Add
+                   | Alter
+                   | DropPart
+                   )
+                   .
+
+  IndexColumn    = SimpleColumnName
+                   [("ASC" | "DESC")        (. WriteKeyword; .)
+                   ]
+                   .
+                   
+  IndexColumnList= IndexColumn
+                   { ItemSeparator
+                     IndexColumn
+                   }
+                   . 
+                   
+  IndexName      = ident                    (. WriteType('Index Name:'); .)
+                   .
+                     
+  CreateIndex    = ["UNIQUE"                (. WriteKeyword; .)
+                   ]
+                   IndexAndName
+                   "ON"                     (. WriteKeyword; .)
+                   Table
+                   OpenParens                  
+                     IndexColumnList
+                   CloseParens
+                   .
+
+  IndexAndName   = "INDEX"                  (. WriteKeyword; .)
+                   IndexName
+                   .
+
+  ItemSeparator  = WEAK ","                 (. WriteSymbol; .)
+                   .    
+                   
+  OpenParens     = "("                      (. WriteSymbol; .)
+                   .                                         
+                   
+  CloseParens    = WEAK ")"                 (. WriteSymbol; .)
+                   .
+                                                                
+END SQLTest.

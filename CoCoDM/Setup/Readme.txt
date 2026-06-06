@@ -1,0 +1,1 @@
+Coco/R for Delphi install is written in InnoSetup (www.jrsoftware.org)

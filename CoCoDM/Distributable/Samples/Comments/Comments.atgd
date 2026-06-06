@@ -1,0 +1,36 @@
+COMPILER Comments 
+
+DELPHI
+  PRIVATE
+    fOnComment : TCommentEvent;
+    procedure DoComment(Sender : TObject; CommentList : TCommentList); 
+  PUBLISHED
+    property OnComment : TCommentEvent read fOnComment write fOnComment;
+  CREATE
+    fInternalGrammarComment := DoComment;
+END_DELPHI                                      
+
+(* Arbitrary Code *)
+
+procedure T-->Grammar<--.DoComment(Sender : TObject; CommentList : TCommentList);
+begin
+  if Assigned(OnComment) then
+    OnComment(Sender, CommentList);
+end; { Do comment }
+
+(* End of Arbitrary Code *)
+
+CHARACTERS
+  EOL = CHR(13) .
+
+COMMENTS FROM "{" TO "}" 
+COMMENTS FROM "(*" TO "*)" 
+COMMENTS FROM "//" TO EOL 
+
+IGNORE CHR(1)..CHR(12)
+IGNORE CHR(14)..CHR(31)
+
+PRODUCTIONS
+  Comments = REPEAT ANY END_REPEAT .
+  
+END Comments .

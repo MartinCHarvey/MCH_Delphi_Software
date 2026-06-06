@@ -1,0 +1,155 @@
+COMPILER Telegram 
+
+DELPHI 
+  PRIVATE
+    LongWCount : integer;
+    ShortWCount : integer;
+    TotalLongWCount : integer;
+    TotalShortWCount : integer;
+    TelegramCount : integer;
+    TelegramLine : string;
+
+    FStream : TMemoryStream;
+
+    procedure StreamLn(S : string);
+    procedure StreamLine(S : string);  
+    procedure Finish;
+    procedure WriteStats;
+    procedure WriteWord(S : string);        
+    procedure PrintCounts(S : integer; L : integer; Prefix : string);
+    property Stream : TMemoryStream read FStream write FStream;
+  PUBLIC
+    procedure InitTelegram;
+  ERRORS
+    200 : Result := 'Word (' + Data + ') is too long';
+  CREATE
+    FStream := TMemoryStream.Create;
+    InitTelegram;
+  DESTROY                           
+    FStream.Free;
+    FStream := nil;
+END_DELPHI
+
+(* Arbitrary Code *)
+procedure T-->Grammar<--.StreamLn(S : string);
+begin
+  if length(S) > 0 then
+    Stream.WriteBuffer(S[1],length(S));
+end;
+
+procedure T-->Grammar<--.StreamLine(S : string);  
+begin
+  S := S + #13#10;
+  StreamLn(S);
+end;
+
+procedure T-->Grammar<--.InitTelegram;
+begin
+  LongWCount := 0;
+  ShortWCount := 0;
+  TotalLongWCount := 0;
+  TotalShortWCount := 0;
+  TelegramCount := 0;
+  TelegramLine := '';
+  Stream.Clear;
+end;              
+
+procedure T-->Grammar<--.Finish;
+begin                                                    
+  if ErrorList.Count = 0 then
+  begin
+    StreamLn('  Number of Telegrams:                             ');
+    StreamLine(PadL(IntToStr(TelegramCount),' ',10));
+    PrintCounts(TotalShortWCount, TotalLongWCount, 'Total ');
+    StreamLine('');
+    StreamLine('***************************************************************');
+    StreamLine('');  
+    Stream.Position := 0;
+    ListStream.Position := 0;
+    Stream.SaveToStream(ListStream);
+  end;
+  InitTelegram;
+end;
+
+procedure T-->Grammar<--.PrintCounts(S : integer; L : integer; Prefix : string);
+begin
+  StreamLn('  ' + Prefix + 'Words less than or equal to 12 characters: ');
+  StreamLine(PadL(IntToStr(S),' ',10));
+  StreamLn('  ' + Prefix + 'Words greater then 12 characters:          ');
+  StreamLine(PadL(IntToStr(L),' ',10));
+end;
+
+procedure T-->Grammar<--.WriteStats;
+begin
+  TelegramCount := TelegramCount + 1;
+  TotalLongWCount := TotalLongWCount + LongWCount;
+  TotalShortWCount := TotalShortWCount + ShortWCount;
+  if length(TelegramLine) > 0 then
+  begin
+    StreamLine(TelegramLine);
+    TelegramLine := '';
+  end;
+  StreamLine('');
+  StreamLine('---------------------------------------------------------------');
+  PrintCounts(ShortWCount, LongWCount,'      ');
+  StreamLine('===============================================================');
+  StreamLine('');
+  LongWCount := 0;
+  ShortWCount := 0;
+end;
+
+procedure T-->Grammar<--.WriteWord(S : string);
+begin
+  if length(S) > 12 then
+    LongWCount := LongWCount + 1
+  else
+    ShortWCount := ShortWCount + 1;
+  TelegramLine := TelegramLine + S + ' ';
+  if length(TelegramLine) > 100 then
+  begin
+    StreamLine(TelegramLine);
+    TelegramLine := '';
+  end;
+end;
+
+(* End of Arbitrary Code *)
+
+CHARACTERS                    
+  letter = CHR(33)..CHR(127) .
+  EOL = CHR(13) .
+  
+TOKENS
+  word = letter { letter } .
+
+IGNORE CHR(1)..CHR(31)        
+
+COMMENTS FROM "{" TO "}"
+COMMENTS FROM "(*" TO "*)"
+COMMENTS FROM "//" TO EOL
+
+PRODUCTIONS
+  Telegram =
+     { TextTelegram }
+     EmptyTelegram 
+     .
+
+  TextTelegram = 
+     textword { textword } endword   (. WriteStats; .) 
+     .
+
+  EmptyTelegram = 
+     endword                         (. Finish; .) 
+     .
+
+  endword = 
+     "ZZZZ" 
+     .
+
+  textword = word                     (. if length(LexString) > 20 then
+                                           SemError(200,LexString)
+                                         else
+                                           WriteWord(LexString); .)
+     .
+  
+END Telegram .
+
