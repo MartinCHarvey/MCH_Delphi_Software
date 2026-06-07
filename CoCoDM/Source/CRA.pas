@@ -17,7 +17,7 @@ uses
   CRT, Classes, CocoBase, CRTypes;
 
 const
-  maxStates = 2000;
+  maxStates = 4096;
 
 type
   {TODO: Change all of these records to objects}
