@@ -34,7 +34,8 @@ uses
   Trackables,
 {$ENDIF}
   SysUtils, Classes, MemDB2Misc, MemDB2Streamable, MemDB2Journal,
-  MemDB2Buffered, MemDB2API, LockAbstractions, RWWLock, MemDB2BufBase, Reffed;
+  MemDB2Buffered, MemDB2API, LockAbstractions, RWWLock, MemDB2BufBase, Reffed,
+  ReOrderBuffer;
 
 type
   PReffedList = ^TReffedList;
@@ -93,6 +94,10 @@ type
     FEntitiesSnapshot: TReffedList;
     FEntitiesRegistered: TReffedList;
 
+    //Journalling not under same lock as commit, need a re-order buffer
+    //to make sure things are journalled in same order they are comitted.
+    FROBReservation: PReservation;
+
     //Changeset states.
     FChangeset: TStream;
     FCommitRollbackInProgress: TInProgressType;
@@ -104,6 +109,11 @@ type
     FLocalContext: TXTransactionLocalContext;
   protected
   public
+    //Public but internal use only.
+    procedure HandleNewEntityUnderDBLocks(Entity: TMemDBEntity);
+    procedure ROBReserve;
+    procedure ROBAbort;
+
     procedure CommitAndFree;
     procedure RollbackAndFree;
 
@@ -166,6 +176,8 @@ type
     FInitWait: TEvent;
     FClientWait: TEvent;
     FPersistWait: TEvent;
+    FROB: TReorderBuffer;
+    FDrainLock: TCriticalSection;
     FRunningTeardown: boolean;
     FJournal: TMemDbDefaultJournal;
     FDatabase: TMemDbDatabasePersistent;
@@ -190,9 +202,12 @@ type
       Initial: boolean);
     procedure HandleJournalTransactionWriteFlush(Sender: TObject; Transaction: TObject);
     procedure HandleUIStateChange(Sender: TObject);
-  public
-    //Public, but for internal use only ....
+    procedure DrainReorderBuffer;
+
     procedure HandleNewEntityUnderDBLocks(Entity: TMemDBEntity; OwnerTx: TMemDBTransaction);
+    function ROBReserve: PReservation;
+    procedure ROBAbort(var Reservation: PReservation);
+  public
 
     constructor Create;
     destructor Destroy; override;
@@ -343,6 +358,22 @@ end;
 
   { TMemDBTransaction }
 
+procedure TMemDBTransaction.HandleNewEntityUnderDBLocks(Entity: TMemDBEntity);
+begin
+  FDB.HandleNewEntityUnderDBLocks(Entity, self);
+end;
+
+procedure TMemDBTransaction.ROBReserve;
+begin
+  Assert(not Assigned(FROBReservation));
+  FROBReservation := FDB.ROBReserve;
+end;
+
+procedure TMemDBTransaction.ROBAbort;
+begin
+  FDB.ROBAbort(FROBReservation);
+end;
+
 function TMemDBTransaction.GetAPI: TMemAPIDatabase;
 begin
   Assert(not FCommitedOrRolledBack);
@@ -449,6 +480,7 @@ begin
   FApiObjects.Free;
   FApiObjectLock.Free;
   FLocalContext.Free;
+  Assert(not Assigned(FROBReservation));
   FEntitiesSnapshot.Release;
   FEntitiesRegistered.Release;
   inherited;
@@ -571,6 +603,16 @@ begin
   end;
 end;
 
+function TMemDB.ROBReserve: PReservation;
+begin
+  result := FROB.Reserve;
+end;
+
+procedure TMemDB.ROBAbort(var Reservation: PReservation);
+begin
+  FROB.Abort(Reservation);
+end;
+
 procedure TMemDB.RemoveTransaction(Transaction: TMemDBTransaction; Commit: boolean);
 var
   idx: integer;
@@ -663,16 +705,23 @@ begin
 
         //And now journal it.
         Transaction.AddRef;
-        FJournal.TransactionCommitChangeset(Transaction);
+        FROB.Commit(Transaction.FROBReservation, Transaction);
       end
       else
       begin
         try
+          //Very likely that transaction does not have a
+          //re-order buffer reservation, but just in case.
+          //Additionally, we need to drain the ROB, in case
+          //another txion is waiting for writeback...
+          FROB.Abort(Transaction.FROBReservation);
+
           //Since everything is multi-buffered, barring out of memory
           //exceptions we do not expect this to fail.
           Transaction.FCRInterface.UserRollbackCycle;
           //We really need rollback to work to clear pins and refcounts.
           //If it doesn't then something's very very broken.
+
         except
           on E: Exception do
           begin
@@ -710,6 +759,9 @@ begin
   Assert(Transaction.FMode in [amReadShared, amWriteExclusive, amReadWriteShared]);
   FRWWLock.Release(DBAccessModeToLockReason(Transaction.FMode));
 
+  //Before, not after waiting for flush finished...
+  DrainReorderBuffer;
+
   if WaitJournalDone then
     Transaction.FlushFinishedEvent.WaitFor(INFINITE);
 
@@ -730,6 +782,24 @@ txion_remove:
   end;
   Transaction.Release;
 end;
+
+procedure TMemDB.DrainReorderBuffer;
+var
+  Transaction: TMemDBTransaction;
+begin
+  FDrainLock.Acquire;
+  try
+    Transaction := FROB.Drain as TMemDBTransaction;
+    while Assigned(Transaction) do
+    begin
+      FJournal.TransactionCommitChangeset(Transaction);
+      Transaction := FROB.Drain as TMemDBTransaction;
+    end;
+  finally
+    FDrainLock.Release;
+  end;
+end;
+
 
 function TMemDB.StartTransaction(Mode: TMDBAccessMode;
                                  Sync: TMDBSyncMode;
@@ -881,6 +951,8 @@ begin
   FJournal.OnJournalWriteFlush := HandleJournalTransactionWriteFlush;
   FJournal.OnJournalError := HandleJournalError;
   FJournal.OnUIStateChange := HandleUIStateChange;
+  FROB := TReorderBuffer.Create;
+  FDrainLock := TCriticalSection.Create;
   FDatabase := TMemDBDatabase.Create;
   (FDatabase as TMemDBDatabase).Init(self);
   inherited;
@@ -902,6 +974,8 @@ begin
   FDatabase.Free;
   FRWWLock.Free;
   FSessionLock.Free;
+  FROB.Free;
+  FDrainLock.Free;
   inherited;
 end;
 
