@@ -29,7 +29,7 @@ interface
 
 uses
   MemDB2Buffered, MemDb2Misc, MemDb2Streamable, MemDB2Indexing, Classes,
-  IndexedStore, MemDB2BufBase;
+  IndexedStore, MemDB2BufBase, ReorderBuffer;
 
 type
   TMemDBDatabase = class;
@@ -470,6 +470,8 @@ begin
 {$ENDIF}
     try
       try
+        T.ROBReserve;
+
         DB.ToJournal(T.Tid, result, T.LocalContext);
 
         DB.PreCommit(T.Tid, pcpEntitySet, OptSet, T.LocalContext);
@@ -487,6 +489,8 @@ begin
           DB.MetaIndexLock.Release;
         end;
       except
+        T.ROBAbort;
+
         DB.MetaIndexLock.Acquire;
         try
           DB.Rollback(T.Tid, rbpIndexRollback, OptSet, T.LocalContext);
@@ -978,13 +982,13 @@ begin
   NewTable := TMemDBTable.Create;
   NewTable.Init(Tr.Tid, self, Name, true);
   FCommitLock.Acquire;
-{$IFDEF DBG_UNDER_COMMIT_LOCK}
-  DbgUnderCommitLock := true;
-{$ENDIF}
   try
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+    DbgUnderCommitLock := true;
+{$ENDIF}
     FMetaIndexLock.Acquire;
     try
-      (FParentMemDB as TMemDB).HandleNewEntityUnderDBLocks(NewTable, Tr);
+      Tr.HandleNewEntityUnderDBLocks(NewTable);
     finally
       FMetaIndexLock.Release;
     end;
@@ -1018,13 +1022,19 @@ begin
   NewKey.Init(Tr.Tid, self, Name, true);
   FCommitLock.Acquire;
   try
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+    DbgUnderCommitLock := true;
+{$ENDIF}
     FMetaIndexLock.Acquire;
     try
-      (FParentMemDB as TMemDB).HandleNewEntityUnderDBLocks(NewKey, Tr);
+      Tr.HandleNewEntityUnderDBLocks(NewKey);
     finally
       FMetaIndexLock.Release;
     end;
   finally
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+    DbgUnderCommitLock := false;
+{$ENDIF}
     FCommitLock.Release;
   end;
   NewKey.Proxy.Release;

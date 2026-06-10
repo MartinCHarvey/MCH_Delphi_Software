@@ -170,6 +170,7 @@
         <DCCReference Include="..\..\CRC\CRC32.pas"/>
         <DCCReference Include="..\..\PatchFreeMem\PatchFreeMem.pas"/>
         <DCCReference Include="..\..\PComp\PComp.pas"/>
+        <DCCReference Include="..\..\LockAbstractions\ReorderBuffer.pas"/>
         <None Include="..\README_Conditionals.txt"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
