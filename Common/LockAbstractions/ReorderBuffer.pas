@@ -46,7 +46,11 @@ type
   PReservation = ^TReservation;
 {$ENDIF}
 
+{$IFDEF USE_TRACKABLES}
+  TReorderBuffer = class(TTrackable)
+{$ELSE}
   TReorderBuffer = class
+{$ENDIF}
   private
     FLock: TCriticalSection;
     FQueue: TDLEntry;
