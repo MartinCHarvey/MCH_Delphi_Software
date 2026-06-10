@@ -785,15 +785,20 @@ end;
 
 procedure TMemDB.DrainReorderBuffer;
 var
-  Transaction: TMemDBTransaction;
+  Obj: TObject;
 begin
   FDrainLock.Acquire;
   try
-    Transaction := FROB.Drain as TMemDBTransaction;
-    while Assigned(Transaction) do
+    Obj := FROB.Drain;
+    while Assigned(Obj) do
     begin
-      FJournal.TransactionCommitChangeset(Transaction);
-      Transaction := FROB.Drain as TMemDBTransaction;
+      if Obj is TMemDBTransaction then
+        FJournal.TransactionCommitChangeset(Obj)
+      else if Obj is TStream then
+        FJournal.Checkpoint(Obj)
+      else
+        Assert(false);
+      Obj:= FROB.Drain as TMemDBTransaction;
     end;
   finally
     FDrainLock.Release;
@@ -1191,10 +1196,12 @@ begin
   finally
     FSessionLock.Release;
   end;
-  //TODO - There is a race here, ensuring that the checkpoint xaction
-  //is the very first xaction written to disk when initializing.
+  //Could make this atomic with reservations, but then we'd have
+  //to guarantee that we'd be the first to grab the commit lock,
+  //which we can't easily, so better to leave a small window, and
+  //reservations ensure txions journal in the same order they took
+  //the commit lock.
 
-  {ref BUG_MCH_1_2_2025 }
   if OK and CreateCheckpoint then
     Checkpoint;
   FJournal.SynchronizeStateChange;
@@ -1266,7 +1273,6 @@ begin
   end;
 end;
 
-
 function TMemDB.Checkpoint: boolean;
 var
   ChangesetStream: TStream;
@@ -1274,9 +1280,12 @@ var
   PseudoTid: TTransactionId;
   Ctxt: TXTransactionLocalContext;
   EntSnapshot, EntRegistered: TReffedList;
+  Reservation: PReservation;
+
 begin
   EntSnapshot := nil;
   EntRegistered := nil;
+  Reservation := nil;
   FSessionLock.Acquire;
   try
     result := FPhase = mdbRunning;
@@ -1304,6 +1313,7 @@ begin
           DbgUnderCommitLock := true;
 {$ENDIF}
           try
+            Reservation := FROB.Reserve;
             //Serialisable so StartTransaction under commit lock.
             FDatabase.StartTransaction(PseudoTid, Ctxt);
             try
@@ -1327,11 +1337,13 @@ begin
             FDatabase.Rollback(PseudoTid, rbpDelayedRollback, CleardownOptSet, Ctxt);
           end;
         except
+          FROB.Abort(Reservation);
           ChangesetStream.Free;
           DeleteFile(TmpName);
           raise;
         end;
-        FJournal.Checkpoint(ChangesetStream);
+        FROB.Commit(Reservation, ChangesetStream);
+
       finally
         Ctxt.Free;
         EntSnapshot.Release;
@@ -1339,6 +1351,9 @@ begin
       end;
     finally
       FRWWLock.Release(lrSharedRead);
+
+      DrainReorderBuffer;
+
       FSessionLock.Acquire;
       try
         Assert(FCheckpointRefs >= 0);
