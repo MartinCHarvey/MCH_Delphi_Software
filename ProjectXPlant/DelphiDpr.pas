@@ -6,7 +6,7 @@ unit DelphiDpr;
 {==============================================================================
 DelphiDpr
 0.0.0.0
-Date of Generation: 20/12/2024 19:00
+Date of Generation: 11/06/2026 12:33
 Comment: Parses Delphi DPR files.
 Author: Martin Harvey
 Copyright: (c) Martin Harvey
@@ -449,6 +449,7 @@ if ((CurrInputCh = '/') OR (CurrInputCh = '(') OR (CurrInputCh = '{')) AND Comme
     case state of
    1: if ((CurrInputCh >= '0') AND (CurrInputCh <= '9') OR
 (CurrInputCh >= 'A') AND (CurrInputCh <= 'Z') OR
+(CurrInputCh = '_') OR
 (CurrInputCh >= 'a') AND (CurrInputCh <= 'z')) then
 begin
  
