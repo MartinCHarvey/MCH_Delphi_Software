@@ -229,7 +229,7 @@ begin
   end;
 end;
 
-procedure Process(DprName: string; OutDirectory: string);
+procedure Process(DprName: string; OutDirectory: string; GenListing: boolean = false);
 var
   FS: TFileStream;
   MS: TMemoryStream;
@@ -237,16 +237,21 @@ var
   FileList: TStringList;
   Idx: integer;
   CoCoError: TCoCoError;
+  ListName: string;
 begin
   FileList := TStringList.Create;
   try
     FS := TFileStream.Create(DprName, fmOpenRead);
-    MS := nil;
     try
       MS := TMemoryStream.Create;
       MS.CopyFrom(FS, FS.Size);
       DPRG := TDelphiDpr.Create(nil);
       try
+        if GenListing then
+        begin
+          ListName := DprName + '.lst';
+          DPRG.GenListWhen := glAlways;
+        end;
         DPRG.SourceStream := MS;
         DPRG.Execute;
         if DPRG.ErrorList.Count = 0 then
@@ -258,6 +263,8 @@ begin
             CocoError := TCocoError(DPRG.ErrorList.Items[Idx]);
             WriteLn('Error: ' + DPRG.ErrorStr(CocoError.ErrorCode, ''));
           end;
+          if GenListing then
+            DPRG.ListStream.SaveToFile(ListName);
         end;
       finally
         DPRG.Free; //Frees MS.
@@ -277,7 +284,7 @@ end;
 
 procedure PrintUsage;
 begin
-  WriteLn('Usage: ProjectXPlant <.dpr file> <output directory>');
+  WriteLn('Usage: ProjectXPlant <.dpr file> <output directory> [-l generate parser listing]');
 end;
 
 begin
@@ -294,13 +301,26 @@ begin
   PasFileExts[4] := '.fmx';
 
   try
-    if ParamCount <>  2 then
+    if (ParamCount <  2) or (ParamCount > 3 )then
     begin
       PrintUsage;
       Exit;
     end;
 
-    Process(ParamStr(1), ParamStr(2));
+    if ParamCount = 2 then
+    begin
+      Process(ParamStr(1), ParamStr(2));
+    end
+    else if (ParamCount = 3) and (ParamStr(3) = '-l') then
+    begin
+      Process(ParamStr(1), ParamStr(2), true);
+    end
+    else
+    begin
+      Assert(false);
+      PrintUsage;
+      Exit;
+    end;
 
   except
     on E: Exception do
