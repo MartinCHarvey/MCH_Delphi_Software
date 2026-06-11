@@ -9,8 +9,8 @@ uses
   Classes;
 
 const
-  size = 16;
-  Limit = 128;
+  size = 16; //Conservative, let's not change the bit modulo.
+  Limit = 512; //This can be overflowed pretty easy. Increase it.
 type
   BITSET = set of 0..size - 1;
   BITARRAY = array[0..Limit] of BITSET;
