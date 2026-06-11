@@ -10,6 +10,13 @@ Most recent (2026) development is in Common/MemDB2:
 - MemDB2 now compiles & runs on both **Win32/64 and Android 32/64** 
 - SQL support for both MemDB and MemDB2 in progress.
 
+Also:
+- TP Lex / Yacc port for Delphi now at: https://github.com/MartinCHarvey/MCH-TPLY41
+  - Fixed it so it just about runs (I need an LALR parser, not an LL(1) one).
+  - It needs porting / converting to OO to allow portable/multiple reinvocation.
+  - Also needs fixing memleaks, which were fine as a standalone exe, but not as a component
+    in a larger program.
+
 If any of you folks get some of this to compile / run under the FPC compiler, I'd be very interested to know.
 
 martin_c_harvey@hotmail.com
