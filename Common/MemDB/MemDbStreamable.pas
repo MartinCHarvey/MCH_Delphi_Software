@@ -262,9 +262,9 @@ type
     mstRowStartV2,
     mstGuidStart,
     mstGuidEnd,
-
-    mstReservedForEscape = $FE,
-    mstReservedForEscape2 = $FF
+    NEWER_mstDbStartV2,
+    mstReservedForEscape,
+    mstReservedForEscape2
   );
 
 {$IFOPT C+}

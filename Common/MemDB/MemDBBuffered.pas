@@ -5795,14 +5795,20 @@ end;
 
 procedure TMemDBDatabasePersistent.FromJournal(Stream: TStream);
 var
-  StrPos: int64;
+  StrPos, i64: int64;
   NxtTag: TMemStreamTag;
   ChangeType: TMemDBEntityChangeType;
   EntityName: string;
   DBU: TMemDBEntity;
   TmpIdx: integer;
+
 begin
-  ExpectTag(Stream, mstDBStart);
+  NxtTag := RdTag(Stream);
+  if not (NxtTag in [mstDBStart, NEWER_mstDBStartV2]) then
+    raise EMemDBException.Create(S_WRONG_TAG);
+  if (NxtTag = NEWER_mstDBStartV2) then
+    Stream.Read(i64, sizeof(i64));
+
   StrPos := Stream.Position;
   NxtTag := RdTag(Stream);
   while NxtTag <> mstDBEnd do
@@ -5855,14 +5861,19 @@ end;
 
 procedure TMemDBDatabasePersistent.FromScratch(Stream: TStream);
 var
-  StrPos: int64;
+  StrPos, i64: int64;
   NxtTag: TMemStreamTag;
   ChangeType: TMemDBEntityChangeType;
   EntityName: string;
   TmpIdx: integer;
   DBU: TMemDBEntity;
 begin
-  ExpectTag(Stream, mstDBStart);
+  NxtTag := RdTag(Stream);
+  if not (NxtTag in [mstDBStart, NEWER_mstDBStartV2]) then
+    raise EMemDBException.Create(S_WRONG_TAG);
+  if (NxtTag = NEWER_mstDBStartV2) then
+    Stream.Read(i64, sizeof(i64));
+
   StrPos := Stream.Position;
   NxtTag := RdTag(Stream);
   while NxtTag <> mstDBEnd do

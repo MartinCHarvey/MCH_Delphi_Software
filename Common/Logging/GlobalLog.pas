@@ -573,9 +573,8 @@ end;
 procedure TGlobalLog.LogStream(Severity: TLogSeverity; Stream: TStream);
 var
   AnsiS: AnsiString;
-  InitPos: integer;
+  InitPos: Int64;
 begin
-  //TODO - update for proper unicode handling, 64 bit stream sizes.
   if Assigned(Stream) then
   begin
     InitPos := Stream.Position;
