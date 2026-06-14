@@ -333,7 +333,7 @@ begin
 
   Pos := JournalEntry.Position;
   Tag := RdTag(JournalEntry);
-  if not (Tag in [mstDBStart, DEPRECATED_mstMultiChangesetsStart]) then
+  if not (Tag in [mstDBStart, NEWER_mstDbStartV2, DEPRECATED_mstMultiChangesetsStart]) then
     raise EMemDBException.Create(S_WRONG_TAG);
 
   //TODO - Remove Multi support eventually.
@@ -370,7 +370,7 @@ begin
       //stream should bomb out on a failed read.
       Pos := JournalEntry.Position;
       Tag := RdTag(JournalEntry);
-      if not (Tag in [mstDBStart, DEPRECATED_mstMultiChangesetsEnd]) then
+      if not (Tag in [mstDBStart, NEWER_mstDbStartV2, DEPRECATED_mstMultiChangesetsEnd]) then
         raise EMemDBException.Create(S_WRONG_TAG);
       Stop := Tag = DEPRECATED_mstMultiChangesetsEnd;
       if not Stop then
