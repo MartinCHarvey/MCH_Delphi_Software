@@ -53,7 +53,7 @@ begin
   reset(yyinput);
   repeat
     ret := yylex;
-    Memo1.Lines.Add('Got a token: ' + token_names[ret] + '(' + yytoken_text + ')');
+    Memo1.Lines.Add('Got a token: ' + TokenName(ret) + '(' + yytoken_text + ')');
   until ret = 0;
   //yyinput closed by yywrap.
 end;

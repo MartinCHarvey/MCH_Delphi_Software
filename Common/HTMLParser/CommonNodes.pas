@@ -24,7 +24,11 @@ IN THE SOFTWARE.
 }
 interface
 
-uses Trackables, DLList, SysUtils, Classes, CoCoBase;
+uses Trackables, DLList, SysUtils, Classes
+{$IFNDEF OMIT_COCO}
+ ,CoCoBase
+{$ENDIF}
+ ;
 
 const
   NodeTypeInvalid = 0;
@@ -191,6 +195,7 @@ type
     destructor Destroy; override;
   end;
 
+{$IFNDEF OMIT_COCO}
   TStringNavHelper = class(TNodeNavHelper)
   private
     FSearchDict: TStringList;
@@ -213,6 +218,7 @@ type
     property Opts: TNodeSearchOpts read FOpts;
     property LastSearch: string read FLastSearch;
   end;
+{$ENDIF}
 
   // Node recursion functions for string fixing.
 function ExecuteAlways(Node: TCommonNode; Ref1, Ref2, Ref3: TObject): boolean;
@@ -722,6 +728,7 @@ end;
 
 { TStringNavHelper }
 
+{$IFNDEF OMIT_COCO}
 function TStringNavHelper.GetTreeFragmentForString(Fragment: string)
   : TCommonNode;
 var
@@ -783,7 +790,9 @@ begin
     Parser.Free;
   end;
 end;
+{$ENDIF}
 
+{$IFNDEF OMIT_COCO}
 constructor TStringNavHelper.Create;
 begin
   inherited;
@@ -871,5 +880,6 @@ function TStringNavHelper.MakeSearchStringAnsi(Search: string): AnsiString;
 begin
   result := UTF8Encode(Search);
 end;
+{$ENDIF}
 
 end.
