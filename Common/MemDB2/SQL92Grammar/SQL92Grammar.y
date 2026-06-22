@@ -1,6 +1,2817 @@
 
+%{
+
+unit SQL92Grammar_parser;
+
+
+interface
+{$DEFINE INSERT_IMPLEMENTATION_CALUSE}
+
+uses
+  yacclib_trkobj, SQL92Grammar_lexer;
+
+%}
+
+%token
+
+                identifier_body
+                national_character_string_literal_start
+                bit_string_literal_start
+                string_literal_continuation
+                hex_string_literal_start
+                delimited_identifier
+                digit
+                not_equals_operator
+                greater_than_or_equals_operator
+                less_than_or_equals_operator
+                concatenation_operator
+                double_period
+                space
+                tab
+                carriage_return
+                line_feed
+                double_quote
+                percent
+                ampersand
+                quote
+                left_paren
+                right_paren
+                left_bracket
+                right_bracket
+                asterisk
+                plus_sign
+                comma
+                minus_sign
+                period
+                solidus
+                colon
+                semicolon
+                less_than_operator
+                equals_operator
+                greater_than_operator
+                question_mark
+                underscore
+                vertical_bar
+
+		_ABSOLUTE
+		_ACTION
+		_ADD
+		_ALL
+		_ALLOCATE
+		_ALTER
+		_AND
+		_ANY
+		_ARE
+		_AS
+		_ASC
+		_ASSERTION
+		_AT
+		_AUTHORIZATION
+		_AVG
+		_BEGIN
+		_BETWEEN
+		_BIT
+		_BIT_LENGTH
+		_BOTH
+		_BY
+		_CASCADE
+		_CASCADED
+		_CASE
+		_CAST
+		_CATALOG
+		_CHAR
+		_CHARACTER
+		_CHARACTER_LENGTH
+		_CHAR_LENGTH
+		_CHECK
+		_CLOSE
+		_COALESCE
+		_COLLATE
+		_COLLATION
+		_COLUMN
+		_COMMIT
+		_CONNECT
+		_CONNECTION
+		_CONSTRAINT
+		_CONSTRAINTS
+		_CONTINUE
+		_CONVERT
+		_CORRESPONDING
+		_CREATE
+		_CROSS
+		_CURRENT
+		_CURRENT_DATE
+		_CURRENT_TIME
+		_CURRENT_TIMESTAMP
+		_CURRENT_USER
+		_CURSOR
+		_DATE
+		_DAY
+		_DEALLOCATE
+		_DEC
+		_DECIMAL
+		_DECLARE
+		_DEFAULT
+		_DEFERRABLE
+		_DEFERRED
+		_DELETE
+		_DESC
+		_DESCRIBE
+		_DESCRIPTOR
+		_DIAGNOSTICS
+		_DISCONNECT
+		_DISTINCT
+		_DOMAIN
+		_DOUBLE
+		_DROP
+		_ELSE
+		_END
+		_END_EXEC
+		_ESCAPE
+		_EXCEPT
+		_EXCEPTION
+		_EXEC
+		_EXECUTE
+		_EXISTS
+		_EXTERNAL
+		_EXTRACT
+		_FALSE
+		_FETCH
+		_FIRST
+		_FLOAT
+		_FOR
+		_FOREIGN
+		_FOUND
+		_FROM
+		_FULL
+		_GET
+		_GLOBAL
+		_GO
+		_GOTO
+		_GRANT
+		_GROUP
+		_HAVING
+		_HOUR
+		_IDENTITY
+		_IMMEDIATE
+		_IN
+		_INDICATOR
+		_INITIALLY
+		_INNER
+		_INPUT
+		_INSENSITIVE
+		_INSERT
+		_INT
+		_INTEGER
+		_INTERSECT
+		_INTERVAL
+		_INTO
+		_IS
+		_ISOLATION
+		_JOIN
+		_KEY
+		_LANGUAGE
+		_LAST
+		_LEADING
+		_LEFT
+		_LEVEL
+		_LIKE
+		_LOCAL
+		_LOWER
+		_MATCH
+		_MAX
+		_MIN
+		_MINUTE
+		_MODULE
+		_MONTH
+		_NAMES
+		_NATIONAL
+		_NATURAL
+		_NCHAR
+		_NEXT
+		_NO
+		_NOT
+		_NULL
+		_NULLIF
+		_NUMERIC
+		_OCTET_LENGTH
+		_OF
+		_ON
+		_ONLY
+		_OPEN
+		_OPTION
+		_OR
+		_ORDER
+		_OUTER
+		_OUTPUT
+		_OVERLAPS
+		_PAD
+		_PARTIAL
+		_POSITION
+		_PRECISION
+		_PREPARE
+		_PRESERVE
+		_PRIMARY
+		_PRIOR
+		_PRIVILEGES
+		_PROCEDURE
+		_PUBLIC
+		_READ
+		_REAL
+		_REFERENCES
+		_RELATIVE
+		_RESTRICT
+		_REVOKE
+		_RIGHT
+		_ROLLBACK
+		_ROWS
+		_SCHEMA
+		_SCROLL
+		_SECOND
+		_SECTION
+		_SELECT
+		_SESSION
+		_SESSION_USER
+		_SET
+		_SIZE
+		_SMALLINT
+		_SOME
+		_SPACE
+		_SQL
+		_SQLCODE
+		_SQLERROR
+		_SQLSTATE
+		_SUBSTRING
+		_SUM
+		_SYSTEM_USER
+		_TABLE
+		_TEMPORARY
+		_THEN
+		_TIME
+		_TIMESTAMP
+		_TIMEZONE_HOUR
+		_TIMEZONE_MINUTE
+		_TO
+		_TRAILING
+		_TRANSACTION
+		_TRANSLATE
+		_TRANSLATION
+		_TRIM
+		_TRUE
+		_UNION
+		_UNIQUE
+		_UNKNOWN
+		_UPDATE
+		_UPPER
+		_USAGE
+		_USER
+		_USING
+		_VALUE
+		_VALUES
+		_VARCHAR
+		_VARYING
+		_VIEW
+		_WHEN
+		_WHENEVER
+		_WHERE
+		_WITH
+		_WORK
+		_WRITE
+		_YEAR
+		_ZONE
+
+		 _ADA
+		 _C
+		 _CATALOG_NAME
+		 _CHARACTER_SET_CATALOG
+		 _CHARACTER_SET_NAME
+		 _CHARACTER_SET_SCHEMA
+		 _CLASS_ORIGIN
+		 _COBOL
+		 _COLLATION_CATALOG
+		 _COLLATION_NAME
+		 _COLLATION_SCHEMA
+		 _COLUMN_NAME
+		 _COMMAND_FUNCTION
+		 _COMMITTED
+		 _CONDITION_NUMBER
+		 _CONNECTION_NAME
+		 _CONSTRAINT_CATALOG
+		 _CONSTRAINT_NAME
+		 _CONSTRAINT_SCHEMA
+		 _COUNT
+		 _CURSOR_NAME
+		 _DATA
+		 _DATETIME_INTERVAL_CODE
+		 _DATETIME_INTERVAL_PRECISION
+		 _DYNAMIC_FUNCTION
+		 _E
+		 _FORTRAN
+		 _LENGTH
+		 _MESSAGE_LENGTH
+		 _MESSAGE_OCTET_LENGTH
+		 _MESSAGE_TEXT
+		 _MORE
+		 _MUMPS
+		 _NAME
+		 _NULLABLE
+		 _NUMBER
+		 _PASCAL
+		 _PLI
+		 _REPEATABLE
+		 _RETURNED_LENGTH
+		 _RETURNED_OCTET_LENGTH
+		 _RETURNED_SQLSTATE
+		 _ROW_COUNT
+		 _SCALE
+		 _SCHEMA_NAME
+		 _SERIALIZABLE
+		 _SERVER_NAME
+		 _SNAPSHOT
+		 _SUBCLASS_ORIGIN
+		 _TABLE_NAME
+		 _TYPE
+		 _UNCOMMITTED
+		 _UNNAMED
+
+%start SQL92Grammar
 
 %%
 
 
+/*
+--h2 Basic Definitions of Characters Used, Tokens, Symbols, Etc.
+--/h2
+*/
+
+  regular_identifier : identifier_body ;
+
+/*
+  TODO - May need to add some of these in as tokens.
+
+  non_reserved_word :
+		_ADA
+	|	_C | _CATALOG_NAME | _CHARACTER_SET_CATALOG | _CHARACTER_SET_NAME | _CHARACTER_SET_SCHEMA
+	|	_CLASS_ORIGIN | _COBOL | _COLLATION_CATALOG | _COLLATION_NAME | _COLLATION_SCHEMA
+	|	_COLUMN_NAME | _COMMAND_FUNCTION | _COMMITTED | _CONDITION_NUMBER | _CONNECTION_NAME
+	|	_CONSTRAINT_CATALOG | _CONSTRAINT_NAME | _CONSTRAINT_SCHEMA | _CURSOR_NAME
+	|	_DATA | _DATETIME_INTERVAL_CODE | _DATETIME_INTERVAL_PRECISION | _DYNAMIC_FUNCTION
+	|	_FORTRAN
+	|	_LENGTH
+	|	_MESSAGE_LENGTH | _MESSAGE_OCTET_LENGTH | _MESSAGE_TEXT | _MORE | _MUMPS
+	|	_NAME | _NULLABLE | _NUMBER
+	|	_PASCAL | _PLI
+	|	_REPEATABLE | _RETURNED_LENGTH | _RETURNED_OCTET_LENGTH | _RETURNED_SQLSTATE | _ROW_COUNT
+	|	_SCALE | _SCHEMA_NAME | _SERIALIZABLE | _SNAPSHOT | _SERVER_NAME | _SUBCLASS_ORIGIN
+	|	_TABLE_NAME | _TYPE
+	|	_UNCOMMITTED | _UNNAMED ;
+*/
+
+/*
+--hr
+--h2 Literal Numbers, Strings, Dates and Times
+--/h2
+*/
+
+  unsigned_numeric_literal : exact_numeric_literal
+	|	approximate_numeric_literal ;
+
+  exact_numeric_literal :
+                unsigned_integer exact_numeric_literal_opt
+	|	period unsigned_integer
+        ;
+
+  exact_numeric_literal_opt :
+                /* empty */
+        |       period
+        |       period unsigned_integer
+        ;
+
+  unsigned_integer : digit
+        |            unsigned_integer  digit
+        ;
+
+  approximate_numeric_literal : mantissa _E exponent ;
+
+  mantissa : exact_numeric_literal ;
+
+  exponent : signed_integer ;
+
+  signed_integer :
+                sign unsigned_integer
+        |       unsigned_integer
+        ;
+
+  sign : plus_sign | minus_sign ;
+
+  national_character_string_literal :
+        national_character_string_literal_start
+        national_character_string_literal_cont
+        ;
+
+  /* TODO - check continuation is national char string */
+  national_character_string_literal_cont :
+        /* empty */
+        | national_character_string_literal_cont string_literal_continuation
+        ;
+
+  bit_string_literal :
+        bit_string_literal_start
+        bit_string_literal_cont
+        ;
+
+/* TODO - Check continuation is bit string */
+  bit_string_literal_cont :
+        /* empty */
+        | bit_string_literal_cont string_literal_continuation
+        ;
+
+  hex_string_literal:
+        hex_string_literal_start
+        hex_string_literal_cont
+        ;
+
+/* TODO - Check continuation is hex string */
+  hex_string_literal_cont :
+        /* empty */
+        | hex_string_literal_cont string_literal_continuation
+        ;
+
+  character_string_literal :
+                introducer character_set_specification
+                character_string_literal_main
+        |       character_string_literal_main
+        ;
+
+  character_string_literal_main :
+                string_literal_continuation
+        |       character_string_literal_main
+                string_literal_continuation
+        ;
+
+  introducer : underscore
+        ;
+
+  character_set_specification :
+		standard_character_repertoire_name
+	|	implementation_defined_character_repertoire_name
+	|	user_defined_character_repertoire_name
+	|	standard_universal_character_form_of_use_name
+	|	implementation_defined_universal_character_form_of_use_name ;
+
+  standard_character_repertoire_name : character_set_name ;
+
+  character_set_name :
+                schema_name period SQL_language_identifier
+         |      SQL_language_identifier
+         ;
+
+  schema_name :
+                catalog_name period unqualified_schema_name
+        |       unqualified_schema_name
+        ;
+
+  catalog_name : identifier ;
+
+  unqualified_schema_name : identifier ;
+
+  identifier :
+                introducer character_set_specification actual_identifier
+        |       actual_identifier
+        ;
+
+  actual_identifier :
+                regular_identifier
+        |       delimited_identifier
+        ;
+
+  SQL_language_identifier :
+                regular_identifier
+        ;
+
+  implementation_defined_character_repertoire_name :
+                character_set_name
+        ;
+
+  user_defined_character_repertoire_name :
+                character_set_name
+        ;
+
+  standard_universal_character_form_of_use_name :
+                character_set_name
+        ;
+
+  implementation_defined_universal_character_form_of_use_name :
+                character_set_name
+        ;
+
+  date_string :
+                quote date_value quote
+        ;
+
+  date_value :
+                years_value minus_sign months_value minus_sign days_value
+        ;
+
+  years_value :
+                datetime_value
+        ;
+
+  datetime_value :
+                unsigned_integer
+        ;
+
+  months_value :
+                datetime_value
+        ;
+
+  days_value :  datetime_value
+        ;
+
+  time_string :
+                quote time_value quote
+                quote time_value time_zone_interval quote
+        ;
+
+  time_value :
+                hours_value colon minutes_value colon seconds_value
+        ;
+
+  hours_value : datetime_value ;
+
+  minutes_value : datetime_value ;
+
+  seconds_value :
+                seconds_integer_value seconds_value_opt
+        ;
+
+  seconds_value_opt :
+        /* Empty */
+        | period
+        | period seconds_fraction
+        ;
+
+  seconds_integer_value : unsigned_integer ;
+
+  seconds_fraction : unsigned_integer ;
+
+  time_zone_interval : sign hours_value colon minutes_value ;
+
+  timestamp_string :
+                quote date_value space time_value quote
+        |       quote date_value space time_value time_zone_interval quote
+        ;
+
+  interval_string :
+                quote year_month_literal quote
+        |       quote day_time_literal quote
+        ;
+
+  year_month_literal : years_value
+	|	        years_value minus_sign months_value
+        ;
+
+  day_time_literal : day_time_interval | time_interval ;
+
+  day_time_interval :
+                days_value
+        |       days_value day_time_interval_opt1
+        ;
+
+  day_time_interval_opt1 :
+		space hours_value
+		space hours_value day_time_interval_opt2
+        ;
+
+  day_time_interval_opt2 :
+		colon minutes_value
+        |       colon minutes_value day_time_interval_opt3
+        ;
+
+  day_time_interval_opt3 :
+                colon seconds_value
+        ;
+
+  time_interval :
+		hours_value time_interval_opt1
+	|	minutes_value time_interval_opt2
+	|	seconds_value
+        ;
+
+  time_interval_opt1 :
+        /* Empty */
+        |       colon minutes_value time_interval_opt3
+        ;
+
+  time_interval_opt2 :
+        /* Empty */
+        |       colon seconds_value
+        ;
+
+  time_interval_opt3 :
+        /* Empty */
+        |       colon seconds_value
+        ;
+
+/*
+--hr
+--h2 SQL Module
+--/h2
+*/
+
+
+  module :
+		module_name_clause language_clause module_authorization_clause
+                module_opt
+        ;
+
+  module_opt :
+		temporary_table_declaration module_contents
+        |       module_contents
+        ;
+
+  module_name_clause :
+		_MODULE
+		_MODULE  module_name
+		_MODULE  module_character_set_specification
+		_MODULE  module_name module_character_set_specification
+        ;
+
+  module_name :
+                identifier
+        ;
+
+  module_character_set_specification : _NAMES _ARE character_set_specification ;
+
+  language_clause : _LANGUAGE language_name ;
+
+  language_name : _ADA | _C | _COBOL | _FORTRAN | _MUMPS | _PASCAL | _PLI ;
+
+  module_authorization_clause :
+		_SCHEMA schema_name
+	|	_AUTHORIZATION module_authorization_identifier
+	|	_SCHEMA schema_name _AUTHORIZATION module_authorization_identifier ;
+
+  module_authorization_identifier : authorization_identifier ;
+
+  authorization_identifier : identifier ;
+
+  temporary_table_declaration :
+                _DECLARE _LOCAL _TEMPORARY _TABLE
+                qualified_local_table_name table_element_list
+                temporary_table_declaration_opt
+        ;
+
+  temporary_table_declaration_opt :
+        /* Empty */
+        |       _ON _COMMIT _PRESERVE _ROWS
+        |       _ON _COMMIT _DELETE _ROWS
+        ;
+
+  qualified_local_table_name : _MODULE period local_table_name ;
+
+  local_table_name : qualified_identifier ;
+
+  qualified_identifier : identifier ;
+
+  table_element_list : left_paren table_element table_element_list_opt right_paren ;
+
+  table_element_list_opt :
+        /* Empty */
+        |       table_element_list_opt comma table_element
+        ;
+
+  table_element :
+                column_definition
+        |       table_constraint_definition
+        ;
+
+  column_definition :
+        column_name column_definition_sel default_clause_opt
+        column_constraint_definition_opt collate_clause_opt;
+
+  column_definition_sel :
+                data_type
+        |       domain_name
+        ;
+
+  default_clause_opt :
+        /* Empty */
+        |       default_clause
+        ;
+
+  column_constraint_definition_opt :
+        /* Empty */
+        |       column_constraint_definition
+        ;
+
+  collate_clause_opt :
+        /* Empty */
+        |       collate_clause
+        ;
+
+  column_name : identifier ;
+
+/*
+--hr
+--h2 Data Types
+--/h2
+*/
+
+  data_type :
+		character_string_type data_type_opt
+	|	national_character_string_type
+	|	bit_string_type
+	|	numeric_type
+	|	datetime_type
+	|	interval_type
+        ;
+
+  data_type_opt :
+        /* Empty */
+        |       _CHARACTER _SET character_set_specification
+        ;
+
+  character_string_type :
+		_CHARACTER character_string_type_len_opt
+	|	_CHAR character_string_type_len_opt
+	|	_CHARACTER _VARYING character_string_type_len_opt
+	|	_CHAR _VARYING character_string_type_len_opt
+	|	_VARCHAR character_string_type_len_opt
+        ;
+
+  character_string_type_len_opt :
+        /* Empty */
+        |       left_paren length right_paren
+        ;
+
+  length : unsigned_integer ;
+
+  national_character_string_type :
+		_NATIONAL _CHARACTER character_string_type_len_opt
+	|	_NATIONAL _CHAR character_string_type_len_opt
+	|	_NCHAR character_string_type_len_opt
+	|	_NATIONAL _CHARACTER _VARYING character_string_type_len_opt
+	|	_NATIONAL _CHAR _VARYING character_string_type_len_opt
+	|	_NCHAR _VARYING character_string_type_len_opt
+        ;
+
+  bit_string_type :
+		_BIT character_string_type_len_opt
+	|	_BIT _VARYING character_string_type_len_opt
+        ;
+
+  numeric_type :
+		exact_numeric_type
+	|	approximate_numeric_type ;
+
+  exact_numeric_type :
+	 	_NUMERIC numeric_precision_scale_opt
+	| 	_DECIMAL numeric_precision_scale_opt
+	| 	_DEC numeric_precision_scale_opt
+	|	_INTEGER
+	|	_INT
+	|	_SMALLINT ;
+
+  numeric_precision_scale_opt :
+        /* Empty */
+        |       left_paren precision comma scale right_paren
+        |       left_paren precision right_paren
+        ;
+
+  precision : unsigned_integer ;
+
+  scale : unsigned_integer ;
+
+  approximate_numeric_type :
+	 	_FLOAT numeric_precision_opt
+	|	_REAL
+	|	_DOUBLE _PRECISION ;
+
+  numeric_precision_opt :
+        /* Empty */
+        |       left_paren precision right_paren
+        ;
+
+  datetime_type :
+		_DATE
+	|       _TIME time_precision_opt tz_opt
+	|       _TIMESTAMP timestamp_precision_opt tz_opt ;
+
+  timestamp_precision_opt :
+        /* Empty */
+        |       left_paren timestamp_precision right_paren
+        ;
+
+  time_precision_opt :
+        /* Empty */
+        |       left_paren time_precision right_paren
+        ;
+
+  tz_opt :
+        /* Empty */
+        |        _WITH _TIME _ZONE
+        ;
+
+
+  time_precision : time_fractional_seconds_precision ;
+
+  time_fractional_seconds_precision : unsigned_integer ;
+
+  timestamp_precision : time_fractional_seconds_precision ;
+
+  interval_type : _INTERVAL interval_qualifier ;
+
+  interval_qualifier :
+		start_field _TO end_field
+	|       single_datetime_field ;
+
+  start_field :
+		non_second_datetime_field numeric_precision_opt
+        ;
+
+  non_second_datetime_field : _YEAR | _MONTH | _DAY | _HOUR | _MINUTE ;
+
+  interval_leading_field_precision : unsigned_integer ;
+
+  end_field :
+		non_second_datetime_field
+	|   _SECOND numeric_precision_opt
+        ;
+
+  interval_fractional_seconds_precision : unsigned_integer ;
+
+  single_datetime_field :
+		non_second_datetime_field numeric_precision_opt
+	|   _SECOND single_datetime_field_opt
+        ;
+
+  single_datetime_field_opt :
+        /* Empty */
+        |       left_paren interval_leading_field_precision single_datetime_field_opt2 right_paren
+        ;
+
+  single_datetime_field_opt2 :
+        /* Empty */
+        |       comma interval_fractional_seconds_precision
+        ;
+
+  domain_name : qualified_name ;
+
+  qualified_name :
+                qualified_identifier ;
+        |       schema_name period qualified_identifier
+        ;
+
+  default_clause : _DEFAULT default_option ;
+
+  default_option :
+		literal
+	|	datetime_value_function
+	|	_USER
+	|	_CURRENT_USER
+	|	_SESSION_USER
+	|	_SYSTEM_USER
+	|	_NULL ;
+
+/*
+--hr
+--h2 Literals
+--/h2
+*/
+
+  literal : signed_numeric_literal | general_literal ;
+
+  signed_numeric_literal :
+                sign unsigned_numeric_literal ;
+        |       unsigned_numeric_literal ;
+
+  general_literal :
+		character_string_literal
+	|	national_character_string_literal
+	|	bit_string_literal
+	|	hex_string_literal
+	|	datetime_literal
+	|	interval_literal ;
+
+  datetime_literal :
+		date_literal
+	|	time_literal
+	|	timestamp_literal ;
+
+  date_literal : _DATE date_string ;
+
+  time_literal : _TIME time_string ;
+
+  timestamp_literal : _TIMESTAMP timestamp_string ;
+
+  interval_literal :
+                _INTERVAL interval_string interval_qualifier
+        |       _INTERVAL sign  interval_string interval_qualifier
+        ;
+
+  datetime_value_function :
+		current_date_value_function
+	|	current_time_value_function
+	|	current_timestamp_value_function ;
+
+  current_date_value_function : _CURRENT_DATE ;
+
+  current_time_value_function :
+                _CURRENT_TIME numeric_precision_opt
+        ;
+
+  current_timestamp_value_function :
+                _CURRENT_TIMESTAMP numeric_precision_opt
+        ;
+
+/*
+--hr
+--h2 Constraints
+--/h2
+*/
+
+  column_constraint_definition :
+		constraint_name_definition_opt column_constraint constraint_attributes_opt ;
+
+  constraint_name_definition :
+               _CONSTRAINT constraint_name
+        ;
+
+  constraint_name_definition_opt :
+        /* Empty */
+        |       constraint_name_definition
+        ;
+
+  constraint_name : qualified_name ;
+
+  column_constraint :
+		_NOT _NULL
+	|	unique_specification
+	|	references_specification
+	|	check_constraint_definition
+        ;
+
+  unique_specification :
+                _UNIQUE
+        |       _PRIMARY _KEY
+        ;
+
+  references_specification :
+		_REFERENCES referenced_table_and_columns
+                match_type_opt
+                referential_triggered_action_opt ;
+
+  match_type_opt :
+        /* Empty */
+        |       _MATCH match_type
+        ;
+
+  referential_triggered_action_opt :
+        /* Empty */
+        |       referential_triggered_action
+        ;
+
+  referenced_table_and_columns :
+                table_name reference_column_list_opt
+        ;
+
+  reference_column_list_opt :
+        /* Empty */
+        |       left_paren reference_column_list right_paren
+        ;
+
+  table_name :
+                qualified_name
+        |       qualified_local_table_name
+        ;
+
+  reference_column_list :
+                column_name_list
+        ;
+
+  column_name_list :
+                column_name
+        |       column_name_list comma column_name
+        ;
+
+  match_type : _FULL | _PARTIAL ;
+
+  referential_triggered_action :
+		update_rule delete_rule_opt
+	|	delete_rule update_rule_opt
+        ;
+
+  update_rule_opt :
+        /* Empty */
+        |       update_rule
+        ;
+
+  delete_rule_opt :
+        /* Empty */
+        |       delete_rule
+        ;
+
+  update_rule :
+                _ON _UPDATE referential_action
+        ;
+
+  referential_action :
+                _CASCADE | _SET _NULL | _SET _DEFAULT | _NO _ACTION
+        ;
+
+  delete_rule :
+                _ON _DELETE referential_action
+        ;
+
+  check_constraint_definition :
+        _CHECK left_paren search_condition right_paren
+        ;
+
+/*
+--hr
+--h2 Search Condition
+--/h2
+*/
+
+  search_condition :
+                boolean_term
+	|       search_condition _OR boolean_term
+        ;
+
+  boolean_term :
+		boolean_factor
+	|       boolean_term _AND boolean_factor
+        ;
+
+  boolean_factor :
+                boolean_test
+        |       _NOT boolean_test
+        ;
+
+  boolean_test :
+                boolean_primary
+        |       boolean_primary boolean_test_opt1
+        ;
+
+  boolean_test_opt1 :
+        /* Empty */
+        | _IS boolean_test_opt2 truth_value
+        ;
+
+  boolean_test_opt2:
+        /* Empty */
+        |       _NOT
+        ;
+
+  boolean_primary :
+                predicate
+        |       left_paren search_condition right_paren
+        ;
+
+  predicate :
+	    comparison_predicate
+	|   between_predicate
+	|   in_predicate
+	|   like_predicate
+	|   null_predicate
+	|   quantified_comparison_predicate
+	|   exists_predicate
+        |   unique_predicate
+	|   match_predicate
+	|   overlaps_predicate ;
+
+  comparison_predicate : row_value_constructor comp_op row_value_constructor
+        ;
+
+  row_value_constructor :
+		row_value_constructor_element
+	|   left_paren row_value_constructor_list right_paren
+	|   row_subquery
+        ;
+
+  row_value_constructor_element :
+            value_expression
+	|   null_specification
+	|   default_specification
+        ;
+
+  value_expression :
+	    numeric_value_expression
+	|   string_value_expression
+	|   datetime_value_expression
+	|   interval_value_expression
+        ;
+
+  numeric_value_expression :
+            term
+	|   numeric_value_expression plus_sign term
+	|   numeric_value_expression minus_sign term
+        ;
+
+  term :
+            factor
+	|   term asterisk factor
+	|   term solidus factor ;
+
+  factor : sign_opt numeric_primary
+        ;
+
+  sign_opt :
+        /* Empty */
+        |       sign
+        ;
+
+  numeric_primary :
+                value_expression_primary
+        |       numeric_value_function
+        ;
+
+  value_expression_primary :
+	    unsigned_value_specification
+	|   column_reference
+	|   set_function_specification
+	|   scalar_subquery
+	|   case_expression
+	|   left_paren value_expression right_paren
+	|   cast_specification
+        ;
+
+  unsigned_value_specification :
+                unsigned_literal
+        |       general_value_specification
+        ;
+
+  unsigned_literal :
+                unsigned_numeric_literal
+        |       general_literal ;
+
+  general_value_specification :
+	    parameter_specification
+	|   dynamic_parameter_specification
+	|   variable_specification
+	|   _USER
+	|   _CURRENT_USER
+	|   _SESSION_USER
+	|   _SYSTEM_USER
+	|   _VALUE
+        ;
+
+  parameter_specification :
+                parameter_name indicator_parameter_opt
+        ;
+
+  parameter_name : colon identifier ;
+
+  indicator_parameter_opt :
+        /* Empty */
+        |       _INDICATOR parameter_name
+        |       parameter_name
+        ;
+
+  dynamic_parameter_specification :
+                question_mark
+        ;
+
+  variable_specification : embedded_variable_name indicator_variable_opt
+        ;
+
+  embedded_variable_name : colon host_identifier
+        ;
+
+  host_identifier : identifier ;
+        /* TODO - Not embedding host programs; SynError; */
+
+/*
+<host identifier> ::=
+		<Ada host identifier>
+	|	<C host identifier>
+	|	<Cobol host identifier>
+	|	<Fortran host identifier>
+	|	<MUMPS host identifier>
+	|	<Pascal host identifier>
+	|	<PL/I host identifier>
+*/
+
+  indicator_variable_opt :
+        /* Empty */
+        | _INDICATOR embedded_variable_name
+        | embedded_variable_name
+        ;
+
+  column_reference :
+                qualifier period column_name
+        |       column_name
+        ;
+
+  qualifier :
+                table_name
+        |       correlation_name
+        ;
+
+  correlation_name : identifier ;
+
+  set_function_specification :
+		_COUNT left_paren asterisk right_paren
+	|       general_set_function
+        ;
+
+  general_set_function :
+		set_function_type left_paren set_quantifier_opt value_expression right_paren
+        ;
+
+  set_quantifier_opt :
+        /* Empty */
+        |       set_quantifier
+        ;
+
+  set_function_type : _AVG | _MAX | _MIN | _SUM | _COUNT ;
+
+  set_quantifier : _DISTINCT | _ALL ;
+
+/*
+--hr
+--h2 Queries
+--/h2
+*/
+
+  scalar_subquery : subquery ;
+
+  subquery : left_paren query_expression right_paren ;
+
+  query_expression : non_join_query_expression | joined_table ;
+
+  non_join_query_expression :
+		non_join_query_term
+	|	query_expression _UNION all_opt corresponding_spec_opt query_term
+	|	query_expression _EXCEPT all_opt corresponding_spec_opt query_term
+        ;
+
+  non_join_query_term :
+		non_join_query_primary
+	|	query_term _INTERSECT all_opt corresponding_spec_opt query_primary
+        ;
+
+  all_opt :
+        /* Empty */
+        |       _ALL
+        ;
+
+  corresponding_spec_opt :
+        /* Empty */
+        |       corresponding_spec
+        ;
+
+  non_join_query_primary :
+                simple_table
+        |       left_paren non_join_query_expression right_paren
+        ;
+
+  simple_table :
+		query_specification
+	|	table_value_constructor
+	|	explicit_table
+        ;
+
+  query_specification :
+		_SELECT set_quantifier_opt select_list table_expression ;
+
+  select_list :
+		asterisk
+	|	select_list_opt ;
+
+  select_list_opt :
+                select_sublist
+        |       select_list_opt comma select_sublist
+        ;
+
+  select_sublist :
+                derived_column
+        |       qualifier period asterisk
+        ;
+
+  derived_column :
+                value_expression
+        |       value_expression as_clause
+        ;
+
+  as_clause :
+                column_name
+        |       _AS column_name
+        ;
+
+
+  table_expression :
+                from_clause
+		where_clause_opt
+		group_by_clause_opt
+		having_clause_opt
+        ;
+
+  where_clause_opt :
+        /* Empty */
+        |       where_clause
+        ;
+
+  group_by_clause_opt :
+        /* Empty */
+        |       group_by_clause
+        ;
+
+  having_clause_opt :
+        /* Empty */
+        |       having_clause
+        ;
+
+  from_clause : _FROM from_clause_opt
+        ;
+
+  from_clause_opt :
+                table_reference
+        |       from_clause_opt comma table_reference
+        ;
+
+/*
+--small
+--i
+Note that <correlation specification> does not appear in the ISO/IEC grammar;
+The notation is written out longhand several times, instead;
+--/i
+--/small
+*/
+
+  table_reference :
+	    table_name correlation_specification_opt
+	|   derived_table correlation_specification
+	|   joined_table ;
+
+  correlation_specification_opt :
+        /* Empty */
+        |       correlation_specification
+        ;
+
+  correlation_specification :
+		as_opt correlation_name derived_column_list_opt
+        ;
+
+  as_opt :
+        /* Empty */
+        | _AS
+        ;
+
+  derived_column_list_opt :
+        /* Empty */
+        |       left_paren derived_column_list right_paren
+        ;
+
+  derived_column_list :
+                column_name_list
+        ;
+
+  derived_table :
+                table_subquery
+        ;
+
+  table_subquery :
+                subquery
+        ;
+
+  joined_table :
+		cross_join
+	|       qualified_join
+	|       left_paren joined_table right_paren
+        ;
+
+  cross_join :
+        table_reference _CROSS _JOIN table_reference
+        ;
+
+  qualified_join :
+        table_reference natural_opt join_type_opt _JOIN table_reference join_specification_opt
+        ;
+
+  natural_opt :
+        /* Empty */
+        |       _NATURAL
+        ;
+
+  join_type_opt :
+        /* Empty */
+        |       join_type
+        ;
+
+  join_specification_opt :
+        /* Empty */
+        |       join_specification
+        ;
+
+  join_type :
+		_INNER
+	|       outer_join_type outer_opt
+	|       _UNION
+        ;
+
+  outer_opt:
+        /* Empty */
+        |       _OUTER
+        ;
+
+  outer_join_type :
+                _LEFT
+        |       _RIGHT
+        |       _FULL
+        ;
+
+  join_specification :
+                join_condition
+        |       named_columns_join
+        ;
+
+  join_condition :
+                _ON search_condition
+        ;
+
+  named_columns_join :
+                _USING left_paren join_column_list right_paren
+        ;
+
+  join_column_list :
+                column_name_list
+        ;
+
+  where_clause :
+                _WHERE search_condition
+        ;
+
+  group_by_clause :
+                _GROUP _BY grouping_column_reference_list
+        ;
+
+  grouping_column_reference_list :
+                grouping_column_reference
+        |       grouping_column_reference_list comma grouping_column_reference
+        ;
+
+  grouping_column_reference :
+                column_reference collate_clause_opt
+        ;
+
+  collate_clause_opt :
+        /* Empty */
+        |       collate_clause
+        ;
+
+  collate_clause :
+                _COLLATE collation_name
+        ;
+
+  collation_name :
+                qualified_name
+        ;
+
+  having_clause :
+                _HAVING search_condition
+        ;
+
+  table_value_constructor :
+                _VALUES table_value_constructor_list
+        ;
+
+  table_value_constructor_list :
+                row_value_constructor
+        |       table_value_constructor_list  comma row_value_constructor
+        ;
+
+  explicit_table : _TABLE table_name
+        ;
+
+  query_term :
+                non_join_query_term
+        |       joined_table
+        ;
+
+  corresponding_spec : _CORRESPONDING corresponding_column_list_opt
+        ;
+
+  corresponding_column_list_opt :
+        /* Empty */
+        |       _BY left_paren corresponding_column_list right_paren
+        ;
+
+  corresponding_column_list : column_name_list ;
+
+  query_primary :
+                non_join_query_primary
+        |       joined_table
+        ;
+
+/*
+--hr
+--h2 Query expression components
+--/h2
+*/
+
+  case_expression :
+                case_abbreviation
+        |       case_specification
+        ;
+
+  case_abbreviation :
+		_NULLIF left_paren value_expression comma value_expression right_paren
+	|	_COALESCE left_paren value_expression_list right_paren
+        ;
+
+  value_expression_list :
+                value_expression
+        |       value_expression_list comma value_expression
+        ;
+
+  case_specification :
+                simple_case
+        |       searched_case
+        ;
+
+  simple_case :
+		_CASE case_operand
+			simple_when_clause
+                        else_clause_opt
+		_END
+        ;
+
+  else_clause_opt :
+        /* Empty */
+        |       else_clause
+        ;
+
+  case_operand :
+                value_expression
+        ;
+
+  simple_when_clause :
+                _WHEN when_operand _THEN result
+        ;
+
+  when_operand :
+                value_expression
+        ;
+
+  result :
+                result_expression
+        |       _NULL
+        ;
+
+  result_expression :
+                value_expression
+        ;
+
+  else_clause :
+                _ELSE result
+        ;
+
+  searched_case :
+		_CASE
+                searched_when_clause
+                else_clause_opt
+		_END
+        ;
+
+  searched_when_clause :
+                _WHEN search_condition _THEN result
+        ;
+
+  cast_specification :
+                _CAST left_paren cast_operand _AS cast_target right_paren
+        ;
+
+  cast_operand :
+                value_expression
+        |       _NULL
+        ;
+
+  cast_target :
+                domain_name
+        |       data_type
+        ;
+
+  numeric_value_function :
+                position_expression
+        |       extract_expression
+        |       length_expression
+        ;
+
+  position_expression :
+	        _POSITION left_paren
+                character_value_expression
+                _IN
+                character_value_expression right_paren
+        ;
+
+  character_value_expression :
+                concatenation
+        |       character_factor
+        ;
+
+  concatenation :
+                character_value_expression concatenation_operator character_factor
+        ;
+
+  character_factor :
+                character_primary collate_clause_opt
+        ;
+
+  character_primary :
+                value_expression_primary
+        |       string_value_function
+        ;
+
+  string_value_function :
+                character_value_function
+        |       bit_value_function
+        ;
+
+  character_value_function :
+	    character_substring_function
+	|   fold
+	|   form_of_use_conversion
+	|   character_translation
+	|   trim_function
+        ;
+
+  character_substring_function :
+		_SUBSTRING left_paren character_value_expression
+                _FROM start_position for_strlength_opt right_paren
+        ;
+
+  for_strlength_opt :
+        /* Empty */
+        |       _FOR string_length
+        ;
+
+  start_position : numeric_value_expression ;
+
+  string_length : numeric_value_expression ;
+
+  fold :
+                _UPPER left_paren character_value_expression right_paren
+        |       _LOWER left_paren character_value_expression right_paren
+        ;
+
+  form_of_use_conversion :
+		_CONVERT left_paren character_value_expression
+                _USING form_of_use_conversion_name right_paren
+        ;
+
+  form_of_use_conversion_name : qualified_name ;
+
+  character_translation :
+		_TRANSLATE left_paren character_value_expression _USING translation_name right_paren ;
+
+  translation_name : qualified_name ;
+
+  trim_function : _TRIM left_paren trim_operands  right_paren ;
+
+  trim_operands : trim_operands_opt trim_source
+        ;
+
+  trim_operands_opt :
+        /* Empty */
+        | trim_specification_opt trim_character_opt _FROM
+        ;
+
+  trim_specification_opt :
+        /* Empty */
+        | _LEADING
+        | _TRAILING
+        | _BOTH
+        ;
+
+  trim_character_opt :
+        /* Empty */
+        | character_value_expression
+        ;
+
+  trim_source :
+                character_value_expression
+        ;
+
+  bit_value_function :
+                bit_substring_function
+        ;
+
+  bit_substring_function :
+		_SUBSTRING left_paren bit_value_expression
+                _FROM start_position bit_substring_function_for_opt right_paren
+        ;
+
+  bit_substring_function_for_opt :
+        /* Empty */
+        | _FOR string_length
+        ;
+
+  bit_value_expression :
+                bit_concatenation
+        |       bit_factor
+        ;
+
+  bit_concatenation : bit_value_expression concatenation_operator bit_factor
+        ;
+
+  bit_factor :
+                bit_primary
+        ;
+
+  bit_primary :
+                value_expression_primary
+        |       string_value_function
+        ;
+
+  extract_expression :
+                _EXTRACT left_paren extract_field _FROM extract_source right_paren
+        ;
+
+  extract_field :
+                datetime_field
+        |       time_zone_field
+        ;
+
+  datetime_field :
+                non_second_datetime_field
+        |       _SECOND
+        ;
+
+  time_zone_field :
+                _TIMEZONE_HOUR
+        |       _TIMEZONE_MINUTE
+        ;
+
+  extract_source :
+                datetime_value_expression
+        |       interval_value_expression
+        ;
+
+  datetime_value_expression :
+		datetime_term
+	|	interval_value_expression plus_sign datetime_term
+	|	datetime_value_expression plus_sign interval_term
+	|	datetime_value_expression minus_sign interval_term
+        ;
+
+  interval_term :
+		interval_factor
+	|	interval_term_2 asterisk factor
+	|	interval_term_2 solidus factor
+	|	term asterisk interval_factor
+        ;
+
+  interval_factor :
+                sign_opt interval_primary
+        ;
+
+  sign_opt :
+        /* Empty */
+        | sign
+        ;
+
+  interval_primary :
+                value_expression_primary interval_qualifier_opt
+        ;
+
+  interval_qualifier_opt :
+        /* Empty */
+        |       interval_qualifier
+        ;
+
+  interval_term_2 : interval_term ;
+
+  interval_value_expression :
+		interval_term
+	|	interval_value_expression_1 plus_sign interval_term_1
+	|	interval_value_expression_1 minus_sign interval_term_1
+	|	left_paren datetime_value_expression minus_sign datetime_term right_paren interval_qualifier
+        ;
+
+  interval_value_expression_1 :
+                interval_value_expression
+        ;
+
+  interval_term_1 :
+                interval_term
+        ;
+
+  datetime_term :
+                datetime_factor
+        ;
+
+  datetime_factor :
+                datetime_primary time_zone_opt
+        ;
+
+  time_zone_opt :
+        /* Empty */
+        |       time_zone
+        ;
+
+  datetime_primary :
+                value_expression_primary
+        |       datetime_value_function
+        ;
+
+  time_zone :
+                _AT time_zone_specifier
+        ;
+
+  time_zone_specifier :
+                _LOCAL
+        |       _TIME _ZONE interval_value_expression
+        ;
+
+  length_expression :
+                char_length_expression
+        |       octet_length_expression
+        |       bit_length_expression
+        ;
+
+  char_length_expression :
+                char_length_specifier left_paren string_value_expression right_paren
+        ;
+
+  char_length_specifier :
+                _CHAR_LENGTH
+        |       _CHARACTER_LENGTH
+        ;
+
+  string_value_expression :
+                character_value_expression
+        |       bit_value_expression
+        ;
+
+  octet_length_expression :
+                _OCTET_LENGTH left_paren string_value_expression right_paren
+        ;
+
+  bit_length_expression :
+                _BIT_LENGTH left_paren string_value_expression right_paren
+        ;
+
+  null_specification : _NULL ;
+
+  default_specification : _DEFAULT ;
+
+  row_value_constructor_list :
+                row_value_constructor_element
+        |       row_value_constructor_list comma row_value_constructor_element
+        ;
+
+  row_subquery : subquery ;
+
+  comp_op :
+	    equals_operator
+	|   not_equals_operator
+	|   less_than_operator
+	|   greater_than_operator
+	|   less_than_or_equals_operator
+	|   greater_than_or_equals_operator ;
+
+  between_predicate :
+		row_value_constructor not_opt _BETWEEN row_value_constructor _AND row_value_constructor ;
+
+  in_predicate : row_value_constructor not_opt _IN in_predicate_value ;
+
+  in_predicate_value : table_subquery | left_paren in_value_list right_paren ;
+
+  in_value_list :
+                value_expression
+        |       in_value_list comma value_expression
+        ;
+
+  like_predicate :
+                match_value not_opt _LIKE pattern like_predicate_escape_opt
+        ;
+
+  like_predicate_escape_opt :
+        /* Empty */
+        |       _ESCAPE escape_character
+        ;
+
+  not_opt :
+        /* Empty */
+        |       _NOT
+        ;
+
+  match_value : character_value_expression ;
+
+  pattern : character_value_expression ;
+
+  escape_character : character_value_expression ;
+
+  null_predicate :
+        row_value_constructor _IS not_opt _NULL
+        ;
+
+  quantified_comparison_predicate : row_value_constructor comp_op quantifier table_subquery ;
+
+  quantifier : all | some ;
+
+  all : _ALL ;
+
+  some : _SOME | _ANY ;
+
+  exists_predicate : _EXISTS table_subquery ;
+
+  unique_predicate : _UNIQUE table_subquery ;
+
+  match_predicate : row_value_constructor _MATCH unique_opt partial_full_opt table_subquery ;
+
+  unique_opt :
+        /* Empty */
+        |       _UNIQUE
+        ;
+
+  partial_full_opt:
+        /* Empty */
+        |       _PARTIAL
+        |       _FULL
+        ;
+
+  overlaps_predicate : row_value_constructor_1 _OVERLAPS row_value_constructor_2 ;
+
+  row_value_constructor_1 : row_value_constructor ;
+
+  row_value_constructor_2 : row_value_constructor ;
+
+  truth_value :
+                _TRUE
+        |       _FALSE
+        |       _UNKNOWN
+        ;
+
+/*
+--hr
+--h2 More about constraints
+--/h2
+*/
+
+  constraint_attributes_opt :
+        /* Empty */
+        | constraint_attributes
+        ;
+
+  constraint_attributes :
+		constraint_check_time deferrable_opt
+	|	not_opt _DEFERRABLE constraint_check_time_opt
+        ;
+
+  deferrable_opt :
+        /* Empty */
+        |       not_opt _DEFERRABLE
+        ;
+
+  constraint_check_time_opt :
+        /* Empty */
+        |       constraint_check_time
+        ;
+
+  constraint_check_time :
+                _INITIALLY _DEFERRED
+        |       _INITIALLY _IMMEDIATE
+        ;
+
+  table_constraint_definition :
+                constraint_name_definition_opt
+                table_constraint constraint_check_time_opt
+        ;
+
+  constraint_check_time_opt :
+        /* Empty */
+        |       constraint_check_time
+        ;
+
+  table_constraint :
+		unique_constraint_definition
+	|	referential_constraint_definition
+	|	check_constraint_definition ;
+
+  unique_constraint_definition :
+                unique_specification left_paren unique_column_list right_paren
+        ;
+
+  unique_column_list :
+                column_name_list
+        ;
+
+  referential_constraint_definition :
+		_FOREIGN _KEY left_paren referencing_columns right_paren references_specification
+        ;
+
+  referencing_columns :
+                        reference_column_list
+        ;
+
+/*
+--hr
+--h2 Module contents
+--/h2
+*/
+
+  module_contents :
+		declare_cursor
+	|	dynamic_declare_cursor
+	|	procedure ;
+
+  declare_cursor :
+		_DECLARE cursor_name insensitive_opt scroll_opt _CURSOR _FOR cursor_specification ;
+
+  insensitive_opt :
+        /* Empty */
+        |       _INSENSITIVE
+        ;
+
+  scroll_opt :
+        /* Empty */
+        |       _SCROLL
+        ;
+
+  cursor_name : identifier ;
+
+  cursor_specification : query_expression order_by_clause_opt updatability_clause_opt ;
+
+  order_by_clause_opt :
+        /* Empty */
+        |       _ORDER _BY sort_specification_list
+        ;
+
+  sort_specification_list :
+                sort_specification
+        |       sort_specification_list comma sort_specification
+        ;
+
+  sort_specification : sort_key collate_clause_opt ordering_specification_opt ;
+
+  sort_key : column_name | unsigned_integer ;
+
+  ordering_specification_opt :
+        /* Empty */
+        |       _ASC
+        |       _DESC
+        ;
+
+  updatability_clause_opt :
+        /* Empty */
+        |       _FOR _READ _ONLY
+        |       _FOR _UPDATE updatability_column_opt
+        ;
+
+  updatability_column_opt:
+        /* Empty */
+        |       _OF column_name_list
+        ;
+
+  dynamic_declare_cursor :
+		_DECLARE cursor_name insensitive_opt scroll_opt _CURSOR _FOR statement_name ;
+
+  statement_name : identifier;
+
+/*
+--hr
+--h2 SQL Procedures
+--/h2
+*/
+
+  procedure :
+	_PROCEDURE procedure_name parameter_declaration_list
+        semicolon SQL_procedure_statement semicolon ;
+
+  procedure_name : identifier ;
+
+  parameter_declaration_list :
+		left_paren parameter_declarations right_paren
+        ;
+
+  parameter_declarations :
+                parameter_declaration
+        |       parameter_declarations comma parameter_declaration
+        ;
+
+  parameter_declaration :
+                parameter_name data_type
+        |       status_parameter
+        ;
+
+  status_parameter :
+                _SQLCODE
+        |       _SQLSTATE
+        ;
+
+  SQL_procedure_statement :
+		SQL_schema_statement
+	|	SQL_data_statement
+	|	SQL_transaction_statement
+	|	SQL_connection_statement
+	|	SQL_session_statement
+        ;
+
+/*
+--hr
+--h2 SQL Schema Definition Statements
+--/h2
+*/
+
+  SQL_schema_statement :
+		SQL_schema_definition_statement
+	|	SQL_schema_manipulation_statement
+        ;
+
+  SQL_schema_definition_statement :
+		schema_definition
+	|	table_definition
+	|	view_definition
+	|	grant_statement
+	|	domain_definition
+	|	character_set_definition
+	|	collation_definition
+	|	translation_definition
+	|	assertion_definition ;
+
+  schema_definition :
+		_CREATE _SCHEMA schema_name_clause
+			schema_character_set_specification_opt
+			schema_elements ;
+
+  schema_character_set_specification_opt :
+        /* Empty */
+        |       schema_character_set_specification
+        ;
+
+  schema_elements :
+        /* Empty */
+        |       schema_element
+        |       schema_elements schema_element
+        ;
+
+  schema_name_clause :
+		schema_name
+	|	_AUTHORIZATION schema_authorization_identifier
+	|	schema_name _AUTHORIZATION schema_authorization_identifier
+        ;
+
+  schema_authorization_identifier : authorization_identifier ;
+
+  schema_character_set_specification : _DEFAULT _CHARACTER _SET character_set_specification ;
+
+  schema_element :
+		domain_definition
+	|	table_definition
+	|	view_definition
+	|	grant_statement
+	|	assertion_definition
+	|	character_set_definition
+	|	collation_definition
+	|	translation_definition ;
+
+  domain_definition :
+		_CREATE _DOMAIN domain_name as_opt data_type
+			default_clause_opt domain_constraint_opt collate_clause_opt ;
+
+  domain_constraint_opt :
+        /* Empty */
+        |       domain_constraint
+        ;
+
+  domain_constraint :
+		constraint_name_definition_opt check_constraint_definition constraint_attributes_opt
+        ;
+
+  table_definition :
+		_CREATE table_definition_opts _TABLE
+                table_name table_element_list table_commit_opts ;
+
+  table_definition_opts :
+        /* Empty */
+        |       _GLOBAL _TEMPORARY
+        |       _LOCAL _TEMPORARY
+        ;
+
+  table_commit_opts :
+        /* Empty */
+        |       _ON _COMMIT _DELETE _ROWS
+        |       _ON _COMMIT _PRESERVE _ROWS
+        ;
+
+  view_definition :
+		_CREATE _VIEW table_name view_column_list_opt
+			_AS query_expression view_check_opt ;
+
+  view_column_list_opt :
+        /* Empty */
+        |       left_paren view_column_list right_paren
+        ;
+
+  view_check_opt :
+        /* Empty */
+        |       _WITH levels_clause_opt _CHECK _OPTION
+        |       _WITH _CHECK _OPTION
+        ;
+
+  view_column_list : column_name_list ;
+
+  levels_clause_opt :
+        /* Empty */
+        |       _CASCADED
+        |       _LOCAL
+        ;
+
+  grant_statement :
+		_GRANT privileges _ON object_name _TO grantee_list grant_option ;
+
+  grantee_list :
+                grantee
+        |       grantee_list comma grantee
+        ;
+
+  grant_option :
+        /* Empty */
+        |       _WITH _GRANT _OPTION
+        ;
+
+  privileges : _ALL _PRIVILEGES | action_list ;
+
+  action_list :
+                action
+        |       action_list  comma action
+        ;
+
+  action :
+		_SELECT
+	|	_DELETE
+	|	_INSERT privilege_column_list_opt
+	|	_UPDATE privilege_column_list_opt
+	|	_REFERENCES privilege_column_list_opt
+	|	_USAGE
+        ;
+
+  privilege_column_list_opt :
+        /* Empty */
+        |       left_paren privilege_column_list right_paren
+        ;
+
+  privilege_column_list : column_name_list ;
+
+  object_name :
+		table_opt table_name
+	|	_DOMAIN domain_name
+	|	_COLLATION collation_name
+	|	_CHARACTER _SET character_set_name
+	|	_TRANSLATION translation_name ;
+
+  table_opt :
+        /* Empty */
+        |       _TABLE
+        ;
+
+  grantee : _PUBLIC | authorization_identifier ;
+
+  assertion_definition :
+		_CREATE _ASSERTION constraint_name assertion_check constraint_attributes_opt
+        ;
+
+  assertion_check : _CHECK left_paren search_condition right_paren
+        ;
+
+  character_set_definition :
+		_CREATE _CHARACTER _SET character_set_name as_opt character_set_source
+		charset_collation_opt ;
+
+  charset_collation_opt :
+        /* Empty */
+        |       collate_clause
+        |       limited_collation_definition
+        ;
+
+  character_set_source : _GET existing_character_set_name ;
+
+  existing_character_set_name :
+		standard_character_repertoire_name
+	|	implementation_defined_character_repertoire_name
+	|	schema_character_set_name ;
+
+  schema_character_set_name : character_set_name ;
+
+  limited_collation_definition :
+		_COLLATION _FROM collation_source ;
+
+  collation_source : collating_sequence_definition | translation_collation ;
+
+  collating_sequence_definition :
+		external_collation
+	|	schema_collation_name
+	|	_DESC left_paren collation_name right_paren
+	|	_DEFAULT ;
+
+  external_collation :
+	_EXTERNAL left_paren quote external_collation_name quote right_paren ;
+
+  external_collation_name : standard_collation_name | implementation_defined_collation_name ;
+
+  standard_collation_name : collation_name ;
+
+  implementation_defined_collation_name : collation_name ;
+
+  schema_collation_name : collation_name ;
+
+  translation_collation : _TRANSLATION translation_name translation_collation_opt ;
+
+  translation_collation_opt :
+        /* Empty */
+        |       _THEN _COLLATION collation_name
+        ;
+
+  collation_definition :
+		_CREATE _COLLATION collation_name _FOR character_set_specification
+			_FROM collation_source pad_attribute_opt
+        ;
+
+  pad_attribute_opt :
+        /* Empty */
+        |       _NO _PAD
+        |       _PAD _SPACE
+        ;
+
+  translation_definition :
+		_CREATE _TRANSLATION translation_name
+			_FOR source_character_set_specification
+			_TO target_character_set_specification
+			_FROM translation_source
+        ;
+
+  source_character_set_specification : character_set_specification ;
+
+  target_character_set_specification : character_set_specification ;
+
+  translation_source : translation_specification ;
+
+  translation_specification :
+		external_translation
+	|	_IDENTITY
+	|	schema_translation_name ;
+
+  external_translation :
+		_EXTERNAL left_paren quote external_translation_name quote right_paren ;
+
+  external_translation_name :
+		standard_translation_name
+	|	implementation_defined_translation_name ;
+
+  standard_translation_name : translation_name ;
+
+  implementation_defined_translation_name : translation_name ;
+
+  schema_translation_name : translation_name ;
+
+  SQL_schema_manipulation_statement :
+		drop_schema_statement
+	|	alter_table_statement
+	|	drop_table_statement
+	|	drop_view_statement
+	|	revoke_statement
+	|	alter_domain_statement
+	|	drop_domain_statement
+	|	drop_character_set_statement
+	|	drop_collation_statement
+	|	drop_translation_statement
+	|	drop_assertion_statement
+        ;
+
+  drop_schema_statement : _DROP _SCHEMA schema_name drop_behaviour
+        ;
+
+  drop_behaviour : _CASCADE | _RESTRICT
+        ;
+
+  alter_table_statement : _ALTER _TABLE table_name alter_table_action
+        ;
+
+  alter_table_action :
+		add_column_definition
+	|	alter_column_definition
+	|	drop_column_definition
+	|	add_table_constraint_definition
+	|	drop_table_constraint_definition
+        ;
+
+  column_opt :
+        /* Empty */
+        |       _COLUMN
+        ;
+
+  add_column_definition :
+                _ADD column_opt column_definition
+        ;
+
+  alter_column_definition :
+                _ALTER column_opt column_name alter_column_action
+        ;
+
+  alter_column_action :
+                set_column_default_clause
+        |       drop_column_default_clause
+        ;
+
+  set_column_default_clause :
+                _SET default_clause
+        ;
+
+  drop_column_default_clause :
+                _DROP _DEFAULT
+        ;
+
+  drop_column_definition :
+                _DROP column_opt column_name drop_behaviour
+        ;
+
+  add_table_constraint_definition :
+                _ADD table_constraint_definition
+        ;
+
+  drop_table_constraint_definition :
+                _DROP _CONSTRAINT constraint_name drop_behaviour
+        ;
+
+  drop_table_statement :
+                _DROP _TABLE table_name drop_behaviour
+        ;
+
+  drop_view_statement :
+                _DROP _VIEW table_name drop_behaviour
+        ;
+
+  revoke_statement :
+		_REVOKE grant_option_for_opt privileges _ON object_name
+			_FROM grantee_list drop_behaviour
+        ;
+
+  grant_option_for_opt :
+        /* Empty */
+        |        _GRANT _OPTION _FOR
+        ;
+
+  alter_domain_statement : _ALTER _DOMAIN domain_name alter_domain_action
+        ;
+
+  alter_domain_action :
+		set_domain_default_clause
+	|	drop_domain_default_clause
+	|	add_domain_constraint_definition
+	|	drop_domain_constraint_definition
+        ;
+
+  set_domain_default_clause :
+                _SET default_clause
+        ;
+
+  drop_domain_default_clause :
+                _DROP _DEFAULT
+        ;
+
+  add_domain_constraint_definition :
+                _ADD domain_constraint
+        ;
+
+  drop_domain_constraint_definition :
+                _DROP _CONSTRAINT constraint_name
+        ;
+
+  drop_domain_statement :
+                _DROP _DOMAIN domain_name drop_behaviour
+        ;
+
+  drop_character_set_statement :
+                _DROP _CHARACTER _SET character_set_name
+        ;
+
+  drop_collation_statement :
+                _DROP _COLLATION collation_name
+        ;
+
+  drop_translation_statement :
+                _DROP _TRANSLATION translation_name
+        ;
+
+  drop_assertion_statement :
+                _DROP _ASSERTION constraint_name
+        ;
+
+/*
+--hr
+--h2 SQL Data Manipulation Statements
+--/h2
+*/
+
+  SQL_data_statement :
+		open_statement
+	|	fetch_statement
+	|	close_statement
+	|	select_statement__single_row
+	|	SQL_data_change_statement ;
+
+  open_statement : _OPEN cursor_name ;
+
+  fetch_statement :
+		_FETCH fetch_orientation_opt cursor_name _INTO fetch_target_list ;
+
+  fetch_orientation_opt :
+        /* Empty */
+        |       _FROM
+        |       fetch_orientation _FROM
+        ;
+
+  fetch_orientation :
+		_NEXT
+	|	_PRIOR
+	|	_FIRST
+	|	_LAST
+	|	_ABSOLUTE simple_value_specification
+        |       _RELATIVE simple_value_specification
+        ;
+
+  simple_value_specification :
+                parameter_name
+        |       embedded_variable_name
+        |       literal
+        ;
+
+  fetch_target_list :
+                target_specification
+        |       fetch_target_list comma target_specification
+        ;
+
+  target_specification :
+		parameter_specification
+	|	variable_specification
+        ;
+
+  close_statement :
+                _CLOSE cursor_name
+        ;
+
+  select_statement__single_row :
+	        _SELECT set_quantifier_opt select_list
+                _INTO select_target_list table_expression
+        ;
+
+  select_target_list :
+                target_specification
+        |       select_target_list comma target_specification
+        ;
+
+  SQL_data_change_statement :
+		delete_statement__positioned
+	|	delete_statement__searched
+	|	insert_statement
+	|	update_statement__positioned
+	|	update_statement__searched ;
+
+  delete_statement__positioned :
+                _DELETE _FROM table_name
+                _WHERE _CURRENT _OF cursor_name
+        ;
+
+  delete_statement__searched :
+                _DELETE _FROM table_name where_clause_opt ;
+
+  insert_statement : _INSERT _INTO table_name insert_columns_and_source ;
+
+  insert_columns_and_source :
+		insert_column_list_opt query_expression
+	|	_DEFAULT _VALUES ;
+
+  insert_column_list_opt :
+        /* Empty */
+        |       left_paren insert_column_list right_paren
+        ;
+
+  insert_column_list : column_name_list ;
+
+  update_statement__positioned :
+		_UPDATE table_name _SET set_clause_list _WHERE _CURRENT _OF cursor_name ;
+
+  set_clause_list :
+                set_clause
+        |       set_clause_list comma set_clause
+        ;
+
+  set_clause :
+                object_column equals_operator update_source
+        ;
+
+  object_column : column_name ;
+
+  update_source :
+                value_expression
+        |       null_specification
+        |       _DEFAULT
+        ;
+
+  update_statement__searched :
+		_UPDATE table_name _SET set_clause_list where_clause_opt
+        ;
+
+  SQL_transaction_statement :
+		set_transaction_statement
+	|	set_constraints_mode_statement
+	|	commit_statement
+	|	rollback_statement
+        ;
+
+  set_transaction_statement :
+		_SET _TRANSACTION transaction_mode_list ;
+
+  transaction_mode_list :
+                transaction_mode
+        |       transaction_mode_list comma transaction_mode
+        ;
+
+  transaction_mode :
+		isolation_level
+	|	transaction_access_mode
+	|	diagnostics_size
+        ;
+
+  isolation_level : _ISOLATION _LEVEL level_of_isolation ;
+
+  level_of_isolation :
+		_READ _UNCOMMITTED
+	|	_READ _COMMITTED
+	|	_REPEATABLE _READ
+	|	_SERIALIZABLE
+        |       _SNAPSHOT
+        ;
+
+  transaction_access_mode :
+                _READ _ONLY
+        |       _READ _WRITE
+        ;
+
+  diagnostics_size : _DIAGNOSTICS _SIZE number_of_conditions ;
+
+  number_of_conditions : simple_value_specification ;
+
+  set_constraints_mode_statement :
+                _SET _CONSTRAINTS constraint_name_list _DEFERRED
+         |      _SET _CONSTRAINTS constraint_name_list _IMMEDIATE
+         ;
+
+  constraint_name_list :
+                _ALL
+        |       constraint_name_list_some
+        ;
+
+  constraint_name_list_some:
+                constraint_name
+        |       constraint_name_list_some comma constraint_name
+        ;
+
+  commit_statement :
+                _COMMIT
+        |       _COMMIT _WORK
+        ;
+
+  rollback_statement :
+                _ROLLBACK
+        |       _ROLLBACK _WORK
+        ;
+
+/*
+--hr
+--h2 Connection Management
+--/h2
+*/
+
+  SQL_connection_statement :
+		connect_statement
+	|	set_connection_statement
+	|	disconnect_statement ;
+
+  connect_statement : _CONNECT _TO connection_target ;
+
+  connection_target :
+		SQL_server_name connection_name_opt user_name_opt
+	|	_DEFAULT ;
+
+  connection_name_opt :
+        /* Empty */
+        |       _AS connection_name
+        ;
+
+  user_name_opt :
+        /* Empty */
+        |       _USER user_name
+        ;
+
+  SQL_server_name : simple_value_specification ;
+
+  connection_name : simple_value_specification ;
+
+  user_name : simple_value_specification ;
+
+  set_connection_statement : _SET _CONNECTION connection_object ;
+
+  connection_object : _DEFAULT | connection_name ;
+
+  disconnect_statement : _DISCONNECT disconnect_object ;
+
+  disconnect_object : connection_object | _ALL | _CURRENT ;
+
+/*
+--hr
+--h2 Session Attributes
+--/h2
+*/
+
+  SQL_session_statement :
+		set_catalog_statement
+	|	set_schema_statement
+	|	set_names_statement
+	|	set_session_authorization_identifier_statement
+	|	set_local_time_zone_statement ;
+
+  set_catalog_statement : _SET _CATALOG value_specification ;
+
+  value_specification : literal | general_value_specification ;
+
+  set_schema_statement : _SET _SCHEMA value_specification ;
+
+  set_names_statement : _SET _NAMES value_specification ;
+
+  set_session_authorization_identifier_statement : _SET _SESSION _AUTHORIZATION value_specification ;
+
+  set_local_time_zone_statement : _SET _TIME _ZONE set_time_zone_value ;
+
+  set_time_zone_value : interval_value_expression | _LOCAL ;
+
+/*
+--hr
+--h2 Dynamic SQL
+--/h2
+*/
+
+/* Omitted, not doing dynamic SQL, or diagnostics */
+
+/*
+--small
+--i
+Note that <colon> is written as a literal colon in the ANSI grammar;
+--/i
+--/small
+*/
+
+  direct_SQL_statement :
+		direct_SQL_data_statement
+	|	SQL_schema_statement
+	|	SQL_transaction_statement
+	|	SQL_connection_statement
+	|	SQL_session_statement
+	|	direct_implementation_defined_statement ;
+
+  direct_SQL_data_statement :
+		delete_statement__searched
+	|	direct_select_statement__multiple_rows
+	|	insert_statement
+	|	update_statement__searched
+	|	temporary_table_declaration ;
+
+  direct_select_statement__multiple_rows : query_expression order_by_clause_opt ;
+
+  direct_implementation_defined_statement : identifier ;
+                                          /* TODO - SynError; */
+
+/*
+--hr
+--h2 Top-Level_reachable in standalone SQL statements
+--   (no embedding inside host program, no host program embedded in &c;);
+--   This you might modify depending on whether you want an interactive
+--   sql prompt or something else;
+--/h2
+*/
+
+sql_statement :
+      direct_SQL_statement
+    | schema_definition
+    ;
+
+sql_script :
+                sql_statement
+    |           sql_script sql_statement
+    ;
+
+sql_input :
+      sql_script
+    | module
+    ;
+
+SQL92Grammar :
+
+  sql_input ;
+
 %%
+
+end. /* SQL92Grammar_parser */

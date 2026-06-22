@@ -119,19 +119,23 @@
         </DCCReference>
         <DCCReference Include="..\SQL92Nodes.pas"/>
         <DCCReference Include="..\..\..\Tracking\Trackables.pas"/>
-        <DCCReference Include="..\..\..\Balanced Tree\BinaryTree.pas"/>
         <DCCReference Include="..\..\..\HTMLParser\CommonNodes.pas"/>
-        <DCCReference Include="..\..\..\DLList\DLList.pas"/>
         <DCCReference Include="..\SQL92Grammar_lexer.pas"/>
         <DCCReference Include="..\..\..\tply_redist\lexlib.pas"/>
+        <DCCReference Include="..\..\..\DLList\DLList.pas"/>
+        <DCCReference Include="..\..\..\Balanced Tree\BinaryTree.pas"/>
+        <DCCReference Include="..\SQL92Grammar_parser.pas"/>
+        <DCCReference Include="..\..\..\tply_redist\yacclib_trkobj.pas"/>
         <None Include="..\sql-92.bnf"/>
-        <None Include="..\SQL92Grammar.LST"/>
         <None Include="..\errors.txt"/>
         <None Include="..\prebuild_tply.bat"/>
         <None Include="..\SQL92Grammar.l"/>
         <None Include="..\SQL92Grammar.y"/>
         <None Include="..\SQL92Grammar.l.cod"/>
         <None Include="..\SQL92Grammar.translated_verbatim.ATG"/>
+        <None Include="..\SQL92Grammar_deleted.ATG"/>
+        <None Include="..\SQL92Grammar_parser.lst"/>
+        <None Include="tmp.txt"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>
