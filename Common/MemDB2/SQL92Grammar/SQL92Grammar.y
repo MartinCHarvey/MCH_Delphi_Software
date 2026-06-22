@@ -453,27 +453,19 @@ uses
         ;
 
   character_set_specification :
-		standard_character_repertoire_name
-	|	implementation_defined_character_repertoire_name
-	|	user_defined_character_repertoire_name
-	|	standard_universal_character_form_of_use_name
-	|	implementation_defined_universal_character_form_of_use_name ;
-
-  standard_character_repertoire_name : character_set_name ;
+		character_set_name
+        ;
 
   character_set_name :
-                schema_name period SQL_language_identifier
+                identifier period identifier period SQL_language_identifier
+         |      identifier period SQL_language_identifier
          |      SQL_language_identifier
          ;
 
   schema_name :
-                catalog_name period unqualified_schema_name
-        |       unqualified_schema_name
+                identifier period identifier
+        |       identifier
         ;
-
-  catalog_name : identifier ;
-
-  unqualified_schema_name : identifier ;
 
   identifier :
                 introducer character_set_specification actual_identifier
@@ -487,22 +479,6 @@ uses
 
   SQL_language_identifier :
                 regular_identifier
-        ;
-
-  implementation_defined_character_repertoire_name :
-                character_set_name
-        ;
-
-  user_defined_character_repertoire_name :
-                character_set_name
-        ;
-
-  standard_universal_character_form_of_use_name :
-                character_set_name
-        ;
-
-  implementation_defined_universal_character_form_of_use_name :
-                character_set_name
         ;
 
   date_string :
@@ -670,9 +646,7 @@ uses
 
   qualified_local_table_name : _MODULE period local_table_name ;
 
-  local_table_name : qualified_identifier ;
-
-  qualified_identifier : identifier ;
+  local_table_name : identifier ;
 
   table_element_list : left_paren table_element table_element_list_opt right_paren ;
 
@@ -859,8 +833,9 @@ uses
   domain_name : qualified_name ;
 
   qualified_name :
-                qualified_identifier ;
-        |       schema_name period qualified_identifier
+                identifier
+        |       identifier period identifier
+        |       identifier period identifier period identifier
         ;
 
   default_clause : _DEFAULT default_option ;
@@ -1087,7 +1062,7 @@ uses
   row_value_constructor :
 		row_value_constructor_element
 	|   left_paren row_value_constructor_list right_paren
-	|   row_subquery
+	|   subquery /* TODO - check is row subquery */
         ;
 
   row_value_constructor_element :
@@ -1103,6 +1078,10 @@ uses
 	|   interval_value_expression
         ;
 
+  string_value_expression :
+                char_bit_value_expression /* TODO - check char-ness / bit-ness */
+        ;
+
   numeric_value_expression :
             term
 	|   numeric_value_expression plus_sign term
@@ -1114,12 +1093,10 @@ uses
 	|   term asterisk factor
 	|   term solidus factor ;
 
-  factor : sign_opt numeric_primary
-        ;
-
-  sign_opt :
-        /* Empty */
-        |       sign
+  factor :
+                numeric_primary
+        |       plus_sign numeric_primary
+        |       minus_sign numeric_primary
         ;
 
   numeric_primary :
@@ -1131,7 +1108,7 @@ uses
 	    unsigned_value_specification
 	|   column_reference
 	|   set_function_specification
-	|   scalar_subquery
+	|   subquery /* TODO - check is scalar subquery /
 	|   case_expression
 	|   left_paren value_expression right_paren
 	|   cast_specification
@@ -1235,13 +1212,9 @@ uses
 --/h2
 */
 
-  scalar_subquery : subquery ;
-
   subquery : left_paren query_expression right_paren ;
 
-  query_expression : non_join_query_expression | joined_table ;
-
-  non_join_query_expression :
+  query_expression :
 		non_join_query_term
 	|	query_expression _UNION all_opt corresponding_spec_opt query_term
 	|	query_expression _EXCEPT all_opt corresponding_spec_opt query_term
@@ -1264,7 +1237,7 @@ uses
 
   non_join_query_primary :
                 simple_table
-        |       left_paren non_join_query_expression right_paren
+        |       left_paren query_expression right_paren
         ;
 
   simple_table :
@@ -1386,29 +1359,25 @@ The notation is written out longhand several times, instead;
         table_reference _CROSS _JOIN table_reference
         ;
 
+
   qualified_join :
-        table_reference natural_opt join_type_opt _JOIN table_reference join_specification_opt
-        ;
+        table_reference natural_opt inner_opt _JOIN table_reference join_specification_opt
+      | table_reference natural_opt outer_join_type outer_opt _JOIN table_reference join_specification_opt
+      | table_reference natural_opt _UNION _JOIN table_reference join_specification_opt
 
   natural_opt :
         /* Empty */
         |       _NATURAL
         ;
 
-  join_type_opt :
+  inner_opt :
         /* Empty */
-        |       join_type
+        |       _INNER
         ;
 
   join_specification_opt :
         /* Empty */
         |       join_specification
-        ;
-
-  join_type :
-		_INNER
-	|       outer_join_type outer_opt
-	|       _UNION
         ;
 
   outer_opt:
@@ -1456,11 +1425,6 @@ The notation is written out longhand several times, instead;
                 column_reference collate_clause_opt
         ;
 
-  collate_clause_opt :
-        /* Empty */
-        |       collate_clause
-        ;
-
   collate_clause :
                 _COLLATE collation_name
         ;
@@ -1487,7 +1451,6 @@ The notation is written out longhand several times, instead;
 
   query_term :
                 non_join_query_term
-        |       joined_table
         ;
 
   corresponding_spec : _CORRESPONDING corresponding_column_list_opt
@@ -1502,7 +1465,6 @@ The notation is written out longhand several times, instead;
 
   query_primary :
                 non_join_query_primary
-        |       joined_table
         ;
 
 /*
@@ -1601,27 +1563,22 @@ The notation is written out longhand several times, instead;
 
   position_expression :
 	        _POSITION left_paren
-                character_value_expression
+                char_bit_value_expression /* TODO - check char-ness / bit-ness */
                 _IN
-                character_value_expression right_paren
+                char_bit_value_expression right_paren
         ;
 
-  character_value_expression :
+  char_bit_value_expression :
                 concatenation
         |       character_factor
         ;
 
   concatenation :
-                character_value_expression concatenation_operator character_factor
+                char_bit_value_expression concatenation_operator character_factor
         ;
 
   character_factor :
-                character_primary collate_clause_opt
-        ;
-
-  character_primary :
-                value_expression_primary
-        |       string_value_function
+                char_bit_primary collate_clause_opt  /* TODO - check char-ness / bit-ness */
         ;
 
   string_value_function :
@@ -1638,7 +1595,7 @@ The notation is written out longhand several times, instead;
         ;
 
   character_substring_function :
-		_SUBSTRING left_paren character_value_expression
+		_SUBSTRING left_paren char_bit_value_expression
                 _FROM start_position for_strlength_opt right_paren
         ;
 
@@ -1652,19 +1609,19 @@ The notation is written out longhand several times, instead;
   string_length : numeric_value_expression ;
 
   fold :
-                _UPPER left_paren character_value_expression right_paren
-        |       _LOWER left_paren character_value_expression right_paren
+                _UPPER left_paren char_bit_value_expression right_paren
+        |       _LOWER left_paren char_bit_value_expression right_paren
         ;
 
   form_of_use_conversion :
-		_CONVERT left_paren character_value_expression
+		_CONVERT left_paren char_bit_value_expression
                 _USING form_of_use_conversion_name right_paren
         ;
 
   form_of_use_conversion_name : qualified_name ;
 
   character_translation :
-		_TRANSLATE left_paren character_value_expression _USING translation_name right_paren ;
+		_TRANSLATE left_paren char_bit_value_expression _USING translation_name right_paren ;
 
   translation_name : qualified_name ;
 
@@ -1687,11 +1644,11 @@ The notation is written out longhand several times, instead;
 
   trim_character_opt :
         /* Empty */
-        | character_value_expression
+        | char_bit_value_expression
         ;
 
   trim_source :
-                character_value_expression
+                char_bit_value_expression
         ;
 
   bit_value_function :
@@ -1699,7 +1656,7 @@ The notation is written out longhand several times, instead;
         ;
 
   bit_substring_function :
-		_SUBSTRING left_paren bit_value_expression
+		_SUBSTRING left_paren char_bit_value_expression
                 _FROM start_position bit_substring_function_for_opt right_paren
         ;
 
@@ -1708,19 +1665,7 @@ The notation is written out longhand several times, instead;
         | _FOR string_length
         ;
 
-  bit_value_expression :
-                bit_concatenation
-        |       bit_factor
-        ;
-
-  bit_concatenation : bit_value_expression concatenation_operator bit_factor
-        ;
-
-  bit_factor :
-                bit_primary
-        ;
-
-  bit_primary :
+  char_bit_primary :
                 value_expression_primary
         |       string_value_function
         ;
@@ -1764,12 +1709,9 @@ The notation is written out longhand several times, instead;
         ;
 
   interval_factor :
-                sign_opt interval_primary
-        ;
-
-  sign_opt :
-        /* Empty */
-        | sign
+                interval_primary
+        |       plus_sign interval_primary
+        |       minus_sign interval_primary
         ;
 
   interval_primary :
@@ -1840,11 +1782,6 @@ The notation is written out longhand several times, instead;
         |       _CHARACTER_LENGTH
         ;
 
-  string_value_expression :
-                character_value_expression
-        |       bit_value_expression
-        ;
-
   octet_length_expression :
                 _OCTET_LENGTH left_paren string_value_expression right_paren
         ;
@@ -1861,8 +1798,6 @@ The notation is written out longhand several times, instead;
                 row_value_constructor_element
         |       row_value_constructor_list comma row_value_constructor_element
         ;
-
-  row_subquery : subquery ;
 
   comp_op :
 	    equals_operator
@@ -1898,11 +1833,11 @@ The notation is written out longhand several times, instead;
         |       _NOT
         ;
 
-  match_value : character_value_expression ;
+  match_value : char_bit_value_expression ;
 
-  pattern : character_value_expression ;
+  pattern : char_bit_value_expression ;
 
-  escape_character : character_value_expression ;
+  escape_character : char_bit_value_expression ;
 
   null_predicate :
         row_value_constructor _IS not_opt _NULL
@@ -2290,11 +2225,8 @@ The notation is written out longhand several times, instead;
   character_set_source : _GET existing_character_set_name ;
 
   existing_character_set_name :
-		standard_character_repertoire_name
-	|	implementation_defined_character_repertoire_name
-	|	schema_character_set_name ;
-
-  schema_character_set_name : character_set_name ;
+                character_set_name
+        ;
 
   limited_collation_definition :
 		_COLLATION _FROM collation_source ;
@@ -2795,7 +2727,6 @@ Note that <colon> is written as a literal colon in the ANSI grammar;
 
 sql_statement :
       direct_SQL_statement
-    | schema_definition
     ;
 
 sql_script :
