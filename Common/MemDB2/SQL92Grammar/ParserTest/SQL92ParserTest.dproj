@@ -127,11 +127,9 @@
         <DCCReference Include="..\SQL92Grammar_parser.pas"/>
         <DCCReference Include="..\..\..\tply_redist\yacclib_trkobj.pas"/>
         <None Include="..\sql-92.bnf"/>
-        <None Include="..\errors.txt"/>
         <None Include="..\prebuild_tply.bat"/>
         <None Include="..\SQL92Grammar.l"/>
         <None Include="..\SQL92Grammar.y"/>
-        <None Include="..\SQL92Grammar.l.cod"/>
         <None Include="..\SQL92Grammar.translated_verbatim.ATG"/>
         <None Include="..\SQL92Grammar_deleted.ATG"/>
         <None Include="..\SQL92Grammar_parser.lst"/>

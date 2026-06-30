@@ -12,6 +12,19 @@ uses
 
 %}
 
+/*
+  TODO - Test and possibly amend
+
+  0. Removed shift-reduce on period, by allowing
+  a.b.c.* as a separate production.
+
+  1. Current time / current timestamp shift/reduce,
+  I think the shift (default) is OK.
+
+
+
+*/
+
 %token
 
                 identifier_body
@@ -466,22 +479,7 @@ uses
         ;
 
   date_value :
-                years_value minus_sign months_value minus_sign days_value
-        ;
-
-  years_value :
-                datetime_value
-        ;
-
-  datetime_value :
-                unsigned_integer
-        ;
-
-  months_value :
-                datetime_value
-        ;
-
-  days_value :  datetime_value
+                unsigned_integer minus_sign unsigned_integer minus_sign unsigned_integer
         ;
 
   time_string :
@@ -490,28 +488,15 @@ uses
         ;
 
   time_value :
-                hours_value colon minutes_value colon seconds_value
+                unsigned_integer colon unsigned_integer colon seconds_value
         ;
-
-  hours_value : datetime_value ;
-
-  minutes_value : datetime_value ;
 
   seconds_value :
-                seconds_integer_value seconds_value_opt
+                unsigned_integer
+        |       unsigned_integer period unsigned_integer
         ;
 
-  seconds_value_opt :
-        /* Empty */
-        | period
-        | period seconds_fraction
-        ;
-
-  seconds_integer_value : unsigned_integer ;
-
-  seconds_fraction : unsigned_integer ;
-
-  time_zone_interval : sign hours_value colon minutes_value ;
+  time_zone_interval : sign unsigned_integer colon unsigned_integer ;
 
   timestamp_string :
                 quote date_value space time_value quote
@@ -519,54 +504,21 @@ uses
         ;
 
   interval_string :
-                quote year_month_literal quote
-        |       quote day_time_literal quote
+                quote interval_string_literal quote
         ;
 
-  year_month_literal : years_value
-	|	        years_value minus_sign months_value
-        ;
-
-  day_time_literal : day_time_interval | time_interval ;
-
-  day_time_interval :
-                days_value
-        |       days_value day_time_interval_opt1
-        ;
-
-  day_time_interval_opt1 :
-		space hours_value
-		space hours_value day_time_interval_opt2
-        ;
-
-  day_time_interval_opt2 :
-		colon minutes_value
-        |       colon minutes_value day_time_interval_opt3
-        ;
-
-  day_time_interval_opt3 :
-                colon seconds_value
-        ;
-
-  time_interval :
-		hours_value time_interval_opt1
-	|	minutes_value time_interval_opt2
-	|	seconds_value
-        ;
-
-  time_interval_opt1 :
-        /* Empty */
-        |       colon minutes_value time_interval_opt3
-        ;
-
-  time_interval_opt2 :
-        /* Empty */
-        |       colon seconds_value
-        ;
-
-  time_interval_opt3 :
-        /* Empty */
-        |       colon seconds_value
+  interval_string_literal :
+                unsigned_integer
+                /* Year month interval */
+        |       unsigned_integer minus_sign unsigned_integer
+                /* Day time intervals */
+        |       unsigned_integer space unsigned_integer
+        |       unsigned_integer space unsigned_integer colon unsigned_integer
+        |       unsigned_integer space unsigned_integer colon unsigned_integer colon seconds_value
+                /* Time intervals */
+	|	unsigned_integer period unsigned_integer
+        |       unsigned_integer colon seconds_value
+        |       unsigned_integer colon unsigned_integer colon seconds_value
         ;
 
 /*
@@ -785,8 +737,9 @@ uses
   interval_type : _INTERVAL interval_qualifier ;
 
   interval_qualifier :
-		start_field _TO end_field
-	|       single_datetime_field ;
+                start_field
+	|	start_field _TO end_field
+        |       _SECOND single_datetime_field_opt;
 
   start_field :
 		non_second_datetime_field
@@ -805,12 +758,6 @@ uses
 
   interval_fractional_seconds_precision : unsigned_integer ;
 
-  single_datetime_field :
-		non_second_datetime_field
-        |       non_second_datetime_field left_paren precision right_paren
-	|       _SECOND single_datetime_field_opt
-        ;
-
   single_datetime_field_opt :
         /* Empty */
         |       left_paren interval_leading_field_precision single_datetime_field_opt2 right_paren
@@ -827,6 +774,12 @@ uses
                 identifier
         |       identifier period identifier
         |       identifier period identifier period identifier
+        ;
+
+  qualified_name_trail_asterisk :
+                identifier period asterisk
+        |       identifier period identifier period asterisk
+        |       identifier period identifier period identifier period asterisk
         ;
 
   default_clause : _DEFAULT default_option ;
@@ -885,12 +838,12 @@ uses
 
   current_time_value_function :
                 _CURRENT_TIME
-        |       _CURRENT_TIME non_second_datetime_field
+        |       _CURRENT_TIME left_paren time_precision right_paren
         ;
 
   current_timestamp_value_function :
                 _CURRENT_TIMESTAMP
-        |       _CURRENT_TIMESTAMP non_second_datetime_field
+        |       _CURRENT_TIMESTAMP left_paren timestamp_precision right_paren
         ;
 
 /*
@@ -1019,17 +972,8 @@ uses
 
   boolean_test :
                 boolean_primary
-        |       boolean_primary boolean_test_opt1
-        ;
-
-  boolean_test_opt1 :
-        /* Empty */
-        | _IS boolean_test_opt2 truth_value
-        ;
-
-  boolean_test_opt2:
-        /* Empty */
-        |       _NOT
+        |       boolean_primary _IS truth_value
+        |       boolean_primary _IS _NOT truth_value
         ;
 
   boolean_primary :
@@ -1053,12 +997,8 @@ uses
         ;
 
   row_value_constructor :
-                row_value_constructor_element
+                expression
         |       left_paren row_value_constructor_list right_paren
-        ;
-
-  row_value_constructor_element :
-            expression
         ;
 
   primary_expression :
@@ -1109,11 +1049,14 @@ uses
 
   string_value_function :
       character_value_function
-    | bit_value_function
 ;
 
   scalar_subquery :
-                subquery
+        left_paren subquery right_paren
+        ;
+
+  subquery :
+        query_expression
         ;
 
   unsigned_value_specification :
@@ -1163,31 +1106,37 @@ uses
 
   correlation_name : identifier ;
 
+  /* TODO - I have generalised the args, need to check
+     for the specific set function */
+
   set_function_specification :
-		_COUNT left_paren asterisk right_paren
-	|       general_set_function
+	        general_set_function
         ;
 
   general_set_function :
-		set_function_type left_paren set_quantifier_opt expression right_paren
+		set_function_type left_paren set_quantifier_args right_paren
         ;
+
+  set_quantifier_args :
+        /* Empty */
+        |       asterisk
+        |       set_quantifier expression
+        ;
+
+  set_function_type : _AVG | _MAX | _MIN | _SUM | _COUNT ;
+
+  set_quantifier : _DISTINCT | _ALL;
 
   set_quantifier_opt :
         /* Empty */
         |       set_quantifier
         ;
 
-  set_function_type : _AVG | _MAX | _MIN | _SUM | _COUNT ;
-
-  set_quantifier : _DISTINCT | _ALL ;
-
 /*
 --hr
 --h2 Queries
 --/h2
 */
-
-  subquery : left_paren query_expression right_paren ;
 
   query_expression :
 		non_join_query_term
@@ -1235,7 +1184,7 @@ uses
 
   select_sublist :
                 derived_column
-        |       qualified_name period asterisk
+        |       qualified_name_trail_asterisk
 /*
         |       qualifier period asterisk
 */
@@ -1297,17 +1246,15 @@ The notation is written out longhand several times, instead;
         ;
 
   table_factor :
-                table_name correlation_specification_opt
+                table_name
+        |       table_name correlation_specification
         |       derived_table correlation_specification
-        ;
-
-  correlation_specification_opt :
-        /* Empty */
-        |       correlation_specification
+        |       table_name _AS correlation_specification
+        |       derived_table _AS correlation_specification
         ;
 
   correlation_specification :
-		as_opt correlation_name derived_column_list_opt
+		correlation_name derived_column_list_opt
         ;
 
   as_opt :
@@ -1329,7 +1276,7 @@ The notation is written out longhand several times, instead;
         ;
 
   table_subquery :
-                subquery
+                left_paren subquery right_paren
         ;
 
   joined_table :
@@ -1488,12 +1435,7 @@ The notation is written out longhand several times, instead;
         ;
 
   result :
-                result_expression
-        |       _NULL
-        ;
-
-  result_expression :
-                expression
+                expression /* Which can be NULL specification */
         ;
 
   else_clause :
@@ -1516,8 +1458,7 @@ The notation is written out longhand several times, instead;
         ;
 
   cast_operand :
-                expression
-        |       _NULL
+                expression      /* Which can be null specification */
         ;
 
   cast_target :
@@ -1540,14 +1481,14 @@ The notation is written out longhand several times, instead;
 
 
   character_value_function :
-	    character_substring_function
+	    character_bit_substring_function
 	|   fold
 	|   form_of_use_conversion
 	|   character_translation
 	|   trim_function
         ;
 
-  character_substring_function :
+  character_bit_substring_function :
 		_SUBSTRING left_paren expression
                 _FROM start_position for_strlength_opt right_paren
         ;
@@ -1578,46 +1519,30 @@ The notation is written out longhand several times, instead;
 
   translation_name : qualified_name ;
 
-  trim_function : _TRIM left_paren trim_operands  right_paren ;
-
-  trim_operands : trim_operands_opt trim_source
+  trim_function :
+                _TRIM left_paren trim_operands right_paren
         ;
 
-  trim_operands_opt :
-        /* Empty */
-        | trim_specification_opt trim_character_opt _FROM
-        ;
+  trim_operands :
+                trim_source
+        |       trim_specification _FROM trim_source
+        |       trim_character _FROM trim_source
+        |       trim_specification trim_character _FROM trim_source
+  ;
 
-  trim_specification_opt :
-        /* Empty */
-        | _LEADING
-        | _TRAILING
-        | _BOTH
-        ;
+  trim_specification :
+                _LEADING
+        |       _TRAILING
+        |       _BOTH
+  ;
 
-  trim_character_opt :
-        /* Empty */
-        | expression /* Check char/bit */
+  trim_character :
+                expression /* Check char/bit */
         ;
 
   trim_source :
                 expression /* Check char/bit */
         ;
-
-  bit_value_function :
-                bit_substring_function
-        ;
-
-  bit_substring_function :
-		_SUBSTRING left_paren expression /* Check char/bit */
-                _FROM start_position bit_substring_function_for_opt right_paren
-        ;
-
-  bit_substring_function_for_opt :
-        /* Empty */
-        | _FOR string_length
-        ;
-
 
   extract_expression :
                 _EXTRACT left_paren extract_field _FROM extract_source right_paren
@@ -1679,8 +1604,8 @@ The notation is written out longhand several times, instead;
   default_specification : _DEFAULT ;
 
   row_value_constructor_list :
-                row_value_constructor_element
-        |       row_value_constructor_list comma row_value_constructor_element
+                expression
+        |       row_value_constructor_list comma expression
         ;
 
   comp_op :
@@ -1692,9 +1617,14 @@ The notation is written out longhand several times, instead;
 	|   greater_than_or_equals_operator ;
 
   between_predicate :
-		row_value_constructor not_opt _BETWEEN row_value_constructor _AND row_value_constructor ;
+		row_value_constructor _BETWEEN row_value_constructor _AND row_value_constructor
+	|	row_value_constructor _NOT _BETWEEN row_value_constructor _AND row_value_constructor
+        ;
 
-  in_predicate : row_value_constructor not_opt _IN in_predicate_value ;
+  in_predicate :
+                row_value_constructor _IN in_predicate_value
+        |        row_value_constructor _NOT _IN in_predicate_value
+        ;
 
   in_predicate_value : table_subquery | left_paren in_value_list right_paren ;
 
@@ -1703,8 +1633,9 @@ The notation is written out longhand several times, instead;
         |       in_value_list comma expression
         ;
 
-  like_predicate :
-                match_value not_opt _LIKE pattern like_predicate_escape_opt
+  like_predicate : /* Check char-bit expressions */
+                expression _LIKE pattern like_predicate_escape_opt
+        |       expression _NOT _LIKE pattern like_predicate_escape_opt
         ;
 
   like_predicate_escape_opt :
@@ -1712,19 +1643,13 @@ The notation is written out longhand several times, instead;
         |       _ESCAPE escape_character
         ;
 
-  not_opt :
-        /* Empty */
-        |       _NOT
-        ;
-
-  match_value : expression /* Check char-bit */;
-
   pattern : expression /* Check char-bit */;
 
   escape_character : expression /* Check char-bit */;
 
   null_predicate :
-        row_value_constructor _IS not_opt _NULL
+                row_value_constructor _IS _NULL
+        |       row_value_constructor _IS _NOT _NULL
         ;
 
   quantified_comparison_predicate : row_value_constructor comp_op quantifier table_subquery ;
@@ -1777,12 +1702,13 @@ The notation is written out longhand several times, instead;
 
   constraint_attributes :
 		constraint_check_time deferrable_opt
-	|	not_opt _DEFERRABLE constraint_check_time_opt
+	|	_DEFERRABLE constraint_check_time_opt
         ;
 
   deferrable_opt :
         /* Empty */
-        |       not_opt _DEFERRABLE
+        |       _DEFERRABLE
+        |       _NOT _DEFERRABLE
         ;
 
   constraint_check_time_opt :
@@ -1798,11 +1724,6 @@ The notation is written out longhand several times, instead;
   table_constraint_definition :
                 constraint_name_definition_opt
                 table_constraint constraint_check_time_opt
-        ;
-
-  constraint_check_time_opt :
-        /* Empty */
-        |       constraint_check_time
         ;
 
   table_constraint :
@@ -2126,11 +2047,7 @@ The notation is written out longhand several times, instead;
   external_collation :
 	_EXTERNAL left_paren quote external_collation_name quote right_paren ;
 
-  external_collation_name : standard_collation_name | implementation_defined_collation_name ;
-
-  standard_collation_name : collation_name ;
-
-  implementation_defined_collation_name : collation_name ;
+  external_collation_name : collation_name ;
 
   schema_collation_name : collation_name ;
 
@@ -2174,12 +2091,7 @@ The notation is written out longhand several times, instead;
 		_EXTERNAL left_paren quote external_translation_name quote right_paren ;
 
   external_translation_name :
-		standard_translation_name
-	|	implementation_defined_translation_name ;
-
-  standard_translation_name : translation_name ;
-
-  implementation_defined_translation_name : translation_name ;
+		translation_name ;
 
   schema_translation_name : translation_name ;
 
@@ -2395,12 +2307,9 @@ The notation is written out longhand several times, instead;
   insert_statement : _INSERT _INTO table_name insert_columns_and_source ;
 
   insert_columns_and_source :
-		insert_column_list_opt query_expression
-	|	_DEFAULT _VALUES ;
-
-  insert_column_list_opt :
-        /* Empty */
-        |       left_paren insert_column_list right_paren
+                left_paren insert_column_list right_paren query_expression
+        |       query_expression
+        |       _DEFAULT _VALUES
         ;
 
   insert_column_list : column_name_list ;
@@ -2421,8 +2330,7 @@ The notation is written out longhand several times, instead;
 
   update_source :
                 expression
-        |       null_specification
-        |       _DEFAULT
+                /* Expression includes NULL and DEFAULT specifications */
         ;
 
   update_statement__searched :
@@ -2627,4 +2535,4 @@ SQL92Grammar :
 
 %%
 
-end. /* SQL92Grammar_parser */
+end. { SQL92Grammar_parser }
