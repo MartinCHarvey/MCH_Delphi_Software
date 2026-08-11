@@ -798,7 +798,7 @@ begin
         FJournal.Checkpoint(Obj)
       else
         Assert(false);
-      Obj:= FROB.Drain as TMemDBTransaction;
+      Obj:= FROB.Drain;
     end;
   finally
     FDrainLock.Release;
