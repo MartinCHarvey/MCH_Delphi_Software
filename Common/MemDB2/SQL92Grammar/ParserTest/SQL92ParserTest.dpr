@@ -7,11 +7,13 @@ uses
   Trackables in '..\..\..\Tracking\Trackables.pas',
   CommonNodes in '..\..\..\HTMLParser\CommonNodes.pas',
   SQL92Grammar_lexer in '..\SQL92Grammar_lexer.pas',
-  lexlib in '..\..\..\tply_redist\lexlib.pas',
   DLList in '..\..\..\DLList\DLList.pas',
   BinaryTree in '..\..\..\Balanced Tree\BinaryTree.pas',
   SQL92Grammar_parser in '..\SQL92Grammar_parser.pas',
-  yacclib_trkobj in '..\..\..\tply_redist\yacclib_trkobj.pas';
+  lexlib_oo in '..\..\..\..\..\github\tply41a\tply41a\lib_oo\lexlib_oo.pas',
+  yacclib_oo in '..\..\..\..\..\github\tply41a\tply41a\lib_oo\yacclib_oo.pas',
+  lexdstr in '..\..\..\..\..\github\tply41a\tply41a\lexdstr.pas',
+  SQL92Grammar_parser_debug in '..\SQL92Grammar_parser_debug.pas';
 
 {$R *.res}
 

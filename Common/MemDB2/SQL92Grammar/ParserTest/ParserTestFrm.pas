@@ -25,7 +25,7 @@ implementation
 
 {$R *.fmx}
 
-uses SQL92Grammar_lexer, lexlib;
+uses SQL92Grammar_lexer, lexlib_oo;
 
 procedure TForm1.TestLexerClick(Sender: TObject);
 const
@@ -39,6 +39,7 @@ var
   SillyInput: System.Text;
   TestString: string;
   Dummy: integer;
+  Lexer: SQL92GrammarLexer;
 begin
   TestString := TEST_STRING;
   Dummy := IoResult;
@@ -48,14 +49,16 @@ begin
   Write(SillyInput, TestString);
   System.close(SillyInput);
 
-  System.assign(yyinput, TEST_LOCATION);
-  SetTextCodePage(yyinput, 1252);
-  reset(yyinput);
-  repeat
-    ret := yylex;
-    Memo1.Lines.Add('Got a token: ' + TokenName(ret) + '(' + yytoken_text + ')');
-  until ret = 0;
-  //yyinput closed by yywrap.
+  Lexer := SQL92GrammarLexer.Create;
+  try
+    Lexer.yyinput := TFileStream.Create(TEST_LOCATION, fmOpenRead);
+    repeat
+      ret := Lexer.yylex;
+      Memo1.Lines.Add('Got a token: ' + Lexer.TokenName(ret) + '(' + Lexer.yytoken_text + ')');
+    until ret = 0;
+  finally
+    Lexer.Free;
+  end;
 end;
 
 end.
