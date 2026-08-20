@@ -3,12 +3,34 @@
 
 unit SQL92Grammar_parser;
 
+        {
+
+        Copyright © 2026 Martin Harvey <martin_c_harvey@hotmail.com>
+
+        Permission is hereby granted, free of charge, to any person obtaining a copy of
+        this software and associated documentation files (the “Software”), to deal in
+        the Software without restriction, including without limitation the rights to
+        use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+        of the Software, and to permit persons to whom the Software is furnished to do
+        so, subject to the following conditions:
+
+        The above copyright notice and this permission notice shall be included in
+        all copies or substantial portions of the Software.
+
+        THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+        IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+        FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+        AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+        LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+        FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+        IN THE SOFTWARE.
+
+        }
 
 interface
-{$DEFINE INSERT_IMPLEMENTATION_CALUSE}
 
 uses
-  yacclib_trkobj, SQL92Grammar_lexer;
+  yacclib_oo, SQL92Grammar_lexer, Classes, SQL92Grammar_parser_debug;
 
 %}
 
@@ -21,9 +43,13 @@ uses
   1. Current time / current timestamp shift/reduce,
   I think the shift (default) is OK.
 
-
-
 */
+
+%classname SQL92GrammarParser
+
+%classfunc  constructor Create;
+%classfunc  destructor Destroy; override;
+%classfunc  procedure yyerror ( msg : String ); override;
 
 %token
 
@@ -346,7 +372,11 @@ uses
 		 _TYPE
 		 _UNCOMMITTED
 		 _UNNAMED
+                 LEX_ERROR /* Does not appear anywhere in the grammar */
 
+%< plus_sign minus_sign
+%< concatenation_operator
+%< asterisk solidus
 
 %start SQL92Grammar
 
@@ -1161,7 +1191,7 @@ uses
 
   non_join_query_primary :
                 simple_table
-        |       left_paren query_expression right_paren
+        |       table_subquery
         ;
 
   simple_table :
@@ -1276,7 +1306,7 @@ The notation is written out longhand several times, instead;
         ;
 
   table_subquery :
-                left_paren subquery right_paren
+                left_paren query_expression right_paren
         ;
 
   joined_table :
@@ -1883,8 +1913,7 @@ The notation is written out longhand several times, instead;
         ;
 
   schema_elements :
-        /* Empty */
-        |       schema_element
+                schema_element
         |       schema_elements schema_element
         ;
 
@@ -1948,17 +1977,12 @@ The notation is written out longhand several times, instead;
 
   view_check_opt :
         /* Empty */
-        |       _WITH levels_clause_opt _CHECK _OPTION
         |       _WITH _CHECK _OPTION
+        |       _WITH _CASCADED _CHECK _OPTION
+        |       _WITH _LOCAL _CHECK _OPTION
         ;
 
   view_column_list : column_name_list ;
-
-  levels_clause_opt :
-        /* Empty */
-        |       _CASCADED
-        |       _LOCAL
-        ;
 
   grant_statement :
 		_GRANT privileges _ON object_name _TO grantee_list grant_option ;
@@ -2534,5 +2558,33 @@ SQL92Grammar :
   sql_input ;
 
 %%
+
+constructor SQL92GrammarParser.Create;
+begin
+  inherited;
+  Lexer := SQL92GrammarLexer.Create;
+end;
+
+destructor SQL92GrammarParser.Destroy;
+begin
+  Lexer.Free;
+  inherited;
+end;
+
+procedure SQL92GrammarParser.yyerror ( msg : String );
+var
+  Debug: TStringList;
+  i: integer;
+begin
+  inherited;
+  Debug := GetStateDebug(yystate);
+  if Assigned(Debug) then
+  begin
+    Lexer.YYOutWriteLn('Parser state debug: ');
+    for i := 0 to Pred(Debug.Count) do
+      Lexer.YYOutWriteLn(Debug[i]);
+    Debug.Free;
+  end;
+end;
 
 end. { SQL92Grammar_parser }

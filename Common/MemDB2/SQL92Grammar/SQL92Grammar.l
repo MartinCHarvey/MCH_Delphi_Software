@@ -1,5 +1,7 @@
 
-  unit SQL92Grammar_lexer;
+%{
+
+unit SQL92Grammar_lexer;
 
         {
 
@@ -25,19 +27,65 @@
 
         }
 
-  interface
+interface
 
-  uses LexLib;
+uses LexLib_oo;
 
-  function yylex: integer;
-  function TokenName(Token: integer): string;
+%}
 
-  implementation
+%classname SQL92GrammarLexer
+%classdef function BestIdentifierOrLiteral(const TokenText: AnsiString): integer;
+%classdef function TokenName(Token: integer): string;
 
+%%
+
+%{
   uses SysUtils, SQL92Grammar_parser;
+%}
 
+[A-Za-z]([A-Za-z0-9_])* return (BestIdentifierOrLiteral(yytoken_text));
+N'([^']|'')*'           return(Ord(national_character_string_literal_start));
+B'(0|1)*'               return(Ord(bit_string_literal_start));
+'([^']|'')*'            return(Ord(string_literal_continuation));
+X'([A-Fa-f0-9])*'       return(Ord(hex_string_literal_start));
+\"([^"]|\"\")*\"        return(Ord(delimited_identifier));
+[0-9]                   return(Ord(digit));
+\<>                     return(Ord(not_equals_operator));
+>=                      return(Ord(greater_than_or_equals_operator));
+\<=                     return(Ord(less_than_or_equals_operator));
+\|\|                    return(Ord(concatenation_operator));
+\.\.                    return(Ord(double_period));
+[ ]                     return(Ord(space)); { TODO - Ignore by not returning anything? }
+\t                      return(Ord(tab));
+\r                      return(Ord(carriage_return));
+\n                      return(Ord(line_feed));
+\"                      return(Ord(double_quote));
+%                       return(Ord(percent));
+&                       return(Ord(ampersand));
+'                       return(Ord(quote));
+[(]                     return(Ord(left_paren));
+[)]                     return(Ord(right_paren));
+\[                      return(Ord(left_bracket));
+\]                      return(Ord(right_bracket));
+\*                      return(Ord(asterisk));
+\+                      return(Ord(plus_sign));
+,                       return(Ord(comma));
+-                       return(Ord(minus_sign));
+[.]                     return(Ord(period));
+[/]                     return(Ord(solidus));
+:                       return(Ord(colon));
+;                       return(Ord(semicolon));
+\<                      return(Ord(less_than_operator));
+=                       return(Ord(equals_operator));
+>                       return(Ord(greater_than_operator));
+?                       return(Ord(question_mark));
+_                       return(Ord(underscore));
+\|                      return(Ord(vertical_bar));
+.                       return(Ord(LEX_ERROR));
 
-    function TokenName(Token: integer): string;
+%%
+
+    function SQL92GrammarLexer.TokenName(Token: integer): string;
     begin
       result := '<invalid/unknown token>';
       case (Token) of
@@ -365,7 +413,7 @@
       end;
     end;
 
-  function BestIdentifierOrLiteral(const TokenText: AnsiString): integer;
+  function SQL92GrammarLexer.BestIdentifierOrLiteral(const TokenText: AnsiString): integer;
   var
     TokenUpper: AnsiString;
   begin
@@ -681,48 +729,6 @@
     end;
   end;
 
-%%
-
-[A-Za-z]([A-Za-z0-9_])* return (BestIdentifierOrLiteral(yytext));
-N'([^']|'')*'           return(Ord(national_character_string_literal_start));
-B'(0|1)*'               return(Ord(bit_string_literal_start));
-'([^']|'')*'            return(Ord(string_literal_continuation));
-X'([A-Fa-f0-9])*'       return(Ord(hex_string_literal_start));
-\"([^"]|\"\")*\"        return(Ord(delimited_identifier));
-[0-9]                   return(Ord(digit));
-\<>                     return(Ord(not_equals_operator));
->=                      return(Ord(greater_than_or_equals_operator));
-\<=                     return(Ord(less_than_or_equals_operator));
-\|\|                    return(Ord(concatenation_operator));
-\.\.                    return(Ord(double_period));
-[ ]                     return(Ord(space)); { TODO - Ignore by not returning anything? }
-\t                      return(Ord(tab));
-\r                      return(Ord(carriage_return));
-\n                      return(Ord(line_feed));
-\"                      return(Ord(double_quote));
-%                       return(Ord(percent));
-&                       return(Ord(ampersand));
-'                       return(Ord(quote));
-[(]                     return(Ord(left_paren));
-[)]                     return(Ord(right_paren));
-\[                      return(Ord(left_bracket));
-\]                      return(Ord(right_bracket));
-\*                      return(Ord(asterisk));
-\+                      return(Ord(plus_sign));
-,                       return(Ord(comma));
--                       return(Ord(minus_sign));
-[.]                     return(Ord(period));
-[/]                     return(Ord(solidus));
-:                       return(Ord(colon));
-;                       return(Ord(semicolon));
-\<                      return(Ord(less_than_operator));
-=                       return(Ord(equals_operator));
->                       return(Ord(greater_than_operator));
-?                       return(Ord(question_mark));
-_                       return(Ord(underscore));
-\|                      return(Ord(vertical_bar));
-
-%%
-
 end.
+
 
