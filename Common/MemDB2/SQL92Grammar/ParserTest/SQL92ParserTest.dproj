@@ -126,7 +126,6 @@
         <DCCReference Include="..\SQL92Grammar_parser.pas"/>
         <DCCReference Include="..\..\..\..\..\github\tply41a\tply41a\lib_oo\lexlib_oo.pas"/>
         <DCCReference Include="..\..\..\..\..\github\tply41a\tply41a\lib_oo\yacclib_oo.pas"/>
-        <DCCReference Include="..\..\..\..\..\github\tply41a\tply41a\lexdstr.pas"/>
         <DCCReference Include="..\SQL92Grammar_parser_debug.pas"/>
         <None Include="..\sql-92.bnf"/>
         <None Include="..\prebuild_tply.bat"/>

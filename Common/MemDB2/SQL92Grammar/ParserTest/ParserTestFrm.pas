@@ -54,7 +54,7 @@ begin
     Lexer.yyinput := TFileStream.Create(TEST_LOCATION, fmOpenRead);
     repeat
       ret := Lexer.yylex;
-      Memo1.Lines.Add('Got a token: ' + Lexer.TokenName(ret) + '(' + Lexer.yytoken_text + ')');
+      Memo1.Lines.Add('Got a token: ' + Lexer.TokenName(ret) + '(' + Lexer.yytext + ')');
     until ret = 0;
   finally
     Lexer.Free;
