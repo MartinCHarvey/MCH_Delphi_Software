@@ -61,7 +61,7 @@ begin
   (* actions: *)
   case yyruleno of
   1:
-                        return (BestIdentifierOrLiteral(yytoken_text));
+                        return (BestIdentifierOrLiteral(yytext));
   2:
                         return(Ord(national_character_string_literal_start));
   3:
@@ -896,10 +896,7 @@ scan:
   for yyn := yymh[yystate] downto yyml[yystate] do yymatch(yym[yyn]);
 
   if yytl[yystate]>yyth[yystate] then
-  begin
-    yytoken_overrun := false;
     goto action; (* dead state *)
-  end;
 
   (* get next character: *)
 
@@ -910,10 +907,7 @@ scan:
   yyn := yytl[yystate];
   while (yyn<=yyth[yystate]) and not (yyactchar in yyt[yyn].cc) do inc(yyn);
   if yyn>yyth[yystate] then
-  begin
-    yytoken_overrun := true;
     goto action;
-  end;
     (* no transition on yyactchar in this state *)
 
   (* switch to new state: *)
@@ -938,8 +932,6 @@ action:
     end;
 
   if not yydone then goto start;
-
-  update_token_text;
 
   yylex := yyretval;
 
@@ -1279,7 +1271,7 @@ end(*yylex*);
   var
     TokenUpper: AnsiString;
   begin
-    TokenUpper := yytoken_text;
+    TokenUpper := yytext;
     Assert(Length(TokenUpper)>0);
     TokenUpper := UpperCase(TokenUpper);
     result := Ord(identifier_body);
