@@ -2,7 +2,7 @@ unit SQL92Nodes;
 
 {
 
-Copyright © 2024 Martin Harvey <martin_c_harvey@hotmail.com>
+Copyright © 2026 Martin Harvey <martin_c_harvey@hotmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the “Software”), to deal in
@@ -29,40 +29,62 @@ interface
 uses CommonNodes, SysUtils;
 
 type
-  TSmarterCommonNode = class(TCommonNode)
+  TSQLSynNode = class(TCommonNode)
   public
+    constructor Create; virtual;
     destructor Destroy; override;
 
-    function FirstChild: TSmarterCommonNode; inline;
-    function LastChild: TSmarterCommonNode; inline;
-    function NextSibling: TSmarterCommonNode; inline;
-    function PrevSibling: TSmarterCommonNode; inline;
+    function FirstChild: TSQLSynNode; inline;
+    function LastChild: TSQLSynNode; inline;
+    function NextSibling: TSQLSynNode; inline;
+    function PrevSibling: TSQLSynNode; inline;
 
-    procedure InsertHeadChild(Dest: TSmarterCommonNode);
-    procedure InsertTailChild(Dest: TSmarterCommonNode);
+    procedure InsertHeadChild(Dest: TSQLSynNode);
+    procedure InsertTailChild(Dest: TSQLSynNode);
 
-    procedure InsertAfterSibling(Dest: TSmarterCommonNode);
-    procedure InsertBeforeSibling(Dest: TSmarterCommonNode);
+    procedure InsertAfterSibling(Dest: TSQLSynNode);
+    procedure InsertBeforeSibling(Dest: TSQLSynNode);
 
     procedure ValidateAST;
     procedure ValidateSelf; virtual;
   end;
 
-  ESmarterNodeException = class(Exception)
+  TSQLSynNodeClass = class of TSQLSynNode;
+
+  ESQLSynException = class(Exception)
   private
-    FN1, FN2: TSmarterCommonNode;
+    FN1, FN2: TSQLSynNode;
   public
-    constructor CreateCtxt(const S:string; N1, N2: TSmarterCommonNode);
-    property N1: TSmarterCommonNode read FN1;
-    property N2: TSmarterCommonNode read FN2;
+    constructor CreateCtxt(const S:string; N1, N2: TSQLSynNode);
+    property N1: TSQLSynNode read FN1;
+    property N2: TSQLSynNode read FN2;
   end;
 
-  ETreeIntegrityException = class(ESmarterNodeException);
+  TSQLSynLiteralType = (
+    sltUnsInt,
+    sltInt,
+    sltExactNumeric,
+    sltApproxNumeric,
+    sltNatString,
+    sltString,
+    sltBitString,
+    sltHexString
+  );
 
-  TSQL92Node = class(TSmarterCommonNode)
+  TSQLSynLiteral = class(TSQLSynNode)
+  private
+    FText: string;
+    FLitType: TSQLSynLiteralType;
+  public
+    property Text: string read FText write FText;
+    property LitType: TSQLSynLiteralType read FLitType write FLitType;
   end;
 
-  TSQLCompilerNode = class(TSmarterCommonNode)
+  TSQLIdentifier = class(TSqlSynNode)
+  private
+    FName: string;
+  public
+    property Name: string read FName write FName;
   end;
 
 implementation
@@ -77,69 +99,74 @@ const
 { ESmarterNodeException }
 
 
-constructor ESmarterNodeException.CreateCtxt(const S:string; N1, N2: TSmarterCommonNode);
+constructor ESQLSynException.CreateCtxt(const S:string; N1, N2: TSQLSynNode);
 begin
   inherited Create(S);
   FN1 := N1;
   FN2 := N2;
 end;
 
-{ TSmarterCommonNode }
+{ TSQLSynNode }
 
-destructor TSmarterCommonNode.Destroy;
+constructor TSQLSynNode.Create;
+begin
+  inherited;
+end;
+
+destructor TSQLSynNode.Destroy;
 begin
   if not DLItemIsEmpty(@FSiblingListEntry) then
     DLListRemoveObj(@FSiblingListEntry);
   inherited;
 end;
 
-function TSmarterCommonNode.FirstChild: TSmarterCommonNode;
+function TSQLSynNode.FirstChild: TSQLSynNode;
 begin
-  result := FContainedListHead.Flink.Owner as TSmarterCommonNode;
+  result := FContainedListHead.Flink.Owner as TSQLSynNode;
 end;
 
-function TSmarterCommonNode.LastChild: TSmarterCommonNode;
+function TSQLSynNode.LastChild: TSQLSynNode;
 begin
-  result := FContainedListHead.Blink.Owner as TSmarterCommonNode;
+  result := FContainedListHead.Blink.Owner as TSQLSynNode;
 end;
 
-function TSmarterCommonNode.NextSibling: TSmarterCommonNode;
+function TSQLSynNode.NextSibling: TSQLSynNode;
 begin
-  result := FSiblingListEntry.Flink.Owner as TSmarterCommonNode;
+  result := FSiblingListEntry.Flink.Owner as TSQLSynNode;
 end;
 
-function TSmarterCommonNode.PrevSibling: TSmarterCommonNode;
+function TSQLSynNode.PrevSibling: TSQLSynNode;
 begin
-  result := FSiblingListEntry.Blink.Owner as TSmarterCommonNode;
+  result := FSiblingListEntry.Blink.Owner as TSQLSynNode;
 end;
 
-procedure TSmarterCommonNode.InsertHeadChild(Dest: TSmarterCommonNode);
-begin
-  if not (Assigned(Self) and Assigned(Dest)) then
-    raise ETreeIntegrityException.Create(S_INSERTING_NIL_CHILD);
-end;
-
-procedure TSmarterCommonNode.InsertTailChild(Dest: TSmarterCommonNode);
+procedure TSQLSynNode.InsertHeadChild(Dest: TSQLSynNode);
 begin
   if not (Assigned(Self) and Assigned(Dest)) then
-    raise ETreeIntegrityException.Create(S_INSERTING_NIL_CHILD);
+    raise ESQLSynException.Create(S_INSERTING_NIL_CHILD);
 end;
 
-procedure TSmarterCommonNode.InsertAfterSibling(Dest: TSmarterCommonNode);
+procedure TSQLSynNode.InsertTailChild(Dest: TSQLSynNode);
 begin
   if not (Assigned(Self) and Assigned(Dest)) then
-    raise ETreeIntegrityException.Create(S_INSERTING_NIL_CHILD);
+    raise ESQLSynException.Create(S_INSERTING_NIL_CHILD);
 end;
 
-procedure TSmarterCommonNode.InsertBeforeSibling(Dest: TSmarterCommonNode);
+procedure TSQLSynNode.InsertAfterSibling(Dest: TSQLSynNode);
 begin
   if not (Assigned(Self) and Assigned(Dest)) then
-    raise ETreeIntegrityException.Create(S_INSERTING_NIL_CHILD);
+    raise ESQLSynException.Create(S_INSERTING_NIL_CHILD);
 end;
 
-procedure TSmarterCommonNode.ValidateAST;
+procedure TSQLSynNode.InsertBeforeSibling(Dest: TSQLSynNode);
+begin
+  if not (Assigned(Self) and Assigned(Dest)) then
+    raise ESQLSynException.Create(S_INSERTING_NIL_CHILD);
+end;
+
+procedure TSQLSynNode.ValidateAST;
 var
-  N: TSmarterCommonNode;
+  N: TSQLSynNode;
 begin
   ValidateSelf;
   N := FirstChild;
@@ -150,14 +177,8 @@ begin
   end;
 end;
 
-procedure TSmarterCommonNode.ValidateSelf;
+procedure TSQLSynNode.ValidateSelf;
 begin
-  if not (Self is TSQL92Node) then
-    raise ESmarterNodeException.CreateCtxt(S_INTERNAL_NODE, self, nil);
 end;
-
-{ TSQL92Node }
-
-{ TSQLCOmpilerNode }
 
 end.

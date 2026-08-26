@@ -40,7 +40,7 @@ type
   SQL92GrammarLexer = class(TPLYLexer)
     public
       function yylex: integer; override;
-      function BestIdentifierOrLiteral(const TokenText: AnsiString): integer;
+      function BestIdentifierOrLiteral: integer;
       function TokenName(Token: integer): string;
   end;
 
@@ -61,7 +61,7 @@ begin
   (* actions: *)
   case yyruleno of
   1:
-                        return (BestIdentifierOrLiteral(yytext));
+                        return (BestIdentifierOrLiteral());
   2:
                         return(Ord(national_character_string_literal_start));
   3:
@@ -1267,11 +1267,11 @@ end(*yylex*);
       end;
     end;
 
-  function SQL92GrammarLexer.BestIdentifierOrLiteral(const TokenText: AnsiString): integer;
+  function SQL92GrammarLexer.BestIdentifierOrLiteral: integer;
   var
-    TokenUpper: AnsiString;
+    TokenUpper: String;
   begin
-    TokenUpper := yytext;
+    TokenUpper := string(yytext);
     Assert(Length(TokenUpper)>0);
     TokenUpper := UpperCase(TokenUpper);
     result := Ord(identifier_body);

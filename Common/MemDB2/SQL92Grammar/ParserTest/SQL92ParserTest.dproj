@@ -51,7 +51,7 @@
         <Base>true</Base>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Base)'!=''">
-        <DCC_Define>OMIT_COCO;$(DCC_Define)</DCC_Define>
+        <DCC_Define>OMIT_COCO;INCLYYSTYPE;$(DCC_Define)</DCC_Define>
         <VerInfo_Keys>CompanyName=;FileDescription=;FileVersion=1.0.0.0;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=;ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
         <Manifest_File>None</Manifest_File>
         <VerInfo_Locale>2057</VerInfo_Locale>
@@ -127,6 +127,7 @@
         <DCCReference Include="..\..\..\..\..\github\tply41a\tply41a\lib_oo\lexlib_oo.pas"/>
         <DCCReference Include="..\..\..\..\..\github\tply41a\tply41a\lib_oo\yacclib_oo.pas"/>
         <DCCReference Include="..\SQL92Grammar_parser_debug.pas"/>
+        <DCCReference Include="..\YYSType_incl.pas"/>
         <None Include="..\sql-92.bnf"/>
         <None Include="..\prebuild_tply.bat"/>
         <None Include="..\SQL92Grammar.l"/>
