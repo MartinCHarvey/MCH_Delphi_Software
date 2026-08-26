@@ -12,7 +12,8 @@ uses
   SQL92Grammar_parser in '..\SQL92Grammar_parser.pas',
   lexlib_oo in '..\..\..\..\..\github\tply41a\tply41a\lib_oo\lexlib_oo.pas',
   yacclib_oo in '..\..\..\..\..\github\tply41a\tply41a\lib_oo\yacclib_oo.pas',
-  SQL92Grammar_parser_debug in '..\SQL92Grammar_parser_debug.pas';
+  SQL92Grammar_parser_debug in '..\SQL92Grammar_parser_debug.pas',
+  YYSType_incl in '..\YYSType_incl.pas';
 
 {$R *.res}
 

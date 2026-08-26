@@ -34,7 +34,7 @@ uses LexLib_oo;
 %}
 
 %classname SQL92GrammarLexer
-%classdef function BestIdentifierOrLiteral(const TokenText: AnsiString): integer;
+%classdef function BestIdentifierOrLiteral: integer;
 %classdef function TokenName(Token: integer): string;
 
 %%
@@ -43,7 +43,7 @@ uses LexLib_oo;
   uses SysUtils, SQL92Grammar_parser;
 %}
 
-[A-Za-z]([A-Za-z0-9_])* return (BestIdentifierOrLiteral(yytoken_text));
+[A-Za-z]([A-Za-z0-9_])* return (BestIdentifierOrLiteral());
 N'([^']|'')*'           return(Ord(national_character_string_literal_start));
 B'(0|1)*'               return(Ord(bit_string_literal_start));
 '([^']|'')*'            return(Ord(string_literal_continuation));
@@ -413,11 +413,11 @@ _                       return(Ord(underscore));
       end;
     end;
 
-  function SQL92GrammarLexer.BestIdentifierOrLiteral(const TokenText: AnsiString): integer;
+  function SQL92GrammarLexer.BestIdentifierOrLiteral: integer;
   var
-    TokenUpper: AnsiString;
+    TokenUpper: String;
   begin
-    TokenUpper := yytoken_text;
+    TokenUpper := string(yytext);
     Assert(Length(TokenUpper)>0);
     TokenUpper := UpperCase(TokenUpper);
     result := Ord(identifier_body);

@@ -30,7 +30,11 @@ unit SQL92Grammar_parser;
 interface
 
 uses
-  yacclib_oo, SQL92Grammar_lexer, Classes, SQL92Grammar_parser_debug;
+{$IFDEF INCLYYSTYPE}
+  YYSType_incl,
+{$ENDIF}
+  yacclib_oo, SQL92Grammar_lexer, Classes, SQL92Grammar_parser_debug,
+  SysUtils, SQL92Nodes;
 
 %}
 
@@ -50,6 +54,9 @@ uses
 %classfunc  constructor Create;
 %classfunc  destructor Destroy; override;
 %classfunc  procedure yyerror ( msg : String ); override;
+%classfunc  procedure yyaction_debug(State: integer; Action: integer); override;
+%classfunc  function MakeClass(ClassType: TSQLSynNodeClass): TSQLSynNode;
+%classfunc  function CheckContinuation(S: string; T: TSQLSynLiteralType): boolean;
 
 %token
 
@@ -382,13 +389,19 @@ uses
 
 %%
 
-
 /*
 --h2 Basic Definitions of Characters Used, Tokens, Symbols, Etc.
 --/h2
 */
 
-  regular_identifier : identifier_body ;
+%{
+  { YYaction local vars here - after comment, before first production. }
+  var
+    TmpInt: integer;
+%}
+
+  regular_identifier : identifier_body          { Assert(false); //TODO. }
+        ;
 
 /*
 --hr
@@ -397,67 +410,187 @@ uses
 */
 
   unsigned_numeric_literal : exact_numeric_literal
-	|	approximate_numeric_literal ;
+                                                { $$ := $1; }
+	|	approximate_numeric_literal
+                                                { $$ := $1; }
+        ;
 
   exact_numeric_literal :
                 unsigned_integer exact_numeric_literal_opt
-	|	period unsigned_integer
+                                                { $$ := $1;
+                                                  if Length($2.Text) > 0 then
+                                                  begin
+                                                    with $$.Obj as TSQLSynLiteral do
+                                                    begin
+                                                      Assert($$.text = Text);
+                                                      $$.text := $$.text + $2.text;
+                                                      Text := $$.text;
+                                                      LitType := sltExactNumeric;
+                                                    end;
+                                                  end; }
+	|	period unsigned_integer         { $$ := $2;
+                                                  with $$.Obj as TSQLSynLiteral do
+                                                  begin
+                                                    LitType := sltExactNumeric;
+                                                    Assert($$.text = Text);
+                                                    $$.text := '.' + $$.text;
+                                                    Text := $$.Text;
+                                                  end; }
         ;
 
   exact_numeric_literal_opt :
-                /* empty */
-        |       period
-        |       period unsigned_integer
+                /* empty */                     { $$.text := ''; }
+        |       period                          { $$.text := '.'; }
+        |       period unsigned_integer         {
+                                                  Assert($2.Text = ($2.Obj as TSQLSynLiteral).Text);
+                                                  $$.text := '.' + $2.Text;
+                                                  $2.Obj.Free; }
         ;
 
-  unsigned_integer : digit
-        |            unsigned_integer  digit
+  unsigned_integer : digit                      { $$.text := UTF8ToString(Lexer.yytext);
+                                                  $$.Obj := MakeClass(TSQLSynLiteral);
+                                                  with $$.Obj as TSQLSynLiteral do
+                                                  begin
+                                                    LitType := sltUnsInt;
+                                                    Text := $$.text;
+                                                  end; }
+        |            unsigned_integer  digit    { Assert($1.Text = ($1.Obj as TSQLSynLiteral).Text);
+                                                  $$ := $1;
+                                                  $$.Text := $1.Text + UTF8ToString(Lexer.yytext);
+                                                  ($$.Obj as TSQLSynLiteral).Text := $$.Text; }
         ;
 
-  approximate_numeric_literal : mantissa _E exponent ;
+  approximate_numeric_literal : mantissa _E exponent
+                                                { Assert(false); // TODO. }
+        ;
 
-  mantissa : exact_numeric_literal ;
+  mantissa : exact_numeric_literal
+                                                { $$ := $1; }
+        ;
 
-  exponent : signed_integer ;
+  exponent : signed_integer
+                                                { $$ := $1; }
+        ;
 
   signed_integer :
                 sign unsigned_integer
+                                                { $$ := $2;
+                                                  if $1.text <> '+' then
+                                                  begin
+                                                    with $$.Obj as TSQLSynLiteral do
+                                                    begin
+                                                      Assert($$.Text = Text);
+                                                      $$.Text := $1.Text + $$.Text;
+                                                      Text := $$.Text;
+                                                      LitType := sltInt;
+                                                    end;
+                                                  end; }
         |       unsigned_integer
+                                                { $$ := $1; }
         ;
 
-  sign : plus_sign | minus_sign ;
+  sign : plus_sign
+                                                { $$.Text := UTF8ToString(Lexer.yytext); }
+        | minus_sign
+                                                { $$.Text := UTF8ToString(Lexer.yytext); }
+        ;
+
+  _national_character_string_literal_start :
+        national_character_string_literal_start
+                                                { $$.Text := UTF8ToString(Lexer.yytext);
+                                                  Assert($$.Text[1] = 'N');
+                                                  Assert($$.Text[2] = '''');
+                                                  Assert($$.Text[Length($$.Text)] = '''');
+                                                  TmpInt := Length($$.Text);
+                                                  $$.Text := Copy($$.Text, 3, Length($$.Text) - 3);
+                                                  Assert(Length($$.Text) = TmpInt - 3); }
+        ;
 
   national_character_string_literal :
-        national_character_string_literal_start
+        _national_character_string_literal_start
         national_character_string_literal_cont
+                                                { yyinfo('National character string interpreted as plain UTF-8 string.');
+                                                  $$.Text := $1.Text + $2.Text;
+                                                  $$.Obj := MakeClass(TSQLSynLiteral);
+                                                  with $$.Obj as TSQLSynLiteral do
+                                                  begin
+                                                    Text := $$.Text;
+                                                    LitType := sltNatString;
+                                                  end; }
         ;
 
-  /* TODO - check continuation is national char string */
   national_character_string_literal_cont :
-        /* empty */
+        /* empty */                             { $$.Text := ''; }
         | national_character_string_literal_cont string_literal_continuation
+                                                { if CheckContinuation($2.Text, sltNatString) then
+                                                    $$.Text := $1.Text + $2.Text
+                                                  else
+                                                    yyerror('String continuation not a national character string'); }
+
+        ;
+
+  _bit_string_literal_start :
+        bit_string_literal_start
+                                                { $$.Text := UTF8ToString(Lexer.yytext);
+                                                  Assert($$.Text[1] = 'B');
+                                                  Assert($$.Text[2] = '''');
+                                                  Assert($$.Text[Length($$.Text)] = '''');
+                                                  TmpInt := Length($$.Text);
+                                                  $$.Text := Copy($$.Text, 3, Length($$.Text) - 3);
+                                                  Assert(Length($$.Text) = TmpInt - 3); }
         ;
 
   bit_string_literal :
-        bit_string_literal_start
+        _bit_string_literal_start
         bit_string_literal_cont
+                                                { $$.Text := $1.Text + $2.Text;
+                                                  $$.Obj := MakeClass(TSQLSynLiteral);
+                                                  with $$.Obj as TSQLSynLiteral do
+                                                  begin
+                                                    Text := $$.Text;
+                                                    LitType := sltBitString;
+                                                  end; }
         ;
 
-/* TODO - Check continuation is bit string */
   bit_string_literal_cont :
-        /* empty */
+        /* empty */                             { $$.Text := ''; }
         | bit_string_literal_cont string_literal_continuation
+                                                { if CheckContinuation($2.Text, sltBitString) then
+                                                    $$.Text := $1.Text + $2.Text
+                                                  else
+                                                    yyerror('String continuation not a bit string'); }
+        ;
+
+  _hex_string_literal_start :
+        hex_string_literal_start
+                                                { $$.Text := UTF8ToString(Lexer.yytext);
+                                                  Assert($$.Text[1] = 'X');
+                                                  Assert($$.Text[2] = '''');
+                                                  Assert($$.Text[Length($$.Text)] = '''');
+                                                  TmpInt := Length($$.Text);
+                                                  $$.Text := Copy($$.Text, 3, Length($$.Text) - 3);
+                                                  Assert(Length($$.Text) = TmpInt - 3); }
         ;
 
   hex_string_literal:
-        hex_string_literal_start
+        _hex_string_literal_start
         hex_string_literal_cont
+                                                { $$.Text := $1.Text + $2.Text;
+                                                  $$.Obj := MakeClass(TSQLSynLiteral);
+                                                  with $$.Obj as TSQLSynLiteral do
+                                                  begin
+                                                    Text := $$.Text;
+                                                    LitType := sltHexString;
+                                                  end; }
         ;
 
-/* TODO - Check continuation is hex string */
   hex_string_literal_cont :
-        /* empty */
+        /* empty */                             { $$.Text := ''; }
         | hex_string_literal_cont string_literal_continuation
+                                                { if CheckContinuation($2.Text, sltHexString) then
+                                                    $$.Text := $1.Text + $2.Text
+                                                  else
+                                                    yyerror('String continuation not a hex string'); }
         ;
 
   character_string_literal :
@@ -2587,4 +2720,29 @@ begin
   end;
 end;
 
-end. { SQL92Grammar_parser }
+procedure SQL92GrammarParser.yyaction_debug(State: integer; Action: integer);
+var
+  S: string;
+begin
+  if not (yydebug or yyactiondebug) then exit;
+  inherited;
+  S := GetStateActionString(State, Action);
+  if Length(S) > 0 then
+    Lexer.YYOutWriteLn(S);
+end;
+
+function SQL92GrammarParser.MakeClass(ClassType: TSQLSynNodeClass): TSQLSynNode;
+begin
+  result := ClassType.Create;
+  result.Line := Lexer.yylineno;
+  result.Col := Lexer.yycolno;
+end;
+
+function SQL92GrammarParser.CheckContinuation(S: string; T: TSQLSynLiteralType): boolean;
+begin
+  Assert(false);
+  //TODO - Write this.
+end;
+
+
+end.
