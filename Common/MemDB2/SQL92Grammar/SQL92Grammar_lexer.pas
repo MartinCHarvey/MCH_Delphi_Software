@@ -999,6 +999,7 @@ end(*yylex*);
 	_AVG: result := '_AVG';
 	_BEGIN: result := '_BEGIN';
 	_BETWEEN: result := '_BETWEEN';
+        _BIGINT: result := '_BIGINT';
 	_BIT: result := '_BIT';
 	_BIT_LENGTH: result := '_BIT_LENGTH';
 	_BOTH: result := '_BOTH';
@@ -1296,6 +1297,7 @@ end(*yylex*);
       'B':
         if TokenUpper = ('BEGIN') then result := Ord(_BEGIN)
         else if TokenUpper = ('BETWEEN') then result := Ord(_BETWEEN)
+        else if TokenUpper = ('BIGINT') then result := Ord(_BIGINT)
         else if TokenUpper = ('BIT') then result := Ord(_BIT)
         else if TokenUpper = ('BIT_LENGTH') then result := Ord(_BIT_LENGTH)
         else if TokenUpper = ('BOTH') then result := Ord(_BOTH)

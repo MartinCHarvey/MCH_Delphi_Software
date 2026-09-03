@@ -49,6 +49,11 @@ uses
 
 */
 
+/*
+  TODO - unsigned integers shouldn't be literal like, just
+  string'y, and use exact and inexact numeric lierals as the classes?
+*/
+
 %classname SQL92GrammarParser
 
 %classfunc  constructor Create;
@@ -57,6 +62,9 @@ uses
 %classfunc  procedure yyaction_debug(State: integer; Action: integer); override;
 %classfunc  function MakeClass(ClassType: TSQLSynNodeClass): TSQLSynNode;
 %classfunc  function CheckContinuation(S: string; T: TSQLSynLiteralType): boolean;
+%classfunc function HandleContinuation(S: string; T: TSQlSynLiteralType): string;
+%classfunc  function CheckDelimIdent(S: string): boolean;
+%classfunc function HandleDelimIdent(S: string): string;
 
 %token
 
@@ -116,6 +124,7 @@ uses
 		_AVG
 		_BEGIN
 		_BETWEEN
+                _BIGINT
 		_BIT
 		_BIT_LENGTH
 		_BOTH
@@ -398,9 +407,13 @@ uses
   { YYaction local vars here - after comment, before first production. }
   var
     TmpInt: integer;
+    TmpClass, TmpClass2: TSqlSynNode;
 %}
 
-  regular_identifier : identifier_body          { Assert(false); //TODO. }
+  regular_identifier : identifier_body          { $$.Text := UTF8ToString(Lexer.yytext);
+                                                  $$.Obj := MakeClass(TSQLSynIdent);
+                                                  with $$.Obj as TSQLSynIdent do
+                                                    IdentName := $$.Text; }
         ;
 
 /*
@@ -439,12 +452,13 @@ uses
         ;
 
   exact_numeric_literal_opt :
-                /* empty */                     { $$.text := ''; }
-        |       period                          { $$.text := '.'; }
+                /* empty */                     { $$.text := ''; $$.Obj := nil; }
+        |       period                          { $$.text := '.'; $$.Obj := nil; }
         |       period unsigned_integer         {
                                                   Assert($2.Text = ($2.Obj as TSQLSynLiteral).Text);
                                                   $$.text := '.' + $2.Text;
-                                                  $2.Obj.Free; }
+                                                  $2.Obj.Free;
+                                                  $$.Obj := nil; }
         ;
 
   unsigned_integer : digit                      { $$.text := UTF8ToString(Lexer.yytext);
@@ -461,7 +475,17 @@ uses
         ;
 
   approximate_numeric_literal : mantissa _E exponent
-                                                { Assert(false); // TODO. }
+                                                {
+                                                  Assert($1.Text = ($1.Obj as TSQLSynLiteral).Text);
+                                                  Assert($3.Text = ($1.Obj as TSQLSynLiteral).Text);
+                                                  $$ := $1;
+                                                  $$.Text := $$.Text + 'E' + $3.Text;
+                                                  with $$.Obj as TSqlSynLiteral do
+                                                  begin
+                                                    Text := $$.Text;
+                                                    LitType := sltApproxNumeric;
+                                                  end;
+                                                  $3.Obj.Free; }
         ;
 
   mantissa : exact_numeric_literal
@@ -475,35 +499,44 @@ uses
   signed_integer :
                 sign unsigned_integer
                                                 { $$ := $2;
-                                                  if $1.text <> '+' then
+                                                  with $$.Obj as TSQLSynLiteral do
                                                   begin
-                                                    with $$.Obj as TSQLSynLiteral do
+                                                    if $1.text <> '+' then
                                                     begin
                                                       Assert($$.Text = Text);
                                                       $$.Text := $1.Text + $$.Text;
                                                       Text := $$.Text;
-                                                      LitType := sltInt;
                                                     end;
+                                                    LitType := sltInt;
                                                   end; }
         |       unsigned_integer
-                                                { $$ := $1; }
+                                                { $$ := $1;
+                                                  with $$.Obj as TSQLSynLiteral do
+                                                    LitType := sltInt; }
         ;
 
   sign : plus_sign
-                                                { $$.Text := UTF8ToString(Lexer.yytext); }
+                                                { $$.Text := UTF8ToString(Lexer.yytext);
+                                                  $$.Obj := nil; }
         | minus_sign
-                                                { $$.Text := UTF8ToString(Lexer.yytext); }
+                                                { $$.Text := UTF8ToString(Lexer.yytext);
+                                                  $$.Obj := nil; }
         ;
 
   _national_character_string_literal_start :
         national_character_string_literal_start
-                                                { $$.Text := UTF8ToString(Lexer.yytext);
+                                                { $$.Obj := nil;
+                                                  $$.Text := UTF8ToString(Lexer.yytext);
                                                   Assert($$.Text[1] = 'N');
                                                   Assert($$.Text[2] = '''');
                                                   Assert($$.Text[Length($$.Text)] = '''');
                                                   TmpInt := Length($$.Text);
-                                                  $$.Text := Copy($$.Text, 3, Length($$.Text) - 3);
-                                                  Assert(Length($$.Text) = TmpInt - 3); }
+                                                  $$.Text := Copy($$.Text, 2, Length($$.Text) - 1);
+                                                  Assert(Length($$.Text) = TmpInt - 1);
+                                                  if CheckContinuation($$.Text, sltNatString) then
+                                                    $$.Text := HandleContinuation($$.Text, sltNatString)
+                                                  else
+                                                    yyerror('Not a valid national character string.'); }
         ;
 
   national_character_string_literal :
@@ -520,10 +553,12 @@ uses
         ;
 
   national_character_string_literal_cont :
-        /* empty */                             { $$.Text := ''; }
+        /* empty */                             { $$.Text := '';
+                                                  $$.Obj := nil; }
         | national_character_string_literal_cont string_literal_continuation
-                                                { if CheckContinuation($2.Text, sltNatString) then
-                                                    $$.Text := $1.Text + $2.Text
+                                                { $$.Obj := nil;
+                                                  if CheckContinuation(UTF8ToString(Lexer.yytext), sltNatString) then
+                                                    $$.Text := $1.Text + HandleContinuation(UTF8ToString(Lexer.yytext), sltNatString)
                                                   else
                                                     yyerror('String continuation not a national character string'); }
 
@@ -531,7 +566,8 @@ uses
 
   _bit_string_literal_start :
         bit_string_literal_start
-                                                { $$.Text := UTF8ToString(Lexer.yytext);
+                                                { $$.Obj := nil;
+                                                  $$.Text := UTF8ToString(Lexer.yytext);
                                                   Assert($$.Text[1] = 'B');
                                                   Assert($$.Text[2] = '''');
                                                   Assert($$.Text[Length($$.Text)] = '''');
@@ -553,17 +589,19 @@ uses
         ;
 
   bit_string_literal_cont :
-        /* empty */                             { $$.Text := ''; }
+        /* empty */                             { $$.Text := ''; $$.Obj := nil; }
         | bit_string_literal_cont string_literal_continuation
-                                                { if CheckContinuation($2.Text, sltBitString) then
-                                                    $$.Text := $1.Text + $2.Text
+                                                { $$.Obj := nil;
+                                                  if CheckContinuation(UTF8ToString(Lexer.yytext), sltBitString) then
+                                                    $$.Text := $1.Text + HandleContinuation(UTF8ToString(Lexer.yytext), sltBitString)
                                                   else
                                                     yyerror('String continuation not a bit string'); }
         ;
 
   _hex_string_literal_start :
         hex_string_literal_start
-                                                { $$.Text := UTF8ToString(Lexer.yytext);
+                                                { $$.Obj := nil;
+                                                  $$.Text := UTF8ToString(Lexer.yytext);
                                                   Assert($$.Text[1] = 'X');
                                                   Assert($$.Text[2] = '''');
                                                   Assert($$.Text[Length($$.Text)] = '''');
@@ -585,10 +623,11 @@ uses
         ;
 
   hex_string_literal_cont :
-        /* empty */                             { $$.Text := ''; }
+        /* empty */                             { $$.Text := ''; $$.Obj := nil;}
         | hex_string_literal_cont string_literal_continuation
-                                                { if CheckContinuation($2.Text, sltHexString) then
-                                                    $$.Text := $1.Text + $2.Text
+                                                { $$.Obj := nil;
+                                                  if CheckContinuation(UTF8ToString(Lexer.yytext), sltHexString) then
+                                                    $$.Text := $1.Text + HandleContinuation(UTF8ToString(Lexer.yytext), sltHexString)
                                                   else
                                                     yyerror('String continuation not a hex string'); }
         ;
@@ -596,92 +635,265 @@ uses
   character_string_literal :
                 introducer character_set_specification
                 character_string_literal_main
+                                                { yyinfo('Charset specification ignored. Interpreting as UTF-8 string');
+                                                  $2.Obj.Free;
+                                                  $$ := $3; }
         |       character_string_literal_main
+                                                { $$ := $1; }
         ;
 
   character_string_literal_main :
-                string_literal_continuation
+                string_literal_continuation     { if CheckContinuation(UTF8ToString(Lexer.yytext), sltString) then
+                                                  begin
+                                                    $$.Text := HandleContinuation(UTF8ToString(Lexer.yyText), sltString);
+                                                    $$.Obj := MakeClass(TSqlSynLiteral);
+                                                    with $$.Obj as TSqlSynLiteral do
+                                                    begin
+                                                      Text := $$.Text;
+                                                      LitType := sltString;
+                                                    end;
+                                                  end
+                                                  else
+                                                    yyerror('Not a valid character string'); }
         |       character_string_literal_main
-                string_literal_continuation
+                string_literal_continuation     { if CheckContinuation(UTF8ToString(Lexer.yytext), sltString) then
+                                                  begin
+                                                    $$.Text := HandleContinuation(UTF8ToString(Lexer.yyText), sltString);
+                                                    //Now do the appending back to front.
+                                                    Assert(($1.Obj as TSQLSynLiteral).Text = $1.Text);
+                                                    $$.Text := $1.Text + $$.Text;
+                                                    $$.Obj := $1.Obj;
+                                                    ($$.Obj as TSQLSynLiteral).Text := $$.Text;
+                                                  end
+                                                  else
+                                                    yyerror('Not a valid character string'); }
         ;
 
-  introducer : underscore
+  introducer : underscore                       { $$.Obj := nil;
+                                                  $$.Text := UTF8ToString(Lexer.yytext); }
         ;
 
   character_set_specification :
-		character_set_name
+		character_set_name              { $$ := $1; }
         ;
 
   character_set_name :
                 identifier period identifier period SQL_language_identifier
+                                                { $$.Text := $1.Text + '.' +
+                                                             $3.Text + '.' +
+                                                             $5.Text;
+                                                  $$.Obj := $5.Obj;
+                                                  $1.Obj.Free;
+                                                  $3.Obj.Free;
+                                                  with $$.Obj as TSQLSynIdent do
+                                                    IdentName := $$.Text; }
          |      identifier period SQL_language_identifier
+                                                { $$.Text := $1.Text + '.' +
+                                                             $3.Text;
+                                                  $1.Obj.Free;
+                                                  $$.Obj := $3.Obj;
+                                                  with $$.Obj as TSQLSynIdent do
+                                                    IdentName := $$.Text; }
          |      SQL_language_identifier
+                                                { $$ := $1; }
          ;
 
   schema_name :
-                identifier period identifier
+                identifier period identifier    { $$.Text := $1.Text + '.' + $3.Text;
+                                                  $1.Obj.Free;
+                                                  $$.Obj := $3.Obj;
+                                                  with $$.Obj as TSQLSynIdent do
+                                                    IdentName := $$.Text; }
         |       identifier
+                                                { $$ := $1; }
         ;
 
   identifier :
                 introducer character_set_specification actual_identifier
+                                                { yyinfo('Charset specification ignored. Interpreting as UTF-8 identifier');
+                                                  $2.Obj.Free;
+                                                  $$ := $3; }
         |       actual_identifier
+                                                { $$ := $1; }
         ;
 
   actual_identifier :
-                regular_identifier
-        |       delimited_identifier
+                regular_identifier              { $$ := $1; }
+        |       delimited_identifier            { if CheckDelimIdent(UTF8ToString(Lexer.yytext)) then
+                                                  begin
+                                                    $$.Text := HandleDelimIdent(UTF8ToString(Lexer.yytext));
+                                                    $$.Obj := MakeClass(TSQLSynIdent);
+                                                    with $$.Obj as TSQLSynIdent do
+                                                      IdentName := $$.Text;
+                                                  end
+                                                  else
+                                                    yyerror('Not a valid delimited identifier.'); }
         ;
 
   SQL_language_identifier :
-                regular_identifier
+                regular_identifier              { $$ := $1; }
         ;
 
   date_string :
-                quote date_value quote
+                quote date_value quote          { $$ := $2 }
         ;
 
   date_value :
                 unsigned_integer minus_sign unsigned_integer minus_sign unsigned_integer
+                                                { $$.Text := $1.Text + '-' +
+                                                             $3.Text + '-' +
+                                                             $5.Text;
+                                                  $$.Obj := nil;
+                                                  $1.Obj.Free;
+                                                  $3.Obj.Free;
+                                                  $5.Obj.Free; }
         ;
 
   time_string :
-                quote time_value quote
+                quote time_value quote          { $$ := $2; }
                 quote time_value time_zone_interval quote
+                                                { $$.Text := $2.Text + $3.Text;
+                                                  $$.Obj := nil; }
         ;
 
   time_value :
                 unsigned_integer colon unsigned_integer colon seconds_value
+                                                { $$.Text := $1.Text + ':'
+                                                  + $3.Text + ':' + $5.Text;
+                                                  $$.Obj := nil;
+                                                  $1.Obj.Free;
+                                                  $3.Obj.Free;
+                                                  $5.Obj.Free; }
         ;
 
   seconds_value :
-                unsigned_integer
+                unsigned_integer                { $$ := $1; }
         |       unsigned_integer period unsigned_integer
+                                                { $$.Obj := nil;
+                                                  $$.Text := $1.Text + '.' + $3.Text;
+                                                  $1.Obj.Free;
+                                                  $3.Obj.Free; }
         ;
 
-  time_zone_interval : sign unsigned_integer colon unsigned_integer ;
+  time_zone_interval : sign unsigned_integer colon unsigned_integer
+                                                { $$.Obj := nil;
+                                                  $$.Text := $1.Text + $2.Text +
+                                                  ':' + $4.Text;
+                                                  $2.Obj.Free;
+                                                  $4.Obj.Free; }
+        ;
 
   timestamp_string :
                 quote date_value space time_value quote
+                                                { $$.Obj := nil;
+                                                  $$.Text := $2.Text + ' ' + $$.Text }
         |       quote date_value space time_value time_zone_interval quote
+                                                { $$.Obj := nil;
+                                                  $$.Text := $2.Text + ' ' + $$.Text;
+                                                  yyinfo('Time zone ignored in in timestamp string.'); }
         ;
 
   interval_string :
-                quote interval_string_literal quote
+                quote interval_string_literal quote { $$ := $1; }
         ;
 
   interval_string_literal :
-                unsigned_integer
+                unsigned_integer                { $$ := $1;
+                                                  $$.Obj.Free;
+                                                  $$.Obj := MakeClass(TSQLSynIntervalStringLiteral);
+                                                  with $$.Obj as TSQLSynIntervalStringLiteral do
+                                                  begin
+                                                    LitType := sltIntervalString;
+                                                    IntervalStringType := istPlainInt;
+                                                    Text := $$.Text;
+                                                  end; }
                 /* Year month interval */
         |       unsigned_integer minus_sign unsigned_integer
+                                                { $$.Text := $1.Text + '-' + $3.Text;
+                                                  $$.Obj := MakeClass(TSQLSynIntervalStringLiteral);
+                                                  with $$.Obj as TSQLSynIntervalStringLiteral do
+                                                  begin
+                                                    LitType := sltIntervalString;
+                                                    IntervalStringType := istYearMonth;
+                                                    Text := $$.Text;
+                                                  end;
+                                                  $1.Obj.Free;
+                                                  $3.Obj.Free; }
                 /* Day time intervals */
         |       unsigned_integer space unsigned_integer
+                                                { $$.Text := $1.Text + ' ' + $3.Text;
+                                                  $$.Obj := MakeClass(TSQLSynIntervalStringLiteral);
+                                                  with $$.Obj as TSQLSynIntervalStringLiteral do
+                                                  begin
+                                                    LitType := sltIntervalString;
+                                                    IntervalStringType := istDayTime1;
+                                                    Text := $$.Text;
+                                                  end;
+                                                  $1.Obj.Free;
+                                                  $3.Obj.Free; }
         |       unsigned_integer space unsigned_integer colon unsigned_integer
+                                                { $$.Text := $1.Text + ' ' + $3.Text
+                                                  + ':' + $5.Text;
+                                                  $$.Obj := MakeClass(TSQLSynIntervalStringLiteral);
+                                                  with $$.Obj as TSQLSynIntervalStringLiteral do
+                                                  begin
+                                                    LitType := sltIntervalString;
+                                                    IntervalStringType := istDayTime2;
+                                                    Text := $$.Text;
+                                                  end;
+                                                  $1.Obj.Free;
+                                                  $3.Obj.Free;
+                                                  $5.Obj.Free; }
         |       unsigned_integer space unsigned_integer colon unsigned_integer colon seconds_value
+                                                { $$.Text := $1.Text + ' ' + $3.Text
+                                                  + ':' + $5.Text + ':' + $7.Text;
+                                                  $$.Obj := MakeClass(TSQLSynIntervalStringLiteral);
+                                                  with $$.Obj as TSQLSynIntervalStringLiteral do
+                                                  begin
+                                                    LitType := sltIntervalString;
+                                                    IntervalStringType := istDayTime3;
+                                                    Text := $$.Text;
+                                                  end;
+                                                  $1.Obj.Free;
+                                                  $3.Obj.Free;
+                                                  $5.Obj.Free;
+                                                  $7.Obj.Free; }
                 /* Time intervals */
 	|	unsigned_integer period unsigned_integer
+                                                { $$.Text := $1.Text + '.' + $3.Text;
+                                                  $$.Obj := MakeClass(TSQLSynIntervalStringLiteral);
+                                                  with $$.Obj as TSQLSynIntervalStringLiteral do
+                                                  begin
+                                                    LitType := sltIntervalString;
+                                                    IntervalStringType := istTime1;
+                                                    Text := $$.Text;
+                                                  end;
+                                                  $1.Obj.Free;
+                                                  $3.Obj.Free; }
         |       unsigned_integer colon seconds_value
+                                                { $$.Text := $1.Text + ':' + $3.Text;
+                                                  $$.Obj := MakeClass(TSQLSynIntervalStringLiteral);
+                                                  with $$.Obj as TSQLSynIntervalStringLiteral do
+                                                  begin
+                                                    LitType := sltIntervalString;
+                                                    IntervalStringType := istTime2;
+                                                    Text := $$.Text;
+                                                  end;
+                                                  $1.Obj.Free;
+                                                  $3.Obj.Free; }
         |       unsigned_integer colon unsigned_integer colon seconds_value
+                                                { $$.Text := $1.Text + ':' + $3.Text
+                                                  + ':' + $5.Text;
+                                                  $$.Obj := MakeClass(TSQLSynIntervalStringLiteral);
+                                                  with $$.Obj as TSQLSynIntervalStringLiteral do
+                                                  begin
+                                                    LitType := sltIntervalString;
+                                                    IntervalStringType := istTime3;
+                                                    Text := $$.Text;
+                                                  end;
+                                                  $1.Obj.Free;
+                                                  $3.Obj.Free;
+                                                  $5.Obj.Free; }
         ;
 
 /*
@@ -692,40 +904,163 @@ uses
 
 
   module :
-		module_name_clause language_clause module_authorization_clause
-                module_opt
+		module_name_clause
+                language_clause
+                module_authorization_clause
+                module_contents
+                                                {
+                                                  $$ := $1; //Module and name
+                                                  with $$.Obj as TSqlSynModule do
+                                                  begin
+                                                    // Language clause
+                                                    InsertTailChild($2.Obj);
+                                                    Language := $2.Obj as TSQLSynIdent;
+                                                    // Module auth clause
+                                                      //Schema.
+                                                    if Assigned(($3.Obj as TTempTpl).T1) then
+                                                    begin
+                                                      ($3.Obj as TTempTpl).T1.RemoveFromTree;
+                                                      InsertTailChild(($3.Obj as TTempTpl).T1);
+                                                      Schema := ($3.Obj as TTempTpl).T1 as TSqlSynIdent;
+                                                    end;
+                                                      //Authorization
+                                                    if Assigned(($3.Obj as TTempTpl).T2) then
+                                                    begin
+                                                      ($3.Obj as TTempTpl).T2.RemoveFromTree;
+                                                      InsertTailChild(($3.Obj as TTempTpl).T2);
+                                                      Authorization := ($3.Obj as TTempTpl).T2 as TSqlSynIdent;
+                                                    end;
+                                                    $3.Obj.Free;
+                                                    // Module opt.
+                                                    // Flatten tree, and keep a cpl of pointers as to
+                                                    // locations of things.
+
+                                                    //Module contents.
+                                                    TmpClass := (($4.Obj) as TTempTpl);
+                                                    while TmpClass.FirstChild <> nil do
+                                                    begin
+                                                      TmpClass2 := TmpClass.FirstChild;
+                                                      TmpClass2.RemoveFromTree;
+                                                      InsertTailChild(TmpClass2);
+                                                      if not Assigned(FirstContents) then
+                                                        FirstContents := TmpClass2;
+                                                    end;
+                                                    $4.Obj.Free;
+                                                  end;
+                                                }
         ;
 
-  module_opt :
-		temporary_table_declaration module_contents
-        |       module_contents
-        ;
 
   module_name_clause :
-		_MODULE
-		_MODULE  module_name
-		_MODULE  module_character_set_specification
-		_MODULE  module_name module_character_set_specification
+                _MODULE
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynModule);
+                                                  with $$.Obj as TSQLSynNamedStructural do
+                                                    StructuralType := sstModule; }
+        |       _MODULE  module_name
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynModule);
+                                                  with $$.Obj as TSQLSynNamedStructural do
+                                                  begin
+                                                    StructuralType := sstModule;
+                                                    InsertTailChild($2.Obj);
+                                                    Name := $2.Obj as TSqlSynIdent;
+                                                  end; }
+        |       _MODULE  module_character_set_specification
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynModule);
+                                                  with $$.Obj as TSQLSynNamedStructural do
+                                                    StructuralType := sstModule; }
+        |       _MODULE  module_name module_character_set_specification
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynModule);
+                                                  with $$.Obj as TSQLSynNamedStructural do
+                                                  begin
+                                                    StructuralType := sstModule;
+                                                    InsertTailChild($2.Obj);
+                                                    Name := $2.Obj as TSqlSynIdent;
+                                                  end; }
         ;
 
   module_name :
                 identifier
+                                                { $$ := $1; }
         ;
 
-  module_character_set_specification : _NAMES _ARE character_set_specification ;
+  module_character_set_specification : _NAMES _ARE character_set_specification
+                                                { yyinfo('Charset specification ignored in module decl.'); }
+        ;
 
-  language_clause : _LANGUAGE language_name ;
+  language_clause :
+        _LANGUAGE language_name
+                                                { $$.Text := $2.Text;
+                                                  $$.Obj := MakeClass(TSqlSynIdent);
+                                                  with $$.Obj as TSqlSynIdent do
+                                                  begin
+                                                    IdentName := $$.Text;
+                                                    Wildcard := false;
+                                                  end; }
+        ;
 
-  language_name : _ADA | _C | _COBOL | _FORTRAN | _MUMPS | _PASCAL | _PLI ;
+  language_name :
+                _ADA
+                                                { $$.Text := (Lexer as SQL92GrammarLexer).TokenName(yychar); $$.Obj := nil; }
+        |       _C
+                                                { $$.Text := (Lexer as SQL92GrammarLexer).TokenName(yychar); $$.Obj := nil; }
+        |       _COBOL
+                                                { $$.Text := (Lexer as SQL92GrammarLexer).TokenName(yychar); $$.Obj := nil; }
+        |       _FORTRAN
+                                                { $$.Text := (Lexer as SQL92GrammarLexer).TokenName(yychar); $$.Obj := nil; }
+        |       _MUMPS
+                                                { $$.Text := (Lexer as SQL92GrammarLexer).TokenName(yychar); $$.Obj := nil; }
+        |       _PASCAL
+                                                { $$.Text := (Lexer as SQL92GrammarLexer).TokenName(yychar); $$.Obj := nil; }
+        |       _PLI
+                                                { $$.Text := (Lexer as SQL92GrammarLexer).TokenName(yychar); $$.Obj := nil; }
+        ;
 
   module_authorization_clause :
 		_SCHEMA schema_name
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TTempTpl);
+                                                  with $$.Obj as TTempTpl do
+                                                  begin
+                                                    InsertTailChild($2.Obj);
+                                                    T1 := $2.Obj;
+                                                  end; }
 	|	_AUTHORIZATION module_authorization_identifier
-	|	_SCHEMA schema_name _AUTHORIZATION module_authorization_identifier ;
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TTempTpl);
+                                                  with $$.Obj as TTempTpl do
+                                                  begin
+                                                    InsertTailChild($2.Obj);
+                                                    T2 := $2.Obj;
+                                                  end; }
+	|	_SCHEMA schema_name _AUTHORIZATION module_authorization_identifier
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TTempTpl);
+                                                  with $$.Obj as TTempTpl do
+                                                  begin
+                                                    InsertTailChild($2.Obj);
+                                                    T1 := $2.Obj;
+                                                    InsertTailChild($4.Obj);
+                                                    T2 := $4.Obj;
+                                                  end; }
+        ;
 
-  module_authorization_identifier : authorization_identifier ;
+  module_authorization_identifier :
+                authorization_identifier
+                                                { $$ := $1; }
+        ;
 
-  authorization_identifier : identifier ;
+  authorization_identifier :
+                identifier
+                                                { $$ := $1; }
+        ;
+
+
+  /* TODO - Continue from here. Make somewhat similar to other
+     create table constructs. */
 
   temporary_table_declaration :
                 _DECLARE _LOCAL _TEMPORARY _TABLE
@@ -789,172 +1124,511 @@ uses
 
   data_type :
 		character_string_type data_type_opt
+                                                { $$ := $1; }
 	|	national_character_string_type
+                                                { $$ := $1; }
 	|	bit_string_type
+                                                { $$ := $1; }
 	|	numeric_type
+                                                { $$ := $1; }
 	|	datetime_type
+                                                { $$ := $1; }
 	|	interval_type
+                                                { $$ := $1; }
         ;
 
   data_type_opt :
         /* Empty */
+                                                { $$.Text := '';
+                                                  $$.Obj := nil; }
         |       _CHARACTER _SET character_set_specification
+                                                { $$.Text := '';
+                                                  $$.Obj := nil;
+                                                  yyinfo('Character set specification ignored in type decl. UTF-8 strings please.');
+                                                  $3.Obj.Free; }
         ;
 
   character_string_type :
 		_CHARACTER character_string_type_len
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtString; }
 	|	_CHAR character_string_type_len
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtString; }
 	|	_CHARACTER _VARYING character_string_type_len
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtString; }
 	|	_CHAR _VARYING character_string_type_len
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtString; }
 	|	_VARCHAR character_string_type_len
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtString; }
 	|	_CHARACTER
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtString;
+                                                  yyinfo('Representing single chars as strings.');}
 	|	_CHAR
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtString;
+                                                  yyinfo('Representing single chars as strings.');}
 	|	_CHARACTER _VARYING
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtString; }
 	|	_CHAR _VARYING
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtString; }
 	|	_VARCHAR
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtString; }
         ;
 
   character_string_type_len :
                 left_paren length right_paren
+                                                { yyinfo('Character string type length declaration ignored.');
+                                                  $$.Text := ''; $$.Obj := nil;
+                                                  $2.Obj.Free; }
         ;
 
-  length : unsigned_integer ;
+  length : unsigned_integer
+                                                { $$ := $1; }
+        ;
 
   national_character_string_type :
 		_NATIONAL _CHARACTER character_string_type_len
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtNatString; }
 	|	_NATIONAL _CHAR character_string_type_len
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtNatString; }
 	|	_NCHAR character_string_type_len
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtNatString; }
 	|	_NATIONAL _CHARACTER _VARYING character_string_type_len
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtNatString; }
 	|	_NATIONAL _CHAR _VARYING character_string_type_len
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtNatString; }
 	|	_NCHAR _VARYING character_string_type_len
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtNatString; }
 	|	_NATIONAL _CHARACTER
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtNatString;
+                                                  yyinfo('Representing single chars as strings.');}
 	|	_NATIONAL _CHAR
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtNatString;
+                                                  yyinfo('Representing single chars as strings.');}
 	|	_NCHAR
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtNatString;
+                                                  yyinfo('Representing single chars as strings.');}
 	|	_NATIONAL _CHARACTER _VARYING
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtNatString; }
 	|	_NATIONAL _CHAR _VARYING
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtNatString; }
 	|	_NCHAR _VARYING
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtNatString; }
         ;
 
   bit_string_type :
 		_BIT character_string_type_len
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtBitString; }
 	|	_BIT _VARYING character_string_type_len
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtBitString; }
 	|	_BIT
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtBitString;
+                                                  yyinfo('Representing single bits as bit strings.');}
 	|	_BIT _VARYING
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtBitString; }
         ;
 
   numeric_type :
-		exact_numeric_type
-	|	approximate_numeric_type ;
+		exact_numeric_type              { $$ := $1; }
+	|	approximate_numeric_type        { $$ := $1; }
+        ;
 
   exact_numeric_type :
 	 	_NUMERIC numeric_precision_scale_opt
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtExactNumeric; }
 	| 	_DECIMAL numeric_precision_scale_opt
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtExactNumeric; }
 	| 	_DEC numeric_precision_scale_opt
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtExactNumeric; }
 	|	_INTEGER
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtExactNumeric; }
 	|	_INT
-	|	_SMALLINT ;
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtExactNumeric; }
+	|	_SMALLINT
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtExactNumeric; }
+        |       _BIGINT
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtExactNumeric; }
+        ;
 
   numeric_precision_scale_opt :
         /* Empty */
         |       left_paren precision comma scale right_paren
+                                                { yyerror('Integer scaling not supported at the moment. E-mail the author.'); }
         |       left_paren precision right_paren
+                                                { yyinfo('Integer precision ignored in type.');
+                                                  $1.Obj.Free; }
         ;
 
-  precision : unsigned_integer ;
+  precision : unsigned_integer
+                                                { $$ := $1; }
+        ;
 
-  scale : unsigned_integer ;
+  scale : unsigned_integer
+                                                { $$ := $1; }
+        ;
 
   approximate_numeric_type :
 	 	_FLOAT
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtApproxNumeric; }
         |       _FLOAT left_paren precision right_paren
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtApproxNumeric;
+                                                  yyinfo('Floating point precision ignored in type.');
+                                                  $3.Obj.Free; }
 	|	_REAL
-	|	_DOUBLE _PRECISION ;
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtApproxNumeric; }
+	|	_DOUBLE _PRECISION
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtApproxNumeric; }
+        ;
 
   datetime_type :
 		_DATE
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtDate; }
 	|       _TIME time_precision_opt tz_opt
-	|       _TIMESTAMP timestamp_precision_opt tz_opt ;
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtTime; }
+	|       _TIMESTAMP timestamp_precision_opt tz_opt
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynType);
+                                                  with $$.Obj as TSQLSynType do
+                                                    GeneralType := sgtTimestamp; }
+        ;
 
   timestamp_precision_opt :
         /* Empty */
         |       left_paren timestamp_precision right_paren
+                                                { yyinfo('Timestamp precision ignored.');
+                                                  $$.Text := ''; $$.obj := nil;
+                                                  $2.Obj.Free; }
         ;
 
   time_precision_opt :
         /* Empty */
         |       left_paren time_precision right_paren
+                                                { yyinfo('Time precision ignored.');
+                                                  $$.Text := ''; $$.obj := nil;
+                                                  $2.Obj.Free; }
         ;
 
   tz_opt :
         /* Empty */
         |        _WITH _TIME _ZONE
+                                                { yyerror('Time zones not supported.');}
         ;
 
 
-  time_precision : time_fractional_seconds_precision ;
+  time_precision : time_fractional_seconds_precision
+                                                { $$ := $1; }
+        ;
 
-  time_fractional_seconds_precision : unsigned_integer ;
+  time_fractional_seconds_precision : unsigned_integer
+                                                { $$ := $1; }
+        ;
 
-  timestamp_precision : time_fractional_seconds_precision ;
+  timestamp_precision : time_fractional_seconds_precision
+                                                { $$ := $1; }
+        ;
 
-  interval_type : _INTERVAL interval_qualifier ;
+  interval_type : _INTERVAL interval_qualifier
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynIntervalType);
+                                                  with $$.Obj as TSQLSynIntervalType do
+                                                  begin
+                                                    InsertTailChild($2.Obj);
+                                                    Qualifier := $2.Obj as TSQLSynIntervalQualifier;
+                                                  end; }
+        ;
 
   interval_qualifier :
                 start_field
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynIntervalQualifier);
+                                                  with $$.Obj as TSQlSynIntervalQualifier do
+                                                  begin
+                                                    Start := TSQLSynQualField($1.Obj);
+                                                    _End := TSQLSynQualField($1.Obj);
+                                                  end; }
 	|	start_field _TO end_field
-        |       _SECOND single_datetime_field_opt;
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynIntervalQualifier);
+                                                  with $$.Obj as TSQlSynIntervalQualifier do
+                                                  begin
+                                                    Start := TSQLSynQualField($1.Obj);
+                                                    _End := TSQLSynQualField($3.Obj);
+                                                  end; }
+        |       _SECOND single_datetime_field_opt
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynIntervalQualifier);
+                                                  with $$.Obj as TSQlSynIntervalQualifier do
+                                                  begin
+                                                    Start := sqfSecond;
+                                                    _End := sqfSecond;
+                                                  end; }
+        ;
 
   start_field :
 		non_second_datetime_field
+                                                { $$ := $1; }
         |       non_second_datetime_field left_paren precision right_paren
+                                                { $$ := $1;
+                                                  yyinfo('Datetime field precision ignored.');
+                                                  $2.Obj.Free; }
         ;
 
-  non_second_datetime_field : _YEAR | _MONTH | _DAY | _HOUR | _MINUTE ;
+  non_second_datetime_field :
+        _YEAR
+                                                { $$.Text := ''; $$.Obj := TSQLSynNode(sqfYear); }
+        | _MONTH
+                                                { $$.Text := ''; $$.Obj := TSQLSynNode(sqfMonth); }
+        | _DAY
+                                                { $$.Text := ''; $$.Obj := TSQLSynNode(sqfDay); }
+        | _HOUR
+                                                { $$.Text := ''; $$.Obj := TSQLSynNode(sqfHour); }
+        | _MINUTE
+                                                { $$.Text := ''; $$.Obj := TSQLSynNode(sqfMinute); }
+        ;
 
-  interval_leading_field_precision : unsigned_integer ;
+  interval_leading_field_precision : unsigned_integer
+                                                { $$ := $1; }
+        ;
 
   end_field :
 		non_second_datetime_field
+                                                { $$ := $1; }
 	|       _SECOND
+                                                { $$.Text := ''; $$.Obj := TSqlSynNode(sqfSecond); }
         |       _SECOND left_paren precision right_paren
+                                                { $$.Text := ''; $$.Obj := TSqlSYnNode(sqfSecond);
+                                                  yyinfo('Datetime field precision ignored.');
+                                                  $3.Obj.Free; }
         ;
 
-  interval_fractional_seconds_precision : unsigned_integer ;
+  interval_fractional_seconds_precision : unsigned_integer
+                                                { $$ := $1; }
+        ;
 
   single_datetime_field_opt :
         /* Empty */
+                                                { $$.Text := ''; $$.obj := nil; }
         |       left_paren interval_leading_field_precision single_datetime_field_opt2 right_paren
+                                                { $$.Text := ''; $$.obj := nil;
+                                                  yyinfo('Leading field precision ignored.');
+                                                  $2.Obj.Free; }
         ;
 
   single_datetime_field_opt2 :
         /* Empty */
+                                                { $$.Text := ''; $$.obj := nil; }
         |       comma interval_fractional_seconds_precision
+                                                { $$.Text := ''; $$.obj := nil;
+                                                  yyinfo('Fractional seconds precision ignored.');
+                                                  $2.Obj.Free; }
         ;
 
-  domain_name : qualified_name ;
+
+  domain_name :
+                qualified_name
+                                                { $$ := $1; }
+        ;
 
   qualified_name :
                 identifier
+                                                { $$ := $1; }
         |       identifier period identifier
+                                                { $$ := $1;
+                                                  $$.Text := $$.Text + '.' + $3.Text;
+                                                  ($$.Obj as TSqlSynIdent).IdentName := $$.Text;
+                                                  $3.Obj.Free; }
         |       identifier period identifier period identifier
+                                                { $$ := $1;
+                                                  $$.Text := $$.Text + '.' + $3.Text + '.' + $5.Text;
+                                                  ($$.Obj as TSqlSynIdent).IdentName := $$.Text;
+                                                  $3.Obj.Free;
+                                                  $5.Obj.Free; }
         ;
 
   qualified_name_trail_asterisk :
                 identifier period asterisk
+                                                { $$ := $1;
+                                                  $$.Text := $1.Text + '.*';
+                                                  with $$.Obj as TSqlsynIdent do
+                                                  begin
+                                                    IdentName := $$.Text;
+                                                    Wildcard := True;
+                                                  end; }
         |       identifier period identifier period asterisk
+                                                { $$ := $1;
+                                                  $$.Text := $1.Text +
+                                                  '.' + $3.Text + '.*';
+                                                  with $$.Obj as TSqlsynIdent do
+                                                  begin
+                                                    IdentName := $$.Text;
+                                                    Wildcard := True;
+                                                  end;
+                                                  $3.Obj.Free; }
         |       identifier period identifier period identifier period asterisk
+                                                { $$ := $1;
+                                                  $$.Text := $1.Text +
+                                                  '.' + $3.Text +
+                                                  '.' + $5.Text + '.*';
+                                                  with $$.Obj as TSqlsynIdent do
+                                                  begin
+                                                    IdentName := $$.Text;
+                                                    Wildcard := True;
+                                                  end;
+                                                  $3.Obj.Free;
+                                                  $5.Obj.Free; }
         ;
 
-  default_clause : _DEFAULT default_option ;
+  default_clause :
+                _DEFAULT default_option
+                                                { $$ := $1; }
+        ;
 
   default_option :
 		literal
+                                                { $$ := $1; }
 	|	datetime_value_function
+                                                { $$ := $1; }
 	|	_USER
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynBuiltin);
+                                                  with $$.Obj as TSqlSynBuiltIn do
+                                                    BuiltInType := sftUser; }
 	|	_CURRENT_USER
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynBuiltin);
+                                                  with $$.Obj as TSqlSynBuiltIn do
+                                                    BuiltInType := sftCurrentUser; }
 	|	_SESSION_USER
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynBuiltin);
+                                                  with $$.Obj as TSqlSynBuiltIn do
+                                                    BuiltInType := sftSessionUser; }
 	|	_SYSTEM_USER
-	|	_NULL ;
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynBuiltin);
+                                                  with $$.Obj as TSqlSynBuiltIn do
+                                                    BuiltInType := sftSystemUser; }
+	|	_NULL
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynBuiltin);
+                                                  with $$.Obj as TSqlSynBuiltIn do
+                                                    BuiltInType := sftNull; }
+        ;
 
 /*
 --hr
@@ -962,51 +1636,166 @@ uses
 --/h2
 */
 
-  literal : signed_numeric_literal | general_literal ;
+  literal :
+                signed_numeric_literal          { $$ := $1; }
+        |       general_literal                 { $$ := $1; }
+        ;
 
   signed_numeric_literal :
-                sign unsigned_numeric_literal ;
-        |       unsigned_numeric_literal ;
+                sign unsigned_numeric_literal
+                                                { $$ := $2;
+                                                  Assert($2.Text = ($2.Obj as TSQLSynLiteral).Text);
+                                                  $$.Text := $1.Text + $2.Text;
+                                                  with $$.Obj as TSQLSynLiteral do
+                                                  begin
+                                                    Text := $$.Text;
+                                                    if $1.Text <> '+' then
+                                                    begin
+                                                      case LitType of
+                                                        sltUnsInt: LitType := sltInt;
+                                                        sltInt: (* No change *);
+                                                        sltExactNumeric: LitType := sltSignedExactNumeric;
+                                                        sltApproxNumeric: LitType := sltSignedApproxNumeric;
+                                                      else
+                                                        Assert(false);
+                                                      end;
+                                                    end;
+                                                  end; }
+        |       unsigned_numeric_literal
+                                                { $$ := $1; }
+        ;
 
   general_literal :
-		character_string_literal
+		character_string_literal        { $$ := $1; }
 	|	national_character_string_literal
+                                                { $$ := $1; }
 	|	bit_string_literal
+                                                { $$ := $1; }
 	|	hex_string_literal
+                                                { $$ := $1; }
 	|	datetime_literal
-	|	interval_literal ;
+                                                { $$ := $1; }
+	|	interval_literal
+                                                { $$ := $1; }
+        ;
 
   datetime_literal :
 		date_literal
+                                                { $$ := $1; }
 	|	time_literal
-	|	timestamp_literal ;
+                                                { $$ := $1; }
+	|	timestamp_literal
+                                                { $$ := $1; }
+        ;
 
-  date_literal : _DATE date_string ;
+  date_literal : _DATE date_string
+                                                { $$.Text := $1.Text;
+                                                  Assert(not Assigned($1.Obj));
+                                                  $$.Obj := MakeClass(TSQlSynLiteral);
+                                                  with $$.Obj as TSQLSynLiteral do
+                                                  begin
+                                                    LitType := sltDate;
+                                                    Text := $$.Text;
+                                                  end; }
+        ;
 
-  time_literal : _TIME time_string ;
+  time_literal : _TIME time_string
+                                                { $$.Text := $1.Text;
+                                                  Assert(not Assigned($1.Obj));
+                                                  $$.Obj := MakeClass(TSQlSynLiteral);
+                                                  with $$.Obj as TSQLSynLiteral do
+                                                  begin
+                                                    LitType := sltTime;
+                                                    Text := $$.Text;
+                                                  end; }
+        ;
 
-  timestamp_literal : _TIMESTAMP timestamp_string ;
+  timestamp_literal : _TIMESTAMP timestamp_string
+                                                { $$.Text := $1.Text;
+                                                  Assert(not Assigned($1.Obj));
+                                                  $$.Obj := MakeClass(TSQlSynLiteral);
+                                                  with $$.Obj as TSQLSynLiteral do
+                                                  begin
+                                                    LitType := sltTimestamp;
+                                                    Text := $$.Text;
+                                                  end; }
+        ;
 
   interval_literal :
                 _INTERVAL interval_string interval_qualifier
+                                                { $$.Text := $2.Text + ' ' + $3.Text;
+                                                  $$.Obj := MakeClass(TSQLSynIntervalLiteral);
+                                                  with $$.Obj as TSQLSynIntervalLiteral do
+                                                  begin
+                                                    LitType := sltInterval;
+                                                    Text := $$.Text;
+                                                    Assert(Assigned($2.Obj));
+                                                    Assert(Assigned($3.Obj));
+                                                    InsertTailChild($2.Obj);
+                                                    InsertTailChild($3.Obj);
+                                                    Interval := $2.Obj as TSQLSynIntervalStringLiteral;
+                                                    Qualifier := $3.Obj as TSQLSynIntervalQualifier;
+                                                  end; }
         |       _INTERVAL sign  interval_string interval_qualifier
+                                                { $$.Text := $3.Text + ' ' + $4.Text;
+                                                  $$.Obj := MakeClass(TSQLSynIntervalLiteral);
+                                                  with $$.Obj as TSQLSynIntervalLiteral do
+                                                  begin
+                                                    LitType := sltInterval;
+                                                    Text := $$.Text;
+                                                    if $2.Text <> '+' then
+                                                      Negated := True;
+                                                    Assert(Assigned($3.Obj));
+                                                    Assert(Assigned($4.Obj));
+                                                    InsertTailChild($3.Obj);
+                                                    InsertTailChild($4.Obj);
+                                                    Interval := $3.Obj as TSQLSynIntervalStringLiteral;
+                                                    Qualifier := $4.Obj as TSQLSynIntervalQualifier;
+                                                  end; }
         ;
 
   datetime_value_function :
-		current_date_value_function
-	|	current_time_value_function
-	|	current_timestamp_value_function ;
+		current_date_value_function     { $$ := $1; }
+	|	current_time_value_function     { $$ := $1; }
+	|	current_timestamp_value_function
+                                                { $$ := $1; }
+        ;
 
-  current_date_value_function : _CURRENT_DATE ;
+  current_date_value_function : _CURRENT_DATE
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynBuiltin);
+                                                  with $$.Obj as TSqlSynBuiltin do
+                                                    BuiltInType := sftCurrentDate; }
+        ;
 
   current_time_value_function :
                 _CURRENT_TIME
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynBuiltin);
+                                                  with $$.Obj as TSqlSynBuiltin do
+                                                    BuiltInType := sftCurrentTime; }
         |       _CURRENT_TIME left_paren time_precision right_paren
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynBuiltin);
+                                                  with $$.Obj as TSqlSynBuiltin do
+                                                    BuiltInType := sftCurrentTime;
+                                                  $3.Obj.Free;
+                                                  yyinfo('Time precision ignored in current time function.'); }
         ;
 
   current_timestamp_value_function :
                 _CURRENT_TIMESTAMP
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynBuiltin);
+                                                  with $$.Obj as TSqlSynBuiltin do
+                                                    BuiltInType := sftCurrentTimestamp; }
         |       _CURRENT_TIMESTAMP left_paren timestamp_precision right_paren
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynBuiltin);
+                                                  with $$.Obj as TSqlSynBuiltin do
+                                                    BuiltInType := sftCurrentTimestamp;
+                                                  $3.Obj.Free;
+                                                  yyinfo('Timestamp precision ignored in current timestamp function.'); }
         ;
 
 /*
@@ -1348,9 +2137,6 @@ uses
   select_sublist :
                 derived_column
         |       qualified_name_trail_asterisk
-/*
-        |       qualifier period asterisk
-*/
         ;
 
   derived_column :
@@ -1386,12 +2172,12 @@ uses
         |       having_clause
         ;
 
-  from_clause : _FROM from_clause_opt
+  from_clause : _FROM from_clause_list
         ;
 
-  from_clause_opt :
+  from_clause_list :
                 table_reference
-        |       from_clause_opt comma table_reference
+        |       from_clause_list comma table_reference
         ;
 
 /*
@@ -1917,9 +2703,20 @@ The notation is written out longhand several times, instead;
 */
 
   module_contents :
+        /* Empty */                             { $$.Obj := MakeClass(TTempTpl); $$.Text := ''; }
+        |       module_contents module_content
+                                                { $$ := $1;
+                                                  $$.Obj.InsertTailChild($2.Obj); }
+        ;
+
+  module_content :
 		declare_cursor
-	|	dynamic_declare_cursor
-	|	procedure ;
+                                                { $$ := $1; }
+	|	procedure
+                                                { $$ := $1; }
+        |       temporary_table_declaration
+                                                { $$ := $1; }
+        ;
 
   declare_cursor :
 		_DECLARE cursor_name insensitive_opt scroll_opt _CURSOR _FOR cursor_specification ;
@@ -1968,11 +2765,6 @@ The notation is written out longhand several times, instead;
         /* Empty */
         |       _OF column_name_list
         ;
-
-  dynamic_declare_cursor :
-		_DECLARE cursor_name insensitive_opt scroll_opt _CURSOR _FOR statement_name ;
-
-  statement_name : identifier;
 
 /*
 --hr
@@ -2736,12 +3528,35 @@ begin
   result := ClassType.Create;
   result.Line := Lexer.yylineno;
   result.Col := Lexer.yycolno;
+  //TODO - State and action as debug?
 end;
 
 function SQL92GrammarParser.CheckContinuation(S: string; T: TSQLSynLiteralType): boolean;
 begin
   Assert(false);
   //TODO - Write this.
+  result := false;
+end;
+
+function SQL92GrammarParser.HandleContinuation(S: string; T: TSQLSynLiteralType): string;
+begin
+  Assert(false);
+  //TODO - Write this.
+  result := '';
+end;
+
+function SQL92GrammarParser.CheckDelimIdent(S: string): boolean;
+begin
+  Assert(false);
+  //TODO - Write this.
+  result := false;
+end;
+
+function SQL92GrammarParser.HandleDelimIdent(S: string): string;
+begin
+  Assert(false);
+  //TODO - Write this.
+  result := '';
 end;
 
 
