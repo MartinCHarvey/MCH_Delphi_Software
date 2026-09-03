@@ -1949,7 +1949,7 @@ Note that <colon> is written as a literal colon in the ANSI grammar.
 	|	preparable_SQL_session_statement
 	|	preparable_SQL_implementation_defined_statement .
 
-preparable_SQL_data_statement =
+  preparable_SQL_data_statement =
 		delete_statement__searched
 	|	dynamic_single_row_select_statement
 	|	insert_statement
