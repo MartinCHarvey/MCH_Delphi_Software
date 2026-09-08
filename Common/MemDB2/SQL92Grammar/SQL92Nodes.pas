@@ -57,6 +57,8 @@ type
 
     procedure ValidateAST;
     procedure ValidateSelf; virtual;
+
+    function Clone: TSQLSynNode; virtual; //TODO - Write and override this.
   end;
 
   TSQLSynNodeClass = class of TSQLSynNode;
@@ -146,9 +148,11 @@ type
   private
     FIdentName: string;
     FWildcard: boolean;
+    FLocalName: boolean;
   public
     property IdentName: string read FIdentName write FIdentName;
     property Wildcard: boolean read FWildcard write FWildCard;
+    property LocalName: boolean read FLocalName write FLocalName;
   end;
 
   //Expect some level of coercion allowed between literal types, and
@@ -220,7 +224,13 @@ type
   //TODO - I'm going to worry about identifier resolution
   //and namespaces a bit later, because there are many and varied ways of introducing them.
   TSQLSynStructuralType = (
-    sstModule
+    sstModule,
+    sstCreateOrDecl,
+    sstColDef,
+    sstConstraint,
+    sstConstraintDetail,
+    sstRefAction,
+    sstConstraintAttributes
   );
 
   TSQLSynStructural = class(TSQLSynNode)
@@ -238,16 +248,174 @@ type
     property Name:TSqlSynIdent read FName write FName;
   end;
 
+  TSqlSynCreateOrDeclTable = class;
+
   TSQLSynModule = class(TSQLSynNamedStructural)
   private
     FLanguage, FSchema, FAuthorization: TSQLSynIdent;
-    FFirstContents: TSQLSynNode;
+    FFirstTempTbl: TSqlSynCreateOrDeclTable;
+    FFirstProcedure: TSqlSynNode; //TODO - Class type;
+    FFirstCursor: TSqlSynNode; //TODO - Class type;
   public
+    procedure FlattenModuleContents(ContentList: TTempTpl);
+
     property Language: TSqlSynIdent read FLanguage write FLanguage;
     property Schema: TSqlSynIdent read FSchema write FSchema;
     property Authorization: TSqlSynIdent read FAuthorization write FAuthorization;
     //Includes both temp tbl decls and contents.
-    property FirstContents: TSqlSynNode read FFirstContents write FFirstContents;
+    property FirstTempTbl: TSqlSynCreateOrDeclTable read FFirstTempTbl write FFirstTempTbl;
+    property FirstProcedure: TSqlSynNode read FFirstProcedure write FFirstProcedure;
+    property FirstCursor: TSqlSynNode read FFirstCursor write FFirstCursor;
+  end;
+
+  TSQLSynCreateOrDeclType = (
+    codTable
+  ) ;
+
+  TSQLSynCreateOrDecl = class(TSQLSynNamedStructural)
+  private
+    FType: TSQlSynCreateOrDeclType;
+  public
+    property _Type: TSQlSynCreateOrDeclType read FType write FType;
+  end;
+
+  TSqlSynRowCommitAction = (
+    rcaUnspecified,
+    rcaCommitRows,
+    rcaDeleteRows
+  );
+
+  TSqlSynColDef = class;
+  TSqlSynConstraint = class;
+
+  //Possibly view as well ...
+  TSqlSynCreateOrDeclTable = class(TSQLSynCreateOrDecl)
+  private
+    FTemporary: boolean;
+    FLocal:boolean;
+    FRowCommitAction: TSqlSynRowCommitAction;
+    FFirstColDef: TSqlSynColDef;
+    FFirstConstraint: TSqlSynConstraint;
+  public
+    procedure FlattenColDefsConstraints(ContentList: TTempTpl);
+
+    property Temporary: boolean read FTemporary write FTemporary;
+    property Local: boolean read FLocal write FLocal;
+    property RowCommitAction: TSqlSynRowCommitAction
+      read FRowCommitAction write FRowCommitAction;
+    property FirstColDef: TSqlSynColDef read FFirstColDef write FFirstColDef;
+    property FirstConstraint: TSqlSynConstraint read FFirstConstraint write FFirstConstraint;
+  end;
+
+  TSqlSynColDef = class(TSQLSynNamedStructural)
+  private
+    FDataType: TSqlSynNode; //Might be datatype or domain ...
+    FDefault: TSQlSynExpr; //Should be a literal or builtin ...
+    FConstraint: TSqlSynNode; //TODO - determine class type here.
+    FCollation: TSqlSynNode;  //TODO - determine class type here.
+  public
+    property Datatype: TSqlSynNode read FDataType write FDataType;
+    property _Default: TSqlSynExpr read FDefault write FDefault;
+    property Constraint: TSqlSynNode read FConstraint write FConstraint;
+    property Collation: TSqlSynNode read FCollation write FCollation;
+  end;
+
+  { The idea here is we'll post process column constraints into table
+    constraints after parse ...}
+  TSqlSynConstraintType = (
+    sctColumn,
+    sctTable,
+    sctDomain);
+
+  TSqlSynConstraintDetail = class;
+  TSqlSynConstraintAttributes = class;
+
+  TSqlSynConstraint = class(TSQLSynNamedStructural)
+  private
+    FConstraintType: TSqlSynConstraintType;
+    FFirstReffingCol: TSqlSynNode; //TODO - determine class type here.
+    FDetail: TSqlSynConstraintDetail;
+    FAttributes: TSqlSynConstraintAttributes;
+  public
+    procedure FlattenReffingCols(ColumnList: TTempTpl);
+    property ConstraintType: TSqlSynConstraintType read FConstraintType write FConstraintType;
+    property FirstReffingCol: TSqlSynNode read FFirstReffingCol write FFirstReffingCol;
+    property Detail: TSqlSynConstraintDetail read FDetail write FDetail;
+    property Attributes: TSqlSynConstraintAttributes read FAttributes write FAttributes;
+  end;
+
+  TSqlSynConstraintDetailType = (
+    cdtNotNull,
+    cdtUnique,
+    cdtPrimaryKey,
+    cdtReferences
+    //cdtCheck TODO - omitted for the moment.
+    ) ;
+
+  TSqlSynConstraintDetail = class(TSQLSynStructural)
+  private
+    FDetailType: TSqlSynConstraintDetailType;
+  public
+    property DetailType: TSqlSynConstraintDetailType read FDetailType write FDetailType;
+  end;
+
+  TSqlSynMatchType = (
+    mtUnspec,
+    mtFull,
+    mtPartial
+  );
+
+  //This detail used for foreign keys.
+  TSqlSynReferencesConstraintDetail = class(TSqlSynConstraintDetail)
+  private
+    FRefTab: TSqlSynIdent;
+    FMatchType: TSqlSynMatchType;
+    FFirstReffedCol: TSqlSynNode; //TODO - Class type, ident?
+    FRefAction: TSqlSynNode; //TODO - Class type, enum?
+  public
+    procedure FlattenReffedDetails(ReffedDefs: TTempTpl);
+    property MatchType: TSqlSynMatchType read FMatchType write FMatchType;
+    property RefTab: TSqlSynIdent read FRefTab write FRefTab;
+    property FirstReffedCol: TSqlSynNode read FFirstReffedCol write FFirstReffedCol;
+    property RefAction: TSqlSynNode read FRefAction write FRefAction;
+  end;
+
+  TSqlSynDeferrable = (
+    ssdUnspec,
+    ssdNotDeferrable,
+    ssdDeferrable
+  );
+
+  TSqlSynInitDeferred = (
+    sidUnspec,
+    sidNotInitDeferred,
+    sidInitDeferred
+  );
+
+  TSqlSynConstraintAttributes = class(TSqlSynStructural)
+  private
+    FDeferrable: TSqlSynDeferrable;
+    FInitDeferred: TSqlSynInitDeferred;
+  public
+    property Deferrable: TSqlSynDeferrable read FDeferrable write FDeferrable;
+    property InitDeferred: TSqlSynInitDeferred read FInitDeferred write FInitDeferred;
+  end;
+
+  TSqlSynRefDoAction = (
+    rdaNone,
+    rdaCascade,
+    rdaSetNull,
+    rdaSetDefault
+  );
+
+  TSqlSynRefAction = class(TSqlSynStructural)
+  private
+    FUpdateAction: TSqlSynRefDoAction;
+    FDeleteAction: TSqlSynRefDoAction;
+  public
+    procedure MergeWith(Other: TSqlSynRefAction);
+    property UpdateAction: TSqlSynRefDoAction read FUpdateAction write FUpdateAction;
+    property DeleteAction: TSqlSynRefDoAction read FDeleteAction write FDeleteAction;
   end;
 
 implementation
@@ -375,5 +543,51 @@ procedure TSQLSynNode.ValidateSelf;
 begin
 end;
 
+function TSQlSynNode.Clone: TSQLSynNode;
+begin
+  Assert(false);
+  result := nil;
+  //TODO - write this.
+end;
+
+{ TSQLSynModule }
+
+procedure TSqlSynModule.FlattenModuleContents(ContentList: TTempTpl);
+begin
+  Assert(false);
+  //TODO - write this.
+end;
+
+{ TSqlSynCreateOrDeclTable }
+
+procedure TSqlSynCreateOrDeclTable.FlattenColDefsConstraints(ContentList: TTempTpl);
+begin
+  Assert(false);
+  //TODO - write this.
+end;
+
+{ TSqlSynConstraint }
+
+procedure TSqlSynConstraint.FlattenReffingCols(ColumnList: TTempTpl);
+begin
+  Assert(false);
+  //TODO - write this.
+end;
+
+{ TSqlSynReferencesConstraintDetail }
+
+procedure TSqlSynReferencesConstraintDetail.FlattenReffedDetails(ReffedDefs: TTempTpl);
+begin
+  Assert(false);
+  //TODO - write this.
+end;
+
+{ TSqlSynRefAction }
+
+procedure TSqlSynRefAction.MergeWith(Other: TSqlSynRefAction);
+begin
+  Assert(false);
+  //TODO - write this.
+end;
 
 end.

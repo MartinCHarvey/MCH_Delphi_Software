@@ -10,7 +10,7 @@ function GetStateActionString(State: integer; Action:Integer): string;
 implementation
 
 const
-  ListInfo: array [0..27914] of string = (
+  ListInfo: array [0..27921] of string = (
     '',
     'state 0:',
     '',
@@ -108,14 +108,14 @@ const
     '',
     'state 1:',
     '',
-    '	SQL92Grammar : sql_input _	(910)',
+    '	SQL92Grammar : sql_input _	(911)',
     '',
-    '	.	reduce 910',
+    '	.	reduce 911',
     '',
     'state 2:',
     '',
     '	sql_script : sql_script _ sql_statement',
-    '	sql_input : sql_script _	(908)',
+    '	sql_input : sql_script _	(909)',
     '',
     '	identifier_body	shift 66',
     '	delimited_identifier	shift 67',
@@ -138,7 +138,7 @@ const
     '	_TABLE	shift 85',
     '	_UPDATE	shift 86',
     '	_VALUES	shift 87',
-    '	$end	reduce 908',
+    '	$end	reduce 909',
     '	.	error',
     '',
     '	sql_statement	goto 88',
@@ -204,279 +204,279 @@ const
     '',
     'state 3:',
     '',
-    '	sql_script : sql_statement _	(906)',
+    '	sql_script : sql_statement _	(907)',
     '',
-    '	.	reduce 906',
+    '	.	reduce 907',
     '',
     'state 4:',
     '',
-    '	direct_SQL_data_statement : direct_select_statement__multiple_rows _	(899)',
-    '',
-    '	.	reduce 899',
-    '',
-    'state 5:',
-    '',
-    '	direct_SQL_statement : direct_implementation_defined_statement _	(897)',
-    '',
-    '	.	reduce 897',
-    '',
-    'state 6:',
-    '',
-    '	direct_SQL_statement : direct_SQL_data_statement _	(892)',
-    '',
-    '	.	reduce 892',
-    '',
-    'state 7:',
-    '',
-    '	sql_statement : direct_SQL_statement _	(905)',
-    '',
-    '	.	reduce 905',
-    '',
-    'state 8:',
-    '',
-    '	SQL_session_statement : set_local_time_zone_statement _	(882)',
-    '',
-    '	.	reduce 882',
-    '',
-    'state 9:',
-    '',
-    '	SQL_session_statement : set_session_authorization_identifier_statement _	(881)',
-    '',
-    '	.	reduce 881',
-    '',
-    'state 10:',
-    '',
-    '	SQL_session_statement : set_names_statement _	(880)',
-    '',
-    '	.	reduce 880',
-    '',
-    'state 11:',
-    '',
-    '	SQL_session_statement : set_schema_statement _	(879)',
-    '',
-    '	.	reduce 879',
-    '',
-    'state 12:',
-    '',
-    '	SQL_session_statement : set_catalog_statement _	(878)',
-    '',
-    '	.	reduce 878',
-    '',
-    'state 13:',
-    '',
-    '	SQL_connection_statement : disconnect_statement _	(860)',
-    '',
-    '	.	reduce 860',
-    '',
-    'state 14:',
-    '',
-    '	SQL_connection_statement : set_connection_statement _	(859)',
-    '',
-    '	.	reduce 859',
-    '',
-    'state 15:',
-    '',
-    '	SQL_connection_statement : connect_statement _	(858)',
-    '',
-    '	.	reduce 858',
-    '',
-    'state 16:',
-    '',
-    '	SQL_transaction_statement : rollback_statement _	(831)',
-    '',
-    '	.	reduce 831',
-    '',
-    'state 17:',
-    '',
-    '	SQL_transaction_statement : commit_statement _	(830)',
-    '',
-    '	.	reduce 830',
-    '',
-    'state 18:',
-    '',
-    '	SQL_transaction_statement : set_constraints_mode_statement _	(829)',
-    '',
-    '	.	reduce 829',
-    '',
-    'state 19:',
-    '',
-    '	SQL_transaction_statement : set_transaction_statement _	(828)',
-    '',
-    '	.	reduce 828',
-    '',
-    'state 20:',
-    '',
-    '	direct_SQL_data_statement : update_statement__searched _	(901)',
-    '',
-    '	.	reduce 901',
-    '',
-    'state 21:',
-    '',
-    '	direct_SQL_data_statement : insert_statement _	(900)',
+    '	direct_SQL_data_statement : direct_select_statement__multiple_rows _	(900)',
     '',
     '	.	reduce 900',
     '',
-    'state 22:',
+    'state 5:',
     '',
-    '	direct_SQL_data_statement : delete_statement__searched _	(898)',
+    '	direct_SQL_statement : direct_implementation_defined_statement _	(898)',
     '',
     '	.	reduce 898',
     '',
+    'state 6:',
+    '',
+    '	direct_SQL_statement : direct_SQL_data_statement _	(893)',
+    '',
+    '	.	reduce 893',
+    '',
+    'state 7:',
+    '',
+    '	sql_statement : direct_SQL_statement _	(906)',
+    '',
+    '	.	reduce 906',
+    '',
+    'state 8:',
+    '',
+    '	SQL_session_statement : set_local_time_zone_statement _	(883)',
+    '',
+    '	.	reduce 883',
+    '',
+    'state 9:',
+    '',
+    '	SQL_session_statement : set_session_authorization_identifier_statement _	(882)',
+    '',
+    '	.	reduce 882',
+    '',
+    'state 10:',
+    '',
+    '	SQL_session_statement : set_names_statement _	(881)',
+    '',
+    '	.	reduce 881',
+    '',
+    'state 11:',
+    '',
+    '	SQL_session_statement : set_schema_statement _	(880)',
+    '',
+    '	.	reduce 880',
+    '',
+    'state 12:',
+    '',
+    '	SQL_session_statement : set_catalog_statement _	(879)',
+    '',
+    '	.	reduce 879',
+    '',
+    'state 13:',
+    '',
+    '	SQL_connection_statement : disconnect_statement _	(861)',
+    '',
+    '	.	reduce 861',
+    '',
+    'state 14:',
+    '',
+    '	SQL_connection_statement : set_connection_statement _	(860)',
+    '',
+    '	.	reduce 860',
+    '',
+    'state 15:',
+    '',
+    '	SQL_connection_statement : connect_statement _	(859)',
+    '',
+    '	.	reduce 859',
+    '',
+    'state 16:',
+    '',
+    '	SQL_transaction_statement : rollback_statement _	(832)',
+    '',
+    '	.	reduce 832',
+    '',
+    'state 17:',
+    '',
+    '	SQL_transaction_statement : commit_statement _	(831)',
+    '',
+    '	.	reduce 831',
+    '',
+    'state 18:',
+    '',
+    '	SQL_transaction_statement : set_constraints_mode_statement _	(830)',
+    '',
+    '	.	reduce 830',
+    '',
+    'state 19:',
+    '',
+    '	SQL_transaction_statement : set_transaction_statement _	(829)',
+    '',
+    '	.	reduce 829',
+    '',
+    'state 20:',
+    '',
+    '	direct_SQL_data_statement : update_statement__searched _	(902)',
+    '',
+    '	.	reduce 902',
+    '',
+    'state 21:',
+    '',
+    '	direct_SQL_data_statement : insert_statement _	(901)',
+    '',
+    '	.	reduce 901',
+    '',
+    'state 22:',
+    '',
+    '	direct_SQL_data_statement : delete_statement__searched _	(899)',
+    '',
+    '	.	reduce 899',
+    '',
     'state 23:',
     '',
-    '	SQL_schema_manipulation_statement : drop_assertion_statement _	(744)',
+    '	SQL_schema_manipulation_statement : drop_assertion_statement _	(745)',
     '',
-    '	.	reduce 744',
+    '	.	reduce 745',
     '',
     'state 24:',
     '',
-    '	SQL_schema_manipulation_statement : drop_translation_statement _	(743)',
+    '	SQL_schema_manipulation_statement : drop_translation_statement _	(744)',
     '',
-    '	.	reduce 743',
+    '	.	reduce 744',
     '',
     'state 25:',
     '',
-    '	SQL_schema_manipulation_statement : drop_collation_statement _	(742)',
+    '	SQL_schema_manipulation_statement : drop_collation_statement _	(743)',
     '',
-    '	.	reduce 742',
+    '	.	reduce 743',
     '',
     'state 26:',
     '',
-    '	SQL_schema_manipulation_statement : drop_character_set_statement _	(741)',
+    '	SQL_schema_manipulation_statement : drop_character_set_statement _	(742)',
     '',
-    '	.	reduce 741',
+    '	.	reduce 742',
     '',
     'state 27:',
     '',
-    '	SQL_schema_manipulation_statement : drop_domain_statement _	(740)',
+    '	SQL_schema_manipulation_statement : drop_domain_statement _	(741)',
     '',
-    '	.	reduce 740',
+    '	.	reduce 741',
     '',
     'state 28:',
     '',
-    '	SQL_schema_manipulation_statement : alter_domain_statement _	(739)',
+    '	SQL_schema_manipulation_statement : alter_domain_statement _	(740)',
     '',
-    '	.	reduce 739',
+    '	.	reduce 740',
     '',
     'state 29:',
     '',
-    '	SQL_schema_manipulation_statement : revoke_statement _	(738)',
+    '	SQL_schema_manipulation_statement : revoke_statement _	(739)',
     '',
-    '	.	reduce 738',
+    '	.	reduce 739',
     '',
     'state 30:',
     '',
-    '	SQL_schema_manipulation_statement : drop_view_statement _	(737)',
+    '	SQL_schema_manipulation_statement : drop_view_statement _	(738)',
     '',
-    '	.	reduce 737',
+    '	.	reduce 738',
     '',
     'state 31:',
     '',
-    '	SQL_schema_manipulation_statement : drop_table_statement _	(736)',
+    '	SQL_schema_manipulation_statement : drop_table_statement _	(737)',
     '',
-    '	.	reduce 736',
+    '	.	reduce 737',
     '',
     'state 32:',
     '',
-    '	SQL_schema_manipulation_statement : alter_table_statement _	(735)',
+    '	SQL_schema_manipulation_statement : alter_table_statement _	(736)',
     '',
-    '	.	reduce 735',
+    '	.	reduce 736',
     '',
     'state 33:',
     '',
-    '	SQL_schema_manipulation_statement : drop_schema_statement _	(734)',
+    '	SQL_schema_manipulation_statement : drop_schema_statement _	(735)',
     '',
-    '	.	reduce 734',
+    '	.	reduce 735',
     '',
     'state 34:',
     '',
-    '	SQL_schema_definition_statement : assertion_definition _	(634)',
+    '	SQL_schema_definition_statement : assertion_definition _	(635)',
     '',
-    '	.	reduce 634',
+    '	.	reduce 635',
     '',
     'state 35:',
     '',
-    '	SQL_schema_definition_statement : translation_definition _	(633)',
+    '	SQL_schema_definition_statement : translation_definition _	(634)',
     '',
-    '	.	reduce 633',
+    '	.	reduce 634',
     '',
     'state 36:',
     '',
-    '	SQL_schema_definition_statement : collation_definition _	(632)',
+    '	SQL_schema_definition_statement : collation_definition _	(633)',
     '',
-    '	.	reduce 632',
+    '	.	reduce 633',
     '',
     'state 37:',
     '',
-    '	SQL_schema_definition_statement : character_set_definition _	(631)',
+    '	SQL_schema_definition_statement : character_set_definition _	(632)',
     '',
-    '	.	reduce 631',
+    '	.	reduce 632',
     '',
     'state 38:',
     '',
-    '	SQL_schema_definition_statement : domain_definition _	(630)',
+    '	SQL_schema_definition_statement : domain_definition _	(631)',
     '',
-    '	.	reduce 630',
+    '	.	reduce 631',
     '',
     'state 39:',
     '',
-    '	SQL_schema_definition_statement : grant_statement _	(629)',
+    '	SQL_schema_definition_statement : grant_statement _	(630)',
     '',
-    '	.	reduce 629',
+    '	.	reduce 630',
     '',
     'state 40:',
     '',
-    '	SQL_schema_definition_statement : view_definition _	(628)',
+    '	SQL_schema_definition_statement : view_definition _	(629)',
     '',
-    '	.	reduce 628',
+    '	.	reduce 629',
     '',
     'state 41:',
     '',
-    '	SQL_schema_definition_statement : table_definition _	(627)',
+    '	SQL_schema_definition_statement : table_definition _	(628)',
     '',
-    '	.	reduce 627',
+    '	.	reduce 628',
     '',
     'state 42:',
     '',
-    '	SQL_schema_definition_statement : schema_definition _	(626)',
+    '	SQL_schema_definition_statement : schema_definition _	(627)',
     '',
-    '	.	reduce 626',
+    '	.	reduce 627',
     '',
     'state 43:',
     '',
-    '	SQL_schema_statement : SQL_schema_manipulation_statement _	(625)',
+    '	SQL_schema_statement : SQL_schema_manipulation_statement _	(626)',
     '',
-    '	.	reduce 625',
+    '	.	reduce 626',
     '',
     'state 44:',
     '',
-    '	SQL_schema_statement : SQL_schema_definition_statement _	(624)',
+    '	SQL_schema_statement : SQL_schema_definition_statement _	(625)',
     '',
-    '	.	reduce 624',
+    '	.	reduce 625',
     '',
     'state 45:',
     '',
-    '	direct_SQL_statement : SQL_session_statement _	(896)',
+    '	direct_SQL_statement : SQL_session_statement _	(897)',
     '',
-    '	.	reduce 896',
+    '	.	reduce 897',
     '',
     'state 46:',
     '',
-    '	direct_SQL_statement : SQL_connection_statement _	(895)',
+    '	direct_SQL_statement : SQL_connection_statement _	(896)',
     '',
-    '	.	reduce 895',
+    '	.	reduce 896',
     '',
     'state 47:',
     '',
-    '	direct_SQL_statement : SQL_transaction_statement _	(894)',
+    '	direct_SQL_statement : SQL_transaction_statement _	(895)',
     '',
-    '	.	reduce 894',
+    '	.	reduce 895',
     '',
     'state 48:',
     '',
-    '	direct_SQL_statement : SQL_schema_statement _	(893)',
+    '	direct_SQL_statement : SQL_schema_statement _	(894)',
     '',
-    '	.	reduce 893',
+    '	.	reduce 894',
     '',
     'state 49:',
     '',
@@ -564,42 +564,42 @@ const
     '	query_expression : query_expression _ _UNION all_opt corresponding_spec_opt query_term',
     '	query_expression : query_expression _ _EXCEPT all_opt corresponding_spec_opt query_term',
     '	direct_select_statement__multiple_rows : query_expression _ order_by_clause_opt',
-    '	order_by_clause_opt : _	(595)',
+    '	order_by_clause_opt : _	(596)',
     '',
     '	_EXCEPT	shift 91',
     '	_ORDER	shift 92',
     '	_UNION	shift 93',
-    '	$end	reduce 595',
-    '	identifier_body	reduce 595',
-    '	delimited_identifier	reduce 595',
-    '	left_paren	reduce 595',
-    '	underscore	reduce 595',
-    '	_ALTER	reduce 595',
-    '	_COMMIT	reduce 595',
-    '	_CONNECT	reduce 595',
-    '	_CREATE	reduce 595',
-    '	_DECLARE	reduce 595',
-    '	_DELETE	reduce 595',
-    '	_DISCONNECT	reduce 595',
-    '	_DROP	reduce 595',
-    '	_GRANT	reduce 595',
-    '	_INSERT	reduce 595',
-    '	_REVOKE	reduce 595',
-    '	_ROLLBACK	reduce 595',
-    '	_SELECT	reduce 595',
-    '	_SET	reduce 595',
-    '	_TABLE	reduce 595',
-    '	_UPDATE	reduce 595',
-    '	_VALUES	reduce 595',
+    '	$end	reduce 596',
+    '	identifier_body	reduce 596',
+    '	delimited_identifier	reduce 596',
+    '	left_paren	reduce 596',
+    '	underscore	reduce 596',
+    '	_ALTER	reduce 596',
+    '	_COMMIT	reduce 596',
+    '	_CONNECT	reduce 596',
+    '	_CREATE	reduce 596',
+    '	_DECLARE	reduce 596',
+    '	_DELETE	reduce 596',
+    '	_DISCONNECT	reduce 596',
+    '	_DROP	reduce 596',
+    '	_GRANT	reduce 596',
+    '	_INSERT	reduce 596',
+    '	_REVOKE	reduce 596',
+    '	_ROLLBACK	reduce 596',
+    '	_SELECT	reduce 596',
+    '	_SET	reduce 596',
+    '	_TABLE	reduce 596',
+    '	_UPDATE	reduce 596',
+    '	_VALUES	reduce 596',
     '	.	error',
     '',
     '	order_by_clause_opt	goto 90',
     '',
     'state 58:',
     '',
-    '	direct_SQL_data_statement : temporary_table_declaration _	(902)',
+    '	direct_SQL_data_statement : temporary_table_declaration _	(903)',
     '',
-    '	.	reduce 902',
+    '	.	reduce 903',
     '',
     'state 59:',
     '',
@@ -612,9 +612,9 @@ const
     '',
     'state 60:',
     '',
-    '	sql_input : module _	(909)',
+    '	sql_input : module _	(910)',
     '',
-    '	.	reduce 909',
+    '	.	reduce 910',
     '',
     'state 61:',
     '',
@@ -624,9 +624,9 @@ const
     '',
     'state 62:',
     '',
-    '	direct_implementation_defined_statement : identifier _	(904)',
+    '	direct_implementation_defined_statement : identifier _	(905)',
     '',
-    '	.	reduce 904',
+    '	.	reduce 905',
     '',
     'state 63:',
     '',
@@ -707,33 +707,33 @@ const
     '',
     'state 71:',
     '',
-    '	commit_statement : _COMMIT _	(854)',
+    '	commit_statement : _COMMIT _	(855)',
     '	commit_statement : _COMMIT _ _WORK',
     '',
     '	_WORK	shift 104',
-    '	$end	reduce 854',
-    '	identifier_body	reduce 854',
-    '	delimited_identifier	reduce 854',
-    '	left_paren	reduce 854',
-    '	semicolon	reduce 854',
-    '	underscore	reduce 854',
-    '	_ALTER	reduce 854',
-    '	_COMMIT	reduce 854',
-    '	_CONNECT	reduce 854',
-    '	_CREATE	reduce 854',
-    '	_DECLARE	reduce 854',
-    '	_DELETE	reduce 854',
-    '	_DISCONNECT	reduce 854',
-    '	_DROP	reduce 854',
-    '	_GRANT	reduce 854',
-    '	_INSERT	reduce 854',
-    '	_REVOKE	reduce 854',
-    '	_ROLLBACK	reduce 854',
-    '	_SELECT	reduce 854',
-    '	_SET	reduce 854',
-    '	_TABLE	reduce 854',
-    '	_UPDATE	reduce 854',
-    '	_VALUES	reduce 854',
+    '	$end	reduce 855',
+    '	identifier_body	reduce 855',
+    '	delimited_identifier	reduce 855',
+    '	left_paren	reduce 855',
+    '	semicolon	reduce 855',
+    '	underscore	reduce 855',
+    '	_ALTER	reduce 855',
+    '	_COMMIT	reduce 855',
+    '	_CONNECT	reduce 855',
+    '	_CREATE	reduce 855',
+    '	_DECLARE	reduce 855',
+    '	_DELETE	reduce 855',
+    '	_DISCONNECT	reduce 855',
+    '	_DROP	reduce 855',
+    '	_GRANT	reduce 855',
+    '	_INSERT	reduce 855',
+    '	_REVOKE	reduce 855',
+    '	_ROLLBACK	reduce 855',
+    '	_SELECT	reduce 855',
+    '	_SET	reduce 855',
+    '	_TABLE	reduce 855',
+    '	_UPDATE	reduce 855',
+    '	_VALUES	reduce 855',
     '	.	error',
     '',
     'state 72:',
@@ -753,7 +753,7 @@ const
     '	character_set_definition : _CREATE _ _CHARACTER _SET character_set_name as_opt character_set_source charset_collation_opt',
     '	collation_definition : _CREATE _ _COLLATION collation_name _FOR character_set_specification _FROM collation_source pad_attribute_opt',
     '	translation_definition : _CREATE _ _TRANSLATION translation_name _FOR source_character_set_specification _TO target_character_set_specification _FROM translation_source',
-    '	table_definition_opts : _	(658)',
+    '	table_definition_opts : _	(659)',
     '',
     '	_ASSERTION	shift 107',
     '	_CHARACTER	shift 108',
@@ -764,7 +764,7 @@ const
     '	_SCHEMA	shift 113',
     '	_TRANSLATION	shift 114',
     '	_VIEW	shift 115',
-    '	_TABLE	reduce 658',
+    '	_TABLE	reduce 659',
     '	.	error',
     '',
     '	table_definition_opts	goto 106',
@@ -904,49 +904,49 @@ const
     'state 81:',
     '',
     '	revoke_statement : _REVOKE _ grant_option_for_opt privileges _ON object_name _FROM grantee_list drop_behaviour',
-    '	grant_option_for_opt : _	(768)',
+    '	grant_option_for_opt : _	(769)',
     '',
     '	_GRANT	shift 186',
-    '	_ALL	reduce 768',
-    '	_DELETE	reduce 768',
-    '	_INSERT	reduce 768',
-    '	_REFERENCES	reduce 768',
-    '	_SELECT	reduce 768',
-    '	_UPDATE	reduce 768',
-    '	_USAGE	reduce 768',
+    '	_ALL	reduce 769',
+    '	_DELETE	reduce 769',
+    '	_INSERT	reduce 769',
+    '	_REFERENCES	reduce 769',
+    '	_SELECT	reduce 769',
+    '	_UPDATE	reduce 769',
+    '	_USAGE	reduce 769',
     '	.	error',
     '',
     '	grant_option_for_opt	goto 185',
     '',
     'state 82:',
     '',
-    '	rollback_statement : _ROLLBACK _	(856)',
+    '	rollback_statement : _ROLLBACK _	(857)',
     '	rollback_statement : _ROLLBACK _ _WORK',
     '',
     '	_WORK	shift 187',
-    '	$end	reduce 856',
-    '	identifier_body	reduce 856',
-    '	delimited_identifier	reduce 856',
-    '	left_paren	reduce 856',
-    '	semicolon	reduce 856',
-    '	underscore	reduce 856',
-    '	_ALTER	reduce 856',
-    '	_COMMIT	reduce 856',
-    '	_CONNECT	reduce 856',
-    '	_CREATE	reduce 856',
-    '	_DECLARE	reduce 856',
-    '	_DELETE	reduce 856',
-    '	_DISCONNECT	reduce 856',
-    '	_DROP	reduce 856',
-    '	_GRANT	reduce 856',
-    '	_INSERT	reduce 856',
-    '	_REVOKE	reduce 856',
-    '	_ROLLBACK	reduce 856',
-    '	_SELECT	reduce 856',
-    '	_SET	reduce 856',
-    '	_TABLE	reduce 856',
-    '	_UPDATE	reduce 856',
-    '	_VALUES	reduce 856',
+    '	$end	reduce 857',
+    '	identifier_body	reduce 857',
+    '	delimited_identifier	reduce 857',
+    '	left_paren	reduce 857',
+    '	semicolon	reduce 857',
+    '	underscore	reduce 857',
+    '	_ALTER	reduce 857',
+    '	_COMMIT	reduce 857',
+    '	_CONNECT	reduce 857',
+    '	_CREATE	reduce 857',
+    '	_DECLARE	reduce 857',
+    '	_DELETE	reduce 857',
+    '	_DISCONNECT	reduce 857',
+    '	_DROP	reduce 857',
+    '	_GRANT	reduce 857',
+    '	_INSERT	reduce 857',
+    '	_REVOKE	reduce 857',
+    '	_ROLLBACK	reduce 857',
+    '	_SELECT	reduce 857',
+    '	_SET	reduce 857',
+    '	_TABLE	reduce 857',
+    '	_UPDATE	reduce 857',
+    '	_VALUES	reduce 857',
     '	.	error',
     '',
     'state 83:',
@@ -1193,9 +1193,9 @@ const
     '',
     'state 88:',
     '',
-    '	sql_script : sql_script sql_statement _	(907)',
+    '	sql_script : sql_script sql_statement _	(908)',
     '',
-    '	.	reduce 907',
+    '	.	reduce 908',
     '',
     'state 89:',
     '',
@@ -1214,9 +1214,9 @@ const
     '',
     'state 90:',
     '',
-    '	direct_select_statement__multiple_rows : query_expression order_by_clause_opt _	(903)',
+    '	direct_select_statement__multiple_rows : query_expression order_by_clause_opt _	(904)',
     '',
-    '	.	reduce 903',
+    '	.	reduce 904',
     '',
     'state 91:',
     '',
@@ -1406,9 +1406,9 @@ const
     '',
     'state 104:',
     '',
-    '	commit_statement : _COMMIT _WORK _	(855)',
+    '	commit_statement : _COMMIT _WORK _	(856)',
     '',
-    '	.	reduce 855',
+    '	.	reduce 856',
     '',
     'state 105:',
     '',
@@ -1613,33 +1613,33 @@ const
     '',
     'state 118:',
     '',
-    '	disconnect_statement : _DISCONNECT disconnect_object _	(874)',
-    '',
-    '	.	reduce 874',
-    '',
-    'state 119:',
-    '',
-    '	disconnect_object : connection_object _	(875)',
+    '	disconnect_statement : _DISCONNECT disconnect_object _	(875)',
     '',
     '	.	reduce 875',
     '',
+    'state 119:',
+    '',
+    '	disconnect_object : connection_object _	(876)',
+    '',
+    '	.	reduce 876',
+    '',
     'state 120:',
     '',
-    '	connection_object : connection_name _	(873)',
+    '	connection_object : connection_name _	(874)',
     '',
-    '	.	reduce 873',
+    '	.	reduce 874',
     '',
     'state 121:',
     '',
-    '	connection_name : simple_value_specification _	(869)',
+    '	connection_name : simple_value_specification _	(870)',
     '',
-    '	.	reduce 869',
+    '	.	reduce 870',
     '',
     'state 122:',
     '',
-    '	simple_value_specification : parameter_name _	(800)',
+    '	simple_value_specification : parameter_name _	(801)',
     '',
-    '	.	reduce 800',
+    '	.	reduce 801',
     '',
     'state 123:',
     '',
@@ -1685,9 +1685,9 @@ const
     '',
     'state 130:',
     '',
-    '	simple_value_specification : literal _	(801)',
+    '	simple_value_specification : literal _	(802)',
     '',
-    '	.	reduce 801',
+    '	.	reduce 802',
     '',
     'state 131:',
     '',
@@ -2141,15 +2141,15 @@ const
     '',
     'state 155:',
     '',
-    '	disconnect_object : _ALL _	(876)',
+    '	disconnect_object : _ALL _	(877)',
     '',
-    '	.	reduce 876',
+    '	.	reduce 877',
     '',
     'state 156:',
     '',
-    '	disconnect_object : _CURRENT _	(877)',
+    '	disconnect_object : _CURRENT _	(878)',
     '',
-    '	.	reduce 877',
+    '	.	reduce 878',
     '',
     'state 157:',
     '',
@@ -2162,9 +2162,9 @@ const
     '',
     'state 158:',
     '',
-    '	connection_object : _DEFAULT _	(872)',
+    '	connection_object : _DEFAULT _	(873)',
     '',
-    '	.	reduce 872',
+    '	.	reduce 873',
     '',
     'state 159:',
     '',
@@ -2321,17 +2321,17 @@ const
     '',
     'state 170:',
     '',
-    '	action_list : action _	(679)',
+    '	action_list : action _	(680)',
     '',
-    '	.	reduce 679',
+    '	.	reduce 680',
     '',
     'state 171:',
     '',
-    '	privileges : action_list _	(678)',
+    '	privileges : action_list _	(679)',
     '	action_list : action_list _ comma action',
     '',
     '	comma	shift 361',
-    '	_ON	reduce 678',
+    '	_ON	reduce 679',
     '	.	error',
     '',
     'state 172:',
@@ -2350,18 +2350,18 @@ const
     '',
     'state 174:',
     '',
-    '	action : _DELETE _	(682)',
+    '	action : _DELETE _	(683)',
     '',
-    '	.	reduce 682',
+    '	.	reduce 683',
     '',
     'state 175:',
     '',
     '	action : _INSERT _ privilege_column_list_opt',
-    '	privilege_column_list_opt : _	(687)',
+    '	privilege_column_list_opt : _	(688)',
     '',
     '	left_paren	shift 365',
-    '	comma	reduce 687',
-    '	_ON	reduce 687',
+    '	comma	reduce 688',
+    '	_ON	reduce 688',
     '	.	error',
     '',
     '	privilege_column_list_opt	goto 364',
@@ -2369,38 +2369,38 @@ const
     'state 176:',
     '',
     '	action : _REFERENCES _ privilege_column_list_opt',
-    '	privilege_column_list_opt : _	(687)',
+    '	privilege_column_list_opt : _	(688)',
     '',
     '	left_paren	shift 365',
-    '	comma	reduce 687',
-    '	_ON	reduce 687',
+    '	comma	reduce 688',
+    '	_ON	reduce 688',
     '	.	error',
     '',
     '	privilege_column_list_opt	goto 366',
     '',
     'state 177:',
     '',
-    '	action : _SELECT _	(681)',
+    '	action : _SELECT _	(682)',
     '',
-    '	.	reduce 681',
+    '	.	reduce 682',
     '',
     'state 178:',
     '',
     '	action : _UPDATE _ privilege_column_list_opt',
-    '	privilege_column_list_opt : _	(687)',
+    '	privilege_column_list_opt : _	(688)',
     '',
     '	left_paren	shift 365',
-    '	comma	reduce 687',
-    '	_ON	reduce 687',
+    '	comma	reduce 688',
+    '	_ON	reduce 688',
     '	.	error',
     '',
     '	privilege_column_list_opt	goto 367',
     '',
     'state 179:',
     '',
-    '	action : _USAGE _	(686)',
+    '	action : _USAGE _	(687)',
     '',
-    '	.	reduce 686',
+    '	.	reduce 687',
     '',
     'state 180:',
     '',
@@ -2476,9 +2476,9 @@ const
     '',
     'state 187:',
     '',
-    '	rollback_statement : _ROLLBACK _WORK _	(857)',
+    '	rollback_statement : _ROLLBACK _WORK _	(858)',
     '',
-    '	.	reduce 857',
+    '	.	reduce 858',
     '',
     'state 188:',
     '',
@@ -4619,9 +4619,9 @@ const
     'state 293:',
     '',
     '	module : module_name_clause language_clause module_authorization_clause _ module_contents',
-    '	module_contents : _	(583)',
+    '	module_contents : _	(584)',
     '',
-    '	.	reduce 583',
+    '	.	reduce 584',
     '',
     '	module_contents	goto 468',
     '',
@@ -4773,54 +4773,54 @@ const
     'state 310:',
     '',
     '	connection_target : SQL_server_name _ connection_name_opt user_name_opt',
-    '	connection_name_opt : _	(864)',
+    '	connection_name_opt : _	(865)',
     '',
     '	_AS	shift 493',
-    '	$end	reduce 864',
-    '	identifier_body	reduce 864',
-    '	delimited_identifier	reduce 864',
-    '	left_paren	reduce 864',
-    '	semicolon	reduce 864',
-    '	underscore	reduce 864',
-    '	_ALTER	reduce 864',
-    '	_COMMIT	reduce 864',
-    '	_CONNECT	reduce 864',
-    '	_CREATE	reduce 864',
-    '	_DECLARE	reduce 864',
-    '	_DELETE	reduce 864',
-    '	_DISCONNECT	reduce 864',
-    '	_DROP	reduce 864',
-    '	_GRANT	reduce 864',
-    '	_INSERT	reduce 864',
-    '	_REVOKE	reduce 864',
-    '	_ROLLBACK	reduce 864',
-    '	_SELECT	reduce 864',
-    '	_SET	reduce 864',
-    '	_TABLE	reduce 864',
-    '	_UPDATE	reduce 864',
-    '	_USER	reduce 864',
-    '	_VALUES	reduce 864',
+    '	$end	reduce 865',
+    '	identifier_body	reduce 865',
+    '	delimited_identifier	reduce 865',
+    '	left_paren	reduce 865',
+    '	semicolon	reduce 865',
+    '	underscore	reduce 865',
+    '	_ALTER	reduce 865',
+    '	_COMMIT	reduce 865',
+    '	_CONNECT	reduce 865',
+    '	_CREATE	reduce 865',
+    '	_DECLARE	reduce 865',
+    '	_DELETE	reduce 865',
+    '	_DISCONNECT	reduce 865',
+    '	_DROP	reduce 865',
+    '	_GRANT	reduce 865',
+    '	_INSERT	reduce 865',
+    '	_REVOKE	reduce 865',
+    '	_ROLLBACK	reduce 865',
+    '	_SELECT	reduce 865',
+    '	_SET	reduce 865',
+    '	_TABLE	reduce 865',
+    '	_UPDATE	reduce 865',
+    '	_USER	reduce 865',
+    '	_VALUES	reduce 865',
     '	.	error',
     '',
     '	connection_name_opt	goto 492',
     '',
     'state 311:',
     '',
-    '	connect_statement : _CONNECT _TO connection_target _	(861)',
+    '	connect_statement : _CONNECT _TO connection_target _	(862)',
     '',
-    '	.	reduce 861',
+    '	.	reduce 862',
     '',
     'state 312:',
     '',
-    '	SQL_server_name : simple_value_specification _	(868)',
+    '	SQL_server_name : simple_value_specification _	(869)',
     '',
-    '	.	reduce 868',
+    '	.	reduce 869',
     '',
     'state 313:',
     '',
-    '	connection_target : _DEFAULT _	(863)',
+    '	connection_target : _DEFAULT _	(864)',
     '',
-    '	.	reduce 863',
+    '	.	reduce 864',
     '',
     'state 314:',
     '',
@@ -4916,24 +4916,24 @@ const
     '',
     'state 321:',
     '',
-    '	table_definition_opts : _GLOBAL _TEMPORARY _	(659)',
+    '	table_definition_opts : _GLOBAL _TEMPORARY _	(660)',
     '',
-    '	.	reduce 659',
+    '	.	reduce 660',
     '',
     'state 322:',
     '',
-    '	table_definition_opts : _LOCAL _TEMPORARY _	(660)',
+    '	table_definition_opts : _LOCAL _TEMPORARY _	(661)',
     '',
-    '	.	reduce 660',
+    '	.	reduce 661',
     '',
     'state 323:',
     '',
     '	schema_definition : _CREATE _SCHEMA schema_name_clause _ schema_character_set_specification_opt schema_elements',
-    '	schema_character_set_specification_opt : _	(636)',
+    '	schema_character_set_specification_opt : _	(637)',
     '',
     '	_DEFAULT	shift 503',
-    '	_CREATE	reduce 636',
-    '	_GRANT	reduce 636',
+    '	_CREATE	reduce 637',
+    '	_GRANT	reduce 637',
     '	.	error',
     '',
     '	schema_character_set_specification	goto 501',
@@ -4941,13 +4941,13 @@ const
     '',
     'state 324:',
     '',
-    '	schema_name_clause : schema_name _	(640)',
+    '	schema_name_clause : schema_name _	(641)',
     '	schema_name_clause : schema_name _ _AUTHORIZATION schema_authorization_identifier',
     '',
     '	_AUTHORIZATION	shift 504',
-    '	_CREATE	reduce 640',
-    '	_DEFAULT	reduce 640',
-    '	_GRANT	reduce 640',
+    '	_CREATE	reduce 641',
+    '	_DEFAULT	reduce 641',
+    '	_GRANT	reduce 641',
     '	.	error',
     '',
     'state 325:',
@@ -4999,10 +4999,10 @@ const
     'state 329:',
     '',
     '	view_definition : _CREATE _VIEW table_name _ view_column_list_opt _AS query_expression view_check_opt',
-    '	view_column_list_opt : _	(665)',
+    '	view_column_list_opt : _	(666)',
     '',
     '	left_paren	shift 510',
-    '	_AS	reduce 665',
+    '	_AS	reduce 666',
     '	.	error',
     '',
     '	view_column_list_opt	goto 509',
@@ -5655,9 +5655,9 @@ const
     '',
     'state 353:',
     '',
-    '	drop_assertion_statement : _DROP _ASSERTION constraint_name _	(783)',
+    '	drop_assertion_statement : _DROP _ASSERTION constraint_name _	(784)',
     '',
-    '	.	reduce 783',
+    '	.	reduce 784',
     '',
     'state 354:',
     '',
@@ -5677,9 +5677,9 @@ const
     '',
     'state 355:',
     '',
-    '	drop_collation_statement : _DROP _COLLATION collation_name _	(781)',
+    '	drop_collation_statement : _DROP _COLLATION collation_name _	(782)',
     '',
-    '	.	reduce 781',
+    '	.	reduce 782',
     '',
     'state 356:',
     '',
@@ -5713,9 +5713,9 @@ const
     '',
     'state 359:',
     '',
-    '	drop_translation_statement : _DROP _TRANSLATION translation_name _	(782)',
+    '	drop_translation_statement : _DROP _TRANSLATION translation_name _	(783)',
     '',
-    '	.	reduce 782',
+    '	.	reduce 783',
     '',
     'state 360:',
     '',
@@ -5744,17 +5744,17 @@ const
     'state 362:',
     '',
     '	grant_statement : _GRANT privileges _ON _ object_name _TO grantee_list grant_option',
-    '	table_opt : _	(695)',
+    '	table_opt : _	(696)',
     '',
     '	_CHARACTER	shift 543',
     '	_COLLATION	shift 544',
     '	_DOMAIN	shift 545',
     '	_TABLE	shift 546',
     '	_TRANSLATION	shift 547',
-    '	identifier_body	reduce 695',
-    '	delimited_identifier	reduce 695',
-    '	underscore	reduce 695',
-    '	_MODULE	reduce 695',
+    '	identifier_body	reduce 696',
+    '	delimited_identifier	reduce 696',
+    '	underscore	reduce 696',
+    '	_MODULE	reduce 696',
     '	.	error',
     '',
     '	table_opt	goto 541',
@@ -5762,15 +5762,15 @@ const
     '',
     'state 363:',
     '',
-    '	privileges : _ALL _PRIVILEGES _	(677)',
+    '	privileges : _ALL _PRIVILEGES _	(678)',
     '',
-    '	.	reduce 677',
+    '	.	reduce 678',
     '',
     'state 364:',
     '',
-    '	action : _INSERT privilege_column_list_opt _	(683)',
+    '	action : _INSERT privilege_column_list_opt _	(684)',
     '',
-    '	.	reduce 683',
+    '	.	reduce 684',
     '',
     'state 365:',
     '',
@@ -5791,15 +5791,15 @@ const
     '',
     'state 366:',
     '',
-    '	action : _REFERENCES privilege_column_list_opt _	(685)',
+    '	action : _REFERENCES privilege_column_list_opt _	(686)',
     '',
-    '	.	reduce 685',
+    '	.	reduce 686',
     '',
     'state 367:',
     '',
-    '	action : _UPDATE privilege_column_list_opt _	(684)',
+    '	action : _UPDATE privilege_column_list_opt _	(685)',
     '',
-    '	.	reduce 684',
+    '	.	reduce 685',
     '',
     'state 368:',
     '',
@@ -6100,36 +6100,36 @@ const
     '',
     'state 382:',
     '',
-    '	set_catalog_statement : _SET _CATALOG value_specification _	(883)',
-    '',
-    '	.	reduce 883',
-    '',
-    'state 383:',
-    '',
-    '	value_specification : general_value_specification _	(885)',
-    '',
-    '	.	reduce 885',
-    '',
-    'state 384:',
-    '',
-    '	value_specification : literal _	(884)',
+    '	set_catalog_statement : _SET _CATALOG value_specification _	(884)',
     '',
     '	.	reduce 884',
     '',
+    'state 383:',
+    '',
+    '	value_specification : general_value_specification _	(886)',
+    '',
+    '	.	reduce 886',
+    '',
+    'state 384:',
+    '',
+    '	value_specification : literal _	(885)',
+    '',
+    '	.	reduce 885',
+    '',
     'state 385:',
     '',
-    '	set_connection_statement : _SET _CONNECTION connection_object _	(871)',
+    '	set_connection_statement : _SET _CONNECTION connection_object _	(872)',
     '',
-    '	.	reduce 871',
+    '	.	reduce 872',
     '',
     'state 386:',
     '',
-    '	constraint_name_list : constraint_name_list_some _	(851)',
+    '	constraint_name_list : constraint_name_list_some _	(852)',
     '	constraint_name_list_some : constraint_name_list_some _ comma constraint_name',
     '',
     '	comma	shift 567',
-    '	_DEFERRED	reduce 851',
-    '	_IMMEDIATE	reduce 851',
+    '	_DEFERRED	reduce 852',
+    '	_IMMEDIATE	reduce 852',
     '	.	error',
     '',
     'state 387:',
@@ -6143,27 +6143,27 @@ const
     '',
     'state 388:',
     '',
-    '	constraint_name_list_some : constraint_name _	(852)',
+    '	constraint_name_list_some : constraint_name _	(853)',
     '',
-    '	.	reduce 852',
+    '	.	reduce 853',
     '',
     'state 389:',
     '',
-    '	constraint_name_list : _ALL _	(850)',
+    '	constraint_name_list : _ALL _	(851)',
     '',
-    '	.	reduce 850',
+    '	.	reduce 851',
     '',
     'state 390:',
     '',
-    '	set_names_statement : _SET _NAMES value_specification _	(887)',
+    '	set_names_statement : _SET _NAMES value_specification _	(888)',
     '',
-    '	.	reduce 887',
+    '	.	reduce 888',
     '',
     'state 391:',
     '',
-    '	set_schema_statement : _SET _SCHEMA value_specification _	(886)',
+    '	set_schema_statement : _SET _SCHEMA value_specification _	(887)',
     '',
-    '	.	reduce 886',
+    '	.	reduce 887',
     '',
     'state 392:',
     '',
@@ -6343,57 +6343,57 @@ const
     '',
     'state 394:',
     '',
-    '	transaction_mode : diagnostics_size _	(837)',
+    '	transaction_mode : diagnostics_size _	(838)',
     '',
-    '	.	reduce 837',
+    '	.	reduce 838',
     '',
     'state 395:',
     '',
-    '	transaction_mode : transaction_access_mode _	(836)',
+    '	transaction_mode : transaction_access_mode _	(837)',
     '',
-    '	.	reduce 836',
+    '	.	reduce 837',
     '',
     'state 396:',
     '',
-    '	transaction_mode : isolation_level _	(835)',
+    '	transaction_mode : isolation_level _	(836)',
     '',
-    '	.	reduce 835',
+    '	.	reduce 836',
     '',
     'state 397:',
     '',
-    '	transaction_mode_list : transaction_mode _	(833)',
+    '	transaction_mode_list : transaction_mode _	(834)',
     '',
-    '	.	reduce 833',
+    '	.	reduce 834',
     '',
     'state 398:',
     '',
-    '	set_transaction_statement : _SET _TRANSACTION transaction_mode_list _	(832)',
+    '	set_transaction_statement : _SET _TRANSACTION transaction_mode_list _	(833)',
     '	transaction_mode_list : transaction_mode_list _ comma transaction_mode',
     '',
     '	comma	shift 574',
-    '	$end	reduce 832',
-    '	identifier_body	reduce 832',
-    '	delimited_identifier	reduce 832',
-    '	left_paren	reduce 832',
-    '	semicolon	reduce 832',
-    '	underscore	reduce 832',
-    '	_ALTER	reduce 832',
-    '	_COMMIT	reduce 832',
-    '	_CONNECT	reduce 832',
-    '	_CREATE	reduce 832',
-    '	_DECLARE	reduce 832',
-    '	_DELETE	reduce 832',
-    '	_DISCONNECT	reduce 832',
-    '	_DROP	reduce 832',
-    '	_GRANT	reduce 832',
-    '	_INSERT	reduce 832',
-    '	_REVOKE	reduce 832',
-    '	_ROLLBACK	reduce 832',
-    '	_SELECT	reduce 832',
-    '	_SET	reduce 832',
-    '	_TABLE	reduce 832',
-    '	_UPDATE	reduce 832',
-    '	_VALUES	reduce 832',
+    '	$end	reduce 833',
+    '	identifier_body	reduce 833',
+    '	delimited_identifier	reduce 833',
+    '	left_paren	reduce 833',
+    '	semicolon	reduce 833',
+    '	underscore	reduce 833',
+    '	_ALTER	reduce 833',
+    '	_COMMIT	reduce 833',
+    '	_CONNECT	reduce 833',
+    '	_CREATE	reduce 833',
+    '	_DECLARE	reduce 833',
+    '	_DELETE	reduce 833',
+    '	_DISCONNECT	reduce 833',
+    '	_DROP	reduce 833',
+    '	_GRANT	reduce 833',
+    '	_INSERT	reduce 833',
+    '	_REVOKE	reduce 833',
+    '	_ROLLBACK	reduce 833',
+    '	_SELECT	reduce 833',
+    '	_SET	reduce 833',
+    '	_TABLE	reduce 833',
+    '	_UPDATE	reduce 833',
+    '	_VALUES	reduce 833',
     '	.	error',
     '',
     'state 399:',
@@ -9697,47 +9697,47 @@ const
     '',
     'state 462:',
     '',
-    '	sort_specification_list : sort_specification _	(597)',
+    '	sort_specification_list : sort_specification _	(598)',
     '',
-    '	.	reduce 597',
+    '	.	reduce 598',
     '',
     'state 463:',
     '',
-    '	order_by_clause_opt : _ORDER _BY sort_specification_list _	(596)',
+    '	order_by_clause_opt : _ORDER _BY sort_specification_list _	(597)',
     '	sort_specification_list : sort_specification_list _ comma sort_specification',
     '',
     '	comma	shift 679',
-    '	$end	reduce 596',
-    '	identifier_body	reduce 596',
-    '	delimited_identifier	reduce 596',
-    '	left_paren	reduce 596',
-    '	underscore	reduce 596',
-    '	_ALTER	reduce 596',
-    '	_COMMIT	reduce 596',
-    '	_CONNECT	reduce 596',
-    '	_CREATE	reduce 596',
-    '	_DECLARE	reduce 596',
-    '	_DELETE	reduce 596',
-    '	_DISCONNECT	reduce 596',
-    '	_DROP	reduce 596',
-    '	_FOR	reduce 596',
-    '	_GRANT	reduce 596',
-    '	_INSERT	reduce 596',
-    '	_PROCEDURE	reduce 596',
-    '	_REVOKE	reduce 596',
-    '	_ROLLBACK	reduce 596',
-    '	_SELECT	reduce 596',
-    '	_SET	reduce 596',
-    '	_TABLE	reduce 596',
-    '	_UPDATE	reduce 596',
-    '	_VALUES	reduce 596',
+    '	$end	reduce 597',
+    '	identifier_body	reduce 597',
+    '	delimited_identifier	reduce 597',
+    '	left_paren	reduce 597',
+    '	underscore	reduce 597',
+    '	_ALTER	reduce 597',
+    '	_COMMIT	reduce 597',
+    '	_CONNECT	reduce 597',
+    '	_CREATE	reduce 597',
+    '	_DECLARE	reduce 597',
+    '	_DELETE	reduce 597',
+    '	_DISCONNECT	reduce 597',
+    '	_DROP	reduce 597',
+    '	_FOR	reduce 597',
+    '	_GRANT	reduce 597',
+    '	_INSERT	reduce 597',
+    '	_PROCEDURE	reduce 597',
+    '	_REVOKE	reduce 597',
+    '	_ROLLBACK	reduce 597',
+    '	_SELECT	reduce 597',
+    '	_SET	reduce 597',
+    '	_TABLE	reduce 597',
+    '	_UPDATE	reduce 597',
+    '	_VALUES	reduce 597',
     '	.	error',
     '',
     'state 464:',
     '',
-    '	sort_key : column_name _	(600)',
+    '	sort_key : column_name _	(601)',
     '',
-    '	.	reduce 600',
+    '	.	reduce 601',
     '',
     'state 465:',
     '',
@@ -9748,37 +9748,37 @@ const
     'state 466:',
     '',
     '	unsigned_integer : unsigned_integer _ digit',
-    '	sort_key : unsigned_integer _	(601)',
+    '	sort_key : unsigned_integer _	(602)',
     '',
     '	digit	shift 340',
-    '	$end	reduce 601',
-    '	identifier_body	reduce 601',
-    '	delimited_identifier	reduce 601',
-    '	left_paren	reduce 601',
-    '	comma	reduce 601',
-    '	underscore	reduce 601',
-    '	_ALTER	reduce 601',
-    '	_ASC	reduce 601',
-    '	_COLLATE	reduce 601',
-    '	_COMMIT	reduce 601',
-    '	_CONNECT	reduce 601',
-    '	_CREATE	reduce 601',
-    '	_DECLARE	reduce 601',
-    '	_DELETE	reduce 601',
-    '	_DESC	reduce 601',
-    '	_DISCONNECT	reduce 601',
-    '	_DROP	reduce 601',
-    '	_FOR	reduce 601',
-    '	_GRANT	reduce 601',
-    '	_INSERT	reduce 601',
-    '	_PROCEDURE	reduce 601',
-    '	_REVOKE	reduce 601',
-    '	_ROLLBACK	reduce 601',
-    '	_SELECT	reduce 601',
-    '	_SET	reduce 601',
-    '	_TABLE	reduce 601',
-    '	_UPDATE	reduce 601',
-    '	_VALUES	reduce 601',
+    '	$end	reduce 602',
+    '	identifier_body	reduce 602',
+    '	delimited_identifier	reduce 602',
+    '	left_paren	reduce 602',
+    '	comma	reduce 602',
+    '	underscore	reduce 602',
+    '	_ALTER	reduce 602',
+    '	_ASC	reduce 602',
+    '	_COLLATE	reduce 602',
+    '	_COMMIT	reduce 602',
+    '	_CONNECT	reduce 602',
+    '	_CREATE	reduce 602',
+    '	_DECLARE	reduce 602',
+    '	_DELETE	reduce 602',
+    '	_DESC	reduce 602',
+    '	_DISCONNECT	reduce 602',
+    '	_DROP	reduce 602',
+    '	_FOR	reduce 602',
+    '	_GRANT	reduce 602',
+    '	_INSERT	reduce 602',
+    '	_PROCEDURE	reduce 602',
+    '	_REVOKE	reduce 602',
+    '	_ROLLBACK	reduce 602',
+    '	_SELECT	reduce 602',
+    '	_SET	reduce 602',
+    '	_TABLE	reduce 602',
+    '	_UPDATE	reduce 602',
+    '	_VALUES	reduce 602',
     '	.	error',
     '',
     'state 467:',
@@ -9859,33 +9859,33 @@ const
     '',
     'state 475:',
     '',
-    '	alter_domain_action : drop_domain_constraint_definition _	(774)',
+    '	alter_domain_action : drop_domain_constraint_definition _	(775)',
     '',
-    '	.	reduce 774',
+    '	.	reduce 775',
     '',
     'state 476:',
     '',
-    '	alter_domain_action : add_domain_constraint_definition _	(773)',
+    '	alter_domain_action : add_domain_constraint_definition _	(774)',
     '',
-    '	.	reduce 773',
+    '	.	reduce 774',
     '',
     'state 477:',
     '',
-    '	alter_domain_action : drop_domain_default_clause _	(772)',
+    '	alter_domain_action : drop_domain_default_clause _	(773)',
     '',
-    '	.	reduce 772',
+    '	.	reduce 773',
     '',
     'state 478:',
     '',
-    '	alter_domain_action : set_domain_default_clause _	(771)',
+    '	alter_domain_action : set_domain_default_clause _	(772)',
     '',
-    '	.	reduce 771',
+    '	.	reduce 772',
     '',
     'state 479:',
     '',
-    '	alter_domain_statement : _ALTER _DOMAIN domain_name alter_domain_action _	(770)',
+    '	alter_domain_statement : _ALTER _DOMAIN domain_name alter_domain_action _	(771)',
     '',
-    '	.	reduce 770',
+    '	.	reduce 771',
     '',
     'state 480:',
     '',
@@ -9920,46 +9920,46 @@ const
     '',
     'state 483:',
     '',
-    '	alter_table_action : drop_table_constraint_definition _	(753)',
+    '	alter_table_action : drop_table_constraint_definition _	(754)',
     '',
-    '	.	reduce 753',
+    '	.	reduce 754',
     '',
     'state 484:',
     '',
-    '	alter_table_action : add_table_constraint_definition _	(752)',
+    '	alter_table_action : add_table_constraint_definition _	(753)',
     '',
-    '	.	reduce 752',
+    '	.	reduce 753',
     '',
     'state 485:',
     '',
-    '	alter_table_action : drop_column_definition _	(751)',
+    '	alter_table_action : drop_column_definition _	(752)',
     '',
-    '	.	reduce 751',
+    '	.	reduce 752',
     '',
     'state 486:',
     '',
-    '	alter_table_action : alter_column_definition _	(750)',
+    '	alter_table_action : alter_column_definition _	(751)',
     '',
-    '	.	reduce 750',
+    '	.	reduce 751',
     '',
     'state 487:',
     '',
-    '	alter_table_action : add_column_definition _	(749)',
+    '	alter_table_action : add_column_definition _	(750)',
     '',
-    '	.	reduce 749',
+    '	.	reduce 750',
     '',
     'state 488:',
     '',
-    '	alter_table_statement : _ALTER _TABLE table_name alter_table_action _	(748)',
+    '	alter_table_statement : _ALTER _TABLE table_name alter_table_action _	(749)',
     '',
-    '	.	reduce 748',
+    '	.	reduce 749',
     '',
     'state 489:',
     '',
     '	add_column_definition : _ADD _ column_opt column_definition',
     '	add_table_constraint_definition : _ADD _ table_constraint_definition',
     '	constraint_name_definition_opt : _	(235)',
-    '	column_opt : _	(754)',
+    '	column_opt : _	(755)',
     '',
     '	_COLUMN	shift 700',
     '	_CONSTRAINT	shift 692',
@@ -9967,9 +9967,9 @@ const
     '	_FOREIGN	reduce 235',
     '	_PRIMARY	reduce 235',
     '	_UNIQUE	reduce 235',
-    '	identifier_body	reduce 754',
-    '	delimited_identifier	reduce 754',
-    '	underscore	reduce 754',
+    '	identifier_body	reduce 755',
+    '	delimited_identifier	reduce 755',
+    '	underscore	reduce 755',
     '	.	error',
     '',
     '	column_opt	goto 697',
@@ -9980,12 +9980,12 @@ const
     'state 490:',
     '',
     '	alter_column_definition : _ALTER _ column_opt column_name alter_column_action',
-    '	column_opt : _	(754)',
+    '	column_opt : _	(755)',
     '',
     '	_COLUMN	shift 700',
-    '	identifier_body	reduce 754',
-    '	delimited_identifier	reduce 754',
-    '	underscore	reduce 754',
+    '	identifier_body	reduce 755',
+    '	delimited_identifier	reduce 755',
+    '	underscore	reduce 755',
     '	.	error',
     '',
     '	column_opt	goto 701',
@@ -9994,13 +9994,13 @@ const
     '',
     '	drop_column_definition : _DROP _ column_opt column_name drop_behaviour',
     '	drop_table_constraint_definition : _DROP _ _CONSTRAINT constraint_name drop_behaviour',
-    '	column_opt : _	(754)',
+    '	column_opt : _	(755)',
     '',
     '	_COLUMN	shift 700',
     '	_CONSTRAINT	shift 703',
-    '	identifier_body	reduce 754',
-    '	delimited_identifier	reduce 754',
-    '	underscore	reduce 754',
+    '	identifier_body	reduce 755',
+    '	delimited_identifier	reduce 755',
+    '	underscore	reduce 755',
     '	.	error',
     '',
     '	column_opt	goto 702',
@@ -10008,32 +10008,32 @@ const
     'state 492:',
     '',
     '	connection_target : SQL_server_name connection_name_opt _ user_name_opt',
-    '	user_name_opt : _	(866)',
+    '	user_name_opt : _	(867)',
     '',
     '	_USER	shift 705',
-    '	$end	reduce 866',
-    '	identifier_body	reduce 866',
-    '	delimited_identifier	reduce 866',
-    '	left_paren	reduce 866',
-    '	semicolon	reduce 866',
-    '	underscore	reduce 866',
-    '	_ALTER	reduce 866',
-    '	_COMMIT	reduce 866',
-    '	_CONNECT	reduce 866',
-    '	_CREATE	reduce 866',
-    '	_DECLARE	reduce 866',
-    '	_DELETE	reduce 866',
-    '	_DISCONNECT	reduce 866',
-    '	_DROP	reduce 866',
-    '	_GRANT	reduce 866',
-    '	_INSERT	reduce 866',
-    '	_REVOKE	reduce 866',
-    '	_ROLLBACK	reduce 866',
-    '	_SELECT	reduce 866',
-    '	_SET	reduce 866',
-    '	_TABLE	reduce 866',
-    '	_UPDATE	reduce 866',
-    '	_VALUES	reduce 866',
+    '	$end	reduce 867',
+    '	identifier_body	reduce 867',
+    '	delimited_identifier	reduce 867',
+    '	left_paren	reduce 867',
+    '	semicolon	reduce 867',
+    '	underscore	reduce 867',
+    '	_ALTER	reduce 867',
+    '	_COMMIT	reduce 867',
+    '	_CONNECT	reduce 867',
+    '	_CREATE	reduce 867',
+    '	_DECLARE	reduce 867',
+    '	_DELETE	reduce 867',
+    '	_DISCONNECT	reduce 867',
+    '	_DROP	reduce 867',
+    '	_GRANT	reduce 867',
+    '	_INSERT	reduce 867',
+    '	_REVOKE	reduce 867',
+    '	_ROLLBACK	reduce 867',
+    '	_SELECT	reduce 867',
+    '	_SET	reduce 867',
+    '	_TABLE	reduce 867',
+    '	_UPDATE	reduce 867',
+    '	_VALUES	reduce 867',
     '	.	error',
     '',
     '	user_name_opt	goto 704',
@@ -10209,9 +10209,9 @@ const
     '',
     'state 501:',
     '',
-    '	schema_character_set_specification_opt : schema_character_set_specification _	(637)',
+    '	schema_character_set_specification_opt : schema_character_set_specification _	(638)',
     '',
-    '	.	reduce 637',
+    '	.	reduce 638',
     '',
     'state 502:',
     '',
@@ -10271,15 +10271,15 @@ const
     '',
     'state 506:',
     '',
-    '	schema_name_clause : _AUTHORIZATION schema_authorization_identifier _	(641)',
+    '	schema_name_clause : _AUTHORIZATION schema_authorization_identifier _	(642)',
     '',
-    '	.	reduce 641',
+    '	.	reduce 642',
     '',
     'state 507:',
     '',
-    '	schema_authorization_identifier : authorization_identifier _	(643)',
+    '	schema_authorization_identifier : authorization_identifier _	(644)',
     '',
-    '	.	reduce 643',
+    '	.	reduce 644',
     '',
     'state 508:',
     '',
@@ -10340,9 +10340,9 @@ const
     '',
     'state 513:',
     '',
-    '	delete_statement__searched : _DELETE _FROM table_name where_clause_opt _	(815)',
+    '	delete_statement__searched : _DELETE _FROM table_name where_clause_opt _	(816)',
     '',
-    '	.	reduce 815',
+    '	.	reduce 816',
     '',
     'state 514:',
     '',
@@ -10896,51 +10896,51 @@ const
     '',
     'state 533:',
     '',
-    '	drop_character_set_statement : _DROP _CHARACTER _SET character_set_name _	(780)',
+    '	drop_character_set_statement : _DROP _CHARACTER _SET character_set_name _	(781)',
     '',
-    '	.	reduce 780',
+    '	.	reduce 781',
     '',
     'state 534:',
     '',
-    '	drop_domain_statement : _DROP _DOMAIN domain_name drop_behaviour _	(779)',
+    '	drop_domain_statement : _DROP _DOMAIN domain_name drop_behaviour _	(780)',
     '',
-    '	.	reduce 779',
+    '	.	reduce 780',
     '',
     'state 535:',
     '',
-    '	drop_behaviour : _CASCADE _	(746)',
-    '',
-    '	.	reduce 746',
-    '',
-    'state 536:',
-    '',
-    '	drop_behaviour : _RESTRICT _	(747)',
+    '	drop_behaviour : _CASCADE _	(747)',
     '',
     '	.	reduce 747',
     '',
+    'state 536:',
+    '',
+    '	drop_behaviour : _RESTRICT _	(748)',
+    '',
+    '	.	reduce 748',
+    '',
     'state 537:',
     '',
-    '	drop_schema_statement : _DROP _SCHEMA schema_name drop_behaviour _	(745)',
+    '	drop_schema_statement : _DROP _SCHEMA schema_name drop_behaviour _	(746)',
     '',
-    '	.	reduce 745',
+    '	.	reduce 746',
     '',
     'state 538:',
     '',
-    '	drop_table_statement : _DROP _TABLE table_name drop_behaviour _	(765)',
-    '',
-    '	.	reduce 765',
-    '',
-    'state 539:',
-    '',
-    '	drop_view_statement : _DROP _VIEW table_name drop_behaviour _	(766)',
+    '	drop_table_statement : _DROP _TABLE table_name drop_behaviour _	(766)',
     '',
     '	.	reduce 766',
     '',
+    'state 539:',
+    '',
+    '	drop_view_statement : _DROP _VIEW table_name drop_behaviour _	(767)',
+    '',
+    '	.	reduce 767',
+    '',
     'state 540:',
     '',
-    '	action_list : action_list comma action _	(680)',
+    '	action_list : action_list comma action _	(681)',
     '',
-    '	.	reduce 680',
+    '	.	reduce 681',
     '',
     'state 541:',
     '',
@@ -11008,9 +11008,9 @@ const
     '',
     'state 546:',
     '',
-    '	table_opt : _TABLE _	(696)',
+    '	table_opt : _TABLE _	(697)',
     '',
-    '	.	reduce 696',
+    '	.	reduce 697',
     '',
     'state 547:',
     '',
@@ -11038,10 +11038,10 @@ const
     'state 549:',
     '',
     '	column_name_list : column_name_list _ comma column_name',
-    '	privilege_column_list : column_name_list _	(689)',
+    '	privilege_column_list : column_name_list _	(690)',
     '',
     '	comma	shift 786',
-    '	right_paren	reduce 689',
+    '	right_paren	reduce 690',
     '	.	error',
     '',
     'state 550:',
@@ -11052,41 +11052,41 @@ const
     '',
     'state 551:',
     '',
-    '	insert_statement : _INSERT _INTO table_name insert_columns_and_source _	(816)',
+    '	insert_statement : _INSERT _INTO table_name insert_columns_and_source _	(817)',
     '',
-    '	.	reduce 816',
+    '	.	reduce 817',
     '',
     'state 552:',
     '',
     '	query_expression : query_expression _ _UNION all_opt corresponding_spec_opt query_term',
     '	query_expression : query_expression _ _EXCEPT all_opt corresponding_spec_opt query_term',
-    '	insert_columns_and_source : query_expression _	(818)',
+    '	insert_columns_and_source : query_expression _	(819)',
     '',
     '	_EXCEPT	shift 91',
     '	_UNION	shift 93',
-    '	$end	reduce 818',
-    '	identifier_body	reduce 818',
-    '	delimited_identifier	reduce 818',
-    '	left_paren	reduce 818',
-    '	semicolon	reduce 818',
-    '	underscore	reduce 818',
-    '	_ALTER	reduce 818',
-    '	_COMMIT	reduce 818',
-    '	_CONNECT	reduce 818',
-    '	_CREATE	reduce 818',
-    '	_DECLARE	reduce 818',
-    '	_DELETE	reduce 818',
-    '	_DISCONNECT	reduce 818',
-    '	_DROP	reduce 818',
-    '	_GRANT	reduce 818',
-    '	_INSERT	reduce 818',
-    '	_REVOKE	reduce 818',
-    '	_ROLLBACK	reduce 818',
-    '	_SELECT	reduce 818',
-    '	_SET	reduce 818',
-    '	_TABLE	reduce 818',
-    '	_UPDATE	reduce 818',
-    '	_VALUES	reduce 818',
+    '	$end	reduce 819',
+    '	identifier_body	reduce 819',
+    '	delimited_identifier	reduce 819',
+    '	left_paren	reduce 819',
+    '	semicolon	reduce 819',
+    '	underscore	reduce 819',
+    '	_ALTER	reduce 819',
+    '	_COMMIT	reduce 819',
+    '	_CONNECT	reduce 819',
+    '	_CREATE	reduce 819',
+    '	_DECLARE	reduce 819',
+    '	_DELETE	reduce 819',
+    '	_DISCONNECT	reduce 819',
+    '	_DROP	reduce 819',
+    '	_GRANT	reduce 819',
+    '	_INSERT	reduce 819',
+    '	_REVOKE	reduce 819',
+    '	_ROLLBACK	reduce 819',
+    '	_SELECT	reduce 819',
+    '	_SET	reduce 819',
+    '	_TABLE	reduce 819',
+    '	_UPDATE	reduce 819',
+    '	_VALUES	reduce 819',
     '	.	error',
     '',
     'state 553:',
@@ -11136,17 +11136,17 @@ const
     'state 556:',
     '',
     '	revoke_statement : _REVOKE grant_option_for_opt privileges _ON _ object_name _FROM grantee_list drop_behaviour',
-    '	table_opt : _	(695)',
+    '	table_opt : _	(696)',
     '',
     '	_CHARACTER	shift 543',
     '	_COLLATION	shift 544',
     '	_DOMAIN	shift 545',
     '	_TABLE	shift 546',
     '	_TRANSLATION	shift 547',
-    '	identifier_body	reduce 695',
-    '	delimited_identifier	reduce 695',
-    '	underscore	reduce 695',
-    '	_MODULE	reduce 695',
+    '	identifier_body	reduce 696',
+    '	delimited_identifier	reduce 696',
+    '	underscore	reduce 696',
+    '	_MODULE	reduce 696',
     '	.	error',
     '',
     '	table_opt	goto 541',
@@ -11154,9 +11154,9 @@ const
     '',
     'state 557:',
     '',
-    '	grant_option_for_opt : _GRANT _OPTION _FOR _	(769)',
+    '	grant_option_for_opt : _GRANT _OPTION _FOR _	(770)',
     '',
-    '	.	reduce 769',
+    '	.	reduce 770',
     '',
     'state 558:',
     '',
@@ -11436,68 +11436,68 @@ const
     '',
     'state 568:',
     '',
-    '	set_constraints_mode_statement : _SET _CONSTRAINTS constraint_name_list _DEFERRED _	(848)',
-    '',
-    '	.	reduce 848',
-    '',
-    'state 569:',
-    '',
-    '	set_constraints_mode_statement : _SET _CONSTRAINTS constraint_name_list _IMMEDIATE _	(849)',
+    '	set_constraints_mode_statement : _SET _CONSTRAINTS constraint_name_list _DEFERRED _	(849)',
     '',
     '	.	reduce 849',
     '',
+    'state 569:',
+    '',
+    '	set_constraints_mode_statement : _SET _CONSTRAINTS constraint_name_list _IMMEDIATE _	(850)',
+    '',
+    '	.	reduce 850',
+    '',
     'state 570:',
     '',
-    '	set_session_authorization_identifier_statement : _SET _SESSION _AUTHORIZATION value_specification _	(888)',
+    '	set_session_authorization_identifier_statement : _SET _SESSION _AUTHORIZATION value_specification _	(889)',
     '',
-    '	.	reduce 888',
+    '	.	reduce 889',
     '',
     'state 571:',
     '',
-    '	set_local_time_zone_statement : _SET _TIME _ZONE set_time_zone_value _	(889)',
+    '	set_local_time_zone_statement : _SET _TIME _ZONE set_time_zone_value _	(890)',
     '',
-    '	.	reduce 889',
+    '	.	reduce 890',
     '',
     'state 572:',
     '',
     '	expression : expression _ plus_sign multiplicative_expression',
     '	expression : expression _ minus_sign multiplicative_expression',
     '	expression : expression _ concatenation_operator multiplicative_expression',
-    '	set_time_zone_value : expression _	(890)',
+    '	set_time_zone_value : expression _	(891)',
     '',
     '	concatenation_operator	shift 427',
     '	plus_sign	shift 428',
     '	minus_sign	shift 429',
-    '	$end	reduce 890',
-    '	identifier_body	reduce 890',
-    '	delimited_identifier	reduce 890',
-    '	left_paren	reduce 890',
-    '	semicolon	reduce 890',
-    '	underscore	reduce 890',
-    '	_ALTER	reduce 890',
-    '	_COMMIT	reduce 890',
-    '	_CONNECT	reduce 890',
-    '	_CREATE	reduce 890',
-    '	_DECLARE	reduce 890',
-    '	_DELETE	reduce 890',
-    '	_DISCONNECT	reduce 890',
-    '	_DROP	reduce 890',
-    '	_GRANT	reduce 890',
-    '	_INSERT	reduce 890',
-    '	_REVOKE	reduce 890',
-    '	_ROLLBACK	reduce 890',
-    '	_SELECT	reduce 890',
-    '	_SET	reduce 890',
-    '	_TABLE	reduce 890',
-    '	_UPDATE	reduce 890',
-    '	_VALUES	reduce 890',
+    '	$end	reduce 891',
+    '	identifier_body	reduce 891',
+    '	delimited_identifier	reduce 891',
+    '	left_paren	reduce 891',
+    '	semicolon	reduce 891',
+    '	underscore	reduce 891',
+    '	_ALTER	reduce 891',
+    '	_COMMIT	reduce 891',
+    '	_CONNECT	reduce 891',
+    '	_CREATE	reduce 891',
+    '	_DECLARE	reduce 891',
+    '	_DELETE	reduce 891',
+    '	_DISCONNECT	reduce 891',
+    '	_DROP	reduce 891',
+    '	_GRANT	reduce 891',
+    '	_INSERT	reduce 891',
+    '	_REVOKE	reduce 891',
+    '	_ROLLBACK	reduce 891',
+    '	_SELECT	reduce 891',
+    '	_SET	reduce 891',
+    '	_TABLE	reduce 891',
+    '	_UPDATE	reduce 891',
+    '	_VALUES	reduce 891',
     '	.	error',
     '',
     'state 573:',
     '',
-    '	set_time_zone_value : _LOCAL _	(891)',
+    '	set_time_zone_value : _LOCAL _	(892)',
     '',
-    '	.	reduce 891',
+    '	.	reduce 892',
     '',
     'state 574:',
     '',
@@ -11574,15 +11574,15 @@ const
     '',
     'state 577:',
     '',
-    '	transaction_access_mode : _READ _ONLY _	(844)',
+    '	transaction_access_mode : _READ _ONLY _	(845)',
     '',
-    '	.	reduce 844',
+    '	.	reduce 845',
     '',
     'state 578:',
     '',
-    '	transaction_access_mode : _READ _WRITE _	(845)',
+    '	transaction_access_mode : _READ _WRITE _	(846)',
     '',
-    '	.	reduce 845',
+    '	.	reduce 846',
     '',
     'state 579:',
     '',
@@ -11733,9 +11733,9 @@ const
     '',
     'state 583:',
     '',
-    '	set_clause_list : set_clause _	(822)',
+    '	set_clause_list : set_clause _	(823)',
     '',
-    '	.	reduce 822',
+    '	.	reduce 823',
     '',
     'state 584:',
     '',
@@ -11774,9 +11774,9 @@ const
     '',
     'state 585:',
     '',
-    '	object_column : column_name _	(825)',
+    '	object_column : column_name _	(826)',
     '',
-    '	.	reduce 825',
+    '	.	reduce 826',
     '',
     'state 586:',
     '',
@@ -13744,35 +13744,35 @@ const
     'state 678:',
     '',
     '	sort_specification : sort_key collate_clause_opt _ ordering_specification_opt',
-    '	ordering_specification_opt : _	(602)',
+    '	ordering_specification_opt : _	(603)',
     '',
     '	_ASC	shift 884',
     '	_DESC	shift 885',
-    '	$end	reduce 602',
-    '	identifier_body	reduce 602',
-    '	delimited_identifier	reduce 602',
-    '	left_paren	reduce 602',
-    '	comma	reduce 602',
-    '	underscore	reduce 602',
-    '	_ALTER	reduce 602',
-    '	_COMMIT	reduce 602',
-    '	_CONNECT	reduce 602',
-    '	_CREATE	reduce 602',
-    '	_DECLARE	reduce 602',
-    '	_DELETE	reduce 602',
-    '	_DISCONNECT	reduce 602',
-    '	_DROP	reduce 602',
-    '	_FOR	reduce 602',
-    '	_GRANT	reduce 602',
-    '	_INSERT	reduce 602',
-    '	_PROCEDURE	reduce 602',
-    '	_REVOKE	reduce 602',
-    '	_ROLLBACK	reduce 602',
-    '	_SELECT	reduce 602',
-    '	_SET	reduce 602',
-    '	_TABLE	reduce 602',
-    '	_UPDATE	reduce 602',
-    '	_VALUES	reduce 602',
+    '	$end	reduce 603',
+    '	identifier_body	reduce 603',
+    '	delimited_identifier	reduce 603',
+    '	left_paren	reduce 603',
+    '	comma	reduce 603',
+    '	underscore	reduce 603',
+    '	_ALTER	reduce 603',
+    '	_COMMIT	reduce 603',
+    '	_CONNECT	reduce 603',
+    '	_CREATE	reduce 603',
+    '	_DECLARE	reduce 603',
+    '	_DELETE	reduce 603',
+    '	_DISCONNECT	reduce 603',
+    '	_DROP	reduce 603',
+    '	_FOR	reduce 603',
+    '	_GRANT	reduce 603',
+    '	_INSERT	reduce 603',
+    '	_PROCEDURE	reduce 603',
+    '	_REVOKE	reduce 603',
+    '	_ROLLBACK	reduce 603',
+    '	_SELECT	reduce 603',
+    '	_SET	reduce 603',
+    '	_TABLE	reduce 603',
+    '	_UPDATE	reduce 603',
+    '	_VALUES	reduce 603',
     '	.	error',
     '',
     '	ordering_specification_opt	goto 883',
@@ -13836,27 +13836,27 @@ const
     '',
     'state 681:',
     '',
-    '	module_content : procedure _	(586)',
+    '	module_content : procedure _	(587)',
     '',
-    '	.	reduce 586',
+    '	.	reduce 587',
     '',
     'state 682:',
     '',
-    '	module_content : declare_cursor _	(585)',
+    '	module_content : declare_cursor _	(586)',
     '',
-    '	.	reduce 585',
+    '	.	reduce 586',
     '',
     'state 683:',
     '',
-    '	module_contents : module_contents module_content _	(584)',
+    '	module_contents : module_contents module_content _	(585)',
     '',
-    '	.	reduce 584',
+    '	.	reduce 585',
     '',
     'state 684:',
     '',
-    '	module_content : temporary_table_declaration _	(587)',
+    '	module_content : temporary_table_declaration _	(588)',
     '',
-    '	.	reduce 587',
+    '	.	reduce 588',
     '',
     'state 685:',
     '',
@@ -13918,9 +13918,9 @@ const
     '',
     'state 689:',
     '',
-    '	add_domain_constraint_definition : _ADD domain_constraint _	(777)',
+    '	add_domain_constraint_definition : _ADD domain_constraint _	(778)',
     '',
-    '	.	reduce 777',
+    '	.	reduce 778',
     '',
     'state 690:',
     '',
@@ -13971,15 +13971,15 @@ const
     '',
     'state 694:',
     '',
-    '	drop_domain_default_clause : _DROP _DEFAULT _	(776)',
+    '	drop_domain_default_clause : _DROP _DEFAULT _	(777)',
     '',
-    '	.	reduce 776',
+    '	.	reduce 777',
     '',
     'state 695:',
     '',
-    '	set_domain_default_clause : _SET default_clause _	(775)',
+    '	set_domain_default_clause : _SET default_clause _	(776)',
     '',
-    '	.	reduce 775',
+    '	.	reduce 776',
     '',
     'state 696:',
     '',
@@ -14055,7 +14055,7 @@ const
     '',
     'state 698:',
     '',
-    '	table_constraint_definition : constraint_name_definition_opt _ table_constraint constraint_check_time_opt',
+    '	table_constraint_definition : constraint_name_definition_opt _ table_constraint table_constraint_attributes_opt',
     '',
     '	_CHECK	shift 895',
     '	_FOREIGN	shift 913',
@@ -14071,15 +14071,15 @@ const
     '',
     'state 699:',
     '',
-    '	add_table_constraint_definition : _ADD table_constraint_definition _	(763)',
+    '	add_table_constraint_definition : _ADD table_constraint_definition _	(764)',
     '',
-    '	.	reduce 763',
+    '	.	reduce 764',
     '',
     'state 700:',
     '',
-    '	column_opt : _COLUMN _	(755)',
+    '	column_opt : _COLUMN _	(756)',
     '',
-    '	.	reduce 755',
+    '	.	reduce 756',
     '',
     'state 701:',
     '',
@@ -14129,9 +14129,9 @@ const
     '',
     'state 704:',
     '',
-    '	connection_target : SQL_server_name connection_name_opt user_name_opt _	(862)',
+    '	connection_target : SQL_server_name connection_name_opt user_name_opt _	(863)',
     '',
-    '	.	reduce 862',
+    '	.	reduce 863',
     '',
     'state 705:',
     '',
@@ -14182,39 +14182,39 @@ const
     '',
     'state 706:',
     '',
-    '	connection_name_opt : _AS connection_name _	(865)',
+    '	connection_name_opt : _AS connection_name _	(866)',
     '',
-    '	.	reduce 865',
+    '	.	reduce 866',
     '',
     'state 707:',
     '',
     '	table_definition : _CREATE table_definition_opts _TABLE table_name table_element_list _ table_commit_opts',
-    '	table_commit_opts : _	(661)',
+    '	table_commit_opts : _	(662)',
     '',
     '	_ON	shift 922',
-    '	$end	reduce 661',
-    '	identifier_body	reduce 661',
-    '	delimited_identifier	reduce 661',
-    '	left_paren	reduce 661',
-    '	semicolon	reduce 661',
-    '	underscore	reduce 661',
-    '	_ALTER	reduce 661',
-    '	_COMMIT	reduce 661',
-    '	_CONNECT	reduce 661',
-    '	_CREATE	reduce 661',
-    '	_DECLARE	reduce 661',
-    '	_DELETE	reduce 661',
-    '	_DISCONNECT	reduce 661',
-    '	_DROP	reduce 661',
-    '	_GRANT	reduce 661',
-    '	_INSERT	reduce 661',
-    '	_REVOKE	reduce 661',
-    '	_ROLLBACK	reduce 661',
-    '	_SELECT	reduce 661',
-    '	_SET	reduce 661',
-    '	_TABLE	reduce 661',
-    '	_UPDATE	reduce 661',
-    '	_VALUES	reduce 661',
+    '	$end	reduce 662',
+    '	identifier_body	reduce 662',
+    '	delimited_identifier	reduce 662',
+    '	left_paren	reduce 662',
+    '	semicolon	reduce 662',
+    '	underscore	reduce 662',
+    '	_ALTER	reduce 662',
+    '	_COMMIT	reduce 662',
+    '	_CONNECT	reduce 662',
+    '	_CREATE	reduce 662',
+    '	_DECLARE	reduce 662',
+    '	_DELETE	reduce 662',
+    '	_DISCONNECT	reduce 662',
+    '	_DROP	reduce 662',
+    '	_GRANT	reduce 662',
+    '	_INSERT	reduce 662',
+    '	_REVOKE	reduce 662',
+    '	_ROLLBACK	reduce 662',
+    '	_SELECT	reduce 662',
+    '	_SET	reduce 662',
+    '	_TABLE	reduce 662',
+    '	_UPDATE	reduce 662',
+    '	_VALUES	reduce 662',
     '	.	error',
     '',
     '	table_commit_opts	goto 921',
@@ -14290,9 +14290,9 @@ const
     '',
     'state 711:',
     '',
-    '	assertion_definition : _CREATE _ASSERTION constraint_name assertion_check constraint_attributes_opt _	(699)',
+    '	assertion_definition : _CREATE _ASSERTION constraint_name assertion_check constraint_attributes_opt _	(700)',
     '',
-    '	.	reduce 699',
+    '	.	reduce 700',
     '',
     'state 712:',
     '',
@@ -15217,43 +15217,43 @@ const
     '',
     'state 746:',
     '',
-    '	schema_elements : schema_element _	(638)',
+    '	schema_elements : schema_element _	(639)',
     '',
-    '	.	reduce 638',
+    '	.	reduce 639',
     '',
     'state 747:',
     '',
     '	*** conflicts:',
     '',
-    '	shift 756, reduce 635 on _CREATE',
-    '	shift 78, reduce 635 on _GRANT',
+    '	shift 756, reduce 636 on _CREATE',
+    '	shift 78, reduce 636 on _GRANT',
     '',
-    '	schema_definition : _CREATE _SCHEMA schema_name_clause schema_character_set_specification_opt schema_elements _	(635)',
+    '	schema_definition : _CREATE _SCHEMA schema_name_clause schema_character_set_specification_opt schema_elements _	(636)',
     '	schema_elements : schema_elements _ schema_element',
     '',
     '	_CREATE	shift 756',
     '	_GRANT	shift 78',
-    '	$end	reduce 635',
-    '	identifier_body	reduce 635',
-    '	delimited_identifier	reduce 635',
-    '	left_paren	reduce 635',
-    '	semicolon	reduce 635',
-    '	underscore	reduce 635',
-    '	_ALTER	reduce 635',
-    '	_COMMIT	reduce 635',
-    '	_CONNECT	reduce 635',
-    '	_DECLARE	reduce 635',
-    '	_DELETE	reduce 635',
-    '	_DISCONNECT	reduce 635',
-    '	_DROP	reduce 635',
-    '	_INSERT	reduce 635',
-    '	_REVOKE	reduce 635',
-    '	_ROLLBACK	reduce 635',
-    '	_SELECT	reduce 635',
-    '	_SET	reduce 635',
-    '	_TABLE	reduce 635',
-    '	_UPDATE	reduce 635',
-    '	_VALUES	reduce 635',
+    '	$end	reduce 636',
+    '	identifier_body	reduce 636',
+    '	delimited_identifier	reduce 636',
+    '	left_paren	reduce 636',
+    '	semicolon	reduce 636',
+    '	underscore	reduce 636',
+    '	_ALTER	reduce 636',
+    '	_COMMIT	reduce 636',
+    '	_CONNECT	reduce 636',
+    '	_DECLARE	reduce 636',
+    '	_DELETE	reduce 636',
+    '	_DISCONNECT	reduce 636',
+    '	_DROP	reduce 636',
+    '	_INSERT	reduce 636',
+    '	_REVOKE	reduce 636',
+    '	_ROLLBACK	reduce 636',
+    '	_SELECT	reduce 636',
+    '	_SET	reduce 636',
+    '	_TABLE	reduce 636',
+    '	_UPDATE	reduce 636',
+    '	_VALUES	reduce 636',
     '	.	error',
     '',
     '	schema_element	goto 964',
@@ -15268,51 +15268,51 @@ const
     '',
     'state 748:',
     '',
-    '	schema_element : assertion_definition _	(649)',
-    '',
-    '	.	reduce 649',
-    '',
-    'state 749:',
-    '',
-    '	schema_element : translation_definition _	(652)',
-    '',
-    '	.	reduce 652',
-    '',
-    'state 750:',
-    '',
-    '	schema_element : collation_definition _	(651)',
-    '',
-    '	.	reduce 651',
-    '',
-    'state 751:',
-    '',
-    '	schema_element : character_set_definition _	(650)',
+    '	schema_element : assertion_definition _	(650)',
     '',
     '	.	reduce 650',
     '',
+    'state 749:',
+    '',
+    '	schema_element : translation_definition _	(653)',
+    '',
+    '	.	reduce 653',
+    '',
+    'state 750:',
+    '',
+    '	schema_element : collation_definition _	(652)',
+    '',
+    '	.	reduce 652',
+    '',
+    'state 751:',
+    '',
+    '	schema_element : character_set_definition _	(651)',
+    '',
+    '	.	reduce 651',
+    '',
     'state 752:',
     '',
-    '	schema_element : domain_definition _	(645)',
+    '	schema_element : domain_definition _	(646)',
     '',
-    '	.	reduce 645',
+    '	.	reduce 646',
     '',
     'state 753:',
     '',
-    '	schema_element : grant_statement _	(648)',
+    '	schema_element : grant_statement _	(649)',
     '',
-    '	.	reduce 648',
+    '	.	reduce 649',
     '',
     'state 754:',
     '',
-    '	schema_element : view_definition _	(647)',
+    '	schema_element : view_definition _	(648)',
     '',
-    '	.	reduce 647',
+    '	.	reduce 648',
     '',
     'state 755:',
     '',
-    '	schema_element : table_definition _	(646)',
+    '	schema_element : table_definition _	(647)',
     '',
-    '	.	reduce 646',
+    '	.	reduce 647',
     '',
     'state 756:',
     '',
@@ -15323,7 +15323,7 @@ const
     '	character_set_definition : _CREATE _ _CHARACTER _SET character_set_name as_opt character_set_source charset_collation_opt',
     '	collation_definition : _CREATE _ _COLLATION collation_name _FOR character_set_specification _FROM collation_source pad_attribute_opt',
     '	translation_definition : _CREATE _ _TRANSLATION translation_name _FOR source_character_set_specification _TO target_character_set_specification _FROM translation_source',
-    '	table_definition_opts : _	(658)',
+    '	table_definition_opts : _	(659)',
     '',
     '	_ASSERTION	shift 107',
     '	_CHARACTER	shift 108',
@@ -15333,7 +15333,7 @@ const
     '	_LOCAL	shift 112',
     '	_TRANSLATION	shift 114',
     '	_VIEW	shift 115',
-    '	_TABLE	reduce 658',
+    '	_TABLE	reduce 659',
     '	.	error',
     '',
     '	table_definition_opts	goto 106',
@@ -15347,9 +15347,9 @@ const
     '',
     'state 758:',
     '',
-    '	schema_name_clause : schema_name _AUTHORIZATION schema_authorization_identifier _	(642)',
+    '	schema_name_clause : schema_name _AUTHORIZATION schema_authorization_identifier _	(643)',
     '',
-    '	.	reduce 642',
+    '	.	reduce 643',
     '',
     'state 759:',
     '',
@@ -15366,9 +15366,9 @@ const
     '',
     'state 761:',
     '',
-    '	source_character_set_specification : character_set_specification _	(725)',
+    '	source_character_set_specification : character_set_specification _	(726)',
     '',
-    '	.	reduce 725',
+    '	.	reduce 726',
     '',
     'state 762:',
     '',
@@ -15400,10 +15400,10 @@ const
     'state 764:',
     '',
     '	column_name_list : column_name_list _ comma column_name',
-    '	view_column_list : column_name_list _	(671)',
+    '	view_column_list : column_name_list _	(672)',
     '',
     '	comma	shift 786',
-    '	right_paren	reduce 671',
+    '	right_paren	reduce 672',
     '	.	error',
     '',
     'state 765:',
@@ -15647,9 +15647,9 @@ const
     '',
     'state 779:',
     '',
-    '	object_name : table_opt table_name _	(690)',
+    '	object_name : table_opt table_name _	(691)',
     '',
-    '	.	reduce 690',
+    '	.	reduce 691',
     '',
     'state 780:',
     '',
@@ -15687,27 +15687,27 @@ const
     '',
     'state 782:',
     '',
-    '	object_name : _COLLATION collation_name _	(692)',
+    '	object_name : _COLLATION collation_name _	(693)',
     '',
-    '	.	reduce 692',
+    '	.	reduce 693',
     '',
     'state 783:',
     '',
-    '	object_name : _DOMAIN domain_name _	(691)',
+    '	object_name : _DOMAIN domain_name _	(692)',
     '',
-    '	.	reduce 691',
+    '	.	reduce 692',
     '',
     'state 784:',
     '',
-    '	object_name : _TRANSLATION translation_name _	(694)',
+    '	object_name : _TRANSLATION translation_name _	(695)',
     '',
-    '	.	reduce 694',
+    '	.	reduce 695',
     '',
     'state 785:',
     '',
-    '	privilege_column_list_opt : left_paren privilege_column_list right_paren _	(688)',
+    '	privilege_column_list_opt : left_paren privilege_column_list right_paren _	(689)',
     '',
-    '	.	reduce 688',
+    '	.	reduce 689',
     '',
     'state 786:',
     '',
@@ -15734,17 +15734,17 @@ const
     'state 788:',
     '',
     '	column_name_list : column_name_list _ comma column_name',
-    '	insert_column_list : column_name_list _	(820)',
+    '	insert_column_list : column_name_list _	(821)',
     '',
     '	comma	shift 786',
-    '	right_paren	reduce 820',
+    '	right_paren	reduce 821',
     '	.	error',
     '',
     'state 789:',
     '',
-    '	insert_columns_and_source : _DEFAULT _VALUES _	(819)',
+    '	insert_columns_and_source : _DEFAULT _VALUES _	(820)',
     '',
-    '	.	reduce 819',
+    '	.	reduce 820',
     '',
     'state 790:',
     '',
@@ -16100,33 +16100,33 @@ const
     '',
     'state 806:',
     '',
-    '	constraint_name_list_some : constraint_name_list_some comma constraint_name _	(853)',
+    '	constraint_name_list_some : constraint_name_list_some comma constraint_name _	(854)',
     '',
-    '	.	reduce 853',
+    '	.	reduce 854',
     '',
     'state 807:',
     '',
-    '	transaction_mode_list : transaction_mode_list comma transaction_mode _	(834)',
+    '	transaction_mode_list : transaction_mode_list comma transaction_mode _	(835)',
     '',
-    '	.	reduce 834',
+    '	.	reduce 835',
     '',
     'state 808:',
     '',
-    '	diagnostics_size : _DIAGNOSTICS _SIZE number_of_conditions _	(846)',
-    '',
-    '	.	reduce 846',
-    '',
-    'state 809:',
-    '',
-    '	number_of_conditions : simple_value_specification _	(847)',
+    '	diagnostics_size : _DIAGNOSTICS _SIZE number_of_conditions _	(847)',
     '',
     '	.	reduce 847',
     '',
+    'state 809:',
+    '',
+    '	number_of_conditions : simple_value_specification _	(848)',
+    '',
+    '	.	reduce 848',
+    '',
     'state 810:',
     '',
-    '	isolation_level : _ISOLATION _LEVEL level_of_isolation _	(838)',
+    '	isolation_level : _ISOLATION _LEVEL level_of_isolation _	(839)',
     '',
-    '	.	reduce 838',
+    '	.	reduce 839',
     '',
     'state 811:',
     '',
@@ -16146,15 +16146,15 @@ const
     '',
     'state 813:',
     '',
-    '	level_of_isolation : _SERIALIZABLE _	(842)',
+    '	level_of_isolation : _SERIALIZABLE _	(843)',
     '',
-    '	.	reduce 842',
+    '	.	reduce 843',
     '',
     'state 814:',
     '',
-    '	level_of_isolation : _SNAPSHOT _	(843)',
+    '	level_of_isolation : _SNAPSHOT _	(844)',
     '',
-    '	.	reduce 843',
+    '	.	reduce 844',
     '',
     'state 815:',
     '',
@@ -16294,9 +16294,9 @@ const
     '',
     'state 817:',
     '',
-    '	update_statement__searched : _UPDATE table_name _SET set_clause_list where_clause_opt _	(827)',
+    '	update_statement__searched : _UPDATE table_name _SET set_clause_list where_clause_opt _	(828)',
     '',
-    '	.	reduce 827',
+    '	.	reduce 828',
     '',
     'state 818:',
     '',
@@ -18910,45 +18910,45 @@ const
     '',
     'state 883:',
     '',
-    '	sort_specification : sort_key collate_clause_opt ordering_specification_opt _	(599)',
+    '	sort_specification : sort_key collate_clause_opt ordering_specification_opt _	(600)',
     '',
-    '	.	reduce 599',
+    '	.	reduce 600',
     '',
     'state 884:',
     '',
-    '	ordering_specification_opt : _ASC _	(603)',
-    '',
-    '	.	reduce 603',
-    '',
-    'state 885:',
-    '',
-    '	ordering_specification_opt : _DESC _	(604)',
+    '	ordering_specification_opt : _ASC _	(604)',
     '',
     '	.	reduce 604',
     '',
+    'state 885:',
+    '',
+    '	ordering_specification_opt : _DESC _	(605)',
+    '',
+    '	.	reduce 605',
+    '',
     'state 886:',
     '',
-    '	sort_specification_list : sort_specification_list comma sort_specification _	(598)',
+    '	sort_specification_list : sort_specification_list comma sort_specification _	(599)',
     '',
-    '	.	reduce 598',
+    '	.	reduce 599',
     '',
     'state 887:',
     '',
     '	declare_cursor : _DECLARE cursor_name _ insensitive_opt scroll_opt _CURSOR _FOR cursor_specification',
-    '	insensitive_opt : _	(589)',
+    '	insensitive_opt : _	(590)',
     '',
     '	_INSENSITIVE	shift 1073',
-    '	_CURSOR	reduce 589',
-    '	_SCROLL	reduce 589',
+    '	_CURSOR	reduce 590',
+    '	_SCROLL	reduce 590',
     '	.	error',
     '',
     '	insensitive_opt	goto 1072',
     '',
     'state 888:',
     '',
-    '	cursor_name : identifier _	(593)',
+    '	cursor_name : identifier _	(594)',
     '',
-    '	.	reduce 593',
+    '	.	reduce 594',
     '',
     'state 889:',
     '',
@@ -18961,9 +18961,9 @@ const
     '',
     'state 890:',
     '',
-    '	procedure_name : identifier _	(611)',
+    '	procedure_name : identifier _	(612)',
     '',
-    '	.	reduce 611',
+    '	.	reduce 612',
     '',
     'state 891:',
     '',
@@ -19035,9 +19035,9 @@ const
     '',
     'state 897:',
     '',
-    '	drop_domain_constraint_definition : _DROP _CONSTRAINT constraint_name _	(778)',
+    '	drop_domain_constraint_definition : _DROP _CONSTRAINT constraint_name _	(779)',
     '',
-    '	.	reduce 778',
+    '	.	reduce 779',
     '',
     'state 898:',
     '',
@@ -19135,25 +19135,25 @@ const
     '',
     'state 907:',
     '',
-    '	add_column_definition : _ADD column_opt column_definition _	(756)',
+    '	add_column_definition : _ADD column_opt column_definition _	(757)',
     '',
-    '	.	reduce 756',
+    '	.	reduce 757',
     '',
     'state 908:',
     '',
-    '	table_constraint : referential_constraint_definition _	(577)',
+    '	table_constraint : referential_constraint_definition _	(578)',
     '',
-    '	.	reduce 577',
+    '	.	reduce 578',
     '',
     'state 909:',
     '',
-    '	table_constraint : unique_constraint_definition _	(576)',
+    '	table_constraint : unique_constraint_definition _	(577)',
     '',
-    '	.	reduce 576',
+    '	.	reduce 577',
     '',
     'state 910:',
     '',
-    '	table_constraint_definition : constraint_name_definition_opt table_constraint _ constraint_check_time_opt',
+    '	table_constraint_definition : constraint_name_definition_opt table_constraint _ table_constraint_attributes_opt',
     '	constraint_check_time_opt : _	(571)',
     '',
     '	_INITIALLY	shift 713',
@@ -19184,34 +19184,35 @@ const
     '	_VALUES	reduce 571',
     '	.	error',
     '',
-    '	constraint_check_time_opt	goto 1081',
+    '	table_constraint_attributes_opt	goto 1081',
+    '	constraint_check_time_opt	goto 1082',
     '	constraint_check_time	goto 930',
     '',
     'state 911:',
     '',
-    '	table_constraint : check_constraint_definition _	(578)',
+    '	table_constraint : check_constraint_definition _	(579)',
     '',
-    '	.	reduce 578',
+    '	.	reduce 579',
     '',
     'state 912:',
     '',
     '	unique_constraint_definition : unique_specification _ left_paren unique_column_list right_paren',
     '',
-    '	left_paren	shift 1082',
+    '	left_paren	shift 1083',
     '	.	error',
     '',
     'state 913:',
     '',
     '	referential_constraint_definition : _FOREIGN _ _KEY left_paren referencing_columns right_paren references_specification',
     '',
-    '	_KEY	shift 1083',
+    '	_KEY	shift 1084',
     '	.	error',
     '',
     'state 914:',
     '',
     '	unique_specification : _PRIMARY _ _KEY',
     '',
-    '	_KEY	shift 1084',
+    '	_KEY	shift 1085',
     '	.	error',
     '',
     'state 915:',
@@ -19224,13 +19225,13 @@ const
     '',
     '	alter_column_definition : _ALTER column_opt column_name _ alter_column_action',
     '',
-    '	_DROP	shift 1088',
-    '	_SET	shift 1089',
+    '	_DROP	shift 1089',
+    '	_SET	shift 1090',
     '	.	error',
     '',
-    '	drop_column_default_clause	goto 1085',
-    '	set_column_default_clause	goto 1086',
-    '	alter_column_action	goto 1087',
+    '	drop_column_default_clause	goto 1086',
+    '	set_column_default_clause	goto 1087',
+    '	alter_column_action	goto 1088',
     '',
     'state 917:',
     '',
@@ -19240,7 +19241,7 @@ const
     '	_RESTRICT	shift 536',
     '	.	error',
     '',
-    '	drop_behaviour	goto 1090',
+    '	drop_behaviour	goto 1091',
     '',
     'state 918:',
     '',
@@ -19250,32 +19251,32 @@ const
     '	_RESTRICT	shift 536',
     '	.	error',
     '',
-    '	drop_behaviour	goto 1091',
+    '	drop_behaviour	goto 1092',
     '',
     'state 919:',
     '',
-    '	user_name_opt : _USER user_name _	(867)',
+    '	user_name_opt : _USER user_name _	(868)',
     '',
-    '	.	reduce 867',
+    '	.	reduce 868',
     '',
     'state 920:',
     '',
-    '	user_name : simple_value_specification _	(870)',
+    '	user_name : simple_value_specification _	(871)',
     '',
-    '	.	reduce 870',
+    '	.	reduce 871',
     '',
     'state 921:',
     '',
-    '	table_definition : _CREATE table_definition_opts _TABLE table_name table_element_list table_commit_opts _	(657)',
+    '	table_definition : _CREATE table_definition_opts _TABLE table_name table_element_list table_commit_opts _	(658)',
     '',
-    '	.	reduce 657',
+    '	.	reduce 658',
     '',
     'state 922:',
     '',
     '	table_commit_opts : _ON _ _COMMIT _DELETE _ROWS',
     '	table_commit_opts : _ON _ _COMMIT _PRESERVE _ROWS',
     '',
-    '	_COMMIT	shift 1092',
+    '	_COMMIT	shift 1093',
     '	.	error',
     '',
     'state 923:',
@@ -19297,7 +19298,7 @@ const
     '',
     '	.	reduce 92',
     '',
-    '	table_element_list_opt	goto 1093',
+    '	table_element_list_opt	goto 1094',
     '',
     'state 926:',
     '',
@@ -19315,7 +19316,7 @@ const
     '',
     '	deferrable_opt : _NOT _ _DEFERRABLE',
     '',
-    '	_DEFERRABLE	shift 1094',
+    '	_DEFERRABLE	shift 1095',
     '	.	error',
     '',
     'state 929:',
@@ -19347,45 +19348,45 @@ const
     '	assertion_check : _CHECK left_paren search_condition _ right_paren',
     '	search_condition : search_condition _ _OR boolean_term',
     '',
-    '	right_paren	shift 1095',
+    '	right_paren	shift 1096',
     '	_OR	shift 855',
     '	.	error',
     '',
     'state 934:',
     '',
     '	character_set_definition : _CREATE _CHARACTER _SET character_set_name as_opt character_set_source _ charset_collation_opt',
-    '	charset_collation_opt : _	(702)',
+    '	charset_collation_opt : _	(703)',
     '',
     '	_COLLATE	shift 420',
-    '	_COLLATION	shift 1099',
-    '	$end	reduce 702',
-    '	identifier_body	reduce 702',
-    '	delimited_identifier	reduce 702',
-    '	left_paren	reduce 702',
-    '	semicolon	reduce 702',
-    '	underscore	reduce 702',
-    '	_ALTER	reduce 702',
-    '	_COMMIT	reduce 702',
-    '	_CONNECT	reduce 702',
-    '	_CREATE	reduce 702',
-    '	_DECLARE	reduce 702',
-    '	_DELETE	reduce 702',
-    '	_DISCONNECT	reduce 702',
-    '	_DROP	reduce 702',
-    '	_GRANT	reduce 702',
-    '	_INSERT	reduce 702',
-    '	_REVOKE	reduce 702',
-    '	_ROLLBACK	reduce 702',
-    '	_SELECT	reduce 702',
-    '	_SET	reduce 702',
-    '	_TABLE	reduce 702',
-    '	_UPDATE	reduce 702',
-    '	_VALUES	reduce 702',
+    '	_COLLATION	shift 1100',
+    '	$end	reduce 703',
+    '	identifier_body	reduce 703',
+    '	delimited_identifier	reduce 703',
+    '	left_paren	reduce 703',
+    '	semicolon	reduce 703',
+    '	underscore	reduce 703',
+    '	_ALTER	reduce 703',
+    '	_COMMIT	reduce 703',
+    '	_CONNECT	reduce 703',
+    '	_CREATE	reduce 703',
+    '	_DECLARE	reduce 703',
+    '	_DELETE	reduce 703',
+    '	_DISCONNECT	reduce 703',
+    '	_DROP	reduce 703',
+    '	_GRANT	reduce 703',
+    '	_INSERT	reduce 703',
+    '	_REVOKE	reduce 703',
+    '	_ROLLBACK	reduce 703',
+    '	_SELECT	reduce 703',
+    '	_SET	reduce 703',
+    '	_TABLE	reduce 703',
+    '	_UPDATE	reduce 703',
+    '	_VALUES	reduce 703',
     '	.	error',
     '',
-    '	limited_collation_definition	goto 1096',
-    '	charset_collation_opt	goto 1097',
-    '	collate_clause	goto 1098',
+    '	limited_collation_definition	goto 1097',
+    '	charset_collation_opt	goto 1098',
+    '	collate_clause	goto 1099',
     '',
     'state 935:',
     '',
@@ -19396,11 +19397,11 @@ const
     '	underscore	shift 69',
     '	.	error',
     '',
-    '	existing_character_set_name	goto 1100',
+    '	existing_character_set_name	goto 1101',
     '	actual_identifier	goto 61',
     '	SQL_language_identifier	goto 96',
     '	identifier	goto 97',
-    '	character_set_name	goto 1101',
+    '	character_set_name	goto 1102',
     '	introducer	goto 63',
     '	regular_identifier	goto 100',
     '',
@@ -19411,18 +19412,18 @@ const
     '	identifier_body	shift 66',
     '	delimited_identifier	shift 67',
     '	underscore	shift 69',
-    '	_DEFAULT	shift 1108',
-    '	_DESC	shift 1109',
-    '	_EXTERNAL	shift 1110',
-    '	_TRANSLATION	shift 1111',
+    '	_DEFAULT	shift 1109',
+    '	_DESC	shift 1110',
+    '	_EXTERNAL	shift 1111',
+    '	_TRANSLATION	shift 1112',
     '	.	error',
     '',
-    '	schema_collation_name	goto 1102',
-    '	external_collation	goto 1103',
-    '	translation_collation	goto 1104',
-    '	collating_sequence_definition	goto 1105',
-    '	collation_source	goto 1106',
-    '	collation_name	goto 1107',
+    '	schema_collation_name	goto 1103',
+    '	external_collation	goto 1104',
+    '	translation_collation	goto 1105',
+    '	collating_sequence_definition	goto 1106',
+    '	collation_source	goto 1107',
+    '	collation_name	goto 1108',
     '	qualified_name	goto 319',
     '	actual_identifier	goto 61',
     '	identifier	goto 203',
@@ -19439,7 +19440,7 @@ const
     '',
     '	data_type_opt : _CHARACTER _ _SET character_set_specification',
     '',
-    '	_SET	shift 1112',
+    '	_SET	shift 1113',
     '	.	error',
     '',
     'state 939:',
@@ -19452,38 +19453,38 @@ const
     '',
     '	domain_definition : _CREATE _DOMAIN domain_name as_opt data_type default_clause_opt _ domain_constraint_opt collate_clause_opt',
     '	constraint_name_definition_opt : _	(235)',
-    '	domain_constraint_opt : _	(654)',
+    '	domain_constraint_opt : _	(655)',
     '',
     '	_CONSTRAINT	shift 692',
     '	_CHECK	reduce 235',
-    '	$end	reduce 654',
-    '	identifier_body	reduce 654',
-    '	delimited_identifier	reduce 654',
-    '	left_paren	reduce 654',
-    '	semicolon	reduce 654',
-    '	underscore	reduce 654',
-    '	_ALTER	reduce 654',
-    '	_COLLATE	reduce 654',
-    '	_COMMIT	reduce 654',
-    '	_CONNECT	reduce 654',
-    '	_CREATE	reduce 654',
-    '	_DECLARE	reduce 654',
-    '	_DELETE	reduce 654',
-    '	_DISCONNECT	reduce 654',
-    '	_DROP	reduce 654',
-    '	_GRANT	reduce 654',
-    '	_INSERT	reduce 654',
-    '	_REVOKE	reduce 654',
-    '	_ROLLBACK	reduce 654',
-    '	_SELECT	reduce 654',
-    '	_SET	reduce 654',
-    '	_TABLE	reduce 654',
-    '	_UPDATE	reduce 654',
-    '	_VALUES	reduce 654',
+    '	$end	reduce 655',
+    '	identifier_body	reduce 655',
+    '	delimited_identifier	reduce 655',
+    '	left_paren	reduce 655',
+    '	semicolon	reduce 655',
+    '	underscore	reduce 655',
+    '	_ALTER	reduce 655',
+    '	_COLLATE	reduce 655',
+    '	_COMMIT	reduce 655',
+    '	_CONNECT	reduce 655',
+    '	_CREATE	reduce 655',
+    '	_DECLARE	reduce 655',
+    '	_DELETE	reduce 655',
+    '	_DISCONNECT	reduce 655',
+    '	_DROP	reduce 655',
+    '	_GRANT	reduce 655',
+    '	_INSERT	reduce 655',
+    '	_REVOKE	reduce 655',
+    '	_ROLLBACK	reduce 655',
+    '	_SELECT	reduce 655',
+    '	_SET	reduce 655',
+    '	_TABLE	reduce 655',
+    '	_UPDATE	reduce 655',
+    '	_VALUES	reduce 655',
     '	.	error',
     '',
-    '	domain_constraint	goto 1113',
-    '	domain_constraint_opt	goto 1114',
+    '	domain_constraint	goto 1114',
+    '	domain_constraint_opt	goto 1115',
     '	constraint_name_definition	goto 690',
     '	constraint_name_definition_opt	goto 691',
     '',
@@ -19500,8 +19501,8 @@ const
     '	digit	shift 150',
     '	.	error',
     '',
-    '	length	goto 1115',
-    '	unsigned_integer	goto 1116',
+    '	length	goto 1116',
+    '	unsigned_integer	goto 1117',
     '',
     'state 943:',
     '',
@@ -19547,7 +19548,7 @@ const
     '	_VALUES	reduce 141',
     '	.	error',
     '',
-    '	character_string_type_len	goto 1117',
+    '	character_string_type_len	goto 1118',
     '',
     'state 944:',
     '',
@@ -19600,7 +19601,7 @@ const
     '	_VALUES	reduce 122',
     '	.	error',
     '',
-    '	character_string_type_len	goto 1118',
+    '	character_string_type_len	goto 1119',
     '',
     'state 946:',
     '',
@@ -19653,7 +19654,7 @@ const
     '	_VALUES	reduce 121',
     '	.	error',
     '',
-    '	character_string_type_len	goto 1119',
+    '	character_string_type_len	goto 1120',
     '',
     'state 948:',
     '',
@@ -19669,7 +19670,7 @@ const
     '	digit	shift 150',
     '	.	error',
     '',
-    '	precision	goto 1120',
+    '	precision	goto 1121',
     '	unsigned_integer	goto 823',
     '',
     'state 950:',
@@ -19691,7 +19692,7 @@ const
     '	digit	shift 150',
     '	.	error',
     '',
-    '	precision	goto 1121',
+    '	precision	goto 1122',
     '	unsigned_integer	goto 823',
     '',
     'state 953:',
@@ -19712,7 +19713,7 @@ const
     '	national_character_string_type : _NATIONAL _CHAR _ _VARYING',
     '',
     '	left_paren	shift 942',
-    '	_VARYING	shift 1123',
+    '	_VARYING	shift 1124',
     '	$end	reduce 133',
     '	identifier_body	reduce 133',
     '	delimited_identifier	reduce 133',
@@ -19747,7 +19748,7 @@ const
     '	_VALUES	reduce 133',
     '	.	error',
     '',
-    '	character_string_type_len	goto 1122',
+    '	character_string_type_len	goto 1123',
     '',
     'state 955:',
     '',
@@ -19761,7 +19762,7 @@ const
     '	national_character_string_type : _NATIONAL _CHARACTER _ _VARYING',
     '',
     '	left_paren	shift 942',
-    '	_VARYING	shift 1125',
+    '	_VARYING	shift 1126',
     '	$end	reduce 132',
     '	identifier_body	reduce 132',
     '	delimited_identifier	reduce 132',
@@ -19796,7 +19797,7 @@ const
     '	_VALUES	reduce 132',
     '	.	error',
     '',
-    '	character_string_type_len	goto 1124',
+    '	character_string_type_len	goto 1125',
     '',
     'state 956:',
     '',
@@ -19848,7 +19849,7 @@ const
     '	_VALUES	reduce 137',
     '	.	error',
     '',
-    '	character_string_type_len	goto 1126',
+    '	character_string_type_len	goto 1127',
     '',
     'state 958:',
     '',
@@ -19861,7 +19862,7 @@ const
     '	datetime_type : _TIME time_precision_opt _ tz_opt',
     '	tz_opt : _	(167)',
     '',
-    '	_WITH	shift 1128',
+    '	_WITH	shift 1129',
     '	$end	reduce 167',
     '	identifier_body	reduce 167',
     '	delimited_identifier	reduce 167',
@@ -19897,7 +19898,7 @@ const
     '	_VALUES	reduce 167',
     '	.	error',
     '',
-    '	tz_opt	goto 1127',
+    '	tz_opt	goto 1128',
     '',
     'state 960:',
     '',
@@ -19907,7 +19908,7 @@ const
     '	.	error',
     '',
     '	time_fractional_seconds_precision	goto 644',
-    '	time_precision	goto 1129',
+    '	time_precision	goto 1130',
     '	unsigned_integer	goto 646',
     '',
     'state 961:',
@@ -19915,7 +19916,7 @@ const
     '	datetime_type : _TIMESTAMP timestamp_precision_opt _ tz_opt',
     '	tz_opt : _	(167)',
     '',
-    '	_WITH	shift 1128',
+    '	_WITH	shift 1129',
     '	$end	reduce 167',
     '	identifier_body	reduce 167',
     '	delimited_identifier	reduce 167',
@@ -19951,7 +19952,7 @@ const
     '	_VALUES	reduce 167',
     '	.	error',
     '',
-    '	tz_opt	goto 1130',
+    '	tz_opt	goto 1131',
     '',
     'state 962:',
     '',
@@ -19961,7 +19962,7 @@ const
     '	.	error',
     '',
     '	time_fractional_seconds_precision	goto 647',
-    '	timestamp_precision	goto 1131',
+    '	timestamp_precision	goto 1132',
     '	unsigned_integer	goto 646',
     '',
     'state 963:',
@@ -19972,9 +19973,9 @@ const
     '',
     'state 964:',
     '',
-    '	schema_elements : schema_elements schema_element _	(639)',
+    '	schema_elements : schema_elements schema_element _	(640)',
     '',
-    '	.	reduce 639',
+    '	.	reduce 640',
     '',
     'state 965:',
     '',
@@ -19989,7 +19990,7 @@ const
     '	SQL_language_identifier	goto 96',
     '	identifier	goto 97',
     '	character_set_name	goto 98',
-    '	character_set_specification	goto 1132',
+    '	character_set_specification	goto 1133',
     '	introducer	goto 63',
     '	regular_identifier	goto 100',
     '',
@@ -20002,12 +20003,12 @@ const
     '	underscore	shift 69',
     '	.	error',
     '',
-    '	target_character_set_specification	goto 1133',
+    '	target_character_set_specification	goto 1134',
     '	actual_identifier	goto 61',
     '	SQL_language_identifier	goto 96',
     '	identifier	goto 97',
     '	character_set_name	goto 98',
-    '	character_set_specification	goto 1134',
+    '	character_set_specification	goto 1135',
     '	introducer	goto 63',
     '	regular_identifier	goto 100',
     '',
@@ -20016,50 +20017,50 @@ const
     '	view_definition : _CREATE _VIEW table_name view_column_list_opt _AS query_expression _ view_check_opt',
     '	query_expression : query_expression _ _UNION all_opt corresponding_spec_opt query_term',
     '	query_expression : query_expression _ _EXCEPT all_opt corresponding_spec_opt query_term',
-    '	view_check_opt : _	(667)',
+    '	view_check_opt : _	(668)',
     '',
     '	_EXCEPT	shift 91',
     '	_UNION	shift 93',
-    '	_WITH	shift 1136',
-    '	$end	reduce 667',
-    '	identifier_body	reduce 667',
-    '	delimited_identifier	reduce 667',
-    '	left_paren	reduce 667',
-    '	semicolon	reduce 667',
-    '	underscore	reduce 667',
-    '	_ALTER	reduce 667',
-    '	_COMMIT	reduce 667',
-    '	_CONNECT	reduce 667',
-    '	_CREATE	reduce 667',
-    '	_DECLARE	reduce 667',
-    '	_DELETE	reduce 667',
-    '	_DISCONNECT	reduce 667',
-    '	_DROP	reduce 667',
-    '	_GRANT	reduce 667',
-    '	_INSERT	reduce 667',
-    '	_REVOKE	reduce 667',
-    '	_ROLLBACK	reduce 667',
-    '	_SELECT	reduce 667',
-    '	_SET	reduce 667',
-    '	_TABLE	reduce 667',
-    '	_UPDATE	reduce 667',
-    '	_VALUES	reduce 667',
+    '	_WITH	shift 1137',
+    '	$end	reduce 668',
+    '	identifier_body	reduce 668',
+    '	delimited_identifier	reduce 668',
+    '	left_paren	reduce 668',
+    '	semicolon	reduce 668',
+    '	underscore	reduce 668',
+    '	_ALTER	reduce 668',
+    '	_COMMIT	reduce 668',
+    '	_CONNECT	reduce 668',
+    '	_CREATE	reduce 668',
+    '	_DECLARE	reduce 668',
+    '	_DELETE	reduce 668',
+    '	_DISCONNECT	reduce 668',
+    '	_DROP	reduce 668',
+    '	_GRANT	reduce 668',
+    '	_INSERT	reduce 668',
+    '	_REVOKE	reduce 668',
+    '	_ROLLBACK	reduce 668',
+    '	_SELECT	reduce 668',
+    '	_SET	reduce 668',
+    '	_TABLE	reduce 668',
+    '	_UPDATE	reduce 668',
+    '	_VALUES	reduce 668',
     '	.	error',
     '',
-    '	view_check_opt	goto 1135',
+    '	view_check_opt	goto 1136',
     '',
     'state 968:',
     '',
-    '	view_column_list_opt : left_paren view_column_list right_paren _	(666)',
+    '	view_column_list_opt : left_paren view_column_list right_paren _	(667)',
     '',
-    '	.	reduce 666',
+    '	.	reduce 667',
     '',
     'state 969:',
     '',
     '	temporary_table_declaration : _DECLARE _LOCAL _TEMPORARY _TABLE qualified_local_table_name table_element_list _ temporary_table_declaration_opt',
     '	temporary_table_declaration_opt : _	(86)',
     '',
-    '	_ON	shift 1138',
+    '	_ON	shift 1139',
     '	$end	reduce 86',
     '	identifier_body	reduce 86',
     '	delimited_identifier	reduce 86',
@@ -20085,7 +20086,7 @@ const
     '	_VALUES	reduce 86',
     '	.	error',
     '',
-    '	temporary_table_declaration_opt	goto 1137',
+    '	temporary_table_declaration_opt	goto 1138',
     '',
     'state 970:',
     '',
@@ -20093,7 +20094,7 @@ const
     '	unsigned_integer : unsigned_integer _ digit',
     '',
     '	digit	shift 340',
-    '	minus_sign	shift 1139',
+    '	minus_sign	shift 1140',
     '	.	error',
     '',
     'state 971:',
@@ -20104,7 +20105,7 @@ const
     '	unsigned_integer : unsigned_integer _ digit',
     '',
     '	digit	shift 340',
-    '	colon	shift 1140',
+    '	colon	shift 1141',
     '	quote	reduce 59',
     '	.	error',
     '',
@@ -20140,8 +20141,8 @@ const
     '	seconds_value : unsigned_integer _ period unsigned_integer',
     '',
     '	digit	shift 340',
-    '	period	shift 1141',
-    '	colon	shift 1142',
+    '	period	shift 1142',
+    '	colon	shift 1143',
     '	quote	reduce 51',
     '	.	error',
     '',
@@ -20149,7 +20150,7 @@ const
     '',
     '	time_string : quote time_value quote $$1 _ quote time_value time_zone_interval quote',
     '',
-    '	quote	shift 1143',
+    '	quote	shift 1144',
     '	.	error',
     '',
     'state 977:',
@@ -20158,7 +20159,7 @@ const
     '	unsigned_integer : unsigned_integer _ digit',
     '',
     '	digit	shift 340',
-    '	colon	shift 1144',
+    '	colon	shift 1145',
     '	.	error',
     '',
     'state 978:',
@@ -20166,72 +20167,72 @@ const
     '	timestamp_string : quote date_value space time_value _ quote',
     '	timestamp_string : quote date_value space time_value _ time_zone_interval quote',
     '',
-    '	quote	shift 1147',
+    '	quote	shift 1148',
     '	plus_sign	shift 151',
     '	minus_sign	shift 152',
     '	.	error',
     '',
-    '	time_zone_interval	goto 1145',
-    '	sign	goto 1146',
+    '	time_zone_interval	goto 1146',
+    '	sign	goto 1147',
     '',
     'state 979:',
     '',
-    '	grantee_list : grantee _	(673)',
+    '	grantee_list : grantee _	(674)',
     '',
-    '	.	reduce 673',
+    '	.	reduce 674',
     '',
     'state 980:',
     '',
     '	grant_statement : _GRANT privileges _ON object_name _TO grantee_list _ grant_option',
     '	grantee_list : grantee_list _ comma grantee',
-    '	grant_option : _	(675)',
+    '	grant_option : _	(676)',
     '',
-    '	comma	shift 1149',
-    '	_WITH	shift 1150',
-    '	$end	reduce 675',
-    '	identifier_body	reduce 675',
-    '	delimited_identifier	reduce 675',
-    '	left_paren	reduce 675',
-    '	semicolon	reduce 675',
-    '	underscore	reduce 675',
-    '	_ALTER	reduce 675',
-    '	_COMMIT	reduce 675',
-    '	_CONNECT	reduce 675',
-    '	_CREATE	reduce 675',
-    '	_DECLARE	reduce 675',
-    '	_DELETE	reduce 675',
-    '	_DISCONNECT	reduce 675',
-    '	_DROP	reduce 675',
-    '	_GRANT	reduce 675',
-    '	_INSERT	reduce 675',
-    '	_REVOKE	reduce 675',
-    '	_ROLLBACK	reduce 675',
-    '	_SELECT	reduce 675',
-    '	_SET	reduce 675',
-    '	_TABLE	reduce 675',
-    '	_UPDATE	reduce 675',
-    '	_VALUES	reduce 675',
+    '	comma	shift 1150',
+    '	_WITH	shift 1151',
+    '	$end	reduce 676',
+    '	identifier_body	reduce 676',
+    '	delimited_identifier	reduce 676',
+    '	left_paren	reduce 676',
+    '	semicolon	reduce 676',
+    '	underscore	reduce 676',
+    '	_ALTER	reduce 676',
+    '	_COMMIT	reduce 676',
+    '	_CONNECT	reduce 676',
+    '	_CREATE	reduce 676',
+    '	_DECLARE	reduce 676',
+    '	_DELETE	reduce 676',
+    '	_DISCONNECT	reduce 676',
+    '	_DROP	reduce 676',
+    '	_GRANT	reduce 676',
+    '	_INSERT	reduce 676',
+    '	_REVOKE	reduce 676',
+    '	_ROLLBACK	reduce 676',
+    '	_SELECT	reduce 676',
+    '	_SET	reduce 676',
+    '	_TABLE	reduce 676',
+    '	_UPDATE	reduce 676',
+    '	_VALUES	reduce 676',
     '	.	error',
     '',
-    '	grant_option	goto 1148',
+    '	grant_option	goto 1149',
     '',
     'state 981:',
     '',
-    '	grantee : authorization_identifier _	(698)',
+    '	grantee : authorization_identifier _	(699)',
     '',
-    '	.	reduce 698',
+    '	.	reduce 699',
     '',
     'state 982:',
     '',
-    '	grantee : _PUBLIC _	(697)',
+    '	grantee : _PUBLIC _	(698)',
     '',
-    '	.	reduce 697',
+    '	.	reduce 698',
     '',
     'state 983:',
     '',
-    '	object_name : _CHARACTER _SET character_set_name _	(693)',
+    '	object_name : _CHARACTER _SET character_set_name _	(694)',
     '',
-    '	.	reduce 693',
+    '	.	reduce 694',
     '',
     'state 984:',
     '',
@@ -20257,7 +20258,7 @@ const
     '	non_join_query_primary	goto 54',
     '	query_term	goto 55',
     '	non_join_query_term	goto 56',
-    '	query_expression	goto 1151',
+    '	query_expression	goto 1152',
     '',
     'state 986:',
     '',
@@ -20270,7 +20271,7 @@ const
     '	.	error',
     '',
     '	grantee	goto 979',
-    '	grantee_list	goto 1152',
+    '	grantee_list	goto 1153',
     '	authorization_identifier	goto 981',
     '	actual_identifier	goto 61',
     '	identifier	goto 471',
@@ -20288,7 +20289,7 @@ const
     '	table_expression : from_clause where_clause_opt group_by_clause_opt _ having_clause_opt',
     '	having_clause_opt : _	(387)',
     '',
-    '	_HAVING	shift 1155',
+    '	_HAVING	shift 1156',
     '	$end	reduce 387',
     '	identifier_body	reduce 387',
     '	delimited_identifier	reduce 387',
@@ -20322,14 +20323,14 @@ const
     '	_WITH	reduce 387',
     '	.	error',
     '',
-    '	having_clause	goto 1153',
-    '	having_clause_opt	goto 1154',
+    '	having_clause	goto 1154',
+    '	having_clause_opt	goto 1155',
     '',
     'state 989:',
     '',
     '	group_by_clause : _GROUP _ _BY grouping_column_reference_list',
     '',
-    '	_BY	shift 1156',
+    '	_BY	shift 1157',
     '	.	error',
     '',
     'state 990:',
@@ -20342,12 +20343,12 @@ const
     '',
     '	*** conflicts:',
     '',
-    '	shift 1158, reduce 402 on left_paren',
+    '	shift 1159, reduce 402 on left_paren',
     '',
     '	correlation_specification : correlation_name _ derived_column_list_opt',
     '	derived_column_list_opt : _	(402)',
     '',
-    '	left_paren	shift 1158',
+    '	left_paren	shift 1159',
     '	$end	reduce 402',
     '	identifier_body	reduce 402',
     '	delimited_identifier	reduce 402',
@@ -20393,7 +20394,7 @@ const
     '	_WITH	reduce 402',
     '	.	error',
     '',
-    '	derived_column_list_opt	goto 1157',
+    '	derived_column_list_opt	goto 1158',
     '',
     'state 992:',
     '',
@@ -20410,7 +20411,7 @@ const
     '	underscore	shift 69',
     '	.	error',
     '',
-    '	correlation_specification	goto 1159',
+    '	correlation_specification	goto 1160',
     '	correlation_name	goto 991',
     '	actual_identifier	goto 61',
     '	identifier	goto 992',
@@ -20421,7 +20422,7 @@ const
     '',
     '	cross_join : table_reference _CROSS _ _JOIN table_factor',
     '',
-    '	_JOIN	shift 1160',
+    '	_JOIN	shift 1161',
     '	.	error',
     '',
     'state 995:',
@@ -20429,17 +20430,17 @@ const
     '	qualified_join : table_reference _FULL _ outer_opt _JOIN table_factor join_specification',
     '	outer_opt : _	(422)',
     '',
-    '	_OUTER	shift 1162',
+    '	_OUTER	shift 1163',
     '	_JOIN	reduce 422',
     '	.	error',
     '',
-    '	outer_opt	goto 1161',
+    '	outer_opt	goto 1162',
     '',
     'state 996:',
     '',
     '	qualified_join : table_reference _INNER _ _JOIN table_factor join_specification',
     '',
-    '	_JOIN	shift 1163',
+    '	_JOIN	shift 1164',
     '	.	error',
     '',
     'state 997:',
@@ -20454,7 +20455,7 @@ const
     '	.	error',
     '',
     '	derived_table	goto 795',
-    '	table_factor	goto 1164',
+    '	table_factor	goto 1165',
     '	table_subquery	goto 800',
     '	table_name	goto 801',
     '	qualified_name	goto 201',
@@ -20469,11 +20470,11 @@ const
     '	qualified_join : table_reference _LEFT _ outer_opt _JOIN table_factor join_specification',
     '	outer_opt : _	(422)',
     '',
-    '	_OUTER	shift 1162',
+    '	_OUTER	shift 1163',
     '	_JOIN	reduce 422',
     '	.	error',
     '',
-    '	outer_opt	goto 1165',
+    '	outer_opt	goto 1166',
     '',
     'state 999:',
     '',
@@ -20484,12 +20485,12 @@ const
     '	qualified_join : table_reference _NATURAL _ _FULL outer_opt _JOIN table_factor',
     '	qualified_join : table_reference _NATURAL _ _UNION _JOIN table_factor',
     '',
-    '	_FULL	shift 1166',
-    '	_INNER	shift 1167',
-    '	_JOIN	shift 1168',
-    '	_LEFT	shift 1169',
-    '	_RIGHT	shift 1170',
-    '	_UNION	shift 1171',
+    '	_FULL	shift 1167',
+    '	_INNER	shift 1168',
+    '	_JOIN	shift 1169',
+    '	_LEFT	shift 1170',
+    '	_RIGHT	shift 1171',
+    '	_UNION	shift 1172',
     '	.	error',
     '',
     'state 1000:',
@@ -20497,11 +20498,11 @@ const
     '	qualified_join : table_reference _RIGHT _ outer_opt _JOIN table_factor join_specification',
     '	outer_opt : _	(422)',
     '',
-    '	_OUTER	shift 1162',
+    '	_OUTER	shift 1163',
     '	_JOIN	reduce 422',
     '	.	error',
     '',
-    '	outer_opt	goto 1172',
+    '	outer_opt	goto 1173',
     '',
     'state 1001:',
     '',
@@ -20519,7 +20520,7 @@ const
     '	derived_table	goto 795',
     '	table_factor	goto 796',
     '	joined_table	goto 797',
-    '	table_reference	goto 1173',
+    '	table_reference	goto 1174',
     '	table_subquery	goto 800',
     '	table_name	goto 801',
     '	qualified_name	goto 201',
@@ -20544,7 +20545,7 @@ const
     '	underscore	shift 69',
     '	.	error',
     '',
-    '	correlation_specification	goto 1174',
+    '	correlation_specification	goto 1175',
     '	correlation_name	goto 991',
     '	actual_identifier	goto 61',
     '	identifier	goto 992',
@@ -20556,7 +20557,7 @@ const
     '	joined_table : left_paren joined_table _ right_paren',
     '	table_reference : joined_table _	(392)',
     '',
-    '	right_paren	shift 1175',
+    '	right_paren	shift 1176',
     '	_CROSS	reduce 392',
     '	_FULL	reduce 392',
     '	_INNER	reduce 392',
@@ -20613,32 +20614,32 @@ const
     '',
     '	identifier_body	shift 66',
     '	delimited_identifier	shift 67',
-    '	asterisk	shift 1177',
+    '	asterisk	shift 1178',
     '	underscore	shift 69',
     '	.	error',
     '',
     '	actual_identifier	goto 61',
-    '	identifier	goto 1176',
+    '	identifier	goto 1177',
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
     'state 1008:',
     '',
-    '	level_of_isolation : _READ _COMMITTED _	(840)',
+    '	level_of_isolation : _READ _COMMITTED _	(841)',
     '',
-    '	.	reduce 840',
+    '	.	reduce 841',
     '',
     'state 1009:',
     '',
-    '	level_of_isolation : _READ _UNCOMMITTED _	(839)',
+    '	level_of_isolation : _READ _UNCOMMITTED _	(840)',
     '',
-    '	.	reduce 839',
+    '	.	reduce 840',
     '',
     'state 1010:',
     '',
-    '	level_of_isolation : _REPEATABLE _READ _	(841)',
+    '	level_of_isolation : _REPEATABLE _READ _	(842)',
     '',
-    '	.	reduce 841',
+    '	.	reduce 842',
     '',
     'state 1011:',
     '',
@@ -20648,52 +20649,52 @@ const
     '',
     'state 1012:',
     '',
-    '	set_clause : object_column equals_operator update_source _	(824)',
+    '	set_clause : object_column equals_operator update_source _	(825)',
     '',
-    '	.	reduce 824',
+    '	.	reduce 825',
     '',
     'state 1013:',
     '',
     '	expression : expression _ plus_sign multiplicative_expression',
     '	expression : expression _ minus_sign multiplicative_expression',
     '	expression : expression _ concatenation_operator multiplicative_expression',
-    '	update_source : expression _	(826)',
+    '	update_source : expression _	(827)',
     '',
     '	concatenation_operator	shift 427',
     '	plus_sign	shift 428',
     '	minus_sign	shift 429',
-    '	$end	reduce 826',
-    '	identifier_body	reduce 826',
-    '	delimited_identifier	reduce 826',
-    '	left_paren	reduce 826',
-    '	comma	reduce 826',
-    '	semicolon	reduce 826',
-    '	underscore	reduce 826',
-    '	_ALTER	reduce 826',
-    '	_COMMIT	reduce 826',
-    '	_CONNECT	reduce 826',
-    '	_CREATE	reduce 826',
-    '	_DECLARE	reduce 826',
-    '	_DELETE	reduce 826',
-    '	_DISCONNECT	reduce 826',
-    '	_DROP	reduce 826',
-    '	_GRANT	reduce 826',
-    '	_INSERT	reduce 826',
-    '	_REVOKE	reduce 826',
-    '	_ROLLBACK	reduce 826',
-    '	_SELECT	reduce 826',
-    '	_SET	reduce 826',
-    '	_TABLE	reduce 826',
-    '	_UPDATE	reduce 826',
-    '	_VALUES	reduce 826',
-    '	_WHERE	reduce 826',
+    '	$end	reduce 827',
+    '	identifier_body	reduce 827',
+    '	delimited_identifier	reduce 827',
+    '	left_paren	reduce 827',
+    '	comma	reduce 827',
+    '	semicolon	reduce 827',
+    '	underscore	reduce 827',
+    '	_ALTER	reduce 827',
+    '	_COMMIT	reduce 827',
+    '	_CONNECT	reduce 827',
+    '	_CREATE	reduce 827',
+    '	_DECLARE	reduce 827',
+    '	_DELETE	reduce 827',
+    '	_DISCONNECT	reduce 827',
+    '	_DROP	reduce 827',
+    '	_GRANT	reduce 827',
+    '	_INSERT	reduce 827',
+    '	_REVOKE	reduce 827',
+    '	_ROLLBACK	reduce 827',
+    '	_SELECT	reduce 827',
+    '	_SET	reduce 827',
+    '	_TABLE	reduce 827',
+    '	_UPDATE	reduce 827',
+    '	_VALUES	reduce 827',
+    '	_WHERE	reduce 827',
     '	.	error',
     '',
     'state 1014:',
     '',
-    '	set_clause_list : set_clause_list comma set_clause _	(823)',
+    '	set_clause_list : set_clause_list comma set_clause _	(824)',
     '',
-    '	.	reduce 823',
+    '	.	reduce 824',
     '',
     'state 1015:',
     '',
@@ -20708,7 +20709,7 @@ const
     '	digit	shift 150',
     '	.	error',
     '',
-    '	precision	goto 1178',
+    '	precision	goto 1179',
     '	unsigned_integer	goto 823',
     '',
     'state 1017:',
@@ -20801,7 +20802,7 @@ const
     '',
     '	single_datetime_field_opt : left_paren interval_leading_field_precision single_datetime_field_opt2 _ right_paren',
     '',
-    '	right_paren	shift 1179',
+    '	right_paren	shift 1180',
     '	.	error',
     '',
     'state 1019:',
@@ -20811,8 +20812,8 @@ const
     '	digit	shift 150',
     '	.	error',
     '',
-    '	interval_fractional_seconds_precision	goto 1180',
-    '	unsigned_integer	goto 1181',
+    '	interval_fractional_seconds_precision	goto 1181',
+    '	unsigned_integer	goto 1182',
     '',
     'state 1020:',
     '',
@@ -20886,7 +20887,7 @@ const
     '	length_expression	goto 215',
     '	extract_expression	goto 216',
     '	position_expression	goto 217',
-    '	result	goto 1182',
+    '	result	goto 1183',
     '	searched_case	goto 218',
     '	simple_case	goto 219',
     '	case_specification	goto 220',
@@ -20959,7 +20960,7 @@ const
     '	like_predicate : expression _LIKE pattern _ like_predicate_escape_opt',
     '	like_predicate_escape_opt : _	(538)',
     '',
-    '	_ESCAPE	shift 1184',
+    '	_ESCAPE	shift 1185',
     '	$end	reduce 538',
     '	identifier_body	reduce 538',
     '	delimited_identifier	reduce 538',
@@ -21008,7 +21009,7 @@ const
     '	_WITH	reduce 538',
     '	.	error',
     '',
-    '	like_predicate_escape_opt	goto 1183',
+    '	like_predicate_escape_opt	goto 1184',
     '',
     'state 1025:',
     '',
@@ -21123,7 +21124,7 @@ const
     '	_COUNT	shift 287',
     '	.	error',
     '',
-    '	pattern	goto 1185',
+    '	pattern	goto 1186',
     '	char_length_specifier	goto 206',
     '	bit_length_expression	goto 207',
     '	octet_length_expression	goto 208',
@@ -21210,7 +21211,7 @@ const
     '	left_paren	shift 68',
     '	.	error',
     '',
-    '	table_subquery	goto 1186',
+    '	table_subquery	goto 1187',
     '',
     'state 1030:',
     '',
@@ -21240,7 +21241,7 @@ const
     '',
     '	between_predicate : row_value_constructor _BETWEEN row_value_constructor _ _AND row_value_constructor',
     '',
-    '	_AND	shift 1187',
+    '	_AND	shift 1188',
     '	.	error',
     '',
     'state 1035:',
@@ -21313,7 +21314,7 @@ const
     '	_COUNT	shift 287',
     '	.	error',
     '',
-    '	in_value_list	goto 1188',
+    '	in_value_list	goto 1189',
     '	char_length_specifier	goto 206',
     '	bit_length_expression	goto 207',
     '	octet_length_expression	goto 208',
@@ -21360,7 +21361,7 @@ const
     '	column_reference	goto 241',
     '	unsigned_value_specification	goto 242',
     '	primary_expression	goto 243',
-    '	expression	goto 1189',
+    '	expression	goto 1190',
     '	current_timestamp_value_function	goto 246',
     '	current_time_value_function	goto 247',
     '	current_date_value_function	goto 248',
@@ -21394,7 +21395,7 @@ const
     '',
     '	null_predicate : row_value_constructor _IS _NOT _ _NULL',
     '',
-    '	_NULL	shift 1190',
+    '	_NULL	shift 1191',
     '	.	error',
     '',
     'state 1039:',
@@ -21408,12 +21409,12 @@ const
     '	match_predicate : row_value_constructor _MATCH unique_opt _ partial_full_opt table_subquery',
     '	partial_full_opt : _	(555)',
     '',
-    '	_FULL	shift 1192',
-    '	_PARTIAL	shift 1193',
+    '	_FULL	shift 1193',
+    '	_PARTIAL	shift 1194',
     '	left_paren	reduce 555',
     '	.	error',
     '',
-    '	partial_full_opt	goto 1191',
+    '	partial_full_opt	goto 1192',
     '',
     'state 1041:',
     '',
@@ -21513,7 +21514,7 @@ const
     '	unsigned_value_specification	goto 242',
     '	primary_expression	goto 243',
     '	expression	goto 244',
-    '	row_value_constructor	goto 1194',
+    '	row_value_constructor	goto 1195',
     '	current_timestamp_value_function	goto 246',
     '	current_time_value_function	goto 247',
     '	current_date_value_function	goto 248',
@@ -21550,7 +21551,7 @@ const
     '	left_paren	shift 1037',
     '	.	error',
     '',
-    '	in_predicate_value	goto 1195',
+    '	in_predicate_value	goto 1196',
     '	table_subquery	goto 1036',
     '',
     'state 1044:',
@@ -21574,7 +21575,7 @@ const
     '	_UNKNOWN	shift 1048',
     '	.	error',
     '',
-    '	truth_value	goto 1196',
+    '	truth_value	goto 1197',
     '',
     'state 1047:',
     '',
@@ -21662,7 +21663,7 @@ const
     '',
     '	cast_specification : _CAST left_paren cast_operand _AS cast_target _ right_paren',
     '',
-    '	right_paren	shift 1197',
+    '	right_paren	shift 1198',
     '	.	error',
     '',
     'state 1054:',
@@ -21695,7 +21696,7 @@ const
     '',
     '	form_of_use_conversion : _CONVERT left_paren expression _USING form_of_use_conversion_name _ right_paren',
     '',
-    '	right_paren	shift 1198',
+    '	right_paren	shift 1199',
     '	.	error',
     '',
     'state 1058:',
@@ -21708,7 +21709,7 @@ const
     '',
     '	extract_expression : _EXTRACT left_paren extract_field _FROM extract_source _ right_paren',
     '',
-    '	right_paren	shift 1199',
+    '	right_paren	shift 1200',
     '	.	error',
     '',
     'state 1060:',
@@ -21732,7 +21733,7 @@ const
     '	expression : expression _ concatenation_operator multiplicative_expression',
     '',
     '	concatenation_operator	shift 427',
-    '	right_paren	shift 1200',
+    '	right_paren	shift 1201',
     '	plus_sign	shift 428',
     '	minus_sign	shift 429',
     '	.	error',
@@ -21745,7 +21746,7 @@ const
     '	expression : expression _ concatenation_operator multiplicative_expression',
     '',
     '	concatenation_operator	shift 427',
-    '	right_paren	shift 1201',
+    '	right_paren	shift 1202',
     '	plus_sign	shift 428',
     '	minus_sign	shift 429',
     '	.	error',
@@ -21755,11 +21756,11 @@ const
     '	character_bit_substring_function : _SUBSTRING left_paren expression _FROM start_position _ for_strlength_opt right_paren',
     '	for_strlength_opt : _	(479)',
     '',
-    '	_FOR	shift 1203',
+    '	_FOR	shift 1204',
     '	right_paren	reduce 479',
     '	.	error',
     '',
-    '	for_strlength_opt	goto 1202',
+    '	for_strlength_opt	goto 1203',
     '',
     'state 1064:',
     '',
@@ -21779,7 +21780,7 @@ const
     '',
     '	character_translation : _TRANSLATE left_paren expression _USING translation_name _ right_paren',
     '',
-    '	right_paren	shift 1204',
+    '	right_paren	shift 1205',
     '	.	error',
     '',
     'state 1066:',
@@ -21859,7 +21860,7 @@ const
     '	bit_length_expression	goto 207',
     '	octet_length_expression	goto 208',
     '	char_length_expression	goto 209',
-    '	trim_source	goto 1205',
+    '	trim_source	goto 1206',
     '	trim_function	goto 210',
     '	character_translation	goto 211',
     '	form_of_use_conversion	goto 212',
@@ -21933,7 +21934,7 @@ const
     '',
     '	corresponding_column_list_opt : _BY left_paren corresponding_column_list _ right_paren',
     '',
-    '	right_paren	shift 1206',
+    '	right_paren	shift 1207',
     '	.	error',
     '',
     'state 1071:',
@@ -21948,25 +21949,25 @@ const
     'state 1072:',
     '',
     '	declare_cursor : _DECLARE cursor_name insensitive_opt _ scroll_opt _CURSOR _FOR cursor_specification',
-    '	scroll_opt : _	(591)',
+    '	scroll_opt : _	(592)',
     '',
-    '	_SCROLL	shift 1208',
-    '	_CURSOR	reduce 591',
+    '	_SCROLL	shift 1209',
+    '	_CURSOR	reduce 592',
     '	.	error',
     '',
-    '	scroll_opt	goto 1207',
+    '	scroll_opt	goto 1208',
     '',
     'state 1073:',
     '',
-    '	insensitive_opt : _INSENSITIVE _	(590)',
+    '	insensitive_opt : _INSENSITIVE _	(591)',
     '',
-    '	.	reduce 590',
+    '	.	reduce 591',
     '',
     'state 1074:',
     '',
     '	procedure : _PROCEDURE procedure_name parameter_declaration_list _ semicolon SQL_procedure_statement semicolon',
     '',
-    '	semicolon	shift 1209',
+    '	semicolon	shift 1210',
     '	.	error',
     '',
     'state 1075:',
@@ -21974,20 +21975,20 @@ const
     '	parameter_declaration_list : left_paren _ parameter_declarations right_paren',
     '',
     '	colon	shift 154',
-    '	_SQLCODE	shift 1214',
-    '	_SQLSTATE	shift 1215',
+    '	_SQLCODE	shift 1215',
+    '	_SQLSTATE	shift 1216',
     '	.	error',
     '',
-    '	status_parameter	goto 1210',
-    '	parameter_declaration	goto 1211',
-    '	parameter_declarations	goto 1212',
-    '	parameter_name	goto 1213',
+    '	status_parameter	goto 1211',
+    '	parameter_declaration	goto 1212',
+    '	parameter_declarations	goto 1213',
+    '	parameter_name	goto 1214',
     '',
     'state 1076:',
     '',
-    '	domain_constraint : constraint_name_definition_opt check_constraint_definition constraint_attributes_opt _	(656)',
+    '	domain_constraint : constraint_name_definition_opt check_constraint_definition constraint_attributes_opt _	(657)',
     '',
-    '	.	reduce 656',
+    '	.	reduce 657',
     '',
     'state 1077:',
     '',
@@ -22101,7 +22102,7 @@ const
     '	boolean_test	goto 631',
     '	boolean_factor	goto 632',
     '	boolean_term	goto 633',
-    '	search_condition	goto 1216',
+    '	search_condition	goto 1217',
     '	current_timestamp_value_function	goto 246',
     '	current_time_value_function	goto 247',
     '	current_date_value_function	goto 248',
@@ -22184,15 +22185,21 @@ const
     '	.	error',
     '',
     '	default_clause	goto 939',
-    '	default_clause_opt	goto 1217',
+    '	default_clause_opt	goto 1218',
     '',
     'state 1081:',
     '',
-    '	table_constraint_definition : constraint_name_definition_opt table_constraint constraint_check_time_opt _	(575)',
+    '	table_constraint_definition : constraint_name_definition_opt table_constraint table_constraint_attributes_opt _	(575)',
     '',
     '	.	reduce 575',
     '',
     'state 1082:',
+    '',
+    '	table_constraint_attributes_opt : constraint_check_time_opt _	(576)',
+    '',
+    '	.	reduce 576',
+    '',
+    'state 1083:',
     '',
     '	unique_constraint_definition : unique_specification left_paren _ unique_column_list right_paren',
     '',
@@ -22201,225 +22208,225 @@ const
     '	underscore	shift 69',
     '	.	error',
     '',
-    '	unique_column_list	goto 1218',
-    '	column_name_list	goto 1219',
+    '	unique_column_list	goto 1219',
+    '	column_name_list	goto 1220',
     '	column_name	goto 550',
     '	actual_identifier	goto 61',
     '	identifier	goto 465',
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1083:',
+    'state 1084:',
     '',
     '	referential_constraint_definition : _FOREIGN _KEY _ left_paren referencing_columns right_paren references_specification',
     '',
-    '	left_paren	shift 1220',
+    '	left_paren	shift 1221',
     '	.	error',
     '',
-    'state 1084:',
+    'state 1085:',
     '',
     '	unique_specification : _PRIMARY _KEY _	(243)',
     '',
     '	.	reduce 243',
     '',
-    'state 1085:',
-    '',
-    '	alter_column_action : drop_column_default_clause _	(759)',
-    '',
-    '	.	reduce 759',
-    '',
     'state 1086:',
     '',
-    '	alter_column_action : set_column_default_clause _	(758)',
+    '	alter_column_action : drop_column_default_clause _	(760)',
     '',
-    '	.	reduce 758',
+    '	.	reduce 760',
     '',
     'state 1087:',
     '',
-    '	alter_column_definition : _ALTER column_opt column_name alter_column_action _	(757)',
+    '	alter_column_action : set_column_default_clause _	(759)',
     '',
-    '	.	reduce 757',
+    '	.	reduce 759',
     '',
     'state 1088:',
     '',
-    '	drop_column_default_clause : _DROP _ _DEFAULT',
+    '	alter_column_definition : _ALTER column_opt column_name alter_column_action _	(758)',
     '',
-    '	_DEFAULT	shift 1221',
-    '	.	error',
+    '	.	reduce 758',
     '',
     'state 1089:',
+    '',
+    '	drop_column_default_clause : _DROP _ _DEFAULT',
+    '',
+    '	_DEFAULT	shift 1222',
+    '	.	error',
+    '',
+    'state 1090:',
     '',
     '	set_column_default_clause : _SET _ default_clause',
     '',
     '	_DEFAULT	shift 696',
     '	.	error',
     '',
-    '	default_clause	goto 1222',
-    '',
-    'state 1090:',
-    '',
-    '	drop_column_definition : _DROP column_opt column_name drop_behaviour _	(762)',
-    '',
-    '	.	reduce 762',
+    '	default_clause	goto 1223',
     '',
     'state 1091:',
     '',
-    '	drop_table_constraint_definition : _DROP _CONSTRAINT constraint_name drop_behaviour _	(764)',
+    '	drop_column_definition : _DROP column_opt column_name drop_behaviour _	(763)',
     '',
-    '	.	reduce 764',
+    '	.	reduce 763',
     '',
     'state 1092:',
+    '',
+    '	drop_table_constraint_definition : _DROP _CONSTRAINT constraint_name drop_behaviour _	(765)',
+    '',
+    '	.	reduce 765',
+    '',
+    'state 1093:',
     '',
     '	table_commit_opts : _ON _COMMIT _ _DELETE _ROWS',
     '	table_commit_opts : _ON _COMMIT _ _PRESERVE _ROWS',
     '',
-    '	_DELETE	shift 1223',
-    '	_PRESERVE	shift 1224',
+    '	_DELETE	shift 1224',
+    '	_PRESERVE	shift 1225',
     '	.	error',
     '',
-    'state 1093:',
+    'state 1094:',
     '',
     '	table_element_list : left_paren table_element table_element_list_opt _ right_paren',
     '	table_element_list_opt : table_element_list_opt _ comma table_element',
     '',
-    '	right_paren	shift 1225',
-    '	comma	shift 1226',
+    '	right_paren	shift 1226',
+    '	comma	shift 1227',
     '	.	error',
     '',
-    'state 1094:',
+    'state 1095:',
     '',
     '	deferrable_opt : _NOT _DEFERRABLE _	(570)',
     '',
     '	.	reduce 570',
     '',
-    'state 1095:',
-    '',
-    '	assertion_check : _CHECK left_paren search_condition right_paren _	(700)',
-    '',
-    '	.	reduce 700',
-    '',
     'state 1096:',
     '',
-    '	charset_collation_opt : limited_collation_definition _	(704)',
-    '',
-    '	.	reduce 704',
-    '',
-    'state 1097:',
-    '',
-    '	character_set_definition : _CREATE _CHARACTER _SET character_set_name as_opt character_set_source charset_collation_opt _	(701)',
+    '	assertion_check : _CHECK left_paren search_condition right_paren _	(701)',
     '',
     '	.	reduce 701',
     '',
-    'state 1098:',
+    'state 1097:',
     '',
-    '	charset_collation_opt : collate_clause _	(703)',
-    '',
-    '	.	reduce 703',
-    '',
-    'state 1099:',
-    '',
-    '	limited_collation_definition : _COLLATION _ _FROM collation_source',
-    '',
-    '	_FROM	shift 1227',
-    '	.	error',
-    '',
-    'state 1100:',
-    '',
-    '	character_set_source : _GET existing_character_set_name _	(705)',
+    '	charset_collation_opt : limited_collation_definition _	(705)',
     '',
     '	.	reduce 705',
     '',
+    'state 1098:',
+    '',
+    '	character_set_definition : _CREATE _CHARACTER _SET character_set_name as_opt character_set_source charset_collation_opt _	(702)',
+    '',
+    '	.	reduce 702',
+    '',
+    'state 1099:',
+    '',
+    '	charset_collation_opt : collate_clause _	(704)',
+    '',
+    '	.	reduce 704',
+    '',
+    'state 1100:',
+    '',
+    '	limited_collation_definition : _COLLATION _ _FROM collation_source',
+    '',
+    '	_FROM	shift 1228',
+    '	.	error',
+    '',
     'state 1101:',
     '',
-    '	existing_character_set_name : character_set_name _	(706)',
+    '	character_set_source : _GET existing_character_set_name _	(706)',
     '',
     '	.	reduce 706',
     '',
     'state 1102:',
     '',
-    '	collating_sequence_definition : schema_collation_name _	(711)',
+    '	existing_character_set_name : character_set_name _	(707)',
     '',
-    '	.	reduce 711',
+    '	.	reduce 707',
     '',
     'state 1103:',
     '',
-    '	collating_sequence_definition : external_collation _	(710)',
+    '	collating_sequence_definition : schema_collation_name _	(712)',
     '',
-    '	.	reduce 710',
+    '	.	reduce 712',
     '',
     'state 1104:',
     '',
-    '	collation_source : translation_collation _	(709)',
+    '	collating_sequence_definition : external_collation _	(711)',
     '',
-    '	.	reduce 709',
+    '	.	reduce 711',
     '',
     'state 1105:',
     '',
-    '	collation_source : collating_sequence_definition _	(708)',
+    '	collation_source : translation_collation _	(710)',
     '',
-    '	.	reduce 708',
+    '	.	reduce 710',
     '',
     'state 1106:',
     '',
-    '	collation_definition : _CREATE _COLLATION collation_name _FOR character_set_specification _FROM collation_source _ pad_attribute_opt',
-    '	pad_attribute_opt : _	(721)',
+    '	collation_source : collating_sequence_definition _	(709)',
     '',
-    '	_NO	shift 1229',
-    '	_PAD	shift 1230',
-    '	$end	reduce 721',
-    '	identifier_body	reduce 721',
-    '	delimited_identifier	reduce 721',
-    '	left_paren	reduce 721',
-    '	semicolon	reduce 721',
-    '	underscore	reduce 721',
-    '	_ALTER	reduce 721',
-    '	_COMMIT	reduce 721',
-    '	_CONNECT	reduce 721',
-    '	_CREATE	reduce 721',
-    '	_DECLARE	reduce 721',
-    '	_DELETE	reduce 721',
-    '	_DISCONNECT	reduce 721',
-    '	_DROP	reduce 721',
-    '	_GRANT	reduce 721',
-    '	_INSERT	reduce 721',
-    '	_REVOKE	reduce 721',
-    '	_ROLLBACK	reduce 721',
-    '	_SELECT	reduce 721',
-    '	_SET	reduce 721',
-    '	_TABLE	reduce 721',
-    '	_UPDATE	reduce 721',
-    '	_VALUES	reduce 721',
-    '	.	error',
-    '',
-    '	pad_attribute_opt	goto 1228',
+    '	.	reduce 709',
     '',
     'state 1107:',
     '',
-    '	schema_collation_name : collation_name _	(716)',
+    '	collation_definition : _CREATE _COLLATION collation_name _FOR character_set_specification _FROM collation_source _ pad_attribute_opt',
+    '	pad_attribute_opt : _	(722)',
     '',
-    '	.	reduce 716',
+    '	_NO	shift 1230',
+    '	_PAD	shift 1231',
+    '	$end	reduce 722',
+    '	identifier_body	reduce 722',
+    '	delimited_identifier	reduce 722',
+    '	left_paren	reduce 722',
+    '	semicolon	reduce 722',
+    '	underscore	reduce 722',
+    '	_ALTER	reduce 722',
+    '	_COMMIT	reduce 722',
+    '	_CONNECT	reduce 722',
+    '	_CREATE	reduce 722',
+    '	_DECLARE	reduce 722',
+    '	_DELETE	reduce 722',
+    '	_DISCONNECT	reduce 722',
+    '	_DROP	reduce 722',
+    '	_GRANT	reduce 722',
+    '	_INSERT	reduce 722',
+    '	_REVOKE	reduce 722',
+    '	_ROLLBACK	reduce 722',
+    '	_SELECT	reduce 722',
+    '	_SET	reduce 722',
+    '	_TABLE	reduce 722',
+    '	_UPDATE	reduce 722',
+    '	_VALUES	reduce 722',
+    '	.	error',
+    '',
+    '	pad_attribute_opt	goto 1229',
     '',
     'state 1108:',
     '',
-    '	collating_sequence_definition : _DEFAULT _	(713)',
+    '	schema_collation_name : collation_name _	(717)',
     '',
-    '	.	reduce 713',
+    '	.	reduce 717',
     '',
     'state 1109:',
     '',
-    '	collating_sequence_definition : _DESC _ left_paren collation_name right_paren',
+    '	collating_sequence_definition : _DEFAULT _	(714)',
     '',
-    '	left_paren	shift 1231',
-    '	.	error',
+    '	.	reduce 714',
     '',
     'state 1110:',
     '',
-    '	external_collation : _EXTERNAL _ left_paren quote external_collation_name quote right_paren',
+    '	collating_sequence_definition : _DESC _ left_paren collation_name right_paren',
     '',
     '	left_paren	shift 1232',
     '	.	error',
     '',
     'state 1111:',
+    '',
+    '	external_collation : _EXTERNAL _ left_paren quote external_collation_name quote right_paren',
+    '',
+    '	left_paren	shift 1233',
+    '	.	error',
+    '',
+    'state 1112:',
     '',
     '	translation_collation : _TRANSLATION _ translation_name translation_collation_opt',
     '',
@@ -22428,14 +22435,14 @@ const
     '	underscore	shift 69',
     '	.	error',
     '',
-    '	translation_name	goto 1233',
+    '	translation_name	goto 1234',
     '	qualified_name	goto 328',
     '	actual_identifier	goto 61',
     '	identifier	goto 203',
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1112:',
+    'state 1113:',
     '',
     '	data_type_opt : _CHARACTER _SET _ character_set_specification',
     '',
@@ -22448,17 +22455,17 @@ const
     '	SQL_language_identifier	goto 96',
     '	identifier	goto 97',
     '	character_set_name	goto 98',
-    '	character_set_specification	goto 1234',
+    '	character_set_specification	goto 1235',
     '	introducer	goto 63',
     '	regular_identifier	goto 100',
     '',
-    'state 1113:',
-    '',
-    '	domain_constraint_opt : domain_constraint _	(655)',
-    '',
-    '	.	reduce 655',
-    '',
     'state 1114:',
+    '',
+    '	domain_constraint_opt : domain_constraint _	(656)',
+    '',
+    '	.	reduce 656',
+    '',
+    'state 1115:',
     '',
     '	domain_definition : _CREATE _DOMAIN domain_name as_opt data_type default_clause_opt domain_constraint_opt _ collate_clause_opt',
     '	collate_clause_opt : _	(103)',
@@ -22490,16 +22497,16 @@ const
     '	.	error',
     '',
     '	collate_clause	goto 677',
-    '	collate_clause_opt	goto 1235',
+    '	collate_clause_opt	goto 1236',
     '',
-    'state 1115:',
+    'state 1116:',
     '',
     '	character_string_type_len : left_paren length _ right_paren',
     '',
-    '	right_paren	shift 1236',
+    '	right_paren	shift 1237',
     '	.	error',
     '',
-    'state 1116:',
+    'state 1117:',
     '',
     '	unsigned_integer : unsigned_integer _ digit',
     '	length : unsigned_integer _	(125)',
@@ -22508,47 +22515,47 @@ const
     '	right_paren	reduce 125',
     '	.	error',
     '',
-    'state 1117:',
+    'state 1118:',
     '',
     '	bit_string_type : _BIT _VARYING character_string_type_len _	(139)',
     '',
     '	.	reduce 139',
     '',
-    'state 1118:',
+    'state 1119:',
     '',
     '	character_string_type : _CHAR _VARYING character_string_type_len _	(117)',
     '',
     '	.	reduce 117',
     '',
-    'state 1119:',
+    'state 1120:',
     '',
     '	character_string_type : _CHARACTER _VARYING character_string_type_len _	(116)',
     '',
     '	.	reduce 116',
     '',
-    'state 1120:',
+    'state 1121:',
     '',
     '	numeric_precision_scale_opt : left_paren precision _ comma scale right_paren',
     '	numeric_precision_scale_opt : left_paren precision _ right_paren',
     '',
-    '	right_paren	shift 1237',
-    '	comma	shift 1238',
-    '	.	error',
-    '',
-    'state 1121:',
-    '',
-    '	approximate_numeric_type : _FLOAT left_paren precision _ right_paren',
-    '',
-    '	right_paren	shift 1239',
+    '	right_paren	shift 1238',
+    '	comma	shift 1239',
     '	.	error',
     '',
     'state 1122:',
+    '',
+    '	approximate_numeric_type : _FLOAT left_paren precision _ right_paren',
+    '',
+    '	right_paren	shift 1240',
+    '	.	error',
+    '',
+    'state 1123:',
     '',
     '	national_character_string_type : _NATIONAL _CHAR character_string_type_len _	(127)',
     '',
     '	.	reduce 127',
     '',
-    'state 1123:',
+    'state 1124:',
     '',
     '	*** conflicts:',
     '',
@@ -22592,15 +22599,15 @@ const
     '	_VALUES	reduce 136',
     '	.	error',
     '',
-    '	character_string_type_len	goto 1240',
+    '	character_string_type_len	goto 1241',
     '',
-    'state 1124:',
+    'state 1125:',
     '',
     '	national_character_string_type : _NATIONAL _CHARACTER character_string_type_len _	(126)',
     '',
     '	.	reduce 126',
     '',
-    'state 1125:',
+    'state 1126:',
     '',
     '	*** conflicts:',
     '',
@@ -22644,110 +22651,100 @@ const
     '	_VALUES	reduce 135',
     '	.	error',
     '',
-    '	character_string_type_len	goto 1241',
+    '	character_string_type_len	goto 1242',
     '',
-    'state 1126:',
+    'state 1127:',
     '',
     '	national_character_string_type : _NCHAR _VARYING character_string_type_len _	(131)',
     '',
     '	.	reduce 131',
     '',
-    'state 1127:',
+    'state 1128:',
     '',
     '	datetime_type : _TIME time_precision_opt tz_opt _	(161)',
     '',
     '	.	reduce 161',
     '',
-    'state 1128:',
+    'state 1129:',
     '',
     '	tz_opt : _WITH _ _TIME _ZONE',
     '',
-    '	_TIME	shift 1242',
-    '	.	error',
-    '',
-    'state 1129:',
-    '',
-    '	time_precision_opt : left_paren time_precision _ right_paren',
-    '',
-    '	right_paren	shift 1243',
+    '	_TIME	shift 1243',
     '	.	error',
     '',
     'state 1130:',
+    '',
+    '	time_precision_opt : left_paren time_precision _ right_paren',
+    '',
+    '	right_paren	shift 1244',
+    '	.	error',
+    '',
+    'state 1131:',
     '',
     '	datetime_type : _TIMESTAMP timestamp_precision_opt tz_opt _	(162)',
     '',
     '	.	reduce 162',
     '',
-    'state 1131:',
+    'state 1132:',
     '',
     '	timestamp_precision_opt : left_paren timestamp_precision _ right_paren',
     '',
-    '	right_paren	shift 1244',
+    '	right_paren	shift 1245',
     '	.	error',
-    '',
-    'state 1132:',
-    '',
-    '	schema_character_set_specification : _DEFAULT _CHARACTER _SET character_set_specification _	(644)',
-    '',
-    '	.	reduce 644',
     '',
     'state 1133:',
     '',
-    '	translation_definition : _CREATE _TRANSLATION translation_name _FOR source_character_set_specification _TO target_character_set_specification _ _FROM translation_source',
+    '	schema_character_set_specification : _DEFAULT _CHARACTER _SET character_set_specification _	(645)',
     '',
-    '	_FROM	shift 1245',
-    '	.	error',
+    '	.	reduce 645',
     '',
     'state 1134:',
     '',
-    '	target_character_set_specification : character_set_specification _	(726)',
+    '	translation_definition : _CREATE _TRANSLATION translation_name _FOR source_character_set_specification _TO target_character_set_specification _ _FROM translation_source',
     '',
-    '	.	reduce 726',
+    '	_FROM	shift 1246',
+    '	.	error',
     '',
     'state 1135:',
     '',
-    '	view_definition : _CREATE _VIEW table_name view_column_list_opt _AS query_expression view_check_opt _	(664)',
+    '	target_character_set_specification : character_set_specification _	(727)',
     '',
-    '	.	reduce 664',
+    '	.	reduce 727',
     '',
     'state 1136:',
+    '',
+    '	view_definition : _CREATE _VIEW table_name view_column_list_opt _AS query_expression view_check_opt _	(665)',
+    '',
+    '	.	reduce 665',
+    '',
+    'state 1137:',
     '',
     '	view_check_opt : _WITH _ _CHECK _OPTION',
     '	view_check_opt : _WITH _ _CASCADED _CHECK _OPTION',
     '	view_check_opt : _WITH _ _LOCAL _CHECK _OPTION',
     '',
-    '	_CASCADED	shift 1246',
-    '	_CHECK	shift 1247',
-    '	_LOCAL	shift 1248',
+    '	_CASCADED	shift 1247',
+    '	_CHECK	shift 1248',
+    '	_LOCAL	shift 1249',
     '	.	error',
     '',
-    'state 1137:',
+    'state 1138:',
     '',
     '	temporary_table_declaration : _DECLARE _LOCAL _TEMPORARY _TABLE qualified_local_table_name table_element_list temporary_table_declaration_opt _	(85)',
     '',
     '	.	reduce 85',
     '',
-    'state 1138:',
+    'state 1139:',
     '',
     '	temporary_table_declaration_opt : _ON _ _COMMIT _PRESERVE _ROWS',
     '	temporary_table_declaration_opt : _ON _ _COMMIT _DELETE _ROWS',
     '',
-    '	_COMMIT	shift 1249',
+    '	_COMMIT	shift 1250',
     '	.	error',
-    '',
-    'state 1139:',
-    '',
-    '	date_value : unsigned_integer minus_sign unsigned_integer minus_sign _ unsigned_integer',
-    '',
-    '	digit	shift 150',
-    '	.	error',
-    '',
-    '	unsigned_integer	goto 1250',
     '',
     'state 1140:',
     '',
-    '	interval_string_literal : unsigned_integer space unsigned_integer colon _ unsigned_integer',
-    '	interval_string_literal : unsigned_integer space unsigned_integer colon _ unsigned_integer colon seconds_value',
+    '	date_value : unsigned_integer minus_sign unsigned_integer minus_sign _ unsigned_integer',
     '',
     '	digit	shift 150',
     '	.	error',
@@ -22756,7 +22753,8 @@ const
     '',
     'state 1141:',
     '',
-    '	seconds_value : unsigned_integer period _ unsigned_integer',
+    '	interval_string_literal : unsigned_integer space unsigned_integer colon _ unsigned_integer',
+    '	interval_string_literal : unsigned_integer space unsigned_integer colon _ unsigned_integer colon seconds_value',
     '',
     '	digit	shift 150',
     '	.	error',
@@ -22765,63 +22763,72 @@ const
     '',
     'state 1142:',
     '',
+    '	seconds_value : unsigned_integer period _ unsigned_integer',
+    '',
+    '	digit	shift 150',
+    '	.	error',
+    '',
+    '	unsigned_integer	goto 1253',
+    '',
+    'state 1143:',
+    '',
     '	interval_string_literal : unsigned_integer colon unsigned_integer colon _ seconds_value',
     '',
     '	digit	shift 150',
     '	.	error',
     '',
-    '	seconds_value	goto 1253',
-    '	unsigned_integer	goto 1254',
+    '	seconds_value	goto 1254',
+    '	unsigned_integer	goto 1255',
     '',
-    'state 1143:',
+    'state 1144:',
     '',
     '	time_string : quote time_value quote $$1 quote _ time_value time_zone_interval quote',
     '',
     '	digit	shift 150',
     '	.	error',
     '',
-    '	time_value	goto 1255',
+    '	time_value	goto 1256',
     '	unsigned_integer	goto 531',
     '',
-    'state 1144:',
+    'state 1145:',
     '',
     '	time_value : unsigned_integer colon unsigned_integer colon _ seconds_value',
     '',
     '	digit	shift 150',
     '	.	error',
     '',
-    '	seconds_value	goto 1256',
-    '	unsigned_integer	goto 1254',
+    '	seconds_value	goto 1257',
+    '	unsigned_integer	goto 1255',
     '',
-    'state 1145:',
+    'state 1146:',
     '',
     '	timestamp_string : quote date_value space time_value time_zone_interval _ quote',
     '',
-    '	quote	shift 1257',
+    '	quote	shift 1258',
     '	.	error',
     '',
-    'state 1146:',
+    'state 1147:',
     '',
     '	time_zone_interval : sign _ unsigned_integer colon unsigned_integer',
     '',
     '	digit	shift 150',
     '	.	error',
     '',
-    '	unsigned_integer	goto 1258',
+    '	unsigned_integer	goto 1259',
     '',
-    'state 1147:',
+    'state 1148:',
     '',
     '	timestamp_string : quote date_value space time_value quote _	(54)',
     '',
     '	.	reduce 54',
     '',
-    'state 1148:',
-    '',
-    '	grant_statement : _GRANT privileges _ON object_name _TO grantee_list grant_option _	(672)',
-    '',
-    '	.	reduce 672',
-    '',
     'state 1149:',
+    '',
+    '	grant_statement : _GRANT privileges _ON object_name _TO grantee_list grant_option _	(673)',
+    '',
+    '	.	reduce 673',
+    '',
+    'state 1150:',
     '',
     '	grantee_list : grantee_list comma _ grantee',
     '',
@@ -22831,78 +22838,78 @@ const
     '	_PUBLIC	shift 982',
     '	.	error',
     '',
-    '	grantee	goto 1259',
+    '	grantee	goto 1260',
     '	authorization_identifier	goto 981',
     '	actual_identifier	goto 61',
     '	identifier	goto 471',
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1150:',
+    'state 1151:',
     '',
     '	grant_option : _WITH _ _GRANT _OPTION',
     '',
-    '	_GRANT	shift 1260',
+    '	_GRANT	shift 1261',
     '	.	error',
     '',
-    'state 1151:',
+    'state 1152:',
     '',
-    '	insert_columns_and_source : left_paren insert_column_list right_paren query_expression _	(817)',
+    '	insert_columns_and_source : left_paren insert_column_list right_paren query_expression _	(818)',
     '	query_expression : query_expression _ _UNION all_opt corresponding_spec_opt query_term',
     '	query_expression : query_expression _ _EXCEPT all_opt corresponding_spec_opt query_term',
     '',
     '	_EXCEPT	shift 91',
     '	_UNION	shift 93',
-    '	$end	reduce 817',
-    '	identifier_body	reduce 817',
-    '	delimited_identifier	reduce 817',
-    '	left_paren	reduce 817',
-    '	semicolon	reduce 817',
-    '	underscore	reduce 817',
-    '	_ALTER	reduce 817',
-    '	_COMMIT	reduce 817',
-    '	_CONNECT	reduce 817',
-    '	_CREATE	reduce 817',
-    '	_DECLARE	reduce 817',
-    '	_DELETE	reduce 817',
-    '	_DISCONNECT	reduce 817',
-    '	_DROP	reduce 817',
-    '	_GRANT	reduce 817',
-    '	_INSERT	reduce 817',
-    '	_REVOKE	reduce 817',
-    '	_ROLLBACK	reduce 817',
-    '	_SELECT	reduce 817',
-    '	_SET	reduce 817',
-    '	_TABLE	reduce 817',
-    '	_UPDATE	reduce 817',
-    '	_VALUES	reduce 817',
+    '	$end	reduce 818',
+    '	identifier_body	reduce 818',
+    '	delimited_identifier	reduce 818',
+    '	left_paren	reduce 818',
+    '	semicolon	reduce 818',
+    '	underscore	reduce 818',
+    '	_ALTER	reduce 818',
+    '	_COMMIT	reduce 818',
+    '	_CONNECT	reduce 818',
+    '	_CREATE	reduce 818',
+    '	_DECLARE	reduce 818',
+    '	_DELETE	reduce 818',
+    '	_DISCONNECT	reduce 818',
+    '	_DROP	reduce 818',
+    '	_GRANT	reduce 818',
+    '	_INSERT	reduce 818',
+    '	_REVOKE	reduce 818',
+    '	_ROLLBACK	reduce 818',
+    '	_SELECT	reduce 818',
+    '	_SET	reduce 818',
+    '	_TABLE	reduce 818',
+    '	_UPDATE	reduce 818',
+    '	_VALUES	reduce 818',
     '	.	error',
     '',
-    'state 1152:',
+    'state 1153:',
     '',
     '	revoke_statement : _REVOKE grant_option_for_opt privileges _ON object_name _FROM grantee_list _ drop_behaviour',
     '	grantee_list : grantee_list _ comma grantee',
     '',
-    '	comma	shift 1149',
+    '	comma	shift 1150',
     '	_CASCADE	shift 535',
     '	_RESTRICT	shift 536',
     '	.	error',
     '',
-    '	drop_behaviour	goto 1261',
+    '	drop_behaviour	goto 1262',
     '',
-    'state 1153:',
+    'state 1154:',
     '',
     '	having_clause_opt : having_clause _	(388)',
     '',
     '	.	reduce 388',
     '',
-    'state 1154:',
+    'state 1155:',
     '',
     '	table_expression : from_clause where_clause_opt group_by_clause_opt having_clause_opt _	(382)',
     '',
     '	.	reduce 382',
     '',
-    'state 1155:',
+    'state 1156:',
     '',
     '	having_clause : _HAVING _ search_condition',
     '',
@@ -23014,7 +23021,7 @@ const
     '	boolean_test	goto 631',
     '	boolean_factor	goto 632',
     '	boolean_term	goto 633',
-    '	search_condition	goto 1262',
+    '	search_condition	goto 1263',
     '	current_timestamp_value_function	goto 246',
     '	current_time_value_function	goto 247',
     '	current_date_value_function	goto 248',
@@ -23044,7 +23051,7 @@ const
     '	unsigned_numeric_literal	goto 253',
     '	regular_identifier	goto 64',
     '',
-    'state 1156:',
+    'state 1157:',
     '',
     '	group_by_clause : _GROUP _BY _ grouping_column_reference_list',
     '',
@@ -23053,22 +23060,22 @@ const
     '	underscore	shift 69',
     '	.	error',
     '',
-    '	grouping_column_reference	goto 1263',
-    '	grouping_column_reference_list	goto 1264',
-    '	column_reference	goto 1265',
+    '	grouping_column_reference	goto 1264',
+    '	grouping_column_reference_list	goto 1265',
+    '	column_reference	goto 1266',
     '	qualified_name	goto 251',
     '	actual_identifier	goto 61',
     '	identifier	goto 203',
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1157:',
+    'state 1158:',
     '',
     '	correlation_specification : correlation_name derived_column_list_opt _	(399)',
     '',
     '	.	reduce 399',
     '',
-    'state 1158:',
+    'state 1159:',
     '',
     '	derived_column_list_opt : left_paren _ derived_column_list right_paren',
     '',
@@ -23077,21 +23084,21 @@ const
     '	underscore	shift 69',
     '	.	error',
     '',
-    '	derived_column_list	goto 1266',
-    '	column_name_list	goto 1267',
+    '	derived_column_list	goto 1267',
+    '	column_name_list	goto 1268',
     '	column_name	goto 550',
     '	actual_identifier	goto 61',
     '	identifier	goto 465',
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1159:',
+    'state 1160:',
     '',
     '	table_factor : derived_table _AS correlation_specification _	(398)',
     '',
     '	.	reduce 398',
     '',
-    'state 1160:',
+    'state 1161:',
     '',
     '	cross_join : table_reference _CROSS _JOIN _ table_factor',
     '',
@@ -23103,7 +23110,7 @@ const
     '	.	error',
     '',
     '	derived_table	goto 795',
-    '	table_factor	goto 1268',
+    '	table_factor	goto 1269',
     '	table_subquery	goto 800',
     '	table_name	goto 801',
     '	qualified_name	goto 201',
@@ -23113,20 +23120,20 @@ const
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1161:',
+    'state 1162:',
     '',
     '	qualified_join : table_reference _FULL outer_opt _ _JOIN table_factor join_specification',
     '',
-    '	_JOIN	shift 1269',
+    '	_JOIN	shift 1270',
     '	.	error',
     '',
-    'state 1162:',
+    'state 1163:',
     '',
     '	outer_opt : _OUTER _	(423)',
     '',
     '	.	reduce 423',
     '',
-    'state 1163:',
+    'state 1164:',
     '',
     '	qualified_join : table_reference _INNER _JOIN _ table_factor join_specification',
     '',
@@ -23138,7 +23145,7 @@ const
     '	.	error',
     '',
     '	derived_table	goto 795',
-    '	table_factor	goto 1270',
+    '	table_factor	goto 1271',
     '	table_subquery	goto 800',
     '	table_name	goto 801',
     '	qualified_name	goto 201',
@@ -23148,44 +23155,44 @@ const
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1164:',
+    'state 1165:',
     '',
     '	qualified_join : table_reference _JOIN table_factor _ join_specification',
     '',
-    '	_ON	shift 1274',
-    '	_USING	shift 1275',
+    '	_ON	shift 1275',
+    '	_USING	shift 1276',
     '	.	error',
     '',
-    '	named_columns_join	goto 1271',
-    '	join_condition	goto 1272',
-    '	join_specification	goto 1273',
+    '	named_columns_join	goto 1272',
+    '	join_condition	goto 1273',
+    '	join_specification	goto 1274',
     '',
-    'state 1165:',
+    'state 1166:',
     '',
     '	qualified_join : table_reference _LEFT outer_opt _ _JOIN table_factor join_specification',
     '',
-    '	_JOIN	shift 1276',
+    '	_JOIN	shift 1277',
     '	.	error',
     '',
-    'state 1166:',
+    'state 1167:',
     '',
     '	qualified_join : table_reference _NATURAL _FULL _ outer_opt _JOIN table_factor',
     '	outer_opt : _	(422)',
     '',
-    '	_OUTER	shift 1162',
+    '	_OUTER	shift 1163',
     '	_JOIN	reduce 422',
     '	.	error',
     '',
-    '	outer_opt	goto 1277',
+    '	outer_opt	goto 1278',
     '',
-    'state 1167:',
+    'state 1168:',
     '',
     '	qualified_join : table_reference _NATURAL _INNER _ _JOIN table_factor',
     '',
-    '	_JOIN	shift 1278',
+    '	_JOIN	shift 1279',
     '	.	error',
     '',
-    'state 1168:',
+    'state 1169:',
     '',
     '	qualified_join : table_reference _NATURAL _JOIN _ table_factor',
     '',
@@ -23197,7 +23204,7 @@ const
     '	.	error',
     '',
     '	derived_table	goto 795',
-    '	table_factor	goto 1279',
+    '	table_factor	goto 1280',
     '	table_subquery	goto 800',
     '	table_name	goto 801',
     '	qualified_name	goto 201',
@@ -23207,23 +23214,12 @@ const
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1169:',
+    'state 1170:',
     '',
     '	qualified_join : table_reference _NATURAL _LEFT _ outer_opt _JOIN table_factor',
     '	outer_opt : _	(422)',
     '',
-    '	_OUTER	shift 1162',
-    '	_JOIN	reduce 422',
-    '	.	error',
-    '',
-    '	outer_opt	goto 1280',
-    '',
-    'state 1170:',
-    '',
-    '	qualified_join : table_reference _NATURAL _RIGHT _ outer_opt _JOIN table_factor',
-    '	outer_opt : _	(422)',
-    '',
-    '	_OUTER	shift 1162',
+    '	_OUTER	shift 1163',
     '	_JOIN	reduce 422',
     '	.	error',
     '',
@@ -23231,19 +23227,30 @@ const
     '',
     'state 1171:',
     '',
-    '	qualified_join : table_reference _NATURAL _UNION _ _JOIN table_factor',
+    '	qualified_join : table_reference _NATURAL _RIGHT _ outer_opt _JOIN table_factor',
+    '	outer_opt : _	(422)',
     '',
-    '	_JOIN	shift 1282',
+    '	_OUTER	shift 1163',
+    '	_JOIN	reduce 422',
     '	.	error',
+    '',
+    '	outer_opt	goto 1282',
     '',
     'state 1172:',
     '',
-    '	qualified_join : table_reference _RIGHT outer_opt _ _JOIN table_factor join_specification',
+    '	qualified_join : table_reference _NATURAL _UNION _ _JOIN table_factor',
     '',
     '	_JOIN	shift 1283',
     '	.	error',
     '',
     'state 1173:',
+    '',
+    '	qualified_join : table_reference _RIGHT outer_opt _ _JOIN table_factor join_specification',
+    '',
+    '	_JOIN	shift 1284',
+    '	.	error',
+    '',
+    'state 1174:',
     '',
     '	from_clause_list : from_clause_list comma table_reference _	(391)',
     '	cross_join : table_reference _ _CROSS _JOIN table_factor',
@@ -23303,24 +23310,24 @@ const
     '	_WITH	reduce 391',
     '	.	error',
     '',
-    'state 1174:',
+    'state 1175:',
     '',
     '	table_factor : table_name _AS correlation_specification _	(397)',
     '',
     '	.	reduce 397',
     '',
-    'state 1175:',
+    'state 1176:',
     '',
     '	joined_table : left_paren joined_table right_paren _	(409)',
     '',
     '	.	reduce 409',
     '',
-    'state 1176:',
+    'state 1177:',
     '',
     '	qualified_name : identifier period identifier period identifier _	(195)',
     '	qualified_name_trail_asterisk : identifier period identifier period identifier _ period asterisk',
     '',
-    '	period	shift 1284',
+    '	period	shift 1285',
     '	identifier_body	reduce 195',
     '	delimited_identifier	reduce 195',
     '	concatenation_operator	reduce 195',
@@ -23343,32 +23350,32 @@ const
     '	_YEAR	reduce 195',
     '	.	error',
     '',
-    'state 1177:',
+    'state 1178:',
     '',
     '	qualified_name_trail_asterisk : identifier period identifier period asterisk _	(197)',
     '',
     '	.	reduce 197',
     '',
-    'state 1178:',
+    'state 1179:',
     '',
     '	end_field : _SECOND left_paren precision _ right_paren',
     '',
-    '	right_paren	shift 1285',
+    '	right_paren	shift 1286',
     '	.	error',
     '',
-    'state 1179:',
+    'state 1180:',
     '',
     '	single_datetime_field_opt : left_paren interval_leading_field_precision single_datetime_field_opt2 right_paren _	(189)',
     '',
     '	.	reduce 189',
     '',
-    'state 1180:',
+    'state 1181:',
     '',
     '	single_datetime_field_opt2 : comma interval_fractional_seconds_precision _	(191)',
     '',
     '	.	reduce 191',
     '',
-    'state 1181:',
+    'state 1182:',
     '',
     '	unsigned_integer : unsigned_integer _ digit',
     '	interval_fractional_seconds_precision : unsigned_integer _	(187)',
@@ -23377,19 +23384,19 @@ const
     '	right_paren	reduce 187',
     '	.	error',
     '',
-    'state 1182:',
+    'state 1183:',
     '',
     '	simple_when_clause : _WHEN when_operand _THEN result _	(459)',
     '',
     '	.	reduce 459',
     '',
-    'state 1183:',
+    'state 1184:',
     '',
     '	like_predicate : expression _LIKE pattern like_predicate_escape_opt _	(536)',
     '',
     '	.	reduce 536',
     '',
-    'state 1184:',
+    'state 1185:',
     '',
     '	like_predicate_escape_opt : _ESCAPE _ escape_character',
     '',
@@ -23443,7 +23450,7 @@ const
     '	_COUNT	shift 287',
     '	.	error',
     '',
-    '	escape_character	goto 1286',
+    '	escape_character	goto 1287',
     '	char_length_specifier	goto 206',
     '	bit_length_expression	goto 207',
     '	octet_length_expression	goto 208',
@@ -23481,7 +23488,7 @@ const
     '	column_reference	goto 241',
     '	unsigned_value_specification	goto 242',
     '	primary_expression	goto 243',
-    '	expression	goto 1287',
+    '	expression	goto 1288',
     '	current_timestamp_value_function	goto 246',
     '	current_time_value_function	goto 247',
     '	current_date_value_function	goto 248',
@@ -23511,12 +23518,12 @@ const
     '	unsigned_numeric_literal	goto 253',
     '	regular_identifier	goto 64',
     '',
-    'state 1185:',
+    'state 1186:',
     '',
     '	like_predicate : expression _NOT _LIKE pattern _ like_predicate_escape_opt',
     '	like_predicate_escape_opt : _	(538)',
     '',
-    '	_ESCAPE	shift 1184',
+    '	_ESCAPE	shift 1185',
     '	$end	reduce 538',
     '	identifier_body	reduce 538',
     '	delimited_identifier	reduce 538',
@@ -23565,15 +23572,15 @@ const
     '	_WITH	reduce 538',
     '	.	error',
     '',
-    '	like_predicate_escape_opt	goto 1288',
+    '	like_predicate_escape_opt	goto 1289',
     '',
-    'state 1186:',
+    'state 1187:',
     '',
     '	quantified_comparison_predicate : row_value_constructor comp_op quantifier table_subquery _	(544)',
     '',
     '	.	reduce 544',
     '',
-    'state 1187:',
+    'state 1188:',
     '',
     '	between_predicate : row_value_constructor _BETWEEN row_value_constructor _AND _ row_value_constructor',
     '',
@@ -23665,7 +23672,7 @@ const
     '	unsigned_value_specification	goto 242',
     '	primary_expression	goto 243',
     '	expression	goto 244',
-    '	row_value_constructor	goto 1289',
+    '	row_value_constructor	goto 1290',
     '	current_timestamp_value_function	goto 246',
     '	current_time_value_function	goto 247',
     '	current_date_value_function	goto 248',
@@ -23695,16 +23702,16 @@ const
     '	unsigned_numeric_literal	goto 253',
     '	regular_identifier	goto 64',
     '',
-    'state 1188:',
+    'state 1189:',
     '',
     '	in_predicate_value : left_paren in_value_list _ right_paren',
     '	in_value_list : in_value_list _ comma expression',
     '',
-    '	right_paren	shift 1290',
-    '	comma	shift 1291',
+    '	right_paren	shift 1291',
+    '	comma	shift 1292',
     '	.	error',
     '',
-    'state 1189:',
+    'state 1190:',
     '',
     '	expression : expression _ plus_sign multiplicative_expression',
     '	expression : expression _ minus_sign multiplicative_expression',
@@ -23718,90 +23725,90 @@ const
     '	comma	reduce 534',
     '	.	error',
     '',
-    'state 1190:',
+    'state 1191:',
     '',
     '	null_predicate : row_value_constructor _IS _NOT _NULL _	(543)',
     '',
     '	.	reduce 543',
     '',
-    'state 1191:',
+    'state 1192:',
     '',
     '	match_predicate : row_value_constructor _MATCH unique_opt partial_full_opt _ table_subquery',
     '',
     '	left_paren	shift 68',
     '	.	error',
     '',
-    '	table_subquery	goto 1292',
+    '	table_subquery	goto 1293',
     '',
-    'state 1192:',
+    'state 1193:',
     '',
     '	partial_full_opt : _FULL _	(557)',
     '',
     '	.	reduce 557',
     '',
-    'state 1193:',
+    'state 1194:',
     '',
     '	partial_full_opt : _PARTIAL _	(556)',
     '',
     '	.	reduce 556',
     '',
-    'state 1194:',
+    'state 1195:',
     '',
     '	between_predicate : row_value_constructor _NOT _BETWEEN row_value_constructor _ _AND row_value_constructor',
     '',
-    '	_AND	shift 1293',
+    '	_AND	shift 1294',
     '	.	error',
     '',
-    'state 1195:',
+    'state 1196:',
     '',
     '	in_predicate : row_value_constructor _NOT _IN in_predicate_value _	(531)',
     '',
     '	.	reduce 531',
     '',
-    'state 1196:',
+    'state 1197:',
     '',
     '	boolean_test : boolean_primary _IS _NOT truth_value _	(280)',
     '',
     '	.	reduce 280',
     '',
-    'state 1197:',
+    'state 1198:',
     '',
     '	cast_specification : _CAST left_paren cast_operand _AS cast_target right_paren _	(465)',
     '',
     '	.	reduce 465',
     '',
-    'state 1198:',
+    'state 1199:',
     '',
     '	form_of_use_conversion : _CONVERT left_paren expression _USING form_of_use_conversion_name right_paren _	(485)',
     '',
     '	.	reduce 485',
     '',
-    'state 1199:',
+    'state 1200:',
     '',
     '	extract_expression : _EXTRACT left_paren extract_field _FROM extract_source right_paren _	(499)',
     '',
     '	.	reduce 499',
     '',
-    'state 1200:',
+    'state 1201:',
     '',
     '	case_abbreviation : _NULLIF left_paren expression comma expression right_paren _	(449)',
     '',
     '	.	reduce 449',
     '',
-    'state 1201:',
+    'state 1202:',
     '',
     '	position_expression : _POSITION left_paren expression _IN expression right_paren _	(472)',
     '',
     '	.	reduce 472',
     '',
-    'state 1202:',
+    'state 1203:',
     '',
     '	character_bit_substring_function : _SUBSTRING left_paren expression _FROM start_position for_strlength_opt _ right_paren',
     '',
-    '	right_paren	shift 1294',
+    '	right_paren	shift 1295',
     '	.	error',
     '',
-    'state 1203:',
+    'state 1204:',
     '',
     '	for_strlength_opt : _FOR _ string_length',
     '',
@@ -23859,7 +23866,7 @@ const
     '	bit_length_expression	goto 207',
     '	octet_length_expression	goto 208',
     '	char_length_expression	goto 209',
-    '	string_length	goto 1295',
+    '	string_length	goto 1296',
     '	trim_function	goto 210',
     '	character_translation	goto 211',
     '	form_of_use_conversion	goto 212',
@@ -23893,7 +23900,7 @@ const
     '	column_reference	goto 241',
     '	unsigned_value_specification	goto 242',
     '	primary_expression	goto 243',
-    '	expression	goto 1296',
+    '	expression	goto 1297',
     '	current_timestamp_value_function	goto 246',
     '	current_time_value_function	goto 247',
     '	current_date_value_function	goto 248',
@@ -23923,58 +23930,58 @@ const
     '	unsigned_numeric_literal	goto 253',
     '	regular_identifier	goto 64',
     '',
-    'state 1204:',
+    'state 1205:',
     '',
     '	character_translation : _TRANSLATE left_paren expression _USING translation_name right_paren _	(487)',
     '',
     '	.	reduce 487',
     '',
-    'state 1205:',
+    'state 1206:',
     '',
     '	trim_operands : trim_specification trim_character _FROM trim_source _	(493)',
     '',
     '	.	reduce 493',
     '',
-    'state 1206:',
+    'state 1207:',
     '',
     '	corresponding_column_list_opt : _BY left_paren corresponding_column_list right_paren _	(444)',
     '',
     '	.	reduce 444',
     '',
-    'state 1207:',
+    'state 1208:',
     '',
     '	declare_cursor : _DECLARE cursor_name insensitive_opt scroll_opt _ _CURSOR _FOR cursor_specification',
     '',
-    '	_CURSOR	shift 1297',
+    '	_CURSOR	shift 1298',
     '	.	error',
     '',
-    'state 1208:',
-    '',
-    '	scroll_opt : _SCROLL _	(592)',
-    '',
-    '	.	reduce 592',
-    '',
     'state 1209:',
+    '',
+    '	scroll_opt : _SCROLL _	(593)',
+    '',
+    '	.	reduce 593',
+    '',
+    'state 1210:',
     '',
     '	procedure : _PROCEDURE procedure_name parameter_declaration_list semicolon _ SQL_procedure_statement semicolon',
     '',
     '	_ALTER	shift 70',
-    '	_CLOSE	shift 1314',
+    '	_CLOSE	shift 1315',
     '	_COMMIT	shift 71',
     '	_CONNECT	shift 72',
     '	_CREATE	shift 73',
-    '	_DELETE	shift 1315',
+    '	_DELETE	shift 1316',
     '	_DISCONNECT	shift 76',
     '	_DROP	shift 77',
-    '	_FETCH	shift 1316',
+    '	_FETCH	shift 1317',
     '	_GRANT	shift 78',
     '	_INSERT	shift 79',
-    '	_OPEN	shift 1317',
+    '	_OPEN	shift 1318',
     '	_REVOKE	shift 81',
     '	_ROLLBACK	shift 82',
-    '	_SELECT	shift 1318',
+    '	_SELECT	shift 1319',
     '	_SET	shift 84',
-    '	_UPDATE	shift 1319',
+    '	_UPDATE	shift 1320',
     '	.	error',
     '',
     '	set_local_time_zone_statement	goto 8',
@@ -23989,16 +23996,16 @@ const
     '	commit_statement	goto 17',
     '	set_constraints_mode_statement	goto 18',
     '	set_transaction_statement	goto 19',
-    '	update_statement__searched	goto 1298',
-    '	update_statement__positioned	goto 1299',
-    '	insert_statement	goto 1300',
-    '	delete_statement__searched	goto 1301',
-    '	delete_statement__positioned	goto 1302',
-    '	SQL_data_change_statement	goto 1303',
-    '	select_statement__single_row	goto 1304',
-    '	close_statement	goto 1305',
-    '	fetch_statement	goto 1306',
-    '	open_statement	goto 1307',
+    '	update_statement__searched	goto 1299',
+    '	update_statement__positioned	goto 1300',
+    '	insert_statement	goto 1301',
+    '	delete_statement__searched	goto 1302',
+    '	delete_statement__positioned	goto 1303',
+    '	SQL_data_change_statement	goto 1304',
+    '	select_statement__single_row	goto 1305',
+    '	close_statement	goto 1306',
+    '	fetch_statement	goto 1307',
+    '	open_statement	goto 1308',
     '	drop_assertion_statement	goto 23',
     '	drop_translation_statement	goto 24',
     '	drop_collation_statement	goto 25',
@@ -24021,35 +24028,35 @@ const
     '	schema_definition	goto 42',
     '	SQL_schema_manipulation_statement	goto 43',
     '	SQL_schema_definition_statement	goto 44',
-    '	SQL_session_statement	goto 1308',
-    '	SQL_connection_statement	goto 1309',
-    '	SQL_transaction_statement	goto 1310',
-    '	SQL_data_statement	goto 1311',
-    '	SQL_schema_statement	goto 1312',
-    '	SQL_procedure_statement	goto 1313',
-    '',
-    'state 1210:',
-    '',
-    '	parameter_declaration : status_parameter _	(616)',
-    '',
-    '	.	reduce 616',
+    '	SQL_session_statement	goto 1309',
+    '	SQL_connection_statement	goto 1310',
+    '	SQL_transaction_statement	goto 1311',
+    '	SQL_data_statement	goto 1312',
+    '	SQL_schema_statement	goto 1313',
+    '	SQL_procedure_statement	goto 1314',
     '',
     'state 1211:',
     '',
-    '	parameter_declarations : parameter_declaration _	(613)',
+    '	parameter_declaration : status_parameter _	(617)',
     '',
-    '	.	reduce 613',
+    '	.	reduce 617',
     '',
     'state 1212:',
+    '',
+    '	parameter_declarations : parameter_declaration _	(614)',
+    '',
+    '	.	reduce 614',
+    '',
+    'state 1213:',
     '',
     '	parameter_declaration_list : left_paren parameter_declarations _ right_paren',
     '	parameter_declarations : parameter_declarations _ comma parameter_declaration',
     '',
-    '	right_paren	shift 1320',
-    '	comma	shift 1321',
+    '	right_paren	shift 1321',
+    '	comma	shift 1322',
     '	.	error',
     '',
-    'state 1213:',
+    'state 1214:',
     '',
     '	parameter_declaration : parameter_name _ data_type',
     '',
@@ -24083,30 +24090,30 @@ const
     '	bit_string_type	goto 722',
     '	national_character_string_type	goto 723',
     '	character_string_type	goto 724',
-    '	data_type	goto 1322',
-    '',
-    'state 1214:',
-    '',
-    '	status_parameter : _SQLCODE _	(617)',
-    '',
-    '	.	reduce 617',
+    '	data_type	goto 1323',
     '',
     'state 1215:',
     '',
-    '	status_parameter : _SQLSTATE _	(618)',
+    '	status_parameter : _SQLCODE _	(618)',
     '',
     '	.	reduce 618',
     '',
     'state 1216:',
     '',
+    '	status_parameter : _SQLSTATE _	(619)',
+    '',
+    '	.	reduce 619',
+    '',
+    'state 1217:',
+    '',
     '	check_constraint_definition : _CHECK left_paren search_condition _ right_paren',
     '	search_condition : search_condition _ _OR boolean_term',
     '',
-    '	right_paren	shift 1323',
+    '	right_paren	shift 1324',
     '	_OR	shift 855',
     '	.	error',
     '',
-    'state 1217:',
+    'state 1218:',
     '',
     '	column_definition : column_name column_definition_sel default_clause_opt _ column_constraint_definition_opt collate_clause_opt',
     '	column_constraint_definition_opt : _	(101)',
@@ -24147,27 +24154,27 @@ const
     '	.	error',
     '',
     '	constraint_name_definition	goto 690',
-    '	constraint_name_definition_opt	goto 1324',
-    '	column_constraint_definition	goto 1325',
-    '	column_constraint_definition_opt	goto 1326',
-    '',
-    'state 1218:',
-    '',
-    '	unique_constraint_definition : unique_specification left_paren unique_column_list _ right_paren',
-    '',
-    '	right_paren	shift 1327',
-    '	.	error',
+    '	constraint_name_definition_opt	goto 1325',
+    '	column_constraint_definition	goto 1326',
+    '	column_constraint_definition_opt	goto 1327',
     '',
     'state 1219:',
     '',
-    '	column_name_list : column_name_list _ comma column_name',
-    '	unique_column_list : column_name_list _	(580)',
+    '	unique_constraint_definition : unique_specification left_paren unique_column_list _ right_paren',
     '',
-    '	comma	shift 786',
-    '	right_paren	reduce 580',
+    '	right_paren	shift 1328',
     '	.	error',
     '',
     'state 1220:',
+    '',
+    '	column_name_list : column_name_list _ comma column_name',
+    '	unique_column_list : column_name_list _	(581)',
+    '',
+    '	comma	shift 786',
+    '	right_paren	reduce 581',
+    '	.	error',
+    '',
+    'state 1221:',
     '',
     '	referential_constraint_definition : _FOREIGN _KEY left_paren _ referencing_columns right_paren references_specification',
     '',
@@ -24176,48 +24183,48 @@ const
     '	underscore	shift 69',
     '	.	error',
     '',
-    '	referencing_columns	goto 1328',
-    '	column_name_list	goto 1329',
-    '	reference_column_list	goto 1330',
+    '	referencing_columns	goto 1329',
+    '	column_name_list	goto 1330',
+    '	reference_column_list	goto 1331',
     '	column_name	goto 550',
     '	actual_identifier	goto 61',
     '	identifier	goto 465',
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1221:',
-    '',
-    '	drop_column_default_clause : _DROP _DEFAULT _	(761)',
-    '',
-    '	.	reduce 761',
-    '',
     'state 1222:',
     '',
-    '	set_column_default_clause : _SET default_clause _	(760)',
+    '	drop_column_default_clause : _DROP _DEFAULT _	(762)',
     '',
-    '	.	reduce 760',
+    '	.	reduce 762',
     '',
     'state 1223:',
     '',
-    '	table_commit_opts : _ON _COMMIT _DELETE _ _ROWS',
+    '	set_column_default_clause : _SET default_clause _	(761)',
     '',
-    '	_ROWS	shift 1331',
-    '	.	error',
+    '	.	reduce 761',
     '',
     'state 1224:',
     '',
-    '	table_commit_opts : _ON _COMMIT _PRESERVE _ _ROWS',
+    '	table_commit_opts : _ON _COMMIT _DELETE _ _ROWS',
     '',
     '	_ROWS	shift 1332',
     '	.	error',
     '',
     'state 1225:',
     '',
+    '	table_commit_opts : _ON _COMMIT _PRESERVE _ _ROWS',
+    '',
+    '	_ROWS	shift 1333',
+    '	.	error',
+    '',
+    'state 1226:',
+    '',
     '	table_element_list : left_paren table_element table_element_list_opt right_paren _	(91)',
     '',
     '	.	reduce 91',
     '',
-    'state 1226:',
+    'state 1227:',
     '',
     '	table_element_list_opt : table_element_list_opt comma _ table_element',
     '	constraint_name_definition_opt : _	(235)',
@@ -24237,58 +24244,58 @@ const
     '	column_name	goto 906',
     '	table_constraint_definition	goto 923',
     '	column_definition	goto 924',
-    '	table_element	goto 1333',
+    '	table_element	goto 1334',
     '	actual_identifier	goto 61',
     '	identifier	goto 465',
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1227:',
+    'state 1228:',
     '',
     '	limited_collation_definition : _COLLATION _FROM _ collation_source',
     '',
     '	identifier_body	shift 66',
     '	delimited_identifier	shift 67',
     '	underscore	shift 69',
-    '	_DEFAULT	shift 1108',
-    '	_DESC	shift 1109',
-    '	_EXTERNAL	shift 1110',
-    '	_TRANSLATION	shift 1111',
+    '	_DEFAULT	shift 1109',
+    '	_DESC	shift 1110',
+    '	_EXTERNAL	shift 1111',
+    '	_TRANSLATION	shift 1112',
     '	.	error',
     '',
-    '	schema_collation_name	goto 1102',
-    '	external_collation	goto 1103',
-    '	translation_collation	goto 1104',
-    '	collating_sequence_definition	goto 1105',
-    '	collation_source	goto 1334',
-    '	collation_name	goto 1107',
+    '	schema_collation_name	goto 1103',
+    '	external_collation	goto 1104',
+    '	translation_collation	goto 1105',
+    '	collating_sequence_definition	goto 1106',
+    '	collation_source	goto 1335',
+    '	collation_name	goto 1108',
     '	qualified_name	goto 319',
     '	actual_identifier	goto 61',
     '	identifier	goto 203',
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1228:',
-    '',
-    '	collation_definition : _CREATE _COLLATION collation_name _FOR character_set_specification _FROM collation_source pad_attribute_opt _	(720)',
-    '',
-    '	.	reduce 720',
-    '',
     'state 1229:',
     '',
-    '	pad_attribute_opt : _NO _ _PAD',
+    '	collation_definition : _CREATE _COLLATION collation_name _FOR character_set_specification _FROM collation_source pad_attribute_opt _	(721)',
     '',
-    '	_PAD	shift 1335',
-    '	.	error',
+    '	.	reduce 721',
     '',
     'state 1230:',
     '',
-    '	pad_attribute_opt : _PAD _ _SPACE',
+    '	pad_attribute_opt : _NO _ _PAD',
     '',
-    '	_SPACE	shift 1336',
+    '	_PAD	shift 1336',
     '	.	error',
     '',
     'state 1231:',
+    '',
+    '	pad_attribute_opt : _PAD _ _SPACE',
+    '',
+    '	_SPACE	shift 1337',
+    '	.	error',
+    '',
+    'state 1232:',
     '',
     '	collating_sequence_definition : _DESC left_paren _ collation_name right_paren',
     '',
@@ -24297,179 +24304,179 @@ const
     '	underscore	shift 69',
     '	.	error',
     '',
-    '	collation_name	goto 1337',
+    '	collation_name	goto 1338',
     '	qualified_name	goto 319',
     '	actual_identifier	goto 61',
     '	identifier	goto 203',
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1232:',
+    'state 1233:',
     '',
     '	external_collation : _EXTERNAL left_paren _ quote external_collation_name quote right_paren',
     '',
-    '	quote	shift 1338',
+    '	quote	shift 1339',
     '	.	error',
-    '',
-    'state 1233:',
-    '',
-    '	translation_collation : _TRANSLATION translation_name _ translation_collation_opt',
-    '	translation_collation_opt : _	(718)',
-    '',
-    '	_THEN	shift 1340',
-    '	$end	reduce 718',
-    '	identifier_body	reduce 718',
-    '	delimited_identifier	reduce 718',
-    '	left_paren	reduce 718',
-    '	semicolon	reduce 718',
-    '	underscore	reduce 718',
-    '	_ALTER	reduce 718',
-    '	_COMMIT	reduce 718',
-    '	_CONNECT	reduce 718',
-    '	_CREATE	reduce 718',
-    '	_DECLARE	reduce 718',
-    '	_DELETE	reduce 718',
-    '	_DISCONNECT	reduce 718',
-    '	_DROP	reduce 718',
-    '	_GRANT	reduce 718',
-    '	_INSERT	reduce 718',
-    '	_NO	reduce 718',
-    '	_PAD	reduce 718',
-    '	_REVOKE	reduce 718',
-    '	_ROLLBACK	reduce 718',
-    '	_SELECT	reduce 718',
-    '	_SET	reduce 718',
-    '	_TABLE	reduce 718',
-    '	_UPDATE	reduce 718',
-    '	_VALUES	reduce 718',
-    '	.	error',
-    '',
-    '	translation_collation_opt	goto 1339',
     '',
     'state 1234:',
+    '',
+    '	translation_collation : _TRANSLATION translation_name _ translation_collation_opt',
+    '	translation_collation_opt : _	(719)',
+    '',
+    '	_THEN	shift 1341',
+    '	$end	reduce 719',
+    '	identifier_body	reduce 719',
+    '	delimited_identifier	reduce 719',
+    '	left_paren	reduce 719',
+    '	semicolon	reduce 719',
+    '	underscore	reduce 719',
+    '	_ALTER	reduce 719',
+    '	_COMMIT	reduce 719',
+    '	_CONNECT	reduce 719',
+    '	_CREATE	reduce 719',
+    '	_DECLARE	reduce 719',
+    '	_DELETE	reduce 719',
+    '	_DISCONNECT	reduce 719',
+    '	_DROP	reduce 719',
+    '	_GRANT	reduce 719',
+    '	_INSERT	reduce 719',
+    '	_NO	reduce 719',
+    '	_PAD	reduce 719',
+    '	_REVOKE	reduce 719',
+    '	_ROLLBACK	reduce 719',
+    '	_SELECT	reduce 719',
+    '	_SET	reduce 719',
+    '	_TABLE	reduce 719',
+    '	_UPDATE	reduce 719',
+    '	_VALUES	reduce 719',
+    '	.	error',
+    '',
+    '	translation_collation_opt	goto 1340',
+    '',
+    'state 1235:',
     '',
     '	data_type_opt : _CHARACTER _SET character_set_specification _	(113)',
     '',
     '	.	reduce 113',
     '',
-    'state 1235:',
-    '',
-    '	domain_definition : _CREATE _DOMAIN domain_name as_opt data_type default_clause_opt domain_constraint_opt collate_clause_opt _	(653)',
-    '',
-    '	.	reduce 653',
-    '',
     'state 1236:',
+    '',
+    '	domain_definition : _CREATE _DOMAIN domain_name as_opt data_type default_clause_opt domain_constraint_opt collate_clause_opt _	(654)',
+    '',
+    '	.	reduce 654',
+    '',
+    'state 1237:',
     '',
     '	character_string_type_len : left_paren length right_paren _	(124)',
     '',
     '	.	reduce 124',
     '',
-    'state 1237:',
+    'state 1238:',
     '',
     '	numeric_precision_scale_opt : left_paren precision right_paren _	(153)',
     '',
     '	.	reduce 153',
     '',
-    'state 1238:',
+    'state 1239:',
     '',
     '	numeric_precision_scale_opt : left_paren precision comma _ scale right_paren',
     '',
     '	digit	shift 150',
     '	.	error',
     '',
-    '	scale	goto 1341',
-    '	unsigned_integer	goto 1342',
+    '	scale	goto 1342',
+    '	unsigned_integer	goto 1343',
     '',
-    'state 1239:',
+    'state 1240:',
     '',
     '	approximate_numeric_type : _FLOAT left_paren precision right_paren _	(157)',
     '',
     '	.	reduce 157',
     '',
-    'state 1240:',
+    'state 1241:',
     '',
     '	national_character_string_type : _NATIONAL _CHAR _VARYING character_string_type_len _	(130)',
     '',
     '	.	reduce 130',
     '',
-    'state 1241:',
+    'state 1242:',
     '',
     '	national_character_string_type : _NATIONAL _CHARACTER _VARYING character_string_type_len _	(129)',
     '',
     '	.	reduce 129',
     '',
-    'state 1242:',
+    'state 1243:',
     '',
     '	tz_opt : _WITH _TIME _ _ZONE',
     '',
-    '	_ZONE	shift 1343',
+    '	_ZONE	shift 1344',
     '	.	error',
     '',
-    'state 1243:',
+    'state 1244:',
     '',
     '	time_precision_opt : left_paren time_precision right_paren _	(166)',
     '',
     '	.	reduce 166',
     '',
-    'state 1244:',
+    'state 1245:',
     '',
     '	timestamp_precision_opt : left_paren timestamp_precision right_paren _	(164)',
     '',
     '	.	reduce 164',
     '',
-    'state 1245:',
+    'state 1246:',
     '',
     '	translation_definition : _CREATE _TRANSLATION translation_name _FOR source_character_set_specification _TO target_character_set_specification _FROM _ translation_source',
     '',
     '	identifier_body	shift 66',
     '	delimited_identifier	shift 67',
     '	underscore	shift 69',
-    '	_EXTERNAL	shift 1349',
-    '	_IDENTITY	shift 1350',
+    '	_EXTERNAL	shift 1350',
+    '	_IDENTITY	shift 1351',
     '	.	error',
     '',
-    '	schema_translation_name	goto 1344',
-    '	external_translation	goto 1345',
-    '	translation_specification	goto 1346',
-    '	translation_source	goto 1347',
-    '	translation_name	goto 1348',
+    '	schema_translation_name	goto 1345',
+    '	external_translation	goto 1346',
+    '	translation_specification	goto 1347',
+    '	translation_source	goto 1348',
+    '	translation_name	goto 1349',
     '	qualified_name	goto 328',
     '	actual_identifier	goto 61',
     '	identifier	goto 203',
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1246:',
+    'state 1247:',
     '',
     '	view_check_opt : _WITH _CASCADED _ _CHECK _OPTION',
     '',
-    '	_CHECK	shift 1351',
-    '	.	error',
-    '',
-    'state 1247:',
-    '',
-    '	view_check_opt : _WITH _CHECK _ _OPTION',
-    '',
-    '	_OPTION	shift 1352',
+    '	_CHECK	shift 1352',
     '	.	error',
     '',
     'state 1248:',
     '',
-    '	view_check_opt : _WITH _LOCAL _ _CHECK _OPTION',
+    '	view_check_opt : _WITH _CHECK _ _OPTION',
     '',
-    '	_CHECK	shift 1353',
+    '	_OPTION	shift 1353',
     '	.	error',
     '',
     'state 1249:',
     '',
-    '	temporary_table_declaration_opt : _ON _COMMIT _ _PRESERVE _ROWS',
-    '	temporary_table_declaration_opt : _ON _COMMIT _ _DELETE _ROWS',
+    '	view_check_opt : _WITH _LOCAL _ _CHECK _OPTION',
     '',
-    '	_DELETE	shift 1354',
-    '	_PRESERVE	shift 1355',
+    '	_CHECK	shift 1354',
     '	.	error',
     '',
     'state 1250:',
+    '',
+    '	temporary_table_declaration_opt : _ON _COMMIT _ _PRESERVE _ROWS',
+    '	temporary_table_declaration_opt : _ON _COMMIT _ _DELETE _ROWS',
+    '',
+    '	_DELETE	shift 1355',
+    '	_PRESERVE	shift 1356',
+    '	.	error',
+    '',
+    'state 1251:',
     '',
     '	date_value : unsigned_integer minus_sign unsigned_integer minus_sign unsigned_integer _	(47)',
     '	unsigned_integer : unsigned_integer _ digit',
@@ -24479,18 +24486,18 @@ const
     '	quote	reduce 47',
     '	.	error',
     '',
-    'state 1251:',
+    'state 1252:',
     '',
     '	interval_string_literal : unsigned_integer space unsigned_integer colon unsigned_integer _	(60)',
     '	interval_string_literal : unsigned_integer space unsigned_integer colon unsigned_integer _ colon seconds_value',
     '	unsigned_integer : unsigned_integer _ digit',
     '',
     '	digit	shift 340',
-    '	colon	shift 1356',
+    '	colon	shift 1357',
     '	quote	reduce 60',
     '	.	error',
     '',
-    'state 1252:',
+    'state 1253:',
     '',
     '	seconds_value : unsigned_integer period unsigned_integer _	(52)',
     '	unsigned_integer : unsigned_integer _ digit',
@@ -24501,26 +24508,26 @@ const
     '	minus_sign	reduce 52',
     '	.	error',
     '',
-    'state 1253:',
+    'state 1254:',
     '',
     '	interval_string_literal : unsigned_integer colon unsigned_integer colon seconds_value _	(64)',
     '',
     '	.	reduce 64',
     '',
-    'state 1254:',
+    'state 1255:',
     '',
     '	unsigned_integer : unsigned_integer _ digit',
     '	seconds_value : unsigned_integer _	(51)',
     '	seconds_value : unsigned_integer _ period unsigned_integer',
     '',
     '	digit	shift 340',
-    '	period	shift 1141',
+    '	period	shift 1142',
     '	quote	reduce 51',
     '	plus_sign	reduce 51',
     '	minus_sign	reduce 51',
     '	.	error',
     '',
-    'state 1255:',
+    'state 1256:',
     '',
     '	time_string : quote time_value quote $$1 quote time_value _ time_zone_interval quote',
     '',
@@ -24528,50 +24535,50 @@ const
     '	minus_sign	shift 152',
     '	.	error',
     '',
-    '	time_zone_interval	goto 1357',
-    '	sign	goto 1146',
+    '	time_zone_interval	goto 1358',
+    '	sign	goto 1147',
     '',
-    'state 1256:',
+    'state 1257:',
     '',
     '	time_value : unsigned_integer colon unsigned_integer colon seconds_value _	(50)',
     '',
     '	.	reduce 50',
     '',
-    'state 1257:',
+    'state 1258:',
     '',
     '	timestamp_string : quote date_value space time_value time_zone_interval quote _	(55)',
     '',
     '	.	reduce 55',
     '',
-    'state 1258:',
+    'state 1259:',
     '',
     '	time_zone_interval : sign unsigned_integer _ colon unsigned_integer',
     '	unsigned_integer : unsigned_integer _ digit',
     '',
     '	digit	shift 340',
-    '	colon	shift 1358',
+    '	colon	shift 1359',
     '	.	error',
-    '',
-    'state 1259:',
-    '',
-    '	grantee_list : grantee_list comma grantee _	(674)',
-    '',
-    '	.	reduce 674',
     '',
     'state 1260:',
     '',
-    '	grant_option : _WITH _GRANT _ _OPTION',
+    '	grantee_list : grantee_list comma grantee _	(675)',
     '',
-    '	_OPTION	shift 1359',
-    '	.	error',
+    '	.	reduce 675',
     '',
     'state 1261:',
     '',
-    '	revoke_statement : _REVOKE grant_option_for_opt privileges _ON object_name _FROM grantee_list drop_behaviour _	(767)',
+    '	grant_option : _WITH _GRANT _ _OPTION',
     '',
-    '	.	reduce 767',
+    '	_OPTION	shift 1360',
+    '	.	error',
     '',
     'state 1262:',
+    '',
+    '	revoke_statement : _REVOKE grant_option_for_opt privileges _ON object_name _FROM grantee_list drop_behaviour _	(768)',
+    '',
+    '	.	reduce 768',
+    '',
+    'state 1263:',
     '',
     '	having_clause : _HAVING search_condition _	(436)',
     '	search_condition : search_condition _ _OR boolean_term',
@@ -24610,18 +24617,18 @@ const
     '	_WITH	reduce 436',
     '	.	error',
     '',
-    'state 1263:',
+    'state 1264:',
     '',
     '	grouping_column_reference_list : grouping_column_reference _	(431)',
     '',
     '	.	reduce 431',
     '',
-    'state 1264:',
+    'state 1265:',
     '',
     '	group_by_clause : _GROUP _BY grouping_column_reference_list _	(430)',
     '	grouping_column_reference_list : grouping_column_reference_list _ comma grouping_column_reference',
     '',
-    '	comma	shift 1360',
+    '	comma	shift 1361',
     '	$end	reduce 430',
     '	identifier_body	reduce 430',
     '	delimited_identifier	reduce 430',
@@ -24656,7 +24663,7 @@ const
     '	_WITH	reduce 430',
     '	.	error',
     '',
-    'state 1265:',
+    'state 1266:',
     '',
     '	grouping_column_reference : column_reference _ collate_clause_opt',
     '	collate_clause_opt : _	(103)',
@@ -24698,16 +24705,16 @@ const
     '	.	error',
     '',
     '	collate_clause	goto 677',
-    '	collate_clause_opt	goto 1361',
+    '	collate_clause_opt	goto 1362',
     '',
-    'state 1266:',
+    'state 1267:',
     '',
     '	derived_column_list_opt : left_paren derived_column_list _ right_paren',
     '',
-    '	right_paren	shift 1362',
+    '	right_paren	shift 1363',
     '	.	error',
     '',
-    'state 1267:',
+    'state 1268:',
     '',
     '	column_name_list : column_name_list _ comma column_name',
     '	derived_column_list : column_name_list _	(404)',
@@ -24716,13 +24723,13 @@ const
     '	right_paren	reduce 404',
     '	.	error',
     '',
-    'state 1268:',
+    'state 1269:',
     '',
     '	cross_join : table_reference _CROSS _JOIN table_factor _	(410)',
     '',
     '	.	reduce 410',
     '',
-    'state 1269:',
+    'state 1270:',
     '',
     '	qualified_join : table_reference _FULL outer_opt _JOIN _ table_factor join_specification',
     '',
@@ -24734,7 +24741,7 @@ const
     '	.	error',
     '',
     '	derived_table	goto 795',
-    '	table_factor	goto 1363',
+    '	table_factor	goto 1364',
     '	table_subquery	goto 800',
     '	table_name	goto 801',
     '	qualified_name	goto 201',
@@ -24744,37 +24751,37 @@ const
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1270:',
+    'state 1271:',
     '',
     '	qualified_join : table_reference _INNER _JOIN table_factor _ join_specification',
     '',
-    '	_ON	shift 1274',
-    '	_USING	shift 1275',
+    '	_ON	shift 1275',
+    '	_USING	shift 1276',
     '	.	error',
     '',
-    '	named_columns_join	goto 1271',
-    '	join_condition	goto 1272',
-    '	join_specification	goto 1364',
+    '	named_columns_join	goto 1272',
+    '	join_condition	goto 1273',
+    '	join_specification	goto 1365',
     '',
-    'state 1271:',
+    'state 1272:',
     '',
     '	join_specification : named_columns_join _	(425)',
     '',
     '	.	reduce 425',
     '',
-    'state 1272:',
+    'state 1273:',
     '',
     '	join_specification : join_condition _	(424)',
     '',
     '	.	reduce 424',
     '',
-    'state 1273:',
+    'state 1274:',
     '',
     '	qualified_join : table_reference _JOIN table_factor join_specification _	(411)',
     '',
     '	.	reduce 411',
     '',
-    'state 1274:',
+    'state 1275:',
     '',
     '	join_condition : _ON _ search_condition',
     '',
@@ -24886,7 +24893,7 @@ const
     '	boolean_test	goto 631',
     '	boolean_factor	goto 632',
     '	boolean_term	goto 633',
-    '	search_condition	goto 1365',
+    '	search_condition	goto 1366',
     '	current_timestamp_value_function	goto 246',
     '	current_time_value_function	goto 247',
     '	current_date_value_function	goto 248',
@@ -24916,14 +24923,14 @@ const
     '	unsigned_numeric_literal	goto 253',
     '	regular_identifier	goto 64',
     '',
-    'state 1275:',
+    'state 1276:',
     '',
     '	named_columns_join : _USING _ left_paren join_column_list right_paren',
     '',
-    '	left_paren	shift 1366',
+    '	left_paren	shift 1367',
     '	.	error',
     '',
-    'state 1276:',
+    'state 1277:',
     '',
     '	qualified_join : table_reference _LEFT outer_opt _JOIN _ table_factor join_specification',
     '',
@@ -24935,7 +24942,7 @@ const
     '	.	error',
     '',
     '	derived_table	goto 795',
-    '	table_factor	goto 1367',
+    '	table_factor	goto 1368',
     '	table_subquery	goto 800',
     '	table_name	goto 801',
     '	qualified_name	goto 201',
@@ -24945,14 +24952,14 @@ const
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1277:',
+    'state 1278:',
     '',
     '	qualified_join : table_reference _NATURAL _FULL outer_opt _ _JOIN table_factor',
     '',
-    '	_JOIN	shift 1368',
+    '	_JOIN	shift 1369',
     '	.	error',
     '',
-    'state 1278:',
+    'state 1279:',
     '',
     '	qualified_join : table_reference _NATURAL _INNER _JOIN _ table_factor',
     '',
@@ -24964,7 +24971,7 @@ const
     '	.	error',
     '',
     '	derived_table	goto 795',
-    '	table_factor	goto 1369',
+    '	table_factor	goto 1370',
     '	table_subquery	goto 800',
     '	table_name	goto 801',
     '	qualified_name	goto 201',
@@ -24974,51 +24981,29 @@ const
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1279:',
+    'state 1280:',
     '',
     '	qualified_join : table_reference _NATURAL _JOIN table_factor _	(416)',
     '',
     '	.	reduce 416',
     '',
-    'state 1280:',
-    '',
-    '	qualified_join : table_reference _NATURAL _LEFT outer_opt _ _JOIN table_factor',
-    '',
-    '	_JOIN	shift 1370',
-    '	.	error',
-    '',
     'state 1281:',
     '',
-    '	qualified_join : table_reference _NATURAL _RIGHT outer_opt _ _JOIN table_factor',
+    '	qualified_join : table_reference _NATURAL _LEFT outer_opt _ _JOIN table_factor',
     '',
     '	_JOIN	shift 1371',
     '	.	error',
     '',
     'state 1282:',
     '',
-    '	qualified_join : table_reference _NATURAL _UNION _JOIN _ table_factor',
+    '	qualified_join : table_reference _NATURAL _RIGHT outer_opt _ _JOIN table_factor',
     '',
-    '	identifier_body	shift 66',
-    '	delimited_identifier	shift 67',
-    '	left_paren	shift 68',
-    '	underscore	shift 69',
-    '	_MODULE	shift 204',
+    '	_JOIN	shift 1372',
     '	.	error',
-    '',
-    '	derived_table	goto 795',
-    '	table_factor	goto 1372',
-    '	table_subquery	goto 800',
-    '	table_name	goto 801',
-    '	qualified_name	goto 201',
-    '	qualified_local_table_name	goto 202',
-    '	actual_identifier	goto 61',
-    '	identifier	goto 203',
-    '	introducer	goto 63',
-    '	regular_identifier	goto 64',
     '',
     'state 1283:',
     '',
-    '	qualified_join : table_reference _RIGHT outer_opt _JOIN _ table_factor join_specification',
+    '	qualified_join : table_reference _NATURAL _UNION _JOIN _ table_factor',
     '',
     '	identifier_body	shift 66',
     '	delimited_identifier	shift 67',
@@ -25040,24 +25025,46 @@ const
     '',
     'state 1284:',
     '',
-    '	qualified_name_trail_asterisk : identifier period identifier period identifier period _ asterisk',
+    '	qualified_join : table_reference _RIGHT outer_opt _JOIN _ table_factor join_specification',
     '',
-    '	asterisk	shift 1374',
+    '	identifier_body	shift 66',
+    '	delimited_identifier	shift 67',
+    '	left_paren	shift 68',
+    '	underscore	shift 69',
+    '	_MODULE	shift 204',
     '	.	error',
     '',
+    '	derived_table	goto 795',
+    '	table_factor	goto 1374',
+    '	table_subquery	goto 800',
+    '	table_name	goto 801',
+    '	qualified_name	goto 201',
+    '	qualified_local_table_name	goto 202',
+    '	actual_identifier	goto 61',
+    '	identifier	goto 203',
+    '	introducer	goto 63',
+    '	regular_identifier	goto 64',
+    '',
     'state 1285:',
+    '',
+    '	qualified_name_trail_asterisk : identifier period identifier period identifier period _ asterisk',
+    '',
+    '	asterisk	shift 1375',
+    '	.	error',
+    '',
+    'state 1286:',
     '',
     '	end_field : _SECOND left_paren precision right_paren _	(186)',
     '',
     '	.	reduce 186',
     '',
-    'state 1286:',
+    'state 1287:',
     '',
     '	like_predicate_escape_opt : _ESCAPE escape_character _	(539)',
     '',
     '	.	reduce 539',
     '',
-    'state 1287:',
+    'state 1288:',
     '',
     '	expression : expression _ plus_sign multiplicative_expression',
     '	expression : expression _ minus_sign multiplicative_expression',
@@ -25115,25 +25122,25 @@ const
     '	_WITH	reduce 541',
     '	.	error',
     '',
-    'state 1288:',
+    'state 1289:',
     '',
     '	like_predicate : expression _NOT _LIKE pattern like_predicate_escape_opt _	(537)',
     '',
     '	.	reduce 537',
     '',
-    'state 1289:',
+    'state 1290:',
     '',
     '	between_predicate : row_value_constructor _BETWEEN row_value_constructor _AND row_value_constructor _	(528)',
     '',
     '	.	reduce 528',
     '',
-    'state 1290:',
+    'state 1291:',
     '',
     '	in_predicate_value : left_paren in_value_list right_paren _	(533)',
     '',
     '	.	reduce 533',
     '',
-    'state 1291:',
+    'state 1292:',
     '',
     '	in_value_list : in_value_list comma _ expression',
     '',
@@ -25224,7 +25231,7 @@ const
     '	column_reference	goto 241',
     '	unsigned_value_specification	goto 242',
     '	primary_expression	goto 243',
-    '	expression	goto 1375',
+    '	expression	goto 1376',
     '	current_timestamp_value_function	goto 246',
     '	current_time_value_function	goto 247',
     '	current_date_value_function	goto 248',
@@ -25254,13 +25261,13 @@ const
     '	unsigned_numeric_literal	goto 253',
     '	regular_identifier	goto 64',
     '',
-    'state 1292:',
+    'state 1293:',
     '',
     '	match_predicate : row_value_constructor _MATCH unique_opt partial_full_opt table_subquery _	(552)',
     '',
     '	.	reduce 552',
     '',
-    'state 1293:',
+    'state 1294:',
     '',
     '	between_predicate : row_value_constructor _NOT _BETWEEN row_value_constructor _AND _ row_value_constructor',
     '',
@@ -25352,7 +25359,7 @@ const
     '	unsigned_value_specification	goto 242',
     '	primary_expression	goto 243',
     '	expression	goto 244',
-    '	row_value_constructor	goto 1376',
+    '	row_value_constructor	goto 1377',
     '	current_timestamp_value_function	goto 246',
     '	current_time_value_function	goto 247',
     '	current_date_value_function	goto 248',
@@ -25382,19 +25389,19 @@ const
     '	unsigned_numeric_literal	goto 253',
     '	regular_identifier	goto 64',
     '',
-    'state 1294:',
+    'state 1295:',
     '',
     '	character_bit_substring_function : _SUBSTRING left_paren expression _FROM start_position for_strlength_opt right_paren _	(478)',
     '',
     '	.	reduce 478',
     '',
-    'state 1295:',
+    'state 1296:',
     '',
     '	for_strlength_opt : _FOR string_length _	(480)',
     '',
     '	.	reduce 480',
     '',
-    'state 1296:',
+    'state 1297:',
     '',
     '	expression : expression _ plus_sign multiplicative_expression',
     '	expression : expression _ minus_sign multiplicative_expression',
@@ -25407,111 +25414,111 @@ const
     '	right_paren	reduce 482',
     '	.	error',
     '',
-    'state 1297:',
+    'state 1298:',
     '',
     '	declare_cursor : _DECLARE cursor_name insensitive_opt scroll_opt _CURSOR _ _FOR cursor_specification',
     '',
-    '	_FOR	shift 1377',
+    '	_FOR	shift 1378',
     '	.	error',
-    '',
-    'state 1298:',
-    '',
-    '	SQL_data_change_statement : update_statement__searched _	(813)',
-    '',
-    '	.	reduce 813',
     '',
     'state 1299:',
     '',
-    '	SQL_data_change_statement : update_statement__positioned _	(812)',
+    '	SQL_data_change_statement : update_statement__searched _	(814)',
     '',
-    '	.	reduce 812',
+    '	.	reduce 814',
     '',
     'state 1300:',
     '',
-    '	SQL_data_change_statement : insert_statement _	(811)',
+    '	SQL_data_change_statement : update_statement__positioned _	(813)',
     '',
-    '	.	reduce 811',
+    '	.	reduce 813',
     '',
     'state 1301:',
     '',
-    '	SQL_data_change_statement : delete_statement__searched _	(810)',
+    '	SQL_data_change_statement : insert_statement _	(812)',
     '',
-    '	.	reduce 810',
+    '	.	reduce 812',
     '',
     'state 1302:',
     '',
-    '	SQL_data_change_statement : delete_statement__positioned _	(809)',
+    '	SQL_data_change_statement : delete_statement__searched _	(811)',
     '',
-    '	.	reduce 809',
+    '	.	reduce 811',
     '',
     'state 1303:',
     '',
-    '	SQL_data_statement : SQL_data_change_statement _	(788)',
+    '	SQL_data_change_statement : delete_statement__positioned _	(810)',
     '',
-    '	.	reduce 788',
+    '	.	reduce 810',
     '',
     'state 1304:',
     '',
-    '	SQL_data_statement : select_statement__single_row _	(787)',
+    '	SQL_data_statement : SQL_data_change_statement _	(789)',
     '',
-    '	.	reduce 787',
+    '	.	reduce 789',
     '',
     'state 1305:',
     '',
-    '	SQL_data_statement : close_statement _	(786)',
+    '	SQL_data_statement : select_statement__single_row _	(788)',
     '',
-    '	.	reduce 786',
+    '	.	reduce 788',
     '',
     'state 1306:',
     '',
-    '	SQL_data_statement : fetch_statement _	(785)',
+    '	SQL_data_statement : close_statement _	(787)',
     '',
-    '	.	reduce 785',
+    '	.	reduce 787',
     '',
     'state 1307:',
     '',
-    '	SQL_data_statement : open_statement _	(784)',
+    '	SQL_data_statement : fetch_statement _	(786)',
     '',
-    '	.	reduce 784',
+    '	.	reduce 786',
     '',
     'state 1308:',
     '',
-    '	SQL_procedure_statement : SQL_session_statement _	(623)',
+    '	SQL_data_statement : open_statement _	(785)',
     '',
-    '	.	reduce 623',
+    '	.	reduce 785',
     '',
     'state 1309:',
     '',
-    '	SQL_procedure_statement : SQL_connection_statement _	(622)',
+    '	SQL_procedure_statement : SQL_session_statement _	(624)',
     '',
-    '	.	reduce 622',
+    '	.	reduce 624',
     '',
     'state 1310:',
     '',
-    '	SQL_procedure_statement : SQL_transaction_statement _	(621)',
+    '	SQL_procedure_statement : SQL_connection_statement _	(623)',
     '',
-    '	.	reduce 621',
+    '	.	reduce 623',
     '',
     'state 1311:',
     '',
-    '	SQL_procedure_statement : SQL_data_statement _	(620)',
+    '	SQL_procedure_statement : SQL_transaction_statement _	(622)',
     '',
-    '	.	reduce 620',
+    '	.	reduce 622',
     '',
     'state 1312:',
     '',
-    '	SQL_procedure_statement : SQL_schema_statement _	(619)',
+    '	SQL_procedure_statement : SQL_data_statement _	(621)',
     '',
-    '	.	reduce 619',
+    '	.	reduce 621',
     '',
     'state 1313:',
     '',
-    '	procedure : _PROCEDURE procedure_name parameter_declaration_list semicolon SQL_procedure_statement _ semicolon',
+    '	SQL_procedure_statement : SQL_schema_statement _	(620)',
     '',
-    '	semicolon	shift 1378',
-    '	.	error',
+    '	.	reduce 620',
     '',
     'state 1314:',
+    '',
+    '	procedure : _PROCEDURE procedure_name parameter_declaration_list semicolon SQL_procedure_statement _ semicolon',
+    '',
+    '	semicolon	shift 1379',
+    '	.	error',
+    '',
+    'state 1315:',
     '',
     '	close_statement : _CLOSE _ cursor_name',
     '',
@@ -25520,41 +25527,41 @@ const
     '	underscore	shift 69',
     '	.	error',
     '',
-    '	cursor_name	goto 1379',
+    '	cursor_name	goto 1380',
     '	actual_identifier	goto 61',
     '	identifier	goto 888',
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1315:',
+    'state 1316:',
     '',
     '	delete_statement__positioned : _DELETE _ _FROM table_name _WHERE _CURRENT _OF cursor_name',
     '	delete_statement__searched : _DELETE _ _FROM table_name where_clause_opt',
     '',
-    '	_FROM	shift 1380',
+    '	_FROM	shift 1381',
     '	.	error',
-    '',
-    'state 1316:',
-    '',
-    '	fetch_statement : _FETCH _ fetch_orientation_opt cursor_name _INTO fetch_target_list',
-    '	fetch_orientation_opt : _	(791)',
-    '',
-    '	_ABSOLUTE	shift 1383',
-    '	_FIRST	shift 1384',
-    '	_FROM	shift 1385',
-    '	_LAST	shift 1386',
-    '	_NEXT	shift 1387',
-    '	_PRIOR	shift 1388',
-    '	_RELATIVE	shift 1389',
-    '	identifier_body	reduce 791',
-    '	delimited_identifier	reduce 791',
-    '	underscore	reduce 791',
-    '	.	error',
-    '',
-    '	fetch_orientation	goto 1381',
-    '	fetch_orientation_opt	goto 1382',
     '',
     'state 1317:',
+    '',
+    '	fetch_statement : _FETCH _ fetch_orientation_opt cursor_name _INTO fetch_target_list',
+    '	fetch_orientation_opt : _	(792)',
+    '',
+    '	_ABSOLUTE	shift 1384',
+    '	_FIRST	shift 1385',
+    '	_FROM	shift 1386',
+    '	_LAST	shift 1387',
+    '	_NEXT	shift 1388',
+    '	_PRIOR	shift 1389',
+    '	_RELATIVE	shift 1390',
+    '	identifier_body	reduce 792',
+    '	delimited_identifier	reduce 792',
+    '	underscore	reduce 792',
+    '	.	error',
+    '',
+    '	fetch_orientation	goto 1382',
+    '	fetch_orientation_opt	goto 1383',
+    '',
+    'state 1318:',
     '',
     '	open_statement : _OPEN _ cursor_name',
     '',
@@ -25563,13 +25570,13 @@ const
     '	underscore	shift 69',
     '	.	error',
     '',
-    '	cursor_name	goto 1390',
+    '	cursor_name	goto 1391',
     '	actual_identifier	goto 61',
     '	identifier	goto 888',
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1318:',
+    'state 1319:',
     '',
     '	select_statement__single_row : _SELECT _ set_quantifier_opt select_list _INTO select_target_list table_expression',
     '	set_quantifier_opt : _	(355)',
@@ -25627,10 +25634,10 @@ const
     '	_COUNT	reduce 355',
     '	.	error',
     '',
-    '	set_quantifier_opt	goto 1391',
+    '	set_quantifier_opt	goto 1392',
     '	set_quantifier	goto 189',
     '',
-    'state 1319:',
+    'state 1320:',
     '',
     '	update_statement__positioned : _UPDATE _ table_name _SET set_clause_list _WHERE _CURRENT _OF cursor_name',
     '	update_statement__searched : _UPDATE _ table_name _SET set_clause_list where_clause_opt',
@@ -25641,7 +25648,7 @@ const
     '	_MODULE	shift 204',
     '	.	error',
     '',
-    '	table_name	goto 1392',
+    '	table_name	goto 1393',
     '	qualified_name	goto 201',
     '	qualified_local_table_name	goto 202',
     '	actual_identifier	goto 61',
@@ -25649,60 +25656,60 @@ const
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1320:',
-    '',
-    '	parameter_declaration_list : left_paren parameter_declarations right_paren _	(612)',
-    '',
-    '	.	reduce 612',
-    '',
     'state 1321:',
+    '',
+    '	parameter_declaration_list : left_paren parameter_declarations right_paren _	(613)',
+    '',
+    '	.	reduce 613',
+    '',
+    'state 1322:',
     '',
     '	parameter_declarations : parameter_declarations comma _ parameter_declaration',
     '',
     '	colon	shift 154',
-    '	_SQLCODE	shift 1214',
-    '	_SQLSTATE	shift 1215',
+    '	_SQLCODE	shift 1215',
+    '	_SQLSTATE	shift 1216',
     '	.	error',
     '',
-    '	status_parameter	goto 1210',
-    '	parameter_declaration	goto 1393',
-    '	parameter_name	goto 1213',
-    '',
-    'state 1322:',
-    '',
-    '	parameter_declaration : parameter_name data_type _	(615)',
-    '',
-    '	.	reduce 615',
+    '	status_parameter	goto 1211',
+    '	parameter_declaration	goto 1394',
+    '	parameter_name	goto 1214',
     '',
     'state 1323:',
+    '',
+    '	parameter_declaration : parameter_name data_type _	(616)',
+    '',
+    '	.	reduce 616',
+    '',
+    'state 1324:',
     '',
     '	check_constraint_definition : _CHECK left_paren search_condition right_paren _	(271)',
     '',
     '	.	reduce 271',
     '',
-    'state 1324:',
+    'state 1325:',
     '',
     '	column_constraint_definition : constraint_name_definition_opt _ column_constraint constraint_attributes_opt',
     '',
     '	_CHECK	shift 895',
-    '	_NOT	shift 1398',
+    '	_NOT	shift 1399',
     '	_PRIMARY	shift 914',
-    '	_REFERENCES	shift 1399',
+    '	_REFERENCES	shift 1400',
     '	_UNIQUE	shift 915',
     '	.	error',
     '',
-    '	check_constraint_definition	goto 1394',
-    '	references_specification	goto 1395',
-    '	unique_specification	goto 1396',
-    '	column_constraint	goto 1397',
+    '	check_constraint_definition	goto 1395',
+    '	references_specification	goto 1396',
+    '	unique_specification	goto 1397',
+    '	column_constraint	goto 1398',
     '',
-    'state 1325:',
+    'state 1326:',
     '',
     '	column_constraint_definition_opt : column_constraint_definition _	(102)',
     '',
     '	.	reduce 102',
     '',
-    'state 1326:',
+    'state 1327:',
     '',
     '	column_definition : column_name column_definition_sel default_clause_opt column_constraint_definition_opt _ collate_clause_opt',
     '	collate_clause_opt : _	(103)',
@@ -25736,22 +25743,22 @@ const
     '	.	error',
     '',
     '	collate_clause	goto 677',
-    '	collate_clause_opt	goto 1400',
-    '',
-    'state 1327:',
-    '',
-    '	unique_constraint_definition : unique_specification left_paren unique_column_list right_paren _	(579)',
-    '',
-    '	.	reduce 579',
+    '	collate_clause_opt	goto 1401',
     '',
     'state 1328:',
     '',
-    '	referential_constraint_definition : _FOREIGN _KEY left_paren referencing_columns _ right_paren references_specification',
+    '	unique_constraint_definition : unique_specification left_paren unique_column_list right_paren _	(580)',
     '',
-    '	right_paren	shift 1401',
-    '	.	error',
+    '	.	reduce 580',
     '',
     'state 1329:',
+    '',
+    '	referential_constraint_definition : _FOREIGN _KEY left_paren referencing_columns _ right_paren references_specification',
+    '',
+    '	right_paren	shift 1402',
+    '	.	error',
+    '',
+    'state 1330:',
     '',
     '	reference_column_list : column_name_list _	(254)',
     '	column_name_list : column_name_list _ comma column_name',
@@ -25760,56 +25767,56 @@ const
     '	right_paren	reduce 254',
     '	.	error',
     '',
-    'state 1330:',
-    '',
-    '	referencing_columns : reference_column_list _	(582)',
-    '',
-    '	.	reduce 582',
-    '',
     'state 1331:',
     '',
-    '	table_commit_opts : _ON _COMMIT _DELETE _ROWS _	(662)',
+    '	referencing_columns : reference_column_list _	(583)',
     '',
-    '	.	reduce 662',
+    '	.	reduce 583',
     '',
     'state 1332:',
     '',
-    '	table_commit_opts : _ON _COMMIT _PRESERVE _ROWS _	(663)',
+    '	table_commit_opts : _ON _COMMIT _DELETE _ROWS _	(663)',
     '',
     '	.	reduce 663',
     '',
     'state 1333:',
     '',
+    '	table_commit_opts : _ON _COMMIT _PRESERVE _ROWS _	(664)',
+    '',
+    '	.	reduce 664',
+    '',
+    'state 1334:',
+    '',
     '	table_element_list_opt : table_element_list_opt comma table_element _	(93)',
     '',
     '	.	reduce 93',
     '',
-    'state 1334:',
-    '',
-    '	limited_collation_definition : _COLLATION _FROM collation_source _	(707)',
-    '',
-    '	.	reduce 707',
-    '',
     'state 1335:',
     '',
-    '	pad_attribute_opt : _NO _PAD _	(722)',
+    '	limited_collation_definition : _COLLATION _FROM collation_source _	(708)',
     '',
-    '	.	reduce 722',
+    '	.	reduce 708',
     '',
     'state 1336:',
     '',
-    '	pad_attribute_opt : _PAD _SPACE _	(723)',
+    '	pad_attribute_opt : _NO _PAD _	(723)',
     '',
     '	.	reduce 723',
     '',
     'state 1337:',
     '',
-    '	collating_sequence_definition : _DESC left_paren collation_name _ right_paren',
+    '	pad_attribute_opt : _PAD _SPACE _	(724)',
     '',
-    '	right_paren	shift 1402',
-    '	.	error',
+    '	.	reduce 724',
     '',
     'state 1338:',
+    '',
+    '	collating_sequence_definition : _DESC left_paren collation_name _ right_paren',
+    '',
+    '	right_paren	shift 1403',
+    '	.	error',
+    '',
+    'state 1339:',
     '',
     '	external_collation : _EXTERNAL left_paren quote _ external_collation_name quote right_paren',
     '',
@@ -25818,35 +25825,35 @@ const
     '	underscore	shift 69',
     '	.	error',
     '',
-    '	external_collation_name	goto 1403',
-    '	collation_name	goto 1404',
+    '	external_collation_name	goto 1404',
+    '	collation_name	goto 1405',
     '	qualified_name	goto 319',
     '	actual_identifier	goto 61',
     '	identifier	goto 203',
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1339:',
-    '',
-    '	translation_collation : _TRANSLATION translation_name translation_collation_opt _	(717)',
-    '',
-    '	.	reduce 717',
-    '',
     'state 1340:',
     '',
-    '	translation_collation_opt : _THEN _ _COLLATION collation_name',
+    '	translation_collation : _TRANSLATION translation_name translation_collation_opt _	(718)',
     '',
-    '	_COLLATION	shift 1405',
-    '	.	error',
+    '	.	reduce 718',
     '',
     'state 1341:',
     '',
-    '	numeric_precision_scale_opt : left_paren precision comma scale _ right_paren',
+    '	translation_collation_opt : _THEN _ _COLLATION collation_name',
     '',
-    '	right_paren	shift 1406',
+    '	_COLLATION	shift 1406',
     '	.	error',
     '',
     'state 1342:',
+    '',
+    '	numeric_precision_scale_opt : left_paren precision comma scale _ right_paren',
+    '',
+    '	right_paren	shift 1407',
+    '	.	error',
+    '',
+    'state 1343:',
     '',
     '	unsigned_integer : unsigned_integer _ digit',
     '	scale : unsigned_integer _	(155)',
@@ -25855,122 +25862,122 @@ const
     '	right_paren	reduce 155',
     '	.	error',
     '',
-    'state 1343:',
+    'state 1344:',
     '',
     '	tz_opt : _WITH _TIME _ZONE _	(168)',
     '',
     '	.	reduce 168',
     '',
-    'state 1344:',
-    '',
-    '	translation_specification : schema_translation_name _	(730)',
-    '',
-    '	.	reduce 730',
-    '',
     'state 1345:',
     '',
-    '	translation_specification : external_translation _	(728)',
+    '	translation_specification : schema_translation_name _	(731)',
     '',
-    '	.	reduce 728',
+    '	.	reduce 731',
     '',
     'state 1346:',
     '',
-    '	translation_source : translation_specification _	(727)',
-    '',
-    '	.	reduce 727',
-    '',
-    'state 1347:',
-    '',
-    '	translation_definition : _CREATE _TRANSLATION translation_name _FOR source_character_set_specification _TO target_character_set_specification _FROM translation_source _	(724)',
-    '',
-    '	.	reduce 724',
-    '',
-    'state 1348:',
-    '',
-    '	schema_translation_name : translation_name _	(733)',
-    '',
-    '	.	reduce 733',
-    '',
-    'state 1349:',
-    '',
-    '	external_translation : _EXTERNAL _ left_paren quote external_translation_name quote right_paren',
-    '',
-    '	left_paren	shift 1407',
-    '	.	error',
-    '',
-    'state 1350:',
-    '',
-    '	translation_specification : _IDENTITY _	(729)',
+    '	translation_specification : external_translation _	(729)',
     '',
     '	.	reduce 729',
     '',
+    'state 1347:',
+    '',
+    '	translation_source : translation_specification _	(728)',
+    '',
+    '	.	reduce 728',
+    '',
+    'state 1348:',
+    '',
+    '	translation_definition : _CREATE _TRANSLATION translation_name _FOR source_character_set_specification _TO target_character_set_specification _FROM translation_source _	(725)',
+    '',
+    '	.	reduce 725',
+    '',
+    'state 1349:',
+    '',
+    '	schema_translation_name : translation_name _	(734)',
+    '',
+    '	.	reduce 734',
+    '',
+    'state 1350:',
+    '',
+    '	external_translation : _EXTERNAL _ left_paren quote external_translation_name quote right_paren',
+    '',
+    '	left_paren	shift 1408',
+    '	.	error',
+    '',
     'state 1351:',
     '',
-    '	view_check_opt : _WITH _CASCADED _CHECK _ _OPTION',
+    '	translation_specification : _IDENTITY _	(730)',
     '',
-    '	_OPTION	shift 1408',
-    '	.	error',
+    '	.	reduce 730',
     '',
     'state 1352:',
     '',
-    '	view_check_opt : _WITH _CHECK _OPTION _	(668)',
-    '',
-    '	.	reduce 668',
-    '',
-    'state 1353:',
-    '',
-    '	view_check_opt : _WITH _LOCAL _CHECK _ _OPTION',
+    '	view_check_opt : _WITH _CASCADED _CHECK _ _OPTION',
     '',
     '	_OPTION	shift 1409',
     '	.	error',
     '',
+    'state 1353:',
+    '',
+    '	view_check_opt : _WITH _CHECK _OPTION _	(669)',
+    '',
+    '	.	reduce 669',
+    '',
     'state 1354:',
     '',
-    '	temporary_table_declaration_opt : _ON _COMMIT _DELETE _ _ROWS',
+    '	view_check_opt : _WITH _LOCAL _CHECK _ _OPTION',
     '',
-    '	_ROWS	shift 1410',
+    '	_OPTION	shift 1410',
     '	.	error',
     '',
     'state 1355:',
     '',
-    '	temporary_table_declaration_opt : _ON _COMMIT _PRESERVE _ _ROWS',
+    '	temporary_table_declaration_opt : _ON _COMMIT _DELETE _ _ROWS',
     '',
     '	_ROWS	shift 1411',
     '	.	error',
     '',
     'state 1356:',
     '',
+    '	temporary_table_declaration_opt : _ON _COMMIT _PRESERVE _ _ROWS',
+    '',
+    '	_ROWS	shift 1412',
+    '	.	error',
+    '',
+    'state 1357:',
+    '',
     '	interval_string_literal : unsigned_integer space unsigned_integer colon unsigned_integer colon _ seconds_value',
     '',
     '	digit	shift 150',
     '	.	error',
     '',
-    '	seconds_value	goto 1412',
-    '	unsigned_integer	goto 1254',
+    '	seconds_value	goto 1413',
+    '	unsigned_integer	goto 1255',
     '',
-    'state 1357:',
+    'state 1358:',
     '',
     '	time_string : quote time_value quote $$1 quote time_value time_zone_interval _ quote',
     '',
-    '	quote	shift 1413',
+    '	quote	shift 1414',
     '	.	error',
     '',
-    'state 1358:',
+    'state 1359:',
     '',
     '	time_zone_interval : sign unsigned_integer colon _ unsigned_integer',
     '',
     '	digit	shift 150',
     '	.	error',
     '',
-    '	unsigned_integer	goto 1414',
-    '',
-    'state 1359:',
-    '',
-    '	grant_option : _WITH _GRANT _OPTION _	(676)',
-    '',
-    '	.	reduce 676',
+    '	unsigned_integer	goto 1415',
     '',
     'state 1360:',
+    '',
+    '	grant_option : _WITH _GRANT _OPTION _	(677)',
+    '',
+    '	.	reduce 677',
+    '',
+    'state 1361:',
     '',
     '	grouping_column_reference_list : grouping_column_reference_list comma _ grouping_column_reference',
     '',
@@ -25979,45 +25986,45 @@ const
     '	underscore	shift 69',
     '	.	error',
     '',
-    '	grouping_column_reference	goto 1415',
-    '	column_reference	goto 1265',
+    '	grouping_column_reference	goto 1416',
+    '	column_reference	goto 1266',
     '	qualified_name	goto 251',
     '	actual_identifier	goto 61',
     '	identifier	goto 203',
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1361:',
+    'state 1362:',
     '',
     '	grouping_column_reference : column_reference collate_clause_opt _	(433)',
     '',
     '	.	reduce 433',
     '',
-    'state 1362:',
+    'state 1363:',
     '',
     '	derived_column_list_opt : left_paren derived_column_list right_paren _	(403)',
     '',
     '	.	reduce 403',
     '',
-    'state 1363:',
+    'state 1364:',
     '',
     '	qualified_join : table_reference _FULL outer_opt _JOIN table_factor _ join_specification',
     '',
-    '	_ON	shift 1274',
-    '	_USING	shift 1275',
+    '	_ON	shift 1275',
+    '	_USING	shift 1276',
     '	.	error',
     '',
-    '	named_columns_join	goto 1271',
-    '	join_condition	goto 1272',
-    '	join_specification	goto 1416',
+    '	named_columns_join	goto 1272',
+    '	join_condition	goto 1273',
+    '	join_specification	goto 1417',
     '',
-    'state 1364:',
+    'state 1365:',
     '',
     '	qualified_join : table_reference _INNER _JOIN table_factor join_specification _	(412)',
     '',
     '	.	reduce 412',
     '',
-    'state 1365:',
+    'state 1366:',
     '',
     '	join_condition : _ON search_condition _	(426)',
     '	search_condition : search_condition _ _OR boolean_term',
@@ -26067,7 +26074,7 @@ const
     '	_WITH	reduce 426',
     '	.	error',
     '',
-    'state 1366:',
+    'state 1367:',
     '',
     '	named_columns_join : _USING left_paren _ join_column_list right_paren',
     '',
@@ -26076,57 +26083,29 @@ const
     '	underscore	shift 69',
     '	.	error',
     '',
-    '	join_column_list	goto 1417',
-    '	column_name_list	goto 1418',
+    '	join_column_list	goto 1418',
+    '	column_name_list	goto 1419',
     '	column_name	goto 550',
     '	actual_identifier	goto 61',
     '	identifier	goto 465',
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1367:',
+    'state 1368:',
     '',
     '	qualified_join : table_reference _LEFT outer_opt _JOIN table_factor _ join_specification',
     '',
-    '	_ON	shift 1274',
-    '	_USING	shift 1275',
+    '	_ON	shift 1275',
+    '	_USING	shift 1276',
     '	.	error',
     '',
-    '	named_columns_join	goto 1271',
-    '	join_condition	goto 1272',
-    '	join_specification	goto 1419',
-    '',
-    'state 1368:',
-    '',
-    '	qualified_join : table_reference _NATURAL _FULL outer_opt _JOIN _ table_factor',
-    '',
-    '	identifier_body	shift 66',
-    '	delimited_identifier	shift 67',
-    '	left_paren	shift 68',
-    '	underscore	shift 69',
-    '	_MODULE	shift 204',
-    '	.	error',
-    '',
-    '	derived_table	goto 795',
-    '	table_factor	goto 1420',
-    '	table_subquery	goto 800',
-    '	table_name	goto 801',
-    '	qualified_name	goto 201',
-    '	qualified_local_table_name	goto 202',
-    '	actual_identifier	goto 61',
-    '	identifier	goto 203',
-    '	introducer	goto 63',
-    '	regular_identifier	goto 64',
+    '	named_columns_join	goto 1272',
+    '	join_condition	goto 1273',
+    '	join_specification	goto 1420',
     '',
     'state 1369:',
     '',
-    '	qualified_join : table_reference _NATURAL _INNER _JOIN table_factor _	(417)',
-    '',
-    '	.	reduce 417',
-    '',
-    'state 1370:',
-    '',
-    '	qualified_join : table_reference _NATURAL _LEFT outer_opt _JOIN _ table_factor',
+    '	qualified_join : table_reference _NATURAL _FULL outer_opt _JOIN _ table_factor',
     '',
     '	identifier_body	shift 66',
     '	delimited_identifier	shift 67',
@@ -26146,9 +26125,15 @@ const
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
+    'state 1370:',
+    '',
+    '	qualified_join : table_reference _NATURAL _INNER _JOIN table_factor _	(417)',
+    '',
+    '	.	reduce 417',
+    '',
     'state 1371:',
     '',
-    '	qualified_join : table_reference _NATURAL _RIGHT outer_opt _JOIN _ table_factor',
+    '	qualified_join : table_reference _NATURAL _LEFT outer_opt _JOIN _ table_factor',
     '',
     '	identifier_body	shift 66',
     '	delimited_identifier	shift 67',
@@ -26170,29 +26155,51 @@ const
     '',
     'state 1372:',
     '',
+    '	qualified_join : table_reference _NATURAL _RIGHT outer_opt _JOIN _ table_factor',
+    '',
+    '	identifier_body	shift 66',
+    '	delimited_identifier	shift 67',
+    '	left_paren	shift 68',
+    '	underscore	shift 69',
+    '	_MODULE	shift 204',
+    '	.	error',
+    '',
+    '	derived_table	goto 795',
+    '	table_factor	goto 1423',
+    '	table_subquery	goto 800',
+    '	table_name	goto 801',
+    '	qualified_name	goto 201',
+    '	qualified_local_table_name	goto 202',
+    '	actual_identifier	goto 61',
+    '	identifier	goto 203',
+    '	introducer	goto 63',
+    '	regular_identifier	goto 64',
+    '',
+    'state 1373:',
+    '',
     '	qualified_join : table_reference _NATURAL _UNION _JOIN table_factor _	(421)',
     '',
     '	.	reduce 421',
     '',
-    'state 1373:',
+    'state 1374:',
     '',
     '	qualified_join : table_reference _RIGHT outer_opt _JOIN table_factor _ join_specification',
     '',
-    '	_ON	shift 1274',
-    '	_USING	shift 1275',
+    '	_ON	shift 1275',
+    '	_USING	shift 1276',
     '	.	error',
     '',
-    '	named_columns_join	goto 1271',
-    '	join_condition	goto 1272',
-    '	join_specification	goto 1423',
+    '	named_columns_join	goto 1272',
+    '	join_condition	goto 1273',
+    '	join_specification	goto 1424',
     '',
-    'state 1374:',
+    'state 1375:',
     '',
     '	qualified_name_trail_asterisk : identifier period identifier period identifier period asterisk _	(198)',
     '',
     '	.	reduce 198',
     '',
-    'state 1375:',
+    'state 1376:',
     '',
     '	in_value_list : in_value_list comma expression _	(535)',
     '	expression : expression _ plus_sign multiplicative_expression',
@@ -26206,13 +26213,13 @@ const
     '	comma	reduce 535',
     '	.	error',
     '',
-    'state 1376:',
+    'state 1377:',
     '',
     '	between_predicate : row_value_constructor _NOT _BETWEEN row_value_constructor _AND row_value_constructor _	(529)',
     '',
     '	.	reduce 529',
     '',
-    'state 1377:',
+    'state 1378:',
     '',
     '	declare_cursor : _DECLARE cursor_name insensitive_opt scroll_opt _CURSOR _FOR _ cursor_specification',
     '',
@@ -26222,7 +26229,7 @@ const
     '	_VALUES	shift 87',
     '	.	error',
     '',
-    '	cursor_specification	goto 1424',
+    '	cursor_specification	goto 1425',
     '	explicit_table	goto 49',
     '	table_value_constructor	goto 50',
     '	query_specification	goto 51',
@@ -26231,21 +26238,21 @@ const
     '	non_join_query_primary	goto 54',
     '	query_term	goto 55',
     '	non_join_query_term	goto 56',
-    '	query_expression	goto 1425',
-    '',
-    'state 1378:',
-    '',
-    '	procedure : _PROCEDURE procedure_name parameter_declaration_list semicolon SQL_procedure_statement semicolon _	(610)',
-    '',
-    '	.	reduce 610',
+    '	query_expression	goto 1426',
     '',
     'state 1379:',
     '',
-    '	close_statement : _CLOSE cursor_name _	(805)',
+    '	procedure : _PROCEDURE procedure_name parameter_declaration_list semicolon SQL_procedure_statement semicolon _	(611)',
     '',
-    '	.	reduce 805',
+    '	.	reduce 611',
     '',
     'state 1380:',
+    '',
+    '	close_statement : _CLOSE cursor_name _	(806)',
+    '',
+    '	.	reduce 806',
+    '',
+    'state 1381:',
     '',
     '	delete_statement__positioned : _DELETE _FROM _ table_name _WHERE _CURRENT _OF cursor_name',
     '	delete_statement__searched : _DELETE _FROM _ table_name where_clause_opt',
@@ -26256,7 +26263,7 @@ const
     '	_MODULE	shift 204',
     '	.	error',
     '',
-    '	table_name	goto 1426',
+    '	table_name	goto 1427',
     '	qualified_name	goto 201',
     '	qualified_local_table_name	goto 202',
     '	actual_identifier	goto 61',
@@ -26264,14 +26271,14 @@ const
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1381:',
+    'state 1382:',
     '',
     '	fetch_orientation_opt : fetch_orientation _ _FROM',
     '',
-    '	_FROM	shift 1427',
+    '	_FROM	shift 1428',
     '	.	error',
     '',
-    'state 1382:',
+    'state 1383:',
     '',
     '	fetch_statement : _FETCH fetch_orientation_opt _ cursor_name _INTO fetch_target_list',
     '',
@@ -26280,91 +26287,15 @@ const
     '	underscore	shift 69',
     '	.	error',
     '',
-    '	cursor_name	goto 1428',
+    '	cursor_name	goto 1429',
     '	actual_identifier	goto 61',
     '	identifier	goto 888',
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1383:',
-    '',
-    '	fetch_orientation : _ABSOLUTE _ simple_value_specification',
-    '',
-    '	national_character_string_literal_start	shift 146',
-    '	bit_string_literal_start	shift 147',
-    '	string_literal_continuation	shift 148',
-    '	hex_string_literal_start	shift 149',
-    '	digit	shift 150',
-    '	plus_sign	shift 151',
-    '	minus_sign	shift 152',
-    '	period	shift 153',
-    '	colon	shift 154',
-    '	underscore	shift 69',
-    '	_DATE	shift 157',
-    '	_INTERVAL	shift 159',
-    '	_TIME	shift 160',
-    '	_TIMESTAMP	shift 161',
-    '	.	error',
-    '',
-    '	simple_value_specification	goto 1429',
-    '	parameter_name	goto 122',
-    '	timestamp_literal	goto 123',
-    '	time_literal	goto 124',
-    '	date_literal	goto 125',
-    '	interval_literal	goto 126',
-    '	datetime_literal	goto 127',
-    '	general_literal	goto 128',
-    '	signed_numeric_literal	goto 129',
-    '	literal	goto 130',
-    '	character_string_literal_main	goto 131',
-    '	introducer	goto 132',
-    '	character_string_literal	goto 133',
-    '	hex_string_literal	goto 134',
-    '	_hex_string_literal_start	goto 135',
-    '	bit_string_literal	goto 136',
-    '	_bit_string_literal_start	goto 137',
-    '	national_character_string_literal	goto 138',
-    '	_national_character_string_literal_start	goto 139',
-    '	sign	goto 140',
-    '	mantissa	goto 141',
-    '	unsigned_integer	goto 142',
-    '	approximate_numeric_literal	goto 143',
-    '	exact_numeric_literal	goto 144',
-    '	unsigned_numeric_literal	goto 145',
-    '',
     'state 1384:',
     '',
-    '	fetch_orientation : _FIRST _	(796)',
-    '',
-    '	.	reduce 796',
-    '',
-    'state 1385:',
-    '',
-    '	fetch_orientation_opt : _FROM _	(792)',
-    '',
-    '	.	reduce 792',
-    '',
-    'state 1386:',
-    '',
-    '	fetch_orientation : _LAST _	(797)',
-    '',
-    '	.	reduce 797',
-    '',
-    'state 1387:',
-    '',
-    '	fetch_orientation : _NEXT _	(794)',
-    '',
-    '	.	reduce 794',
-    '',
-    'state 1388:',
-    '',
-    '	fetch_orientation : _PRIOR _	(795)',
-    '',
-    '	.	reduce 795',
-    '',
-    'state 1389:',
-    '',
-    '	fetch_orientation : _RELATIVE _ simple_value_specification',
+    '	fetch_orientation : _ABSOLUTE _ simple_value_specification',
     '',
     '	national_character_string_literal_start	shift 146',
     '	bit_string_literal_start	shift 147',
@@ -26408,13 +26339,89 @@ const
     '	exact_numeric_literal	goto 144',
     '	unsigned_numeric_literal	goto 145',
     '',
+    'state 1385:',
+    '',
+    '	fetch_orientation : _FIRST _	(797)',
+    '',
+    '	.	reduce 797',
+    '',
+    'state 1386:',
+    '',
+    '	fetch_orientation_opt : _FROM _	(793)',
+    '',
+    '	.	reduce 793',
+    '',
+    'state 1387:',
+    '',
+    '	fetch_orientation : _LAST _	(798)',
+    '',
+    '	.	reduce 798',
+    '',
+    'state 1388:',
+    '',
+    '	fetch_orientation : _NEXT _	(795)',
+    '',
+    '	.	reduce 795',
+    '',
+    'state 1389:',
+    '',
+    '	fetch_orientation : _PRIOR _	(796)',
+    '',
+    '	.	reduce 796',
+    '',
     'state 1390:',
     '',
-    '	open_statement : _OPEN cursor_name _	(789)',
+    '	fetch_orientation : _RELATIVE _ simple_value_specification',
     '',
-    '	.	reduce 789',
+    '	national_character_string_literal_start	shift 146',
+    '	bit_string_literal_start	shift 147',
+    '	string_literal_continuation	shift 148',
+    '	hex_string_literal_start	shift 149',
+    '	digit	shift 150',
+    '	plus_sign	shift 151',
+    '	minus_sign	shift 152',
+    '	period	shift 153',
+    '	colon	shift 154',
+    '	underscore	shift 69',
+    '	_DATE	shift 157',
+    '	_INTERVAL	shift 159',
+    '	_TIME	shift 160',
+    '	_TIMESTAMP	shift 161',
+    '	.	error',
+    '',
+    '	simple_value_specification	goto 1431',
+    '	parameter_name	goto 122',
+    '	timestamp_literal	goto 123',
+    '	time_literal	goto 124',
+    '	date_literal	goto 125',
+    '	interval_literal	goto 126',
+    '	datetime_literal	goto 127',
+    '	general_literal	goto 128',
+    '	signed_numeric_literal	goto 129',
+    '	literal	goto 130',
+    '	character_string_literal_main	goto 131',
+    '	introducer	goto 132',
+    '	character_string_literal	goto 133',
+    '	hex_string_literal	goto 134',
+    '	_hex_string_literal_start	goto 135',
+    '	bit_string_literal	goto 136',
+    '	_bit_string_literal_start	goto 137',
+    '	national_character_string_literal	goto 138',
+    '	_national_character_string_literal_start	goto 139',
+    '	sign	goto 140',
+    '	mantissa	goto 141',
+    '	unsigned_integer	goto 142',
+    '	approximate_numeric_literal	goto 143',
+    '	exact_numeric_literal	goto 144',
+    '	unsigned_numeric_literal	goto 145',
     '',
     'state 1391:',
+    '',
+    '	open_statement : _OPEN cursor_name _	(790)',
+    '',
+    '	.	reduce 790',
+    '',
+    'state 1392:',
     '',
     '	select_statement__single_row : _SELECT set_quantifier_opt _ select_list _INTO select_target_list table_expression',
     '',
@@ -26488,7 +26495,7 @@ const
     '	derived_column	goto 373',
     '	select_sublist	goto 374',
     '	select_list_opt	goto 375',
-    '	select_list	goto 1431',
+    '	select_list	goto 1432',
     '	set_function_type	goto 223',
     '	general_set_function	goto 224',
     '	parameter_name	goto 225',
@@ -26541,39 +26548,39 @@ const
     '	unsigned_numeric_literal	goto 253',
     '	regular_identifier	goto 64',
     '',
-    'state 1392:',
+    'state 1393:',
     '',
     '	update_statement__positioned : _UPDATE table_name _ _SET set_clause_list _WHERE _CURRENT _OF cursor_name',
     '	update_statement__searched : _UPDATE table_name _ _SET set_clause_list where_clause_opt',
     '',
-    '	_SET	shift 1432',
+    '	_SET	shift 1433',
     '	.	error',
     '',
-    'state 1393:',
-    '',
-    '	parameter_declarations : parameter_declarations comma parameter_declaration _	(614)',
-    '',
-    '	.	reduce 614',
-    '',
     'state 1394:',
+    '',
+    '	parameter_declarations : parameter_declarations comma parameter_declaration _	(615)',
+    '',
+    '	.	reduce 615',
+    '',
+    'state 1395:',
     '',
     '	column_constraint : check_constraint_definition _	(241)',
     '',
     '	.	reduce 241',
     '',
-    'state 1395:',
+    'state 1396:',
     '',
     '	column_constraint : references_specification _	(240)',
     '',
     '	.	reduce 240',
     '',
-    'state 1396:',
+    'state 1397:',
     '',
     '	column_constraint : unique_specification _	(239)',
     '',
     '	.	reduce 239',
     '',
-    'state 1397:',
+    'state 1398:',
     '',
     '	column_constraint_definition : constraint_name_definition_opt column_constraint _ constraint_attributes_opt',
     '	constraint_attributes_opt : _	(564)',
@@ -26610,16 +26617,16 @@ const
     '',
     '	constraint_check_time	goto 709',
     '	constraint_attributes	goto 710',
-    '	constraint_attributes_opt	goto 1433',
+    '	constraint_attributes_opt	goto 1434',
     '',
-    'state 1398:',
+    'state 1399:',
     '',
     '	column_constraint : _NOT _ _NULL',
     '',
-    '	_NULL	shift 1434',
+    '	_NULL	shift 1435',
     '	.	error',
     '',
-    'state 1399:',
+    'state 1400:',
     '',
     '	references_specification : _REFERENCES _ referenced_table_and_columns match_type_opt referential_triggered_action_opt',
     '',
@@ -26629,8 +26636,8 @@ const
     '	_MODULE	shift 204',
     '	.	error',
     '',
-    '	table_name	goto 1435',
-    '	referenced_table_and_columns	goto 1436',
+    '	table_name	goto 1436',
+    '	referenced_table_and_columns	goto 1437',
     '	qualified_name	goto 201',
     '	qualified_local_table_name	goto 202',
     '	actual_identifier	goto 61',
@@ -26638,41 +26645,41 @@ const
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1400:',
+    'state 1401:',
     '',
     '	column_definition : column_name column_definition_sel default_clause_opt column_constraint_definition_opt collate_clause_opt _	(96)',
     '',
     '	.	reduce 96',
     '',
-    'state 1401:',
+    'state 1402:',
     '',
     '	referential_constraint_definition : _FOREIGN _KEY left_paren referencing_columns right_paren _ references_specification',
     '',
-    '	_REFERENCES	shift 1399',
+    '	_REFERENCES	shift 1400',
     '	.	error',
     '',
-    '	references_specification	goto 1437',
-    '',
-    'state 1402:',
-    '',
-    '	collating_sequence_definition : _DESC left_paren collation_name right_paren _	(712)',
-    '',
-    '	.	reduce 712',
+    '	references_specification	goto 1438',
     '',
     'state 1403:',
     '',
-    '	external_collation : _EXTERNAL left_paren quote external_collation_name _ quote right_paren',
+    '	collating_sequence_definition : _DESC left_paren collation_name right_paren _	(713)',
     '',
-    '	quote	shift 1438',
-    '	.	error',
+    '	.	reduce 713',
     '',
     'state 1404:',
     '',
-    '	external_collation_name : collation_name _	(715)',
+    '	external_collation : _EXTERNAL left_paren quote external_collation_name _ quote right_paren',
     '',
-    '	.	reduce 715',
+    '	quote	shift 1439',
+    '	.	error',
     '',
     'state 1405:',
+    '',
+    '	external_collation_name : collation_name _	(716)',
+    '',
+    '	.	reduce 716',
+    '',
+    'state 1406:',
     '',
     '	translation_collation_opt : _THEN _COLLATION _ collation_name',
     '',
@@ -26681,63 +26688,63 @@ const
     '	underscore	shift 69',
     '	.	error',
     '',
-    '	collation_name	goto 1439',
+    '	collation_name	goto 1440',
     '	qualified_name	goto 319',
     '	actual_identifier	goto 61',
     '	identifier	goto 203',
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1406:',
+    'state 1407:',
     '',
     '	numeric_precision_scale_opt : left_paren precision comma scale right_paren _	(152)',
     '',
     '	.	reduce 152',
     '',
-    'state 1407:',
+    'state 1408:',
     '',
     '	external_translation : _EXTERNAL left_paren _ quote external_translation_name quote right_paren',
     '',
-    '	quote	shift 1440',
+    '	quote	shift 1441',
     '	.	error',
-    '',
-    'state 1408:',
-    '',
-    '	view_check_opt : _WITH _CASCADED _CHECK _OPTION _	(669)',
-    '',
-    '	.	reduce 669',
     '',
     'state 1409:',
     '',
-    '	view_check_opt : _WITH _LOCAL _CHECK _OPTION _	(670)',
+    '	view_check_opt : _WITH _CASCADED _CHECK _OPTION _	(670)',
     '',
     '	.	reduce 670',
     '',
     'state 1410:',
     '',
+    '	view_check_opt : _WITH _LOCAL _CHECK _OPTION _	(671)',
+    '',
+    '	.	reduce 671',
+    '',
+    'state 1411:',
+    '',
     '	temporary_table_declaration_opt : _ON _COMMIT _DELETE _ROWS _	(88)',
     '',
     '	.	reduce 88',
     '',
-    'state 1411:',
+    'state 1412:',
     '',
     '	temporary_table_declaration_opt : _ON _COMMIT _PRESERVE _ROWS _	(87)',
     '',
     '	.	reduce 87',
     '',
-    'state 1412:',
+    'state 1413:',
     '',
     '	interval_string_literal : unsigned_integer space unsigned_integer colon unsigned_integer colon seconds_value _	(61)',
     '',
     '	.	reduce 61',
     '',
-    'state 1413:',
+    'state 1414:',
     '',
     '	time_string : quote time_value quote $$1 quote time_value time_zone_interval quote _	(49)',
     '',
     '	.	reduce 49',
     '',
-    'state 1414:',
+    'state 1415:',
     '',
     '	time_zone_interval : sign unsigned_integer colon unsigned_integer _	(53)',
     '	unsigned_integer : unsigned_integer _ digit',
@@ -26746,26 +26753,26 @@ const
     '	quote	reduce 53',
     '	.	error',
     '',
-    'state 1415:',
+    'state 1416:',
     '',
     '	grouping_column_reference_list : grouping_column_reference_list comma grouping_column_reference _	(432)',
     '',
     '	.	reduce 432',
     '',
-    'state 1416:',
+    'state 1417:',
     '',
     '	qualified_join : table_reference _FULL outer_opt _JOIN table_factor join_specification _	(415)',
     '',
     '	.	reduce 415',
     '',
-    'state 1417:',
+    'state 1418:',
     '',
     '	named_columns_join : _USING left_paren join_column_list _ right_paren',
     '',
-    '	right_paren	shift 1441',
+    '	right_paren	shift 1442',
     '	.	error',
     '',
-    'state 1418:',
+    'state 1419:',
     '',
     '	column_name_list : column_name_list _ comma column_name',
     '	join_column_list : column_name_list _	(428)',
@@ -26774,106 +26781,106 @@ const
     '	right_paren	reduce 428',
     '	.	error',
     '',
-    'state 1419:',
+    'state 1420:',
     '',
     '	qualified_join : table_reference _LEFT outer_opt _JOIN table_factor join_specification _	(413)',
     '',
     '	.	reduce 413',
     '',
-    'state 1420:',
+    'state 1421:',
     '',
     '	qualified_join : table_reference _NATURAL _FULL outer_opt _JOIN table_factor _	(420)',
     '',
     '	.	reduce 420',
     '',
-    'state 1421:',
+    'state 1422:',
     '',
     '	qualified_join : table_reference _NATURAL _LEFT outer_opt _JOIN table_factor _	(418)',
     '',
     '	.	reduce 418',
     '',
-    'state 1422:',
+    'state 1423:',
     '',
     '	qualified_join : table_reference _NATURAL _RIGHT outer_opt _JOIN table_factor _	(419)',
     '',
     '	.	reduce 419',
     '',
-    'state 1423:',
+    'state 1424:',
     '',
     '	qualified_join : table_reference _RIGHT outer_opt _JOIN table_factor join_specification _	(414)',
     '',
     '	.	reduce 414',
     '',
-    'state 1424:',
-    '',
-    '	declare_cursor : _DECLARE cursor_name insensitive_opt scroll_opt _CURSOR _FOR cursor_specification _	(588)',
-    '',
-    '	.	reduce 588',
-    '',
     'state 1425:',
+    '',
+    '	declare_cursor : _DECLARE cursor_name insensitive_opt scroll_opt _CURSOR _FOR cursor_specification _	(589)',
+    '',
+    '	.	reduce 589',
+    '',
+    'state 1426:',
     '',
     '	query_expression : query_expression _ _UNION all_opt corresponding_spec_opt query_term',
     '	query_expression : query_expression _ _EXCEPT all_opt corresponding_spec_opt query_term',
     '	cursor_specification : query_expression _ order_by_clause_opt updatability_clause_opt',
-    '	order_by_clause_opt : _	(595)',
+    '	order_by_clause_opt : _	(596)',
     '',
     '	_EXCEPT	shift 91',
     '	_ORDER	shift 92',
     '	_UNION	shift 93',
-    '	$end	reduce 595',
-    '	_DECLARE	reduce 595',
-    '	_FOR	reduce 595',
-    '	_PROCEDURE	reduce 595',
+    '	$end	reduce 596',
+    '	_DECLARE	reduce 596',
+    '	_FOR	reduce 596',
+    '	_PROCEDURE	reduce 596',
     '	.	error',
     '',
-    '	order_by_clause_opt	goto 1442',
+    '	order_by_clause_opt	goto 1443',
     '',
-    'state 1426:',
+    'state 1427:',
     '',
     '	delete_statement__positioned : _DELETE _FROM table_name _ _WHERE _CURRENT _OF cursor_name',
     '	delete_statement__searched : _DELETE _FROM table_name _ where_clause_opt',
     '	where_clause_opt : _	(383)',
     '',
-    '	_WHERE	shift 1443',
+    '	_WHERE	shift 1444',
     '	semicolon	reduce 383',
     '	.	error',
     '',
     '	where_clause	goto 512',
     '	where_clause_opt	goto 513',
     '',
-    'state 1427:',
-    '',
-    '	fetch_orientation_opt : fetch_orientation _FROM _	(793)',
-    '',
-    '	.	reduce 793',
-    '',
     'state 1428:',
     '',
-    '	fetch_statement : _FETCH fetch_orientation_opt cursor_name _ _INTO fetch_target_list',
+    '	fetch_orientation_opt : fetch_orientation _FROM _	(794)',
     '',
-    '	_INTO	shift 1444',
-    '	.	error',
+    '	.	reduce 794',
     '',
     'state 1429:',
     '',
-    '	fetch_orientation : _ABSOLUTE simple_value_specification _	(798)',
+    '	fetch_statement : _FETCH fetch_orientation_opt cursor_name _ _INTO fetch_target_list',
     '',
-    '	.	reduce 798',
+    '	_INTO	shift 1445',
+    '	.	error',
     '',
     'state 1430:',
     '',
-    '	fetch_orientation : _RELATIVE simple_value_specification _	(799)',
+    '	fetch_orientation : _ABSOLUTE simple_value_specification _	(799)',
     '',
     '	.	reduce 799',
     '',
     'state 1431:',
     '',
-    '	select_statement__single_row : _SELECT set_quantifier_opt select_list _ _INTO select_target_list table_expression',
+    '	fetch_orientation : _RELATIVE simple_value_specification _	(800)',
     '',
-    '	_INTO	shift 1445',
-    '	.	error',
+    '	.	reduce 800',
     '',
     'state 1432:',
+    '',
+    '	select_statement__single_row : _SELECT set_quantifier_opt select_list _ _INTO select_target_list table_expression',
+    '',
+    '	_INTO	shift 1446',
+    '	.	error',
+    '',
+    'state 1433:',
     '',
     '	update_statement__positioned : _UPDATE table_name _SET _ set_clause_list _WHERE _CURRENT _OF cursor_name',
     '	update_statement__searched : _UPDATE table_name _SET _ set_clause_list where_clause_opt',
@@ -26885,35 +26892,35 @@ const
     '',
     '	object_column	goto 582',
     '	set_clause	goto 583',
-    '	set_clause_list	goto 1446',
+    '	set_clause_list	goto 1447',
     '	column_name	goto 585',
     '	actual_identifier	goto 61',
     '	identifier	goto 465',
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1433:',
+    'state 1434:',
     '',
     '	column_constraint_definition : constraint_name_definition_opt column_constraint constraint_attributes_opt _	(233)',
     '',
     '	.	reduce 233',
     '',
-    'state 1434:',
+    'state 1435:',
     '',
     '	column_constraint : _NOT _NULL _	(238)',
     '',
     '	.	reduce 238',
     '',
-    'state 1435:',
+    'state 1436:',
     '',
     '	*** conflicts:',
     '',
-    '	shift 1448, reduce 250 on left_paren',
+    '	shift 1449, reduce 250 on left_paren',
     '',
     '	referenced_table_and_columns : table_name _ reference_column_list_opt',
     '	reference_column_list_opt : _	(250)',
     '',
-    '	left_paren	shift 1448',
+    '	left_paren	shift 1449',
     '	$end	reduce 250',
     '	identifier_body	reduce 250',
     '	delimited_identifier	reduce 250',
@@ -26945,14 +26952,14 @@ const
     '	_VALUES	reduce 250',
     '	.	error',
     '',
-    '	reference_column_list_opt	goto 1447',
+    '	reference_column_list_opt	goto 1448',
     '',
-    'state 1436:',
+    'state 1437:',
     '',
     '	references_specification : _REFERENCES referenced_table_and_columns _ match_type_opt referential_triggered_action_opt',
     '	match_type_opt : _	(245)',
     '',
-    '	_MATCH	shift 1450',
+    '	_MATCH	shift 1451',
     '	$end	reduce 245',
     '	identifier_body	reduce 245',
     '	delimited_identifier	reduce 245',
@@ -26984,28 +26991,28 @@ const
     '	_VALUES	reduce 245',
     '	.	error',
     '',
-    '	match_type_opt	goto 1449',
-    '',
-    'state 1437:',
-    '',
-    '	referential_constraint_definition : _FOREIGN _KEY left_paren referencing_columns right_paren references_specification _	(581)',
-    '',
-    '	.	reduce 581',
+    '	match_type_opt	goto 1450',
     '',
     'state 1438:',
     '',
-    '	external_collation : _EXTERNAL left_paren quote external_collation_name quote _ right_paren',
+    '	referential_constraint_definition : _FOREIGN _KEY left_paren referencing_columns right_paren references_specification _	(582)',
     '',
-    '	right_paren	shift 1451',
-    '	.	error',
+    '	.	reduce 582',
     '',
     'state 1439:',
     '',
-    '	translation_collation_opt : _THEN _COLLATION collation_name _	(719)',
+    '	external_collation : _EXTERNAL left_paren quote external_collation_name quote _ right_paren',
     '',
-    '	.	reduce 719',
+    '	right_paren	shift 1452',
+    '	.	error',
     '',
     'state 1440:',
+    '',
+    '	translation_collation_opt : _THEN _COLLATION collation_name _	(720)',
+    '',
+    '	.	reduce 720',
+    '',
+    'state 1441:',
     '',
     '	external_translation : _EXTERNAL left_paren quote _ external_translation_name quote right_paren',
     '',
@@ -27014,34 +27021,34 @@ const
     '	underscore	shift 69',
     '	.	error',
     '',
-    '	external_translation_name	goto 1452',
-    '	translation_name	goto 1453',
+    '	external_translation_name	goto 1453',
+    '	translation_name	goto 1454',
     '	qualified_name	goto 328',
     '	actual_identifier	goto 61',
     '	identifier	goto 203',
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1441:',
+    'state 1442:',
     '',
     '	named_columns_join : _USING left_paren join_column_list right_paren _	(427)',
     '',
     '	.	reduce 427',
     '',
-    'state 1442:',
+    'state 1443:',
     '',
     '	cursor_specification : query_expression order_by_clause_opt _ updatability_clause_opt',
-    '	updatability_clause_opt : _	(605)',
+    '	updatability_clause_opt : _	(606)',
     '',
-    '	_FOR	shift 1455',
-    '	$end	reduce 605',
-    '	_DECLARE	reduce 605',
-    '	_PROCEDURE	reduce 605',
+    '	_FOR	shift 1456',
+    '	$end	reduce 606',
+    '	_DECLARE	reduce 606',
+    '	_PROCEDURE	reduce 606',
     '	.	error',
     '',
-    '	updatability_clause_opt	goto 1454',
+    '	updatability_clause_opt	goto 1455',
     '',
-    'state 1443:',
+    'state 1444:',
     '',
     '	delete_statement__positioned : _DELETE _FROM table_name _WHERE _ _CURRENT _OF cursor_name',
     '	where_clause : _WHERE _ search_condition',
@@ -27067,7 +27074,7 @@ const
     '	_CHAR_LENGTH	shift 262',
     '	_COALESCE	shift 263',
     '	_CONVERT	shift 264',
-    '	_CURRENT	shift 1456',
+    '	_CURRENT	shift 1457',
     '	_CURRENT_DATE	shift 265',
     '	_CURRENT_TIME	shift 266',
     '	_CURRENT_TIMESTAMP	shift 267',
@@ -27185,31 +27192,31 @@ const
     '	unsigned_numeric_literal	goto 253',
     '	regular_identifier	goto 64',
     '',
-    'state 1444:',
+    'state 1445:',
     '',
     '	fetch_statement : _FETCH fetch_orientation_opt cursor_name _INTO _ fetch_target_list',
     '',
     '	colon	shift 154',
     '	.	error',
     '',
-    '	target_specification	goto 1457',
-    '	fetch_target_list	goto 1458',
+    '	target_specification	goto 1458',
+    '	fetch_target_list	goto 1459',
     '	parameter_name	goto 225',
-    '	parameter_specification	goto 1459',
+    '	parameter_specification	goto 1460',
     '',
-    'state 1445:',
+    'state 1446:',
     '',
     '	select_statement__single_row : _SELECT set_quantifier_opt select_list _INTO _ select_target_list table_expression',
     '',
     '	colon	shift 154',
     '	.	error',
     '',
-    '	select_target_list	goto 1460',
-    '	target_specification	goto 1461',
+    '	select_target_list	goto 1461',
+    '	target_specification	goto 1462',
     '	parameter_name	goto 225',
-    '	parameter_specification	goto 1459',
+    '	parameter_specification	goto 1460',
     '',
-    'state 1446:',
+    'state 1447:',
     '',
     '	update_statement__positioned : _UPDATE table_name _SET set_clause_list _ _WHERE _CURRENT _OF cursor_name',
     '	update_statement__searched : _UPDATE table_name _SET set_clause_list _ where_clause_opt',
@@ -27217,20 +27224,20 @@ const
     '	where_clause_opt : _	(383)',
     '',
     '	comma	shift 818',
-    '	_WHERE	shift 1462',
+    '	_WHERE	shift 1463',
     '	semicolon	reduce 383',
     '	.	error',
     '',
     '	where_clause	goto 512',
     '	where_clause_opt	goto 817',
     '',
-    'state 1447:',
+    'state 1448:',
     '',
     '	referenced_table_and_columns : table_name reference_column_list_opt _	(249)',
     '',
     '	.	reduce 249',
     '',
-    'state 1448:',
+    'state 1449:',
     '',
     '	reference_column_list_opt : left_paren _ reference_column_list right_paren',
     '',
@@ -27239,20 +27246,20 @@ const
     '	underscore	shift 69',
     '	.	error',
     '',
-    '	column_name_list	goto 1329',
-    '	reference_column_list	goto 1463',
+    '	column_name_list	goto 1330',
+    '	reference_column_list	goto 1464',
     '	column_name	goto 550',
     '	actual_identifier	goto 61',
     '	identifier	goto 465',
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1449:',
+    'state 1450:',
     '',
     '	references_specification : _REFERENCES referenced_table_and_columns match_type_opt _ referential_triggered_action_opt',
     '	referential_triggered_action_opt : _	(247)',
     '',
-    '	_ON	shift 1468',
+    '	_ON	shift 1469',
     '	$end	reduce 247',
     '	identifier_body	reduce 247',
     '	delimited_identifier	reduce 247',
@@ -27283,102 +27290,102 @@ const
     '	_VALUES	reduce 247',
     '	.	error',
     '',
-    '	delete_rule	goto 1464',
-    '	update_rule	goto 1465',
-    '	referential_triggered_action	goto 1466',
-    '	referential_triggered_action_opt	goto 1467',
-    '',
-    'state 1450:',
-    '',
-    '	match_type_opt : _MATCH _ match_type',
-    '',
-    '	_FULL	shift 1470',
-    '	_PARTIAL	shift 1471',
-    '	.	error',
-    '',
-    '	match_type	goto 1469',
+    '	delete_rule	goto 1465',
+    '	update_rule	goto 1466',
+    '	referential_triggered_action	goto 1467',
+    '	referential_triggered_action_opt	goto 1468',
     '',
     'state 1451:',
     '',
-    '	external_collation : _EXTERNAL left_paren quote external_collation_name quote right_paren _	(714)',
+    '	match_type_opt : _MATCH _ match_type',
     '',
-    '	.	reduce 714',
+    '	_FULL	shift 1471',
+    '	_PARTIAL	shift 1472',
+    '	.	error',
+    '',
+    '	match_type	goto 1470',
     '',
     'state 1452:',
     '',
-    '	external_translation : _EXTERNAL left_paren quote external_translation_name _ quote right_paren',
+    '	external_collation : _EXTERNAL left_paren quote external_collation_name quote right_paren _	(715)',
     '',
-    '	quote	shift 1472',
-    '	.	error',
+    '	.	reduce 715',
     '',
     'state 1453:',
     '',
-    '	external_translation_name : translation_name _	(732)',
+    '	external_translation : _EXTERNAL left_paren quote external_translation_name _ quote right_paren',
     '',
-    '	.	reduce 732',
+    '	quote	shift 1473',
+    '	.	error',
     '',
     'state 1454:',
     '',
-    '	cursor_specification : query_expression order_by_clause_opt updatability_clause_opt _	(594)',
+    '	external_translation_name : translation_name _	(733)',
     '',
-    '	.	reduce 594',
+    '	.	reduce 733',
     '',
     'state 1455:',
+    '',
+    '	cursor_specification : query_expression order_by_clause_opt updatability_clause_opt _	(595)',
+    '',
+    '	.	reduce 595',
+    '',
+    'state 1456:',
     '',
     '	updatability_clause_opt : _FOR _ _READ _ONLY',
     '	updatability_clause_opt : _FOR _ _UPDATE updatability_column_opt',
     '',
-    '	_READ	shift 1473',
-    '	_UPDATE	shift 1474',
-    '	.	error',
-    '',
-    'state 1456:',
-    '',
-    '	delete_statement__positioned : _DELETE _FROM table_name _WHERE _CURRENT _ _OF cursor_name',
-    '',
-    '	_OF	shift 1475',
+    '	_READ	shift 1474',
+    '	_UPDATE	shift 1475',
     '	.	error',
     '',
     'state 1457:',
     '',
-    '	fetch_target_list : target_specification _	(802)',
+    '	delete_statement__positioned : _DELETE _FROM table_name _WHERE _CURRENT _ _OF cursor_name',
     '',
-    '	.	reduce 802',
+    '	_OF	shift 1476',
+    '	.	error',
     '',
     'state 1458:',
     '',
-    '	fetch_statement : _FETCH fetch_orientation_opt cursor_name _INTO fetch_target_list _	(790)',
-    '	fetch_target_list : fetch_target_list _ comma target_specification',
+    '	fetch_target_list : target_specification _	(803)',
     '',
-    '	comma	shift 1476',
-    '	semicolon	reduce 790',
-    '	.	error',
+    '	.	reduce 803',
     '',
     'state 1459:',
     '',
-    '	target_specification : parameter_specification _	(804)',
+    '	fetch_statement : _FETCH fetch_orientation_opt cursor_name _INTO fetch_target_list _	(791)',
+    '	fetch_target_list : fetch_target_list _ comma target_specification',
     '',
-    '	.	reduce 804',
+    '	comma	shift 1477',
+    '	semicolon	reduce 791',
+    '	.	error',
     '',
     'state 1460:',
+    '',
+    '	target_specification : parameter_specification _	(805)',
+    '',
+    '	.	reduce 805',
+    '',
+    'state 1461:',
     '',
     '	select_statement__single_row : _SELECT set_quantifier_opt select_list _INTO select_target_list _ table_expression',
     '	select_target_list : select_target_list _ comma target_specification',
     '',
-    '	comma	shift 1478',
+    '	comma	shift 1479',
     '	_FROM	shift 561',
     '	.	error',
     '',
     '	from_clause	goto 559',
-    '	table_expression	goto 1477',
-    '',
-    'state 1461:',
-    '',
-    '	select_target_list : target_specification _	(807)',
-    '',
-    '	.	reduce 807',
+    '	table_expression	goto 1478',
     '',
     'state 1462:',
+    '',
+    '	select_target_list : target_specification _	(808)',
+    '',
+    '	.	reduce 808',
+    '',
+    'state 1463:',
     '',
     '	update_statement__positioned : _UPDATE table_name _SET set_clause_list _WHERE _ _CURRENT _OF cursor_name',
     '	where_clause : _WHERE _ search_condition',
@@ -27404,7 +27411,7 @@ const
     '	_CHAR_LENGTH	shift 262',
     '	_COALESCE	shift 263',
     '	_CONVERT	shift 264',
-    '	_CURRENT	shift 1479',
+    '	_CURRENT	shift 1480',
     '	_CURRENT_DATE	shift 265',
     '	_CURRENT_TIME	shift 266',
     '	_CURRENT_TIMESTAMP	shift 267',
@@ -27522,19 +27529,19 @@ const
     '	unsigned_numeric_literal	goto 253',
     '	regular_identifier	goto 64',
     '',
-    'state 1463:',
+    'state 1464:',
     '',
     '	reference_column_list_opt : left_paren reference_column_list _ right_paren',
     '',
-    '	right_paren	shift 1480',
+    '	right_paren	shift 1481',
     '	.	error',
     '',
-    'state 1464:',
+    'state 1465:',
     '',
     '	referential_triggered_action : delete_rule _ update_rule_opt',
     '	update_rule_opt : _	(261)',
     '',
-    '	_ON	shift 1483',
+    '	_ON	shift 1484',
     '	$end	reduce 261',
     '	identifier_body	reduce 261',
     '	delimited_identifier	reduce 261',
@@ -27565,15 +27572,15 @@ const
     '	_VALUES	reduce 261',
     '	.	error',
     '',
-    '	update_rule_opt	goto 1481',
-    '	update_rule	goto 1482',
+    '	update_rule_opt	goto 1482',
+    '	update_rule	goto 1483',
     '',
-    'state 1465:',
+    'state 1466:',
     '',
     '	referential_triggered_action : update_rule _ delete_rule_opt',
     '	delete_rule_opt : _	(263)',
     '',
-    '	_ON	shift 1486',
+    '	_ON	shift 1487',
     '	$end	reduce 263',
     '	identifier_body	reduce 263',
     '	delimited_identifier	reduce 263',
@@ -27604,76 +27611,76 @@ const
     '	_VALUES	reduce 263',
     '	.	error',
     '',
-    '	delete_rule	goto 1484',
-    '	delete_rule_opt	goto 1485',
+    '	delete_rule	goto 1485',
+    '	delete_rule_opt	goto 1486',
     '',
-    'state 1466:',
+    'state 1467:',
     '',
     '	referential_triggered_action_opt : referential_triggered_action _	(248)',
     '',
     '	.	reduce 248',
     '',
-    'state 1467:',
+    'state 1468:',
     '',
     '	references_specification : _REFERENCES referenced_table_and_columns match_type_opt referential_triggered_action_opt _	(244)',
     '',
     '	.	reduce 244',
     '',
-    'state 1468:',
+    'state 1469:',
     '',
     '	update_rule : _ON _ _UPDATE referential_action',
     '	delete_rule : _ON _ _DELETE referential_action',
     '',
-    '	_DELETE	shift 1487',
-    '	_UPDATE	shift 1488',
+    '	_DELETE	shift 1488',
+    '	_UPDATE	shift 1489',
     '	.	error',
     '',
-    'state 1469:',
+    'state 1470:',
     '',
     '	match_type_opt : _MATCH match_type _	(246)',
     '',
     '	.	reduce 246',
     '',
-    'state 1470:',
+    'state 1471:',
     '',
     '	match_type : _FULL _	(257)',
     '',
     '	.	reduce 257',
     '',
-    'state 1471:',
+    'state 1472:',
     '',
     '	match_type : _PARTIAL _	(258)',
     '',
     '	.	reduce 258',
     '',
-    'state 1472:',
+    'state 1473:',
     '',
     '	external_translation : _EXTERNAL left_paren quote external_translation_name quote _ right_paren',
     '',
-    '	right_paren	shift 1489',
-    '	.	error',
-    '',
-    'state 1473:',
-    '',
-    '	updatability_clause_opt : _FOR _READ _ _ONLY',
-    '',
-    '	_ONLY	shift 1490',
+    '	right_paren	shift 1490',
     '	.	error',
     '',
     'state 1474:',
     '',
-    '	updatability_clause_opt : _FOR _UPDATE _ updatability_column_opt',
-    '	updatability_column_opt : _	(608)',
+    '	updatability_clause_opt : _FOR _READ _ _ONLY',
     '',
-    '	_OF	shift 1492',
-    '	$end	reduce 608',
-    '	_DECLARE	reduce 608',
-    '	_PROCEDURE	reduce 608',
+    '	_ONLY	shift 1491',
     '	.	error',
     '',
-    '	updatability_column_opt	goto 1491',
-    '',
     'state 1475:',
+    '',
+    '	updatability_clause_opt : _FOR _UPDATE _ updatability_column_opt',
+    '	updatability_column_opt : _	(609)',
+    '',
+    '	_OF	shift 1493',
+    '	$end	reduce 609',
+    '	_DECLARE	reduce 609',
+    '	_PROCEDURE	reduce 609',
+    '	.	error',
+    '',
+    '	updatability_column_opt	goto 1492',
+    '',
+    'state 1476:',
     '',
     '	delete_statement__positioned : _DELETE _FROM table_name _WHERE _CURRENT _OF _ cursor_name',
     '',
@@ -27682,132 +27689,132 @@ const
     '	underscore	shift 69',
     '	.	error',
     '',
-    '	cursor_name	goto 1493',
+    '	cursor_name	goto 1494',
     '	actual_identifier	goto 61',
     '	identifier	goto 888',
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1476:',
+    'state 1477:',
     '',
     '	fetch_target_list : fetch_target_list comma _ target_specification',
     '',
     '	colon	shift 154',
     '	.	error',
     '',
-    '	target_specification	goto 1494',
+    '	target_specification	goto 1495',
     '	parameter_name	goto 225',
-    '	parameter_specification	goto 1459',
-    '',
-    'state 1477:',
-    '',
-    '	select_statement__single_row : _SELECT set_quantifier_opt select_list _INTO select_target_list table_expression _	(806)',
-    '',
-    '	.	reduce 806',
+    '	parameter_specification	goto 1460',
     '',
     'state 1478:',
+    '',
+    '	select_statement__single_row : _SELECT set_quantifier_opt select_list _INTO select_target_list table_expression _	(807)',
+    '',
+    '	.	reduce 807',
+    '',
+    'state 1479:',
     '',
     '	select_target_list : select_target_list comma _ target_specification',
     '',
     '	colon	shift 154',
     '	.	error',
     '',
-    '	target_specification	goto 1495',
+    '	target_specification	goto 1496',
     '	parameter_name	goto 225',
-    '	parameter_specification	goto 1459',
+    '	parameter_specification	goto 1460',
     '',
-    'state 1479:',
+    'state 1480:',
     '',
     '	update_statement__positioned : _UPDATE table_name _SET set_clause_list _WHERE _CURRENT _ _OF cursor_name',
     '',
-    '	_OF	shift 1496',
+    '	_OF	shift 1497',
     '	.	error',
     '',
-    'state 1480:',
+    'state 1481:',
     '',
     '	reference_column_list_opt : left_paren reference_column_list right_paren _	(251)',
     '',
     '	.	reduce 251',
     '',
-    'state 1481:',
+    'state 1482:',
     '',
     '	referential_triggered_action : delete_rule update_rule_opt _	(260)',
     '',
     '	.	reduce 260',
     '',
-    'state 1482:',
+    'state 1483:',
     '',
     '	update_rule_opt : update_rule _	(262)',
     '',
     '	.	reduce 262',
     '',
-    'state 1483:',
+    'state 1484:',
     '',
     '	update_rule : _ON _ _UPDATE referential_action',
     '',
-    '	_UPDATE	shift 1488',
+    '	_UPDATE	shift 1489',
     '	.	error',
     '',
-    'state 1484:',
+    'state 1485:',
     '',
     '	delete_rule_opt : delete_rule _	(264)',
     '',
     '	.	reduce 264',
     '',
-    'state 1485:',
+    'state 1486:',
     '',
     '	referential_triggered_action : update_rule delete_rule_opt _	(259)',
     '',
     '	.	reduce 259',
     '',
-    'state 1486:',
+    'state 1487:',
     '',
     '	delete_rule : _ON _ _DELETE referential_action',
     '',
-    '	_DELETE	shift 1487',
+    '	_DELETE	shift 1488',
     '	.	error',
-    '',
-    'state 1487:',
-    '',
-    '	delete_rule : _ON _DELETE _ referential_action',
-    '',
-    '	_CASCADE	shift 1498',
-    '	_NO	shift 1499',
-    '	_SET	shift 1500',
-    '	.	error',
-    '',
-    '	referential_action	goto 1497',
     '',
     'state 1488:',
     '',
-    '	update_rule : _ON _UPDATE _ referential_action',
+    '	delete_rule : _ON _DELETE _ referential_action',
     '',
-    '	_CASCADE	shift 1498',
-    '	_NO	shift 1499',
-    '	_SET	shift 1500',
+    '	_CASCADE	shift 1499',
+    '	_NO	shift 1500',
+    '	_SET	shift 1501',
     '	.	error',
     '',
-    '	referential_action	goto 1501',
+    '	referential_action	goto 1498',
     '',
     'state 1489:',
     '',
-    '	external_translation : _EXTERNAL left_paren quote external_translation_name quote right_paren _	(731)',
+    '	update_rule : _ON _UPDATE _ referential_action',
     '',
-    '	.	reduce 731',
+    '	_CASCADE	shift 1499',
+    '	_NO	shift 1500',
+    '	_SET	shift 1501',
+    '	.	error',
+    '',
+    '	referential_action	goto 1502',
     '',
     'state 1490:',
     '',
-    '	updatability_clause_opt : _FOR _READ _ONLY _	(606)',
+    '	external_translation : _EXTERNAL left_paren quote external_translation_name quote right_paren _	(732)',
     '',
-    '	.	reduce 606',
+    '	.	reduce 732',
     '',
     'state 1491:',
     '',
-    '	updatability_clause_opt : _FOR _UPDATE updatability_column_opt _	(607)',
+    '	updatability_clause_opt : _FOR _READ _ONLY _	(607)',
     '',
     '	.	reduce 607',
     '',
     'state 1492:',
+    '',
+    '	updatability_clause_opt : _FOR _UPDATE updatability_column_opt _	(608)',
+    '',
+    '	.	reduce 608',
+    '',
+    'state 1493:',
     '',
     '	updatability_column_opt : _OF _ column_name_list',
     '',
@@ -27816,32 +27823,32 @@ const
     '	underscore	shift 69',
     '	.	error',
     '',
-    '	column_name_list	goto 1502',
+    '	column_name_list	goto 1503',
     '	column_name	goto 550',
     '	actual_identifier	goto 61',
     '	identifier	goto 465',
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1493:',
-    '',
-    '	delete_statement__positioned : _DELETE _FROM table_name _WHERE _CURRENT _OF cursor_name _	(814)',
-    '',
-    '	.	reduce 814',
-    '',
     'state 1494:',
     '',
-    '	fetch_target_list : fetch_target_list comma target_specification _	(803)',
+    '	delete_statement__positioned : _DELETE _FROM table_name _WHERE _CURRENT _OF cursor_name _	(815)',
     '',
-    '	.	reduce 803',
+    '	.	reduce 815',
     '',
     'state 1495:',
     '',
-    '	select_target_list : select_target_list comma target_specification _	(808)',
+    '	fetch_target_list : fetch_target_list comma target_specification _	(804)',
     '',
-    '	.	reduce 808',
+    '	.	reduce 804',
     '',
     'state 1496:',
+    '',
+    '	select_target_list : select_target_list comma target_specification _	(809)',
+    '',
+    '	.	reduce 809',
+    '',
+    'state 1497:',
     '',
     '	update_statement__positioned : _UPDATE table_name _SET set_clause_list _WHERE _CURRENT _OF _ cursor_name',
     '',
@@ -27850,76 +27857,76 @@ const
     '	underscore	shift 69',
     '	.	error',
     '',
-    '	cursor_name	goto 1503',
+    '	cursor_name	goto 1504',
     '	actual_identifier	goto 61',
     '	identifier	goto 888',
     '	introducer	goto 63',
     '	regular_identifier	goto 64',
     '',
-    'state 1497:',
+    'state 1498:',
     '',
     '	delete_rule : _ON _DELETE referential_action _	(270)',
     '',
     '	.	reduce 270',
     '',
-    'state 1498:',
+    'state 1499:',
     '',
     '	referential_action : _CASCADE _	(266)',
     '',
     '	.	reduce 266',
     '',
-    'state 1499:',
+    'state 1500:',
     '',
     '	referential_action : _NO _ _ACTION',
     '',
-    '	_ACTION	shift 1504',
+    '	_ACTION	shift 1505',
     '	.	error',
     '',
-    'state 1500:',
+    'state 1501:',
     '',
     '	referential_action : _SET _ _NULL',
     '	referential_action : _SET _ _DEFAULT',
     '',
-    '	_DEFAULT	shift 1505',
-    '	_NULL	shift 1506',
+    '	_DEFAULT	shift 1506',
+    '	_NULL	shift 1507',
     '	.	error',
     '',
-    'state 1501:',
+    'state 1502:',
     '',
     '	update_rule : _ON _UPDATE referential_action _	(265)',
     '',
     '	.	reduce 265',
     '',
-    'state 1502:',
+    'state 1503:',
     '',
-    '	updatability_column_opt : _OF column_name_list _	(609)',
+    '	updatability_column_opt : _OF column_name_list _	(610)',
     '	column_name_list : column_name_list _ comma column_name',
     '',
     '	comma	shift 786',
-    '	$end	reduce 609',
-    '	_DECLARE	reduce 609',
-    '	_PROCEDURE	reduce 609',
+    '	$end	reduce 610',
+    '	_DECLARE	reduce 610',
+    '	_PROCEDURE	reduce 610',
     '	.	error',
     '',
-    'state 1503:',
-    '',
-    '	update_statement__positioned : _UPDATE table_name _SET set_clause_list _WHERE _CURRENT _OF cursor_name _	(821)',
-    '',
-    '	.	reduce 821',
-    '',
     'state 1504:',
+    '',
+    '	update_statement__positioned : _UPDATE table_name _SET set_clause_list _WHERE _CURRENT _OF cursor_name _	(822)',
+    '',
+    '	.	reduce 822',
+    '',
+    'state 1505:',
     '',
     '	referential_action : _NO _ACTION _	(269)',
     '',
     '	.	reduce 269',
     '',
-    'state 1505:',
+    'state 1506:',
     '',
     '	referential_action : _SET _DEFAULT _	(268)',
     '',
     '	.	reduce 268',
     '',
-    'state 1506:',
+    'state 1507:',
     '',
     '	referential_action : _SET _NULL _	(267)',
     '',
@@ -31573,802 +31580,802 @@ begin
     end;
     910: begin
       First := 19140;
-      Last := 19175;
+      Last := 19176;
     end;
     911: begin
-      First := 19176;
-      Last := 19181;
+      First := 19177;
+      Last := 19182;
     end;
     912: begin
-      First := 19182;
-      Last := 19188;
+      First := 19183;
+      Last := 19189;
     end;
     913: begin
-      First := 19189;
-      Last := 19195;
+      First := 19190;
+      Last := 19196;
     end;
     914: begin
-      First := 19196;
-      Last := 19202;
+      First := 19197;
+      Last := 19203;
     end;
     915: begin
-      First := 19203;
-      Last := 19208;
+      First := 19204;
+      Last := 19209;
     end;
     916: begin
-      First := 19209;
-      Last := 19220;
+      First := 19210;
+      Last := 19221;
     end;
     917: begin
-      First := 19221;
-      Last := 19230;
+      First := 19222;
+      Last := 19231;
     end;
     918: begin
-      First := 19231;
-      Last := 19240;
+      First := 19232;
+      Last := 19241;
     end;
     919: begin
-      First := 19241;
-      Last := 19246;
+      First := 19242;
+      Last := 19247;
     end;
     920: begin
-      First := 19247;
-      Last := 19252;
+      First := 19248;
+      Last := 19253;
     end;
     921: begin
-      First := 19253;
-      Last := 19258;
+      First := 19254;
+      Last := 19259;
     end;
     922: begin
-      First := 19259;
-      Last := 19266;
+      First := 19260;
+      Last := 19267;
     end;
     923: begin
-      First := 19267;
-      Last := 19272;
+      First := 19268;
+      Last := 19273;
     end;
     924: begin
-      First := 19273;
-      Last := 19278;
+      First := 19274;
+      Last := 19279;
     end;
     925: begin
-      First := 19279;
-      Last := 19287;
+      First := 19280;
+      Last := 19288;
     end;
     926: begin
-      First := 19288;
-      Last := 19293;
+      First := 19289;
+      Last := 19294;
     end;
     927: begin
-      First := 19294;
-      Last := 19299;
+      First := 19295;
+      Last := 19300;
     end;
     928: begin
-      First := 19300;
-      Last := 19306;
+      First := 19301;
+      Last := 19307;
     end;
     929: begin
-      First := 19307;
-      Last := 19312;
+      First := 19308;
+      Last := 19313;
     end;
     930: begin
-      First := 19313;
-      Last := 19318;
+      First := 19314;
+      Last := 19319;
     end;
     931: begin
-      First := 19319;
-      Last := 19324;
+      First := 19320;
+      Last := 19325;
     end;
     932: begin
-      First := 19325;
-      Last := 19330;
+      First := 19326;
+      Last := 19331;
     end;
     933: begin
-      First := 19331;
-      Last := 19339;
+      First := 19332;
+      Last := 19340;
     end;
     934: begin
-      First := 19340;
-      Last := 19375;
+      First := 19341;
+      Last := 19376;
     end;
     935: begin
-      First := 19376;
-      Last := 19392;
+      First := 19377;
+      Last := 19393;
     end;
     936: begin
-      First := 19393;
-      Last := 19417;
+      First := 19394;
+      Last := 19418;
     end;
     937: begin
-      First := 19418;
-      Last := 19423;
+      First := 19419;
+      Last := 19424;
     end;
     938: begin
-      First := 19424;
-      Last := 19430;
+      First := 19425;
+      Last := 19431;
     end;
     939: begin
-      First := 19431;
-      Last := 19436;
+      First := 19432;
+      Last := 19437;
     end;
     940: begin
-      First := 19437;
-      Last := 19475;
+      First := 19438;
+      Last := 19476;
     end;
     941: begin
-      First := 19476;
-      Last := 19481;
+      First := 19477;
+      Last := 19482;
     end;
     942: begin
-      First := 19482;
-      Last := 19491;
+      First := 19483;
+      Last := 19492;
     end;
     943: begin
-      First := 19492;
-      Last := 19537;
+      First := 19493;
+      Last := 19538;
     end;
     944: begin
-      First := 19538;
-      Last := 19543;
+      First := 19539;
+      Last := 19544;
     end;
     945: begin
-      First := 19544;
-      Last := 19590;
+      First := 19545;
+      Last := 19591;
     end;
     946: begin
-      First := 19591;
-      Last := 19596;
+      First := 19592;
+      Last := 19597;
     end;
     947: begin
-      First := 19597;
-      Last := 19643;
+      First := 19598;
+      Last := 19644;
     end;
     948: begin
-      First := 19644;
-      Last := 19649;
+      First := 19645;
+      Last := 19650;
     end;
     949: begin
-      First := 19650;
-      Last := 19660;
+      First := 19651;
+      Last := 19661;
     end;
     950: begin
-      First := 19661;
-      Last := 19666;
+      First := 19662;
+      Last := 19667;
     end;
     951: begin
-      First := 19667;
-      Last := 19672;
+      First := 19668;
+      Last := 19673;
     end;
     952: begin
-      First := 19673;
-      Last := 19682;
+      First := 19674;
+      Last := 19683;
     end;
     953: begin
-      First := 19683;
-      Last := 19688;
+      First := 19684;
+      Last := 19689;
     end;
     954: begin
-      First := 19689;
-      Last := 19737;
+      First := 19690;
+      Last := 19738;
     end;
     955: begin
-      First := 19738;
-      Last := 19786;
+      First := 19739;
+      Last := 19787;
     end;
     956: begin
-      First := 19787;
-      Last := 19792;
+      First := 19788;
+      Last := 19793;
     end;
     957: begin
-      First := 19793;
-      Last := 19838;
+      First := 19794;
+      Last := 19839;
     end;
     958: begin
-      First := 19839;
-      Last := 19844;
+      First := 19840;
+      Last := 19845;
     end;
     959: begin
-      First := 19845;
-      Last := 19887;
+      First := 19846;
+      Last := 19888;
     end;
     960: begin
-      First := 19888;
-      Last := 19898;
+      First := 19889;
+      Last := 19899;
     end;
     961: begin
-      First := 19899;
-      Last := 19941;
+      First := 19900;
+      Last := 19942;
     end;
     962: begin
-      First := 19942;
-      Last := 19952;
+      First := 19943;
+      Last := 19953;
     end;
     963: begin
-      First := 19953;
-      Last := 19958;
+      First := 19954;
+      Last := 19959;
     end;
     964: begin
-      First := 19959;
-      Last := 19964;
+      First := 19960;
+      Last := 19965;
     end;
     965: begin
-      First := 19965;
-      Last := 19981;
+      First := 19966;
+      Last := 19982;
     end;
     966: begin
-      First := 19982;
-      Last := 19999;
+      First := 19983;
+      Last := 20000;
     end;
     967: begin
-      First := 20000;
-      Last := 20036;
+      First := 20001;
+      Last := 20037;
     end;
     968: begin
-      First := 20037;
-      Last := 20042;
+      First := 20038;
+      Last := 20043;
     end;
     969: begin
-      First := 20043;
-      Last := 20075;
+      First := 20044;
+      Last := 20076;
     end;
     970: begin
-      First := 20076;
-      Last := 20084;
+      First := 20077;
+      Last := 20085;
     end;
     971: begin
-      First := 20085;
-      Last := 20096;
+      First := 20086;
+      Last := 20097;
     end;
     972: begin
-      First := 20097;
-      Last := 20105;
+      First := 20098;
+      Last := 20106;
     end;
     973: begin
-      First := 20106;
-      Last := 20114;
+      First := 20107;
+      Last := 20115;
     end;
     974: begin
-      First := 20115;
-      Last := 20120;
+      First := 20116;
+      Last := 20121;
     end;
     975: begin
-      First := 20121;
-      Last := 20133;
+      First := 20122;
+      Last := 20134;
     end;
     976: begin
-      First := 20134;
-      Last := 20140;
+      First := 20135;
+      Last := 20141;
     end;
     977: begin
-      First := 20141;
-      Last := 20149;
+      First := 20142;
+      Last := 20150;
     end;
     978: begin
-      First := 20150;
-      Last := 20162;
+      First := 20151;
+      Last := 20163;
     end;
     979: begin
-      First := 20163;
-      Last := 20168;
+      First := 20164;
+      Last := 20169;
     end;
     980: begin
-      First := 20169;
-      Last := 20203;
+      First := 20170;
+      Last := 20204;
     end;
     981: begin
-      First := 20204;
-      Last := 20209;
+      First := 20205;
+      Last := 20210;
     end;
     982: begin
-      First := 20210;
-      Last := 20215;
+      First := 20211;
+      Last := 20216;
     end;
     983: begin
-      First := 20216;
-      Last := 20221;
+      First := 20217;
+      Last := 20222;
     end;
     984: begin
-      First := 20222;
-      Last := 20227;
+      First := 20223;
+      Last := 20228;
     end;
     985: begin
-      First := 20228;
-      Last := 20247;
+      First := 20229;
+      Last := 20248;
     end;
     986: begin
-      First := 20248;
-      Last := 20265;
+      First := 20249;
+      Last := 20266;
     end;
     987: begin
-      First := 20266;
-      Last := 20271;
+      First := 20267;
+      Last := 20272;
     end;
     988: begin
-      First := 20272;
-      Last := 20313;
+      First := 20273;
+      Last := 20314;
     end;
     989: begin
-      First := 20314;
-      Last := 20320;
+      First := 20315;
+      Last := 20321;
     end;
     990: begin
-      First := 20321;
-      Last := 20326;
+      First := 20322;
+      Last := 20327;
     end;
     991: begin
-      First := 20327;
-      Last := 20383;
+      First := 20328;
+      Last := 20384;
     end;
     992: begin
-      First := 20384;
-      Last := 20389;
+      First := 20385;
+      Last := 20390;
     end;
     993: begin
-      First := 20390;
-      Last := 20405;
+      First := 20391;
+      Last := 20406;
     end;
     994: begin
-      First := 20406;
-      Last := 20412;
+      First := 20407;
+      Last := 20413;
     end;
     995: begin
-      First := 20413;
-      Last := 20423;
+      First := 20414;
+      Last := 20424;
     end;
     996: begin
-      First := 20424;
-      Last := 20430;
+      First := 20425;
+      Last := 20431;
     end;
     997: begin
-      First := 20431;
-      Last := 20452;
+      First := 20432;
+      Last := 20453;
     end;
     998: begin
-      First := 20453;
-      Last := 20463;
+      First := 20454;
+      Last := 20464;
     end;
     999: begin
-      First := 20464;
-      Last := 20480;
+      First := 20465;
+      Last := 20481;
     end;
     1000: begin
-      First := 20481;
-      Last := 20491;
+      First := 20482;
+      Last := 20492;
     end;
     1001: begin
-      First := 20492;
-      Last := 20517;
+      First := 20493;
+      Last := 20518;
     end;
     1002: begin
-      First := 20518;
-      Last := 20523;
+      First := 20519;
+      Last := 20524;
     end;
     1003: begin
-      First := 20524;
-      Last := 20539;
+      First := 20525;
+      Last := 20540;
     end;
     1004: begin
-      First := 20540;
-      Last := 20554;
+      First := 20541;
+      Last := 20555;
     end;
     1005: begin
-      First := 20555;
-      Last := 20578;
+      First := 20556;
+      Last := 20579;
     end;
     1006: begin
-      First := 20579;
-      Last := 20593;
+      First := 20580;
+      Last := 20594;
     end;
     1007: begin
-      First := 20594;
-      Last := 20610;
+      First := 20595;
+      Last := 20611;
     end;
     1008: begin
-      First := 20611;
-      Last := 20616;
+      First := 20612;
+      Last := 20617;
     end;
     1009: begin
-      First := 20617;
-      Last := 20622;
+      First := 20618;
+      Last := 20623;
     end;
     1010: begin
-      First := 20623;
-      Last := 20628;
+      First := 20624;
+      Last := 20629;
     end;
     1011: begin
-      First := 20629;
-      Last := 20634;
+      First := 20630;
+      Last := 20635;
     end;
     1012: begin
-      First := 20635;
-      Last := 20640;
+      First := 20636;
+      Last := 20641;
     end;
     1013: begin
-      First := 20641;
-      Last := 20677;
+      First := 20642;
+      Last := 20678;
     end;
     1014: begin
-      First := 20678;
-      Last := 20683;
+      First := 20679;
+      Last := 20684;
     end;
     1015: begin
-      First := 20684;
-      Last := 20689;
+      First := 20685;
+      Last := 20690;
     end;
     1016: begin
-      First := 20690;
-      Last := 20699;
+      First := 20691;
+      Last := 20700;
     end;
     1017: begin
-      First := 20700;
-      Last := 20785;
+      First := 20701;
+      Last := 20786;
     end;
     1018: begin
-      First := 20786;
-      Last := 20792;
+      First := 20787;
+      Last := 20793;
     end;
     1019: begin
-      First := 20793;
-      Last := 20802;
+      First := 20794;
+      Last := 20803;
     end;
     1020: begin
-      First := 20803;
-      Last := 20808;
+      First := 20804;
+      Last := 20809;
     end;
     1021: begin
-      First := 20809;
-      Last := 20930;
+      First := 20810;
+      Last := 20931;
     end;
     1022: begin
-      First := 20931;
-      Last := 20936;
+      First := 20932;
+      Last := 20937;
     end;
     1023: begin
-      First := 20937;
-      Last := 20942;
+      First := 20938;
+      Last := 20943;
     end;
     1024: begin
-      First := 20943;
-      Last := 20998;
+      First := 20944;
+      Last := 20999;
     end;
     1025: begin
-      First := 20999;
-      Last := 21057;
+      First := 21000;
+      Last := 21058;
     end;
     1026: begin
-      First := 21058;
-      Last := 21179;
+      First := 21059;
+      Last := 21180;
     end;
     1027: begin
-      First := 21180;
-      Last := 21185;
+      First := 21181;
+      Last := 21186;
     end;
     1028: begin
-      First := 21186;
-      Last := 21191;
+      First := 21187;
+      Last := 21192;
     end;
     1029: begin
-      First := 21192;
-      Last := 21200;
+      First := 21193;
+      Last := 21201;
     end;
     1030: begin
-      First := 21201;
-      Last := 21206;
+      First := 21202;
+      Last := 21207;
     end;
     1031: begin
-      First := 21207;
-      Last := 21212;
+      First := 21208;
+      Last := 21213;
     end;
     1032: begin
-      First := 21213;
-      Last := 21218;
+      First := 21214;
+      Last := 21219;
     end;
     1033: begin
-      First := 21219;
-      Last := 21224;
+      First := 21220;
+      Last := 21225;
     end;
     1034: begin
-      First := 21225;
-      Last := 21231;
+      First := 21226;
+      Last := 21232;
     end;
     1035: begin
-      First := 21232;
-      Last := 21237;
+      First := 21233;
+      Last := 21238;
     end;
     1036: begin
-      First := 21238;
-      Last := 21243;
+      First := 21239;
+      Last := 21244;
     end;
     1037: begin
-      First := 21244;
-      Last := 21378;
+      First := 21245;
+      Last := 21379;
     end;
     1038: begin
-      First := 21379;
-      Last := 21385;
+      First := 21380;
+      Last := 21386;
     end;
     1039: begin
-      First := 21386;
-      Last := 21391;
+      First := 21387;
+      Last := 21392;
     end;
     1040: begin
-      First := 21392;
-      Last := 21403;
+      First := 21393;
+      Last := 21404;
     end;
     1041: begin
-      First := 21404;
-      Last := 21409;
+      First := 21405;
+      Last := 21410;
     end;
     1042: begin
-      First := 21410;
-      Last := 21531;
+      First := 21411;
+      Last := 21532;
     end;
     1043: begin
-      First := 21532;
-      Last := 21541;
+      First := 21533;
+      Last := 21542;
     end;
     1044: begin
-      First := 21542;
-      Last := 21547;
+      First := 21543;
+      Last := 21548;
     end;
     1045: begin
-      First := 21548;
-      Last := 21553;
+      First := 21549;
+      Last := 21554;
     end;
     1046: begin
-      First := 21554;
-      Last := 21564;
+      First := 21555;
+      Last := 21565;
     end;
     1047: begin
-      First := 21565;
-      Last := 21570;
+      First := 21566;
+      Last := 21571;
     end;
     1048: begin
-      First := 21571;
-      Last := 21576;
+      First := 21572;
+      Last := 21577;
     end;
     1049: begin
-      First := 21577;
-      Last := 21582;
+      First := 21578;
+      Last := 21583;
     end;
     1050: begin
-      First := 21583;
-      Last := 21634;
+      First := 21584;
+      Last := 21635;
     end;
     1051: begin
-      First := 21635;
-      Last := 21640;
+      First := 21636;
+      Last := 21641;
     end;
     1052: begin
-      First := 21641;
-      Last := 21646;
+      First := 21642;
+      Last := 21647;
     end;
     1053: begin
-      First := 21647;
-      Last := 21653;
+      First := 21648;
+      Last := 21654;
     end;
     1054: begin
-      First := 21654;
-      Last := 21659;
+      First := 21655;
+      Last := 21660;
     end;
     1055: begin
-      First := 21660;
-      Last := 21665;
+      First := 21661;
+      Last := 21666;
     end;
     1056: begin
-      First := 21666;
-      Last := 21679;
+      First := 21667;
+      Last := 21680;
     end;
     1057: begin
-      First := 21680;
-      Last := 21686;
+      First := 21681;
+      Last := 21687;
     end;
     1058: begin
-      First := 21687;
-      Last := 21692;
+      First := 21688;
+      Last := 21693;
     end;
     1059: begin
-      First := 21693;
-      Last := 21699;
+      First := 21694;
+      Last := 21700;
     end;
     1060: begin
-      First := 21700;
-      Last := 21712;
+      First := 21701;
+      Last := 21713;
     end;
     1061: begin
-      First := 21713;
-      Last := 21725;
+      First := 21714;
+      Last := 21726;
     end;
     1062: begin
-      First := 21726;
-      Last := 21738;
+      First := 21727;
+      Last := 21739;
     end;
     1063: begin
-      First := 21739;
-      Last := 21749;
+      First := 21740;
+      Last := 21750;
     end;
     1064: begin
-      First := 21750;
-      Last := 21763;
+      First := 21751;
+      Last := 21764;
     end;
     1065: begin
-      First := 21764;
-      Last := 21770;
+      First := 21765;
+      Last := 21771;
     end;
     1066: begin
-      First := 21771;
-      Last := 21776;
+      First := 21772;
+      Last := 21777;
     end;
     1067: begin
-      First := 21777;
-      Last := 21789;
+      First := 21778;
+      Last := 21790;
     end;
     1068: begin
-      First := 21790;
-      Last := 21911;
+      First := 21791;
+      Last := 21912;
     end;
     1069: begin
-      First := 21912;
-      Last := 21917;
+      First := 21913;
+      Last := 21918;
     end;
     1070: begin
-      First := 21918;
-      Last := 21924;
+      First := 21919;
+      Last := 21925;
     end;
     1071: begin
-      First := 21925;
-      Last := 21933;
+      First := 21926;
+      Last := 21934;
     end;
     1072: begin
-      First := 21934;
-      Last := 21944;
+      First := 21935;
+      Last := 21945;
     end;
     1073: begin
-      First := 21945;
-      Last := 21950;
+      First := 21946;
+      Last := 21951;
     end;
     1074: begin
-      First := 21951;
-      Last := 21957;
+      First := 21952;
+      Last := 21958;
     end;
     1075: begin
-      First := 21958;
-      Last := 21971;
+      First := 21959;
+      Last := 21972;
     end;
     1076: begin
-      First := 21972;
-      Last := 21977;
+      First := 21973;
+      Last := 21978;
     end;
     1077: begin
-      First := 21978;
-      Last := 22119;
+      First := 21979;
+      Last := 22120;
     end;
     1078: begin
-      First := 22120;
-      Last := 22125;
+      First := 22121;
+      Last := 22126;
     end;
     1079: begin
-      First := 22126;
-      Last := 22131;
+      First := 22127;
+      Last := 22132;
     end;
     1080: begin
-      First := 22132;
-      Last := 22174;
+      First := 22133;
+      Last := 22175;
     end;
     1081: begin
-      First := 22175;
-      Last := 22180;
+      First := 22176;
+      Last := 22181;
     end;
     1082: begin
-      First := 22181;
-      Last := 22197;
+      First := 22182;
+      Last := 22187;
     end;
     1083: begin
-      First := 22198;
+      First := 22188;
       Last := 22204;
     end;
     1084: begin
       First := 22205;
-      Last := 22210;
+      Last := 22211;
     end;
     1085: begin
-      First := 22211;
-      Last := 22216;
+      First := 22212;
+      Last := 22217;
     end;
     1086: begin
-      First := 22217;
-      Last := 22222;
+      First := 22218;
+      Last := 22223;
     end;
     1087: begin
-      First := 22223;
-      Last := 22228;
+      First := 22224;
+      Last := 22229;
     end;
     1088: begin
-      First := 22229;
+      First := 22230;
       Last := 22235;
     end;
     1089: begin
       First := 22236;
-      Last := 22244;
+      Last := 22242;
     end;
     1090: begin
-      First := 22245;
-      Last := 22250;
+      First := 22243;
+      Last := 22251;
     end;
     1091: begin
-      First := 22251;
-      Last := 22256;
+      First := 22252;
+      Last := 22257;
     end;
     1092: begin
-      First := 22257;
-      Last := 22265;
+      First := 22258;
+      Last := 22263;
     end;
     1093: begin
-      First := 22266;
-      Last := 22274;
+      First := 22264;
+      Last := 22272;
     end;
     1094: begin
-      First := 22275;
-      Last := 22280;
+      First := 22273;
+      Last := 22281;
     end;
     1095: begin
-      First := 22281;
-      Last := 22286;
+      First := 22282;
+      Last := 22287;
     end;
     1096: begin
-      First := 22287;
-      Last := 22292;
+      First := 22288;
+      Last := 22293;
     end;
     1097: begin
-      First := 22293;
-      Last := 22298;
+      First := 22294;
+      Last := 22299;
     end;
     1098: begin
-      First := 22299;
-      Last := 22304;
+      First := 22300;
+      Last := 22305;
     end;
     1099: begin
-      First := 22305;
+      First := 22306;
       Last := 22311;
     end;
     1100: begin
       First := 22312;
-      Last := 22317;
+      Last := 22318;
     end;
     1101: begin
-      First := 22318;
-      Last := 22323;
+      First := 22319;
+      Last := 22324;
     end;
     1102: begin
-      First := 22324;
-      Last := 22329;
+      First := 22325;
+      Last := 22330;
     end;
     1103: begin
-      First := 22330;
-      Last := 22335;
+      First := 22331;
+      Last := 22336;
     end;
     1104: begin
-      First := 22336;
-      Last := 22341;
+      First := 22337;
+      Last := 22342;
     end;
     1105: begin
-      First := 22342;
-      Last := 22347;
+      First := 22343;
+      Last := 22348;
     end;
     1106: begin
-      First := 22348;
-      Last := 22381;
+      First := 22349;
+      Last := 22354;
     end;
     1107: begin
-      First := 22382;
-      Last := 22387;
+      First := 22355;
+      Last := 22388;
     end;
     1108: begin
-      First := 22388;
-      Last := 22393;
+      First := 22389;
+      Last := 22394;
     end;
     1109: begin
-      First := 22394;
+      First := 22395;
       Last := 22400;
     end;
     1110: begin
@@ -32377,74 +32384,74 @@ begin
     end;
     1111: begin
       First := 22408;
-      Last := 22423;
+      Last := 22414;
     end;
     1112: begin
-      First := 22424;
-      Last := 22440;
+      First := 22415;
+      Last := 22430;
     end;
     1113: begin
-      First := 22441;
-      Last := 22446;
+      First := 22431;
+      Last := 22447;
     end;
     1114: begin
-      First := 22447;
-      Last := 22480;
+      First := 22448;
+      Last := 22453;
     end;
     1115: begin
-      First := 22481;
+      First := 22454;
       Last := 22487;
     end;
     1116: begin
       First := 22488;
-      Last := 22496;
+      Last := 22494;
     end;
     1117: begin
-      First := 22497;
-      Last := 22502;
+      First := 22495;
+      Last := 22503;
     end;
     1118: begin
-      First := 22503;
-      Last := 22508;
+      First := 22504;
+      Last := 22509;
     end;
     1119: begin
-      First := 22509;
-      Last := 22514;
+      First := 22510;
+      Last := 22515;
     end;
     1120: begin
-      First := 22515;
-      Last := 22523;
+      First := 22516;
+      Last := 22521;
     end;
     1121: begin
-      First := 22524;
+      First := 22522;
       Last := 22530;
     end;
     1122: begin
       First := 22531;
-      Last := 22536;
+      Last := 22537;
     end;
     1123: begin
-      First := 22537;
-      Last := 22582;
+      First := 22538;
+      Last := 22543;
     end;
     1124: begin
-      First := 22583;
-      Last := 22588;
+      First := 22544;
+      Last := 22589;
     end;
     1125: begin
-      First := 22589;
-      Last := 22634;
+      First := 22590;
+      Last := 22595;
     end;
     1126: begin
-      First := 22635;
-      Last := 22640;
+      First := 22596;
+      Last := 22641;
     end;
     1127: begin
-      First := 22641;
-      Last := 22646;
+      First := 22642;
+      Last := 22647;
     end;
     1128: begin
-      First := 22647;
+      First := 22648;
       Last := 22653;
     end;
     1129: begin
@@ -32453,170 +32460,170 @@ begin
     end;
     1130: begin
       First := 22661;
-      Last := 22666;
+      Last := 22667;
     end;
     1131: begin
-      First := 22667;
+      First := 22668;
       Last := 22673;
     end;
     1132: begin
       First := 22674;
-      Last := 22679;
+      Last := 22680;
     end;
     1133: begin
-      First := 22680;
+      First := 22681;
       Last := 22686;
     end;
     1134: begin
       First := 22687;
-      Last := 22692;
+      Last := 22693;
     end;
     1135: begin
-      First := 22693;
-      Last := 22698;
+      First := 22694;
+      Last := 22699;
     end;
     1136: begin
-      First := 22699;
-      Last := 22709;
+      First := 22700;
+      Last := 22705;
     end;
     1137: begin
-      First := 22710;
-      Last := 22715;
+      First := 22706;
+      Last := 22716;
     end;
     1138: begin
-      First := 22716;
-      Last := 22723;
+      First := 22717;
+      Last := 22722;
     end;
     1139: begin
-      First := 22724;
-      Last := 22732;
+      First := 22723;
+      Last := 22730;
     end;
     1140: begin
-      First := 22733;
-      Last := 22742;
+      First := 22731;
+      Last := 22739;
     end;
     1141: begin
-      First := 22743;
-      Last := 22751;
+      First := 22740;
+      Last := 22749;
     end;
     1142: begin
-      First := 22752;
-      Last := 22761;
+      First := 22750;
+      Last := 22758;
     end;
     1143: begin
-      First := 22762;
-      Last := 22771;
+      First := 22759;
+      Last := 22768;
     end;
     1144: begin
-      First := 22772;
-      Last := 22781;
+      First := 22769;
+      Last := 22778;
     end;
     1145: begin
-      First := 22782;
+      First := 22779;
       Last := 22788;
     end;
     1146: begin
       First := 22789;
-      Last := 22797;
+      Last := 22795;
     end;
     1147: begin
-      First := 22798;
-      Last := 22803;
+      First := 22796;
+      Last := 22804;
     end;
     1148: begin
-      First := 22804;
-      Last := 22809;
+      First := 22805;
+      Last := 22810;
     end;
     1149: begin
-      First := 22810;
-      Last := 22826;
+      First := 22811;
+      Last := 22816;
     end;
     1150: begin
-      First := 22827;
+      First := 22817;
       Last := 22833;
     end;
     1151: begin
       First := 22834;
-      Last := 22866;
+      Last := 22840;
     end;
     1152: begin
-      First := 22867;
-      Last := 22878;
+      First := 22841;
+      Last := 22873;
     end;
     1153: begin
-      First := 22879;
-      Last := 22884;
+      First := 22874;
+      Last := 22885;
     end;
     1154: begin
-      First := 22885;
-      Last := 22890;
+      First := 22886;
+      Last := 22891;
     end;
     1155: begin
-      First := 22891;
-      Last := 23032;
+      First := 22892;
+      Last := 22897;
     end;
     1156: begin
-      First := 23033;
-      Last := 23050;
+      First := 22898;
+      Last := 23039;
     end;
     1157: begin
-      First := 23051;
-      Last := 23056;
+      First := 23040;
+      Last := 23057;
     end;
     1158: begin
-      First := 23057;
-      Last := 23073;
+      First := 23058;
+      Last := 23063;
     end;
     1159: begin
-      First := 23074;
-      Last := 23079;
+      First := 23064;
+      Last := 23080;
     end;
     1160: begin
-      First := 23080;
-      Last := 23101;
+      First := 23081;
+      Last := 23086;
     end;
     1161: begin
-      First := 23102;
+      First := 23087;
       Last := 23108;
     end;
     1162: begin
       First := 23109;
-      Last := 23114;
+      Last := 23115;
     end;
     1163: begin
-      First := 23115;
-      Last := 23136;
+      First := 23116;
+      Last := 23121;
     end;
     1164: begin
-      First := 23137;
-      Last := 23148;
+      First := 23122;
+      Last := 23143;
     end;
     1165: begin
-      First := 23149;
+      First := 23144;
       Last := 23155;
     end;
     1166: begin
       First := 23156;
-      Last := 23166;
+      Last := 23162;
     end;
     1167: begin
-      First := 23167;
+      First := 23163;
       Last := 23173;
     end;
     1168: begin
       First := 23174;
-      Last := 23195;
+      Last := 23180;
     end;
     1169: begin
-      First := 23196;
-      Last := 23206;
+      First := 23181;
+      Last := 23202;
     end;
     1170: begin
-      First := 23207;
-      Last := 23217;
+      First := 23203;
+      Last := 23213;
     end;
     1171: begin
-      First := 23218;
+      First := 23214;
       Last := 23224;
     end;
     1172: begin
@@ -32625,206 +32632,206 @@ begin
     end;
     1173: begin
       First := 23232;
-      Last := 23291;
+      Last := 23238;
     end;
     1174: begin
-      First := 23292;
-      Last := 23297;
+      First := 23239;
+      Last := 23298;
     end;
     1175: begin
-      First := 23298;
-      Last := 23303;
+      First := 23299;
+      Last := 23304;
     end;
     1176: begin
-      First := 23304;
-      Last := 23331;
+      First := 23305;
+      Last := 23310;
     end;
     1177: begin
-      First := 23332;
-      Last := 23337;
+      First := 23311;
+      Last := 23338;
     end;
     1178: begin
-      First := 23338;
+      First := 23339;
       Last := 23344;
     end;
     1179: begin
       First := 23345;
-      Last := 23350;
+      Last := 23351;
     end;
     1180: begin
-      First := 23351;
-      Last := 23356;
+      First := 23352;
+      Last := 23357;
     end;
     1181: begin
-      First := 23357;
-      Last := 23365;
+      First := 23358;
+      Last := 23363;
     end;
     1182: begin
-      First := 23366;
-      Last := 23371;
+      First := 23364;
+      Last := 23372;
     end;
     1183: begin
-      First := 23372;
-      Last := 23377;
+      First := 23373;
+      Last := 23378;
     end;
     1184: begin
-      First := 23378;
-      Last := 23499;
+      First := 23379;
+      Last := 23384;
     end;
     1185: begin
-      First := 23500;
-      Last := 23555;
+      First := 23385;
+      Last := 23506;
     end;
     1186: begin
-      First := 23556;
-      Last := 23561;
+      First := 23507;
+      Last := 23562;
     end;
     1187: begin
-      First := 23562;
-      Last := 23683;
+      First := 23563;
+      Last := 23568;
     end;
     1188: begin
-      First := 23684;
-      Last := 23692;
+      First := 23569;
+      Last := 23690;
     end;
     1189: begin
-      First := 23693;
-      Last := 23706;
+      First := 23691;
+      Last := 23699;
     end;
     1190: begin
-      First := 23707;
-      Last := 23712;
+      First := 23700;
+      Last := 23713;
     end;
     1191: begin
-      First := 23713;
-      Last := 23721;
+      First := 23714;
+      Last := 23719;
     end;
     1192: begin
-      First := 23722;
-      Last := 23727;
+      First := 23720;
+      Last := 23728;
     end;
     1193: begin
-      First := 23728;
-      Last := 23733;
+      First := 23729;
+      Last := 23734;
     end;
     1194: begin
-      First := 23734;
+      First := 23735;
       Last := 23740;
     end;
     1195: begin
       First := 23741;
-      Last := 23746;
+      Last := 23747;
     end;
     1196: begin
-      First := 23747;
-      Last := 23752;
+      First := 23748;
+      Last := 23753;
     end;
     1197: begin
-      First := 23753;
-      Last := 23758;
+      First := 23754;
+      Last := 23759;
     end;
     1198: begin
-      First := 23759;
-      Last := 23764;
+      First := 23760;
+      Last := 23765;
     end;
     1199: begin
-      First := 23765;
-      Last := 23770;
+      First := 23766;
+      Last := 23771;
     end;
     1200: begin
-      First := 23771;
-      Last := 23776;
+      First := 23772;
+      Last := 23777;
     end;
     1201: begin
-      First := 23777;
-      Last := 23782;
+      First := 23778;
+      Last := 23783;
     end;
     1202: begin
-      First := 23783;
+      First := 23784;
       Last := 23789;
     end;
     1203: begin
       First := 23790;
-      Last := 23911;
+      Last := 23796;
     end;
     1204: begin
-      First := 23912;
-      Last := 23917;
+      First := 23797;
+      Last := 23918;
     end;
     1205: begin
-      First := 23918;
-      Last := 23923;
+      First := 23919;
+      Last := 23924;
     end;
     1206: begin
-      First := 23924;
-      Last := 23929;
+      First := 23925;
+      Last := 23930;
     end;
     1207: begin
-      First := 23930;
+      First := 23931;
       Last := 23936;
     end;
     1208: begin
       First := 23937;
-      Last := 23942;
+      Last := 23943;
     end;
     1209: begin
-      First := 23943;
-      Last := 24016;
+      First := 23944;
+      Last := 23949;
     end;
     1210: begin
-      First := 24017;
-      Last := 24022;
+      First := 23950;
+      Last := 24023;
     end;
     1211: begin
-      First := 24023;
-      Last := 24028;
+      First := 24024;
+      Last := 24029;
     end;
     1212: begin
-      First := 24029;
-      Last := 24037;
+      First := 24030;
+      Last := 24035;
     end;
     1213: begin
-      First := 24038;
-      Last := 24073;
+      First := 24036;
+      Last := 24044;
     end;
     1214: begin
-      First := 24074;
-      Last := 24079;
+      First := 24045;
+      Last := 24080;
     end;
     1215: begin
-      First := 24080;
-      Last := 24085;
+      First := 24081;
+      Last := 24086;
     end;
     1216: begin
-      First := 24086;
-      Last := 24094;
+      First := 24087;
+      Last := 24092;
     end;
     1217: begin
-      First := 24095;
-      Last := 24139;
+      First := 24093;
+      Last := 24101;
     end;
     1218: begin
-      First := 24140;
+      First := 24102;
       Last := 24146;
     end;
     1219: begin
       First := 24147;
-      Last := 24155;
+      Last := 24153;
     end;
     1220: begin
-      First := 24156;
-      Last := 24173;
+      First := 24154;
+      Last := 24162;
     end;
     1221: begin
-      First := 24174;
-      Last := 24179;
+      First := 24163;
+      Last := 24180;
     end;
     1222: begin
-      First := 24180;
-      Last := 24185;
+      First := 24181;
+      Last := 24186;
     end;
     1223: begin
-      First := 24186;
+      First := 24187;
       Last := 24192;
     end;
     1224: begin
@@ -32833,22 +32840,22 @@ begin
     end;
     1225: begin
       First := 24200;
-      Last := 24205;
+      Last := 24206;
     end;
     1226: begin
-      First := 24206;
-      Last := 24231;
+      First := 24207;
+      Last := 24212;
     end;
     1227: begin
-      First := 24232;
-      Last := 24256;
+      First := 24213;
+      Last := 24238;
     end;
     1228: begin
-      First := 24257;
-      Last := 24262;
+      First := 24239;
+      Last := 24263;
     end;
     1229: begin
-      First := 24263;
+      First := 24264;
       Last := 24269;
     end;
     1230: begin
@@ -32857,66 +32864,66 @@ begin
     end;
     1231: begin
       First := 24277;
-      Last := 24292;
+      Last := 24283;
     end;
     1232: begin
-      First := 24293;
+      First := 24284;
       Last := 24299;
     end;
     1233: begin
       First := 24300;
-      Last := 24334;
+      Last := 24306;
     end;
     1234: begin
-      First := 24335;
-      Last := 24340;
+      First := 24307;
+      Last := 24341;
     end;
     1235: begin
-      First := 24341;
-      Last := 24346;
+      First := 24342;
+      Last := 24347;
     end;
     1236: begin
-      First := 24347;
-      Last := 24352;
+      First := 24348;
+      Last := 24353;
     end;
     1237: begin
-      First := 24353;
-      Last := 24358;
+      First := 24354;
+      Last := 24359;
     end;
     1238: begin
-      First := 24359;
-      Last := 24368;
+      First := 24360;
+      Last := 24365;
     end;
     1239: begin
-      First := 24369;
-      Last := 24374;
+      First := 24366;
+      Last := 24375;
     end;
     1240: begin
-      First := 24375;
-      Last := 24380;
+      First := 24376;
+      Last := 24381;
     end;
     1241: begin
-      First := 24381;
-      Last := 24386;
+      First := 24382;
+      Last := 24387;
     end;
     1242: begin
-      First := 24387;
+      First := 24388;
       Last := 24393;
     end;
     1243: begin
       First := 24394;
-      Last := 24399;
+      Last := 24400;
     end;
     1244: begin
-      First := 24400;
-      Last := 24405;
+      First := 24401;
+      Last := 24406;
     end;
     1245: begin
-      First := 24406;
-      Last := 24427;
+      First := 24407;
+      Last := 24412;
     end;
     1246: begin
-      First := 24428;
+      First := 24413;
       Last := 24434;
     end;
     1247: begin
@@ -32929,130 +32936,130 @@ begin
     end;
     1249: begin
       First := 24449;
-      Last := 24457;
+      Last := 24455;
     end;
     1250: begin
-      First := 24458;
-      Last := 24467;
+      First := 24456;
+      Last := 24464;
     end;
     1251: begin
-      First := 24468;
-      Last := 24478;
+      First := 24465;
+      Last := 24474;
     end;
     1252: begin
-      First := 24479;
-      Last := 24489;
+      First := 24475;
+      Last := 24485;
     end;
     1253: begin
-      First := 24490;
-      Last := 24495;
+      First := 24486;
+      Last := 24496;
     end;
     1254: begin
-      First := 24496;
-      Last := 24508;
+      First := 24497;
+      Last := 24502;
     end;
     1255: begin
-      First := 24509;
-      Last := 24519;
+      First := 24503;
+      Last := 24515;
     end;
     1256: begin
-      First := 24520;
-      Last := 24525;
+      First := 24516;
+      Last := 24526;
     end;
     1257: begin
-      First := 24526;
-      Last := 24531;
+      First := 24527;
+      Last := 24532;
     end;
     1258: begin
-      First := 24532;
-      Last := 24540;
+      First := 24533;
+      Last := 24538;
     end;
     1259: begin
-      First := 24541;
-      Last := 24546;
+      First := 24539;
+      Last := 24547;
     end;
     1260: begin
-      First := 24547;
+      First := 24548;
       Last := 24553;
     end;
     1261: begin
       First := 24554;
-      Last := 24559;
+      Last := 24560;
     end;
     1262: begin
-      First := 24560;
-      Last := 24598;
+      First := 24561;
+      Last := 24566;
     end;
     1263: begin
-      First := 24599;
-      Last := 24604;
+      First := 24567;
+      Last := 24605;
     end;
     1264: begin
-      First := 24605;
-      Last := 24644;
+      First := 24606;
+      Last := 24611;
     end;
     1265: begin
-      First := 24645;
-      Last := 24688;
+      First := 24612;
+      Last := 24651;
     end;
     1266: begin
-      First := 24689;
+      First := 24652;
       Last := 24695;
     end;
     1267: begin
       First := 24696;
-      Last := 24704;
+      Last := 24702;
     end;
     1268: begin
-      First := 24705;
-      Last := 24710;
+      First := 24703;
+      Last := 24711;
     end;
     1269: begin
-      First := 24711;
-      Last := 24732;
+      First := 24712;
+      Last := 24717;
     end;
     1270: begin
-      First := 24733;
-      Last := 24744;
+      First := 24718;
+      Last := 24739;
     end;
     1271: begin
-      First := 24745;
-      Last := 24750;
+      First := 24740;
+      Last := 24751;
     end;
     1272: begin
-      First := 24751;
-      Last := 24756;
+      First := 24752;
+      Last := 24757;
     end;
     1273: begin
-      First := 24757;
-      Last := 24762;
+      First := 24758;
+      Last := 24763;
     end;
     1274: begin
-      First := 24763;
-      Last := 24904;
+      First := 24764;
+      Last := 24769;
     end;
     1275: begin
-      First := 24905;
+      First := 24770;
       Last := 24911;
     end;
     1276: begin
       First := 24912;
-      Last := 24933;
+      Last := 24918;
     end;
     1277: begin
-      First := 24934;
+      First := 24919;
       Last := 24940;
     end;
     1278: begin
       First := 24941;
-      Last := 24962;
+      Last := 24947;
     end;
     1279: begin
-      First := 24963;
-      Last := 24968;
+      First := 24948;
+      Last := 24969;
     end;
     1280: begin
-      First := 24969;
+      First := 24970;
       Last := 24975;
     end;
     1281: begin
@@ -33061,238 +33068,238 @@ begin
     end;
     1282: begin
       First := 24983;
-      Last := 25004;
+      Last := 24989;
     end;
     1283: begin
-      First := 25005;
-      Last := 25026;
+      First := 24990;
+      Last := 25011;
     end;
     1284: begin
-      First := 25027;
+      First := 25012;
       Last := 25033;
     end;
     1285: begin
       First := 25034;
-      Last := 25039;
+      Last := 25040;
     end;
     1286: begin
-      First := 25040;
-      Last := 25045;
+      First := 25041;
+      Last := 25046;
     end;
     1287: begin
-      First := 25046;
-      Last := 25103;
+      First := 25047;
+      Last := 25052;
     end;
     1288: begin
-      First := 25104;
-      Last := 25109;
+      First := 25053;
+      Last := 25110;
     end;
     1289: begin
-      First := 25110;
-      Last := 25115;
+      First := 25111;
+      Last := 25116;
     end;
     1290: begin
-      First := 25116;
-      Last := 25121;
+      First := 25117;
+      Last := 25122;
     end;
     1291: begin
-      First := 25122;
-      Last := 25242;
+      First := 25123;
+      Last := 25128;
     end;
     1292: begin
-      First := 25243;
-      Last := 25248;
+      First := 25129;
+      Last := 25249;
     end;
     1293: begin
-      First := 25249;
-      Last := 25370;
+      First := 25250;
+      Last := 25255;
     end;
     1294: begin
-      First := 25371;
-      Last := 25376;
+      First := 25256;
+      Last := 25377;
     end;
     1295: begin
-      First := 25377;
-      Last := 25382;
+      First := 25378;
+      Last := 25383;
     end;
     1296: begin
-      First := 25383;
-      Last := 25395;
+      First := 25384;
+      Last := 25389;
     end;
     1297: begin
-      First := 25396;
+      First := 25390;
       Last := 25402;
     end;
     1298: begin
       First := 25403;
-      Last := 25408;
+      Last := 25409;
     end;
     1299: begin
-      First := 25409;
-      Last := 25414;
+      First := 25410;
+      Last := 25415;
     end;
     1300: begin
-      First := 25415;
-      Last := 25420;
+      First := 25416;
+      Last := 25421;
     end;
     1301: begin
-      First := 25421;
-      Last := 25426;
+      First := 25422;
+      Last := 25427;
     end;
     1302: begin
-      First := 25427;
-      Last := 25432;
+      First := 25428;
+      Last := 25433;
     end;
     1303: begin
-      First := 25433;
-      Last := 25438;
+      First := 25434;
+      Last := 25439;
     end;
     1304: begin
-      First := 25439;
-      Last := 25444;
+      First := 25440;
+      Last := 25445;
     end;
     1305: begin
-      First := 25445;
-      Last := 25450;
+      First := 25446;
+      Last := 25451;
     end;
     1306: begin
-      First := 25451;
-      Last := 25456;
+      First := 25452;
+      Last := 25457;
     end;
     1307: begin
-      First := 25457;
-      Last := 25462;
+      First := 25458;
+      Last := 25463;
     end;
     1308: begin
-      First := 25463;
-      Last := 25468;
+      First := 25464;
+      Last := 25469;
     end;
     1309: begin
-      First := 25469;
-      Last := 25474;
+      First := 25470;
+      Last := 25475;
     end;
     1310: begin
-      First := 25475;
-      Last := 25480;
+      First := 25476;
+      Last := 25481;
     end;
     1311: begin
-      First := 25481;
-      Last := 25486;
+      First := 25482;
+      Last := 25487;
     end;
     1312: begin
-      First := 25487;
-      Last := 25492;
+      First := 25488;
+      Last := 25493;
     end;
     1313: begin
-      First := 25493;
+      First := 25494;
       Last := 25499;
     end;
     1314: begin
       First := 25500;
-      Last := 25514;
+      Last := 25506;
     end;
     1315: begin
-      First := 25515;
-      Last := 25522;
+      First := 25507;
+      Last := 25521;
     end;
     1316: begin
-      First := 25523;
-      Last := 25542;
+      First := 25522;
+      Last := 25529;
     end;
     1317: begin
-      First := 25543;
-      Last := 25557;
+      First := 25530;
+      Last := 25549;
     end;
     1318: begin
-      First := 25558;
-      Last := 25618;
+      First := 25550;
+      Last := 25564;
     end;
     1319: begin
-      First := 25619;
-      Last := 25637;
+      First := 25565;
+      Last := 25625;
     end;
     1320: begin
-      First := 25638;
-      Last := 25643;
+      First := 25626;
+      Last := 25644;
     end;
     1321: begin
-      First := 25644;
-      Last := 25656;
+      First := 25645;
+      Last := 25650;
     end;
     1322: begin
-      First := 25657;
-      Last := 25662;
+      First := 25651;
+      Last := 25663;
     end;
     1323: begin
-      First := 25663;
-      Last := 25668;
+      First := 25664;
+      Last := 25669;
     end;
     1324: begin
-      First := 25669;
-      Last := 25684;
+      First := 25670;
+      Last := 25675;
     end;
     1325: begin
-      First := 25685;
-      Last := 25690;
+      First := 25676;
+      Last := 25691;
     end;
     1326: begin
-      First := 25691;
-      Last := 25726;
+      First := 25692;
+      Last := 25697;
     end;
     1327: begin
-      First := 25727;
-      Last := 25732;
+      First := 25698;
+      Last := 25733;
     end;
     1328: begin
-      First := 25733;
+      First := 25734;
       Last := 25739;
     end;
     1329: begin
       First := 25740;
-      Last := 25748;
+      Last := 25746;
     end;
     1330: begin
-      First := 25749;
-      Last := 25754;
+      First := 25747;
+      Last := 25755;
     end;
     1331: begin
-      First := 25755;
-      Last := 25760;
+      First := 25756;
+      Last := 25761;
     end;
     1332: begin
-      First := 25761;
-      Last := 25766;
+      First := 25762;
+      Last := 25767;
     end;
     1333: begin
-      First := 25767;
-      Last := 25772;
+      First := 25768;
+      Last := 25773;
     end;
     1334: begin
-      First := 25773;
-      Last := 25778;
+      First := 25774;
+      Last := 25779;
     end;
     1335: begin
-      First := 25779;
-      Last := 25784;
+      First := 25780;
+      Last := 25785;
     end;
     1336: begin
-      First := 25785;
-      Last := 25790;
+      First := 25786;
+      Last := 25791;
     end;
     1337: begin
-      First := 25791;
+      First := 25792;
       Last := 25797;
     end;
     1338: begin
       First := 25798;
-      Last := 25814;
+      Last := 25804;
     end;
     1339: begin
-      First := 25815;
-      Last := 25820;
+      First := 25805;
+      Last := 25821;
     end;
     1340: begin
-      First := 25821;
+      First := 25822;
       Last := 25827;
     end;
     1341: begin
@@ -33301,50 +33308,50 @@ begin
     end;
     1342: begin
       First := 25835;
-      Last := 25843;
+      Last := 25841;
     end;
     1343: begin
-      First := 25844;
-      Last := 25849;
+      First := 25842;
+      Last := 25850;
     end;
     1344: begin
-      First := 25850;
-      Last := 25855;
+      First := 25851;
+      Last := 25856;
     end;
     1345: begin
-      First := 25856;
-      Last := 25861;
+      First := 25857;
+      Last := 25862;
     end;
     1346: begin
-      First := 25862;
-      Last := 25867;
+      First := 25863;
+      Last := 25868;
     end;
     1347: begin
-      First := 25868;
-      Last := 25873;
+      First := 25869;
+      Last := 25874;
     end;
     1348: begin
-      First := 25874;
-      Last := 25879;
+      First := 25875;
+      Last := 25880;
     end;
     1349: begin
-      First := 25880;
+      First := 25881;
       Last := 25886;
     end;
     1350: begin
       First := 25887;
-      Last := 25892;
+      Last := 25893;
     end;
     1351: begin
-      First := 25893;
+      First := 25894;
       Last := 25899;
     end;
     1352: begin
       First := 25900;
-      Last := 25905;
+      Last := 25906;
     end;
     1353: begin
-      First := 25906;
+      First := 25907;
       Last := 25912;
     end;
     1354: begin
@@ -33357,470 +33364,470 @@ begin
     end;
     1356: begin
       First := 25927;
-      Last := 25936;
+      Last := 25933;
     end;
     1357: begin
-      First := 25937;
+      First := 25934;
       Last := 25943;
     end;
     1358: begin
       First := 25944;
-      Last := 25952;
+      Last := 25950;
     end;
     1359: begin
-      First := 25953;
-      Last := 25958;
+      First := 25951;
+      Last := 25959;
     end;
     1360: begin
-      First := 25959;
-      Last := 25975;
+      First := 25960;
+      Last := 25965;
     end;
     1361: begin
-      First := 25976;
-      Last := 25981;
+      First := 25966;
+      Last := 25982;
     end;
     1362: begin
-      First := 25982;
-      Last := 25987;
+      First := 25983;
+      Last := 25988;
     end;
     1363: begin
-      First := 25988;
-      Last := 25999;
+      First := 25989;
+      Last := 25994;
     end;
     1364: begin
-      First := 26000;
-      Last := 26005;
+      First := 25995;
+      Last := 26006;
     end;
     1365: begin
-      First := 26006;
-      Last := 26055;
+      First := 26007;
+      Last := 26012;
     end;
     1366: begin
-      First := 26056;
-      Last := 26072;
+      First := 26013;
+      Last := 26062;
     end;
     1367: begin
-      First := 26073;
-      Last := 26084;
+      First := 26063;
+      Last := 26079;
     end;
     1368: begin
-      First := 26085;
-      Last := 26106;
+      First := 26080;
+      Last := 26091;
     end;
     1369: begin
-      First := 26107;
-      Last := 26112;
+      First := 26092;
+      Last := 26113;
     end;
     1370: begin
-      First := 26113;
-      Last := 26134;
+      First := 26114;
+      Last := 26119;
     end;
     1371: begin
-      First := 26135;
-      Last := 26156;
+      First := 26120;
+      Last := 26141;
     end;
     1372: begin
-      First := 26157;
-      Last := 26162;
+      First := 26142;
+      Last := 26163;
     end;
     1373: begin
-      First := 26163;
-      Last := 26174;
+      First := 26164;
+      Last := 26169;
     end;
     1374: begin
-      First := 26175;
-      Last := 26180;
+      First := 26170;
+      Last := 26181;
     end;
     1375: begin
-      First := 26181;
-      Last := 26194;
+      First := 26182;
+      Last := 26187;
     end;
     1376: begin
-      First := 26195;
-      Last := 26200;
+      First := 26188;
+      Last := 26201;
     end;
     1377: begin
-      First := 26201;
-      Last := 26221;
+      First := 26202;
+      Last := 26207;
     end;
     1378: begin
-      First := 26222;
-      Last := 26227;
+      First := 26208;
+      Last := 26228;
     end;
     1379: begin
-      First := 26228;
-      Last := 26233;
+      First := 26229;
+      Last := 26234;
     end;
     1380: begin
-      First := 26234;
-      Last := 26252;
+      First := 26235;
+      Last := 26240;
     end;
     1381: begin
-      First := 26253;
+      First := 26241;
       Last := 26259;
     end;
     1382: begin
       First := 26260;
-      Last := 26274;
+      Last := 26266;
     end;
     1383: begin
-      First := 26275;
-      Last := 26320;
+      First := 26267;
+      Last := 26281;
     end;
     1384: begin
-      First := 26321;
-      Last := 26326;
+      First := 26282;
+      Last := 26327;
     end;
     1385: begin
-      First := 26327;
-      Last := 26332;
+      First := 26328;
+      Last := 26333;
     end;
     1386: begin
-      First := 26333;
-      Last := 26338;
+      First := 26334;
+      Last := 26339;
     end;
     1387: begin
-      First := 26339;
-      Last := 26344;
+      First := 26340;
+      Last := 26345;
     end;
     1388: begin
-      First := 26345;
-      Last := 26350;
+      First := 26346;
+      Last := 26351;
     end;
     1389: begin
-      First := 26351;
-      Last := 26396;
+      First := 26352;
+      Last := 26357;
     end;
     1390: begin
-      First := 26397;
-      Last := 26402;
+      First := 26358;
+      Last := 26403;
     end;
     1391: begin
-      First := 26403;
-      Last := 26529;
+      First := 26404;
+      Last := 26409;
     end;
     1392: begin
-      First := 26530;
-      Last := 26537;
+      First := 26410;
+      Last := 26536;
     end;
     1393: begin
-      First := 26538;
-      Last := 26543;
+      First := 26537;
+      Last := 26544;
     end;
     1394: begin
-      First := 26544;
-      Last := 26549;
+      First := 26545;
+      Last := 26550;
     end;
     1395: begin
-      First := 26550;
-      Last := 26555;
+      First := 26551;
+      Last := 26556;
     end;
     1396: begin
-      First := 26556;
-      Last := 26561;
+      First := 26557;
+      Last := 26562;
     end;
     1397: begin
-      First := 26562;
-      Last := 26600;
+      First := 26563;
+      Last := 26568;
     end;
     1398: begin
-      First := 26601;
+      First := 26569;
       Last := 26607;
     end;
     1399: begin
       First := 26608;
-      Last := 26626;
+      Last := 26614;
     end;
     1400: begin
-      First := 26627;
-      Last := 26632;
+      First := 26615;
+      Last := 26633;
     end;
     1401: begin
-      First := 26633;
-      Last := 26641;
+      First := 26634;
+      Last := 26639;
     end;
     1402: begin
-      First := 26642;
-      Last := 26647;
+      First := 26640;
+      Last := 26648;
     end;
     1403: begin
-      First := 26648;
+      First := 26649;
       Last := 26654;
     end;
     1404: begin
       First := 26655;
-      Last := 26660;
+      Last := 26661;
     end;
     1405: begin
-      First := 26661;
-      Last := 26676;
+      First := 26662;
+      Last := 26667;
     end;
     1406: begin
-      First := 26677;
-      Last := 26682;
+      First := 26668;
+      Last := 26683;
     end;
     1407: begin
-      First := 26683;
+      First := 26684;
       Last := 26689;
     end;
     1408: begin
       First := 26690;
-      Last := 26695;
+      Last := 26696;
     end;
     1409: begin
-      First := 26696;
-      Last := 26701;
+      First := 26697;
+      Last := 26702;
     end;
     1410: begin
-      First := 26702;
-      Last := 26707;
+      First := 26703;
+      Last := 26708;
     end;
     1411: begin
-      First := 26708;
-      Last := 26713;
+      First := 26709;
+      Last := 26714;
     end;
     1412: begin
-      First := 26714;
-      Last := 26719;
+      First := 26715;
+      Last := 26720;
     end;
     1413: begin
-      First := 26720;
-      Last := 26725;
+      First := 26721;
+      Last := 26726;
     end;
     1414: begin
-      First := 26726;
-      Last := 26734;
+      First := 26727;
+      Last := 26732;
     end;
     1415: begin
-      First := 26735;
-      Last := 26740;
+      First := 26733;
+      Last := 26741;
     end;
     1416: begin
-      First := 26741;
-      Last := 26746;
+      First := 26742;
+      Last := 26747;
     end;
     1417: begin
-      First := 26747;
+      First := 26748;
       Last := 26753;
     end;
     1418: begin
       First := 26754;
-      Last := 26762;
+      Last := 26760;
     end;
     1419: begin
-      First := 26763;
-      Last := 26768;
+      First := 26761;
+      Last := 26769;
     end;
     1420: begin
-      First := 26769;
-      Last := 26774;
+      First := 26770;
+      Last := 26775;
     end;
     1421: begin
-      First := 26775;
-      Last := 26780;
+      First := 26776;
+      Last := 26781;
     end;
     1422: begin
-      First := 26781;
-      Last := 26786;
+      First := 26782;
+      Last := 26787;
     end;
     1423: begin
-      First := 26787;
-      Last := 26792;
+      First := 26788;
+      Last := 26793;
     end;
     1424: begin
-      First := 26793;
-      Last := 26798;
+      First := 26794;
+      Last := 26799;
     end;
     1425: begin
-      First := 26799;
-      Last := 26816;
+      First := 26800;
+      Last := 26805;
     end;
     1426: begin
-      First := 26817;
-      Last := 26829;
+      First := 26806;
+      Last := 26823;
     end;
     1427: begin
-      First := 26830;
-      Last := 26835;
+      First := 26824;
+      Last := 26836;
     end;
     1428: begin
-      First := 26836;
+      First := 26837;
       Last := 26842;
     end;
     1429: begin
       First := 26843;
-      Last := 26848;
+      Last := 26849;
     end;
     1430: begin
-      First := 26849;
-      Last := 26854;
+      First := 26850;
+      Last := 26855;
     end;
     1431: begin
-      First := 26855;
+      First := 26856;
       Last := 26861;
     end;
     1432: begin
       First := 26862;
-      Last := 26880;
+      Last := 26868;
     end;
     1433: begin
-      First := 26881;
-      Last := 26886;
+      First := 26869;
+      Last := 26887;
     end;
     1434: begin
-      First := 26887;
-      Last := 26892;
+      First := 26888;
+      Last := 26893;
     end;
     1435: begin
-      First := 26893;
-      Last := 26935;
+      First := 26894;
+      Last := 26899;
     end;
     1436: begin
-      First := 26936;
-      Last := 26974;
+      First := 26900;
+      Last := 26942;
     end;
     1437: begin
-      First := 26975;
-      Last := 26980;
+      First := 26943;
+      Last := 26981;
     end;
     1438: begin
-      First := 26981;
+      First := 26982;
       Last := 26987;
     end;
     1439: begin
       First := 26988;
-      Last := 26993;
+      Last := 26994;
     end;
     1440: begin
-      First := 26994;
-      Last := 27010;
+      First := 26995;
+      Last := 27000;
     end;
     1441: begin
-      First := 27011;
-      Last := 27016;
+      First := 27001;
+      Last := 27017;
     end;
     1442: begin
-      First := 27017;
-      Last := 27029;
+      First := 27018;
+      Last := 27023;
     end;
     1443: begin
-      First := 27030;
-      Last := 27173;
+      First := 27024;
+      Last := 27036;
     end;
     1444: begin
-      First := 27174;
-      Last := 27185;
+      First := 27037;
+      Last := 27180;
     end;
     1445: begin
-      First := 27186;
-      Last := 27197;
+      First := 27181;
+      Last := 27192;
     end;
     1446: begin
-      First := 27198;
-      Last := 27212;
+      First := 27193;
+      Last := 27204;
     end;
     1447: begin
-      First := 27213;
-      Last := 27218;
+      First := 27205;
+      Last := 27219;
     end;
     1448: begin
-      First := 27219;
-      Last := 27235;
+      First := 27220;
+      Last := 27225;
     end;
     1449: begin
-      First := 27236;
-      Last := 27276;
+      First := 27226;
+      Last := 27242;
     end;
     1450: begin
-      First := 27277;
-      Last := 27286;
+      First := 27243;
+      Last := 27283;
     end;
     1451: begin
-      First := 27287;
-      Last := 27292;
+      First := 27284;
+      Last := 27293;
     end;
     1452: begin
-      First := 27293;
+      First := 27294;
       Last := 27299;
     end;
     1453: begin
       First := 27300;
-      Last := 27305;
+      Last := 27306;
     end;
     1454: begin
-      First := 27306;
-      Last := 27311;
+      First := 27307;
+      Last := 27312;
     end;
     1455: begin
-      First := 27312;
-      Last := 27320;
+      First := 27313;
+      Last := 27318;
     end;
     1456: begin
-      First := 27321;
+      First := 27319;
       Last := 27327;
     end;
     1457: begin
       First := 27328;
-      Last := 27333;
+      Last := 27334;
     end;
     1458: begin
-      First := 27334;
-      Last := 27342;
+      First := 27335;
+      Last := 27340;
     end;
     1459: begin
-      First := 27343;
-      Last := 27348;
+      First := 27341;
+      Last := 27349;
     end;
     1460: begin
-      First := 27349;
-      Last := 27360;
+      First := 27350;
+      Last := 27355;
     end;
     1461: begin
-      First := 27361;
-      Last := 27366;
+      First := 27356;
+      Last := 27367;
     end;
     1462: begin
-      First := 27367;
-      Last := 27510;
+      First := 27368;
+      Last := 27373;
     end;
     1463: begin
-      First := 27511;
+      First := 27374;
       Last := 27517;
     end;
     1464: begin
       First := 27518;
-      Last := 27556;
+      Last := 27524;
     end;
     1465: begin
-      First := 27557;
-      Last := 27595;
+      First := 27525;
+      Last := 27563;
     end;
     1466: begin
-      First := 27596;
-      Last := 27601;
+      First := 27564;
+      Last := 27602;
     end;
     1467: begin
-      First := 27602;
-      Last := 27607;
+      First := 27603;
+      Last := 27608;
     end;
     1468: begin
-      First := 27608;
-      Last := 27616;
+      First := 27609;
+      Last := 27614;
     end;
     1469: begin
-      First := 27617;
-      Last := 27622;
+      First := 27615;
+      Last := 27623;
     end;
     1470: begin
-      First := 27623;
-      Last := 27628;
+      First := 27624;
+      Last := 27629;
     end;
     1471: begin
-      First := 27629;
-      Last := 27634;
+      First := 27630;
+      Last := 27635;
     end;
     1472: begin
-      First := 27635;
+      First := 27636;
       Last := 27641;
     end;
     1473: begin
@@ -33829,135 +33836,139 @@ begin
     end;
     1474: begin
       First := 27649;
-      Last := 27661;
+      Last := 27655;
     end;
     1475: begin
-      First := 27662;
-      Last := 27676;
+      First := 27656;
+      Last := 27668;
     end;
     1476: begin
-      First := 27677;
-      Last := 27687;
+      First := 27669;
+      Last := 27683;
     end;
     1477: begin
-      First := 27688;
-      Last := 27693;
+      First := 27684;
+      Last := 27694;
     end;
     1478: begin
-      First := 27694;
-      Last := 27704;
+      First := 27695;
+      Last := 27700;
     end;
     1479: begin
-      First := 27705;
+      First := 27701;
       Last := 27711;
     end;
     1480: begin
       First := 27712;
-      Last := 27717;
+      Last := 27718;
     end;
     1481: begin
-      First := 27718;
-      Last := 27723;
+      First := 27719;
+      Last := 27724;
     end;
     1482: begin
-      First := 27724;
-      Last := 27729;
+      First := 27725;
+      Last := 27730;
     end;
     1483: begin
-      First := 27730;
+      First := 27731;
       Last := 27736;
     end;
     1484: begin
       First := 27737;
-      Last := 27742;
+      Last := 27743;
     end;
     1485: begin
-      First := 27743;
-      Last := 27748;
+      First := 27744;
+      Last := 27749;
     end;
     1486: begin
-      First := 27749;
+      First := 27750;
       Last := 27755;
     end;
     1487: begin
       First := 27756;
-      Last := 27766;
+      Last := 27762;
     end;
     1488: begin
-      First := 27767;
-      Last := 27777;
+      First := 27763;
+      Last := 27773;
     end;
     1489: begin
-      First := 27778;
-      Last := 27783;
+      First := 27774;
+      Last := 27784;
     end;
     1490: begin
-      First := 27784;
-      Last := 27789;
+      First := 27785;
+      Last := 27790;
     end;
     1491: begin
-      First := 27790;
-      Last := 27795;
+      First := 27791;
+      Last := 27796;
     end;
     1492: begin
-      First := 27796;
-      Last := 27811;
+      First := 27797;
+      Last := 27802;
     end;
     1493: begin
-      First := 27812;
-      Last := 27817;
+      First := 27803;
+      Last := 27818;
     end;
     1494: begin
-      First := 27818;
-      Last := 27823;
+      First := 27819;
+      Last := 27824;
     end;
     1495: begin
-      First := 27824;
-      Last := 27829;
+      First := 27825;
+      Last := 27830;
     end;
     1496: begin
-      First := 27830;
-      Last := 27844;
+      First := 27831;
+      Last := 27836;
     end;
     1497: begin
-      First := 27845;
-      Last := 27850;
+      First := 27837;
+      Last := 27851;
     end;
     1498: begin
-      First := 27851;
-      Last := 27856;
+      First := 27852;
+      Last := 27857;
     end;
     1499: begin
-      First := 27857;
+      First := 27858;
       Last := 27863;
     end;
     1500: begin
       First := 27864;
-      Last := 27872;
+      Last := 27870;
     end;
     1501: begin
-      First := 27873;
-      Last := 27878;
+      First := 27871;
+      Last := 27879;
     end;
     1502: begin
-      First := 27879;
-      Last := 27889;
+      First := 27880;
+      Last := 27885;
     end;
     1503: begin
-      First := 27890;
-      Last := 27895;
+      First := 27886;
+      Last := 27896;
     end;
     1504: begin
-      First := 27896;
-      Last := 27901;
+      First := 27897;
+      Last := 27902;
     end;
     1505: begin
-      First := 27902;
-      Last := 27907;
+      First := 27903;
+      Last := 27908;
     end;
     1506: begin
-      First := 27908;
+      First := 27909;
       Last := 27914;
+    end;
+    1507: begin
+      First := 27915;
+      Last := 27921;
     end;
   else
     First := -1; Last := -1;
