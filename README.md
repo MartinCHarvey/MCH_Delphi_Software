@@ -12,10 +12,8 @@ Most recent (2026) development is in Common/MemDB2:
 
 Also:
 - TP Lex / Yacc port for Delphi now at: https://github.com/MartinCHarvey/MCH-TPLY41
-  - Fixed it so it just about runs (I need an LALR parser, not an LL(1) one).
-  - It needs porting / converting to OO to allow portable/multiple reinvocation.
-  - Also needs fixing memleaks, which were fine as a standalone exe, but not as a component
-    in a larger program.
+  - Now has an OO mode "-oo" for generating object oritented code.
+  - Support via additional declarations "%classname" "%classdecl" "%classfunc" "%classvar" for OO encapsultated lexers and parsers.
 
 If any of you folks get some of this to compile / run under the FPC compiler, I'd be very interested to know.
 
