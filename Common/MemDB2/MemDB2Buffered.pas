@@ -7274,9 +7274,9 @@ begin
       Entity := Proxy.Proxy as TMemDBEntity;
       //Cross check with entities this transaction can reasonably have altered.
       if TxList.IndexOf(Proxy) >= 0 then
-        result := result or Entity.AnyChangesForTid(Tid, Ctxt)
-      else
-        Assert(not Entity.AnyChangesForTid(Tid, Ctxt));
+        result := result or Entity.AnyChangesForTid(Tid, Ctxt);
+      // Cannot assert state for entities not registered for Txion.
+      // See voluminous comment in commit for reasons why.
     end;
   finally
     EntityList.Release;
