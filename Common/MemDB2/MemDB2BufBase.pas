@@ -759,7 +759,7 @@ begin
   begin
     DLListRemoveObj(@Reffing.Link);
     Reffing.Free;
-    Reffing := PTidReference(Reffing.Link.FLink.Owner);
+    Reffing := PTidReference(FTidsReffingList.FLink.Owner);
   end;
 {$ENDIF}
   inherited;
