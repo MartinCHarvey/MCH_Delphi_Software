@@ -3915,7 +3915,18 @@ begin
     end;
     try
       Cursor.Row.RemoveFromLocalIndices(self);
-      Cursor.Row.Delete(FTid);
+      try
+        //Unfortunately data is immutable whilst indexed.
+        Cursor.Row.Delete(FTid);
+      except
+        //Even if failed (typically concurrency case unless data totally hosed),
+        //re-add back in to local indices, which improves the situation
+        //where txion local data is used instead of an immediate abort.
+        //This case tested in RowEditDeleteConflict.
+
+        Cursor.Row.AddToLocalIndices(self);
+        raise;
+      end;
     except
       //Unfortunately have to alloc new cursor before delete.
       result.Free;
@@ -3979,12 +3990,18 @@ begin
     //Caught nicely in isolation >= RepeatableRead.
     //Caught less nicely in isolation CommittedRead
     Row.RemoveFromLocalIndices(self);
-
-    Row.RequestChange(FTid);
-    Next := Row.GetNext(FTid);
-    Next.DeepAssign(FieldList);
-
-    Row.AddToLocalIndices(self);
+    try
+      //Unfortunately, local indices can index "Next" items, which need
+      //to be immutable whilst they are in the index.
+      Row.RequestChange(FTid);
+      Next := Row.GetNext(FTid);
+      Next.DeepAssign(FieldList);
+    finally
+      //Even if failed (typically concurrency case unless data totally hosed),
+      //re-add back in to local indices, which improves the situation
+      //where txion local data is used instead of an immediate abort.
+      Row.AddToLocalIndices(self);
+    end;
 
     try
       //Similar to existing cursor, but no INode hint.

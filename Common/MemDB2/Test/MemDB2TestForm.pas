@@ -983,6 +983,200 @@ procedure TForm1.ConcurrencyBtnClick(Sender: TObject);
     end;
   end;
 
+  procedure RowEditDeleteConflict;
+  var
+    T1, T2: TMemDBTransaction;
+    DBAPI1, DBAPI2: TMemAPIDatabase;
+    Dat1, Dat2: TMemAPITableData;
+    DataRec: TMemDbFieldDataRec;
+    Pass, Pass2: boolean;
+  begin
+    Pass := false;
+    Pass2 := false;
+    if Limit < 42 then
+    begin
+      LogTimeIncr('Skipped test. Set LIMIT >= 41');
+      exit;
+    end;
+    //Reminder, table contains only odd numbered rows.
+
+    //Check conflict with edit/delete at repeatable read iso,
+    //caught early, not later on at txion commit time.
+    T1 := FSession.StartTransaction(amReadWriteShared, amLazyWrite, ilReadRepeatable);
+    T2 := FSession.StartTransaction(amReadWriteShared, amLazyWrite, ilReadRepeatable);
+    try
+      try
+        try
+          DBAPI1 := T1.GetAPI;
+          DBAPI2 := T2.GetAPI;
+          try
+            Dat1 := DBAPI1.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
+            Dat2 := DBAPI2.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
+            try
+              DataRec.FieldType := ftInteger;
+              DataRec.i32Val := 41;
+              Dat1.FindByIndex('Index1', DataRec);
+              Dat2.FindByIndex('Index1', DataRec);
+              DataRec.i32Val := 84;
+              Dat1.WriteField('Int', DataRec);
+              Dat1.Post;
+            finally
+              Dat1.Free;
+              Dat2.Free;
+            end;
+          finally
+            DBAPI1.Free;
+            DBAPI2.Free;
+          end;
+          T1.CommitAndFree;
+          T1 := nil;
+          Pass := true;
+        except
+          on E: Exception do
+          begin
+            LogTimeIncr('Error: ' + E.Message);
+            raise;
+          end;
+        end;
+        //Now do the later deletion here *after* T1 has comitted,
+        //so the T2 error occurs at delete time, rather than later
+        //transaction commit.
+        DBAPI2 := T2.GetAPI;
+        try
+          Dat2 := DBAPI2.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
+          try
+            DataRec.FieldType := ftInteger;
+            DataRec.i32Val := 41;
+            Dat2.FindByIndex('Index1', DataRec);
+            Pass2 := true;
+            Dat2.Delete;
+            Pass2 := false;
+          finally
+            Dat2.Free;
+          end;
+        finally
+          DBAPI2.Free;
+        end;
+        T2.CommitAndFree;
+        T2 := nil;
+        LogTimeIncr('Error: Transaction completed when expected conflict.');
+      except
+        on E: Exception do
+        begin
+          T2.RollbackAndFree;
+          T2 := nil;
+          if Pass and Pass2 then
+            LogTimeIncr('Simultaneous row edit/delete detected OK (' + E.Message + ')')
+          else
+            raise;
+        end;
+      end;
+    finally
+      if Assigned(T1) then
+        T1.RollbackAndFree;
+      if Assigned(T2) then
+        T2.RollbackAndFree;
+    end;
+  end;
+
+  procedure RowEditCaughtEarly;
+  var
+    T1, T2: TMemDBTransaction;
+    DBAPI1, DBAPI2: TMemAPIDatabase;
+    Dat1, Dat2: TMemAPITableData;
+    DataRec: TMemDbFieldDataRec;
+    Pass, Pass2: boolean;
+  begin
+    Pass := false;
+    Pass2 := false;
+    if Limit < 42 then
+    begin
+      LogTimeIncr('Skipped test. Set LIMIT >= 41');
+      exit;
+    end;
+    //Reminder, table contains only odd numbered rows.
+
+    //Check conflict with edit/edit at repeatable read iso,
+    //caught early, not later on at txion commit time.
+    T1 := FSession.StartTransaction(amReadWriteShared, amLazyWrite, ilReadRepeatable);
+    T2 := FSession.StartTransaction(amReadWriteShared, amLazyWrite, ilReadRepeatable);
+    try
+      try
+        try
+          DBAPI1 := T1.GetAPI;
+          DBAPI2 := T2.GetAPI;
+          try
+            Dat1 := DBAPI1.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
+            Dat2 := DBAPI2.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
+            try
+              DataRec.FieldType := ftInteger;
+              DataRec.i32Val := 41;
+              Dat1.FindByIndex('Index1', DataRec);
+              Dat2.FindByIndex('Index1', DataRec);
+              DataRec.i32Val := 84;
+              Dat1.WriteField('Int', DataRec);
+              Dat1.Post;
+            finally
+              Dat1.Free;
+              Dat2.Free;
+            end;
+          finally
+            DBAPI1.Free;
+            DBAPI2.Free;
+          end;
+          T1.CommitAndFree;
+          T1 := nil;
+          Pass := true;
+        except
+          on E: Exception do
+          begin
+            LogTimeIncr('Error: ' + E.Message);
+            raise;
+          end;
+        end;
+        //Now do the later edit here *after* T1 has comitted,
+        //so the T2 error occurs at post time, rather than later
+        //transaction commit.
+        DBAPI2 := T2.GetAPI;
+        try
+          Dat2 := DBAPI2.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
+          try
+            DataRec.FieldType := ftInteger;
+            DataRec.i32Val := 41;
+            Dat2.FindByIndex('Index1', DataRec);
+            DataRec.i32Val := 85;
+            Dat2.WriteField('Int', DataRec);
+            Pass2 := true;
+            Dat2.Post;
+            Pass2 := false;
+          finally
+            Dat2.Free;
+          end;
+        finally
+          DBAPI2.Free;
+        end;
+        T2.CommitAndFree;
+        T2 := nil;
+        LogTimeIncr('Error: Transaction completed when expected conflict.');
+      except
+        on E: Exception do
+        begin
+          T2.RollbackAndFree;
+          T2 := nil;
+          if Pass and Pass2 then
+            LogTimeIncr('Simultaneous row edit/edit early detect OK (' + E.Message + ')')
+          else
+            raise;
+        end;
+      end;
+    finally
+      if Assigned(T1) then
+        T1.RollbackAndFree;
+      if Assigned(T2) then
+        T2.RollbackAndFree;
+    end;
+  end;
+
   procedure SimulRowEdit;
   var
     T1, T2: TMemDBTransaction;
@@ -1406,9 +1600,17 @@ procedure TForm1.ConcurrencyBtnClick(Sender: TObject);
 
 begin
   { Setup }
-  { Simultaneous row edit }
+  { Simultaneous row edit, caught at txion commit. }
   Setup;
   SimulRowEdit;
+  { Row edit delete conflict, with error caught during local delete,
+    not at txion commit time. (Local index error paths). }
+  Setup;
+  RowEditDeleteConflict;
+  { Row edit conflict caught early, not at txion commit.
+    (Local index error paths). }
+  Setup;
+  RowEditCaughtEarly;
   { Serialisable read conflict }
   Setup;
   SerialisableRead;
