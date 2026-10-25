@@ -2585,7 +2585,7 @@ begin
                                             IDef.FieldArray,
                                             SparseOffsets, pinEvolve);
     Assert(Length(FieldDefs) = Length(SparseOffsets));
-    if not IDef.FieldNameCount = Length(FieldDefs) then
+    if not (IDef.FieldNameCount = Length(FieldDefs)) then
       raise EMemDbInternalException.Create(S_ERROR_GETTING_OFFSETS_IN_INDEX_BUILD);
 
     SetLength(CompactOffsets, Length(SparseOffsets));
@@ -3081,7 +3081,7 @@ begin
     FieldDefs := FParentTable.FieldsByNames(CurrentBufSelector, CCDef.FieldArray, SparseOffsets, pinFinalCheck);
 
     Assert(Length(FieldDefs) = Length(SparseOffsets));
-    if not CCDef.FieldNameCount = Length(FieldDefs) then
+    if not (CCDef.FieldNameCount = Length(FieldDefs)) then
       raise EMemDbInternalException.Create(S_ERROR_GETTING_OFFSETS_IN_INDEX_VALIDATE);
 
     SetLength(CompactOffsets, Length(SparseOffsets));
