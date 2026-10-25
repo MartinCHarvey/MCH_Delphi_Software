@@ -899,7 +899,7 @@ end;
 
 procedure TMemDBMultiBuffered.SetListCreateClass(New: TMemDBStreamableClass);
 begin
-  if not Assigned(New) and New.InheritsFrom(TMemStreamableList) then
+  if not (Assigned(New) and New.InheritsFrom(TMemStreamableList)) then
     raise EMemDBInternalException.Create(S_CREATE_CLASS_NOT_SLIST);
   FListCreateClass := New;
 end;
