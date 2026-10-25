@@ -6772,7 +6772,7 @@ begin
 
   if OptApplies(optEntitiesParallel, Opts) then
   begin
-    ParallelInit(Handlers, Refs2, Refs2, Excepts, Rets, PCount);
+    ParallelInit(Handlers, Refs1, Refs2, Excepts, Rets, PCount);
     TPOPre.Tid := Tid;
     TPOPre.Phase := Phase;
     TPOPre.Opts := Opts;
