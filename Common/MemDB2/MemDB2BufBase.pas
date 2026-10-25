@@ -759,7 +759,7 @@ begin
   begin
     DLListRemoveObj(@Reffing.Link);
     Reffing.Free;
-    Reffing := PTidReference(Reffing.Link.FLink.Owner);
+    Reffing := PTidReference(FTidsReffingList.FLink.Owner);
   end;
 {$ENDIF}
   inherited;
@@ -899,7 +899,7 @@ end;
 
 procedure TMemDBMultiBuffered.SetListCreateClass(New: TMemDBStreamableClass);
 begin
-  if not Assigned(New) and New.InheritsFrom(TMemStreamableList) then
+  if not (Assigned(New) and New.InheritsFrom(TMemStreamableList)) then
     raise EMemDBInternalException.Create(S_CREATE_CLASS_NOT_SLIST);
   FListCreateClass := New;
 end;

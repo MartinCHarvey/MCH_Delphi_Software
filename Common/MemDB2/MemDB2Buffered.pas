@@ -797,6 +797,7 @@ const
   S_FROM_SCRATCH_REQUIRES_EMPTY_OBJ = 'Journal replay from scratch must start with empty objects.';
   S_INTERNAL_CHECKING_STRUCTURE = 'Internal error checking changed row structure';
   S_FIELDS_NOT_SAME_AS_META = 'Changed fields not the same as metadata';
+  S_FIELDS_NOT_SAME_AS_META_WRITING = 'Changed fields not the same as metadata; Writing and API checks passed!';
   S_TABLE_WITH_NO_FIELDS_HAS_ROWS = 'Streamed in table has rows but no fields!';
   S_JOURNAL_REPLAY_NAMES_INCONSISTENT = 'Journal replay, names inconsistent.';
   S_FK_FIELD_MISSING = 'Foreign key relationship: required data is missing.';
@@ -804,7 +805,7 @@ const
   S_FK_REFERENCES_INDEX = 'Cannot delete index, it is referenced by a foreign key.';
 
   S_API_TRANSACTION_IS_RO = 'Write operation attempted in read-only transaction.';
-  S_API_NO_SUCH_API_OBJECT = 'No API object, bad handle, or API ID not supported.';
+  S_API_NO_SUCH_API_OBJECT = 'Getting API object: No API object, bad handle, or API ID not supported.';
   S_API_NEXT_PREV_REQUIRES_CURRENT_ROW =
     'Navigating to next or previous row requires that you be on a row to start with.';
   S_API_SEARCH_VAL_BAD_TYPE = 'Search key data must be of same type as field.';
@@ -1138,9 +1139,7 @@ end;
 
 function TMemDBAPI.GetApiObject(ID: TMemDBAPIId; RaiseIfNoAPI: boolean = true): TMemDBAPI;
 begin
-  result := FInterfacedObject.GetAPIObject(FAssociatedTransaction, ID);
-  if (not Assigned(result)) and RaiseIfNoAPI then
-    raise EMemDBAPIException.Create(S_API_NO_SUCH_API_OBJECT);
+  result := FInterfacedObject.GetAPIObject(FAssociatedTransaction, ID, RaiseIfNoAPI);
 end;
 
 destructor TMemDBAPI.Destroy;
@@ -2586,7 +2585,7 @@ begin
                                             IDef.FieldArray,
                                             SparseOffsets, pinEvolve);
     Assert(Length(FieldDefs) = Length(SparseOffsets));
-    if not IDef.FieldNameCount = Length(FieldDefs) then
+    if not (IDef.FieldNameCount = Length(FieldDefs)) then
       raise EMemDbInternalException.Create(S_ERROR_GETTING_OFFSETS_IN_INDEX_BUILD);
 
     SetLength(CompactOffsets, Length(SparseOffsets));
@@ -3082,7 +3081,7 @@ begin
     FieldDefs := FParentTable.FieldsByNames(CurrentBufSelector, CCDef.FieldArray, SparseOffsets, pinFinalCheck);
 
     Assert(Length(FieldDefs) = Length(SparseOffsets));
-    if not CCDef.FieldNameCount = Length(FieldDefs) then
+    if not (CCDef.FieldNameCount = Length(FieldDefs)) then
       raise EMemDbInternalException.Create(S_ERROR_GETTING_OFFSETS_IN_INDEX_VALIDATE);
 
     SetLength(CompactOffsets, Length(SparseOffsets));
@@ -3916,7 +3915,18 @@ begin
     end;
     try
       Cursor.Row.RemoveFromLocalIndices(self);
-      Cursor.Row.Delete(FTid);
+      try
+        //Unfortunately data is immutable whilst indexed.
+        Cursor.Row.Delete(FTid);
+      except
+        //Even if failed (typically concurrency case unless data totally hosed),
+        //re-add back in to local indices, which improves the situation
+        //where txion local data is used instead of an immediate abort.
+        //This case tested in RowEditDeleteConflict.
+
+        Cursor.Row.AddToLocalIndices(self);
+        raise;
+      end;
     except
       //Unfortunately have to alloc new cursor before delete.
       result.Free;
@@ -3942,7 +3952,9 @@ begin
   //I am in TidLocal, so atomic Meta/Index pin has already happened.
 
   CurMeta := META_PinCurrent(pinEvolve) as TMemTableMetadataItem;
-  TMemDBRow.StaticCheckFormatAgainstMeta(FieldList, CurMeta);
+  //Should already have been checked at API layer, but double check here.
+  if not TMemDBRow.StaticCheckFormatAgainstMeta(FieldList, CurMeta) then
+    raise EMemDBInternalException.Create(S_FIELDS_NOT_SAME_AS_META_WRITING);
   result := nil;
   if Appending then
   begin
@@ -3978,12 +3990,18 @@ begin
     //Caught nicely in isolation >= RepeatableRead.
     //Caught less nicely in isolation CommittedRead
     Row.RemoveFromLocalIndices(self);
-
-    Row.RequestChange(FTid);
-    Next := Row.GetNext(FTid);
-    Next.DeepAssign(FieldList);
-
-    Row.AddToLocalIndices(self);
+    try
+      //Unfortunately, local indices can index "Next" items, which need
+      //to be immutable whilst they are in the index.
+      Row.RequestChange(FTid);
+      Next := Row.GetNext(FTid);
+      Next.DeepAssign(FieldList);
+    finally
+      //Even if failed (typically concurrency case unless data totally hosed),
+      //re-add back in to local indices, which improves the situation
+      //where txion local data is used instead of an immediate abort.
+      Row.AddToLocalIndices(self);
+    end;
 
     try
       //Similar to existing cursor, but no INode hint.
@@ -4695,7 +4713,7 @@ begin
 
   //Don't lock master row list, instead used Tid Local, even if it has more
   //lock acquisitions.
-  TidLocal := GetTidLocal(Tid);
+  TidLocal := GetOptTidLocal(Tid);
   if Assigned(TidLocal) then
   begin
     //Some very pathalogical cases involve rollback for nonexistent Tid.
@@ -6771,7 +6789,7 @@ begin
 
   if OptApplies(optEntitiesParallel, Opts) then
   begin
-    ParallelInit(Handlers, Refs2, Refs2, Excepts, Rets, PCount);
+    ParallelInit(Handlers, Refs1, Refs2, Excepts, Rets, PCount);
     TPOPre.Tid := Tid;
     TPOPre.Phase := Phase;
     TPOPre.Opts := Opts;
@@ -7273,9 +7291,9 @@ begin
       Entity := Proxy.Proxy as TMemDBEntity;
       //Cross check with entities this transaction can reasonably have altered.
       if TxList.IndexOf(Proxy) >= 0 then
-        result := result or Entity.AnyChangesForTid(Tid, Ctxt)
-      else
-        Assert(not Entity.AnyChangesForTid(Tid, Ctxt));
+        result := result or Entity.AnyChangesForTid(Tid, Ctxt);
+      // Cannot assert state for entities not registered for Txion.
+      // See voluminous comment in commit for reasons why.
     end;
   finally
     EntityList.Release;
@@ -7490,7 +7508,9 @@ begin
     for i := 0 to Pred(CETxt.FCacheList.Count) do
       Inc(TSize, TMemDBNodeCache(CETxt.FCacheList[i]).Count);
     MCache := TMemDBNodeCache.Create;
+    //All mem-alloc is done up front here.
     MCache.Capacity := TSize;
+    //Copying and freeing from here on in
     for i := 0 to Pred(CETxt.FCacheList.Count) do
       MCache.TakeNodesFrom(TMemDBNodeCache(CETxt.FCacheList[i]));
     for i := 0 to Pred(CETxt.FCacheList.Count) do
