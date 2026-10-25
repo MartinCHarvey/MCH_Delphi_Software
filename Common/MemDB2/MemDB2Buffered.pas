@@ -7508,7 +7508,9 @@ begin
     for i := 0 to Pred(CETxt.FCacheList.Count) do
       Inc(TSize, TMemDBNodeCache(CETxt.FCacheList[i]).Count);
     MCache := TMemDBNodeCache.Create;
+    //All mem-alloc is done up front here.
     MCache.Capacity := TSize;
+    //Copying and freeing from here on in
     for i := 0 to Pred(CETxt.FCacheList.Count) do
       MCache.TakeNodesFrom(TMemDBNodeCache(CETxt.FCacheList[i]));
     for i := 0 to Pred(CETxt.FCacheList.Count) do
