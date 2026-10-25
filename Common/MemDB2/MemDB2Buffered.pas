@@ -797,6 +797,7 @@ const
   S_FROM_SCRATCH_REQUIRES_EMPTY_OBJ = 'Journal replay from scratch must start with empty objects.';
   S_INTERNAL_CHECKING_STRUCTURE = 'Internal error checking changed row structure';
   S_FIELDS_NOT_SAME_AS_META = 'Changed fields not the same as metadata';
+  S_FIELDS_NOT_SAME_AS_META_WRITING = 'Changed fields not the same as metadata; Writing and API checks passed!';
   S_TABLE_WITH_NO_FIELDS_HAS_ROWS = 'Streamed in table has rows but no fields!';
   S_JOURNAL_REPLAY_NAMES_INCONSISTENT = 'Journal replay, names inconsistent.';
   S_FK_FIELD_MISSING = 'Foreign key relationship: required data is missing.';
@@ -3942,7 +3943,9 @@ begin
   //I am in TidLocal, so atomic Meta/Index pin has already happened.
 
   CurMeta := META_PinCurrent(pinEvolve) as TMemTableMetadataItem;
-  TMemDBRow.StaticCheckFormatAgainstMeta(FieldList, CurMeta);
+  //Should already have been checked at API layer, but double check here.
+  if not TMemDBRow.StaticCheckFormatAgainstMeta(FieldList, CurMeta) then
+    raise EMemDBInternalException.Create(S_FIELDS_NOT_SAME_AS_META_WRITING);
   result := nil;
   if Appending then
   begin
