@@ -61,7 +61,7 @@ type
   public
     procedure CreateTable(Name: string);
     procedure CreateForeignKey(Name: string);
-    function GetAPIObjectFromEntity(Name: string; API: TMemDBAPIId): TMemDBAPI;
+    function GetAPIObjectFromEntity(Name: string; API: TMemDBAPIId; RaiseIfNoApiOrEntity: boolean = false): TMemDBAPI;
     procedure RenameTableOrKey(OldName, NewName: string);
     procedure DeleteTableOrKey(Name: string);
     function GetEntityNames: TStringList;
@@ -172,7 +172,7 @@ type
     procedure API_RenameTableOrKey(T: TObject; OldName, NewName: string);
     procedure API_DeleteTableOrKey(T: TObject; Name: string);
     function API_GetEntityNames(T: TObject): TStringList;
-    function API_GetAPIObjectFromEntity(T: TObject; Name: string; API: TMemDBAPIId): TMemDBAPI;
+    function API_GetAPIObjectFromEntity(T: TObject; Name: string; API: TMemDBAPIId; RaiseIfNoApiOrEntity: boolean = false): TMemDBAPI;
     function HandleInterfacedObjRequest(Transaction: TObject; ID: TMemDBAPIId): TMemDBAPI;override;
 
     property Policies: TOptimizePolicies read FPolicies write FPolicies;
@@ -311,6 +311,7 @@ const
   S_API_NO_ROW_FOR_DELETE = 'You need to navigate to a row before you can delete it.';
   S_API_INDEX_FOR_FK_UNIQUE_ATTR = 'Foreign key: referenced index must have unique attribute set.';
   S_TABLE_FORMAT_CONCURRENTLY_CHANGED = 'Concurrency: Table format changed whilst iterating.';
+  S_API_NO_SUCH_ENTITY = 'Getting API object: No entity by that name.';
 
 function MakeStream(StorageMode: TTempStorageMode): TStream;
 var
@@ -569,9 +570,9 @@ begin
   result := DB.API_GetEntityNames(FAssociatedTransaction);
 end;
 
-function TMemAPIDatabase.GetAPIObjectFromEntity(Name: string; API: TMemDBAPIId): TMemDBAPI;
+function TMemAPIDatabase.GetAPIObjectFromEntity(Name: string; API: TMemDBAPIId; RaiseIfNoApiOrEntity: boolean): TMemDBAPI;
 begin
-  result := DB.API_GetApiObjectFromEntity(FAssociatedTransaction,Name, API);
+  result := DB.API_GetApiObjectFromEntity(FAssociatedTransaction,Name, API, RaiseIfNoApiOrEntity);
 end;
 
 { TMemAPITable }
@@ -1149,7 +1150,7 @@ begin
   end;
 end;
 
-function TMemDBDatabase.API_GetAPIObjectFromEntity(T: TObject; Name: string; API: TMemDBAPIId): TMemDBAPI;
+function TMemDBDatabase.API_GetAPIObjectFromEntity(T: TObject; Name: string; API: TMemDBAPIId; RaiseIfNoApiOrEntity: boolean): TMemDBAPI;
 var
   Tr: TMemDbTransaction;
   AB: TBufSelector;
@@ -1162,7 +1163,7 @@ begin
   if Assigned(Entity) then
   begin
     try
-      result := Entity.Interfaced.GetAPIObject(Tr, API, false);
+      result := Entity.Interfaced.GetAPIObject(Tr, API, RaiseIfNoApiOrEntity);
       if Assigned(result) and (result is TMemAPITableData) then
       begin
         (result as TMemAPITableData).FTidLocalHint
@@ -1172,6 +1173,11 @@ begin
       Entity.Proxy.Release;
     end;
   end
+  else
+  begin
+    if RaiseIfNoApiOrEntity then
+        raise EMemDBAPIException.Create(S_API_NO_SUCH_ENTITY);
+  end;
 end;
 
 function TMemDBDatabase.HandleInterfacedObjRequest(Transaction: TObject; ID: TMemDBAPIId): TMemDBAPI;

@@ -805,7 +805,7 @@ const
   S_FK_REFERENCES_INDEX = 'Cannot delete index, it is referenced by a foreign key.';
 
   S_API_TRANSACTION_IS_RO = 'Write operation attempted in read-only transaction.';
-  S_API_NO_SUCH_API_OBJECT = 'No API object, bad handle, or API ID not supported.';
+  S_API_NO_SUCH_API_OBJECT = 'Getting API object: No API object, bad handle, or API ID not supported.';
   S_API_NEXT_PREV_REQUIRES_CURRENT_ROW =
     'Navigating to next or previous row requires that you be on a row to start with.';
   S_API_SEARCH_VAL_BAD_TYPE = 'Search key data must be of same type as field.';
@@ -1139,9 +1139,7 @@ end;
 
 function TMemDBAPI.GetApiObject(ID: TMemDBAPIId; RaiseIfNoAPI: boolean = true): TMemDBAPI;
 begin
-  result := FInterfacedObject.GetAPIObject(FAssociatedTransaction, ID);
-  if (not Assigned(result)) and RaiseIfNoAPI then
-    raise EMemDBAPIException.Create(S_API_NO_SUCH_API_OBJECT);
+  result := FInterfacedObject.GetAPIObject(FAssociatedTransaction, ID, RaiseIfNoAPI);
 end;
 
 destructor TMemDBAPI.Destroy;
