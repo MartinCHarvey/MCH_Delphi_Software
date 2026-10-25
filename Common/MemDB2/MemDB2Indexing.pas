@@ -474,6 +474,7 @@ begin
   FRoot.Release; //Not to cache...
   FNext.Release; //Not to cache...
   FCache.Free;
+  FStandbyCache.Free; //Placate claude code. Should be NIL unless internal error.
   inherited;
 end;
 
