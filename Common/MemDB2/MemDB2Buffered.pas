@@ -4695,7 +4695,7 @@ begin
 
   //Don't lock master row list, instead used Tid Local, even if it has more
   //lock acquisitions.
-  TidLocal := GetTidLocal(Tid);
+  TidLocal := GetOptTidLocal(Tid);
   if Assigned(TidLocal) then
   begin
     //Some very pathalogical cases involve rollback for nonexistent Tid.
