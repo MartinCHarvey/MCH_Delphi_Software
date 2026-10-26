@@ -86,6 +86,7 @@ function TCoWABTree.Add(item: TCoWTreeItem; Src,Dest: TCowSel): boolean;
 var
   InP, OutP: TCowTreeItem;
   h, found: TChkBool;
+  consumed: boolean;
 begin
 {$IFOPT C+}
   found := TChkBool.Create;
@@ -104,7 +105,13 @@ begin
       exit;
     end;
     InP := Roots[Src];
-    OutP := SearchAndInsert(item, InP, h, found);
+    try
+      OutP := SearchAndInsert(item, InP, h, found, consumed);
+    except
+      if not Consumed then
+        item.Release;
+      raise;
+    end;
     if Assigned(OutP) then
     begin
       Roots[Dest].Release;

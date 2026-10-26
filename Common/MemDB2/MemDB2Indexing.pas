@@ -626,7 +626,7 @@ end;
 function TMemDbIndexGeneric.Add(Sel: TAbSelType; var New: TMemDBIndexLeafGeneric): boolean;
 var
   Root, NewRoot: TMemDBIndexLeafGeneric;
-  SelGood: boolean;
+  SelGood, consumed: boolean;
   h, found: TChkBool;
 begin
 {$IFOPT C+}
@@ -651,14 +651,19 @@ begin
 
     New.FOriginalIndex := self;
     try
-      NewRoot := SearchAndInsert(New, Root, h, found) as TMemDBIndexLeaf;
+      NewRoot := SearchAndInsert(New, Root, h, found, consumed) as TMemDBIndexLeaf;
     except
-      New := nil; //Unfortunately consumed as part of clean-up
+      //Default case is node consumed and discarded on exception,
+      //which might be before or after new-tree-building-phase.
+      if not Consumed then
+        New.Release;
+      New := nil;
       raise;
     end;
     result := not RdCk(found);
     if Result then
     begin
+      Assert(Consumed);
       New := nil; //Consumed with good addition.
 
       //Mods are serialised. No clever interlocked roots.
@@ -672,7 +677,10 @@ begin
       end;
     end
     else
+    begin
+      Assert(not Consumed);
       New.FOriginalIndex := nil;
+    end;
       //Just about the only time when we can alter node fields.
 {$IFOPT C+}
   finally
