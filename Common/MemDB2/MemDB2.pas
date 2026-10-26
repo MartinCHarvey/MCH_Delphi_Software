@@ -94,6 +94,9 @@ type
     FEntitiesSnapshot: TReffedList;
     FEntitiesRegistered: TReffedList;
 
+    //RWWLock handling slightly messier than I wanted ...
+    //We expect the case where this flag is false to be vanishingly rare;
+    FRWWLocked: boolean;
     //Journalling not under same lock as commit, need a re-order buffer
     //to make sure things are journalled in same order they are comitted.
     FROBReservation: PReservation;
@@ -634,8 +637,9 @@ begin
     idx := FTransactionList.IndexOf(Transaction);
     if idx < 0 then
       raise EMemDBException.Create(S_DB_TRANSACTION_NOT_FOUND);
-    Transaction.FCommitRollbackInProgress := tiptCommitRollback;
     AsyncError := FPhase = mdbError;
+    if not AsyncError then
+      Transaction.FCommitRollbackInProgress := tiptCommitRollback;
   finally
     FSessionLock.Release;
   end;
@@ -646,7 +650,13 @@ begin
     if Commit then
       raise EMemDBException.Create(S_ERRORPHASE_COMMIT_ERROR + FLastError)
     else
-    //Allow DB force close / rollback cases to quietly clear up as much as they can.
+      //Allow DB force close / rollback cases to quietly clear up as much as they can.
+      //At least drop the locks correctly.
+      if Transaction.FRWWLocked then
+      begin
+        FRWWLock.Release(DBAccessModeToLockReason(Transaction.FMode));
+        Transaction.FRWWLocked := false;
+      end;
       goto txion_remove;
   end;
 
@@ -753,11 +763,15 @@ begin
     raise;
   end;
   //If failed commit, hold the R/W lock.
-  //If good commit, drop the lock.
+  //If good commit, drop the lock, drain and flush data.
   //If failed rollback, DB in error, exception swallowed, and drop the R/W lock.
 
   Assert(Transaction.FMode in [amReadShared, amWriteExclusive, amReadWriteShared]);
-  FRWWLock.Release(DBAccessModeToLockReason(Transaction.FMode));
+  if Transaction.FRWWLocked then
+  begin
+    FRWWLock.Release(DBAccessModeToLockReason(Transaction.FMode));
+    Transaction.FRWWLocked := false;
+  end;
 
   //Before, not after waiting for flush finished...
   DrainReorderBuffer;
@@ -846,6 +860,8 @@ begin
         end;
         raise;
       end;
+      //FRWWLocked flag only necessary for exceptions here, which
+      //we expect to be vanishingly rare.
       Session.FSessionTransactions.Add(result);
       FTransactionList.Add(result);
     finally
@@ -853,6 +869,7 @@ begin
     end;
     Assert(Mode in [amReadShared, amWriteExclusive, amReadWriteShared]);
     FRWWLock.Acquire(DBAccessModeToLockReason(Mode));
+    result.FRWWLocked := true;
 
     result.FCRInterface := FDatabase.Interfaced.GetAPIObject(result, APIInternalCommitRollback)
       as TMemAPIDatabaseInternal;
