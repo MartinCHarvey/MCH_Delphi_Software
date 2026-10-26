@@ -181,7 +181,12 @@ type
     optEntitiesParallel,
     optIndexBuildParallel,
     optIndexEvolveParallel,
-    optGuaranteedSerial
+    optGuaranteedSerial,
+    //Datastructures absolutley guaranteed single threaded.
+    optCommitOnlySerial
+    //Datastructures guaranteed *commit serial*, i.e.
+    //no row or entity changes comitted, but entitiy or row creation
+    //and hence insertion into entity / master row lists might still happen.
   );
 
 const
@@ -323,8 +328,10 @@ begin
    if DoOpt then
     result := result + [Opt];
   end;
-  if InitFirstTrans or InitNextTrans or (Mode = amWriteExclusive) then
-    result := result + [optGuaranteedSerial];
+  if InitFirstTrans or InitNextTrans then
+    result:= result + [optGuaranteedSerial, optCommitOnlySerial]
+  else if (Mode = amWriteExclusive) then
+    result := result + [optCommitOnlySerial];
 end;
 
 function EmptyOptimizeSet: TOptimizeSet;

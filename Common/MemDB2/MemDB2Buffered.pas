@@ -222,6 +222,7 @@ type
   TMemDBFKMeta = record
     Tid: TTransactionId;
     Ctxt: TTXLocalContext;
+    Opts: TOptimizeSet;
     TableReferring, TableReferred: TMemDbTablePersistent;
     IndexDefReferring, IndexDefReferred: TMemIndexDef;
     FieldDefsReferring, FieldDefsReferred: TMemFieldDefs;
@@ -2535,6 +2536,7 @@ end;
 type
   TBuildValidateIdxParallelContext = record
     LocalIter: boolean;
+    Opts: TOptimizeSet;
   end;
   PBuildValidateIdxParallelContext = ^TBuildValidateIdxParallelContext;
 
@@ -2602,8 +2604,24 @@ begin
 
     if Context.LocalIter then
       IRec := FCPRows.GetAnItem
+      //LocalIter, row prohibit locks prevent new rows being *comitted*.
     else
-      IRec := FParentTable.FMasterRowList.GetAnItem;
+    begin
+      if OptApplies(optGuaranteedSerial, Context.Opts) then
+        IRec := FParentTable.FMasterRowList.GetAnItem
+      else
+      begin
+        FParentTable.FMasterRowLock.Acquire;
+        try
+          //But only master row lock protects against concurrent insertion into
+          //the structure (separate user operations)
+          IRec := FParentTable.FMasterRowList.GetAnItem;
+        finally
+          FParentTable.FMasterRowLock.Release;
+        end;
+      end;      
+    end;
+      
     while Assigned(IRec) do
     begin
       Row := IRec.Item as TMemDBRow;
@@ -2643,7 +2661,19 @@ begin
       if Context.LocalIter then
         FCPRows.GetAnotherItem(IRec)
       else
-        FParentTable.FMasterRowList.GetAnotherItem(IRec);
+      begin
+        if OptApplies(optGuaranteedSerial, Context.Opts) then
+          FParentTable.FMasterRowList.GetAnotherItem(IRec)
+        else
+        begin
+          FParentTable.FMasterRowLock.Acquire;
+          try
+            FParentTable.FMasterRowList.GetAnotherItem(IRec);
+          finally
+            FParentTable.FMasterRowLock.Release;
+          end;
+        end;      
+      end;
     end;
     //Added all the rows.
 
@@ -2732,8 +2762,23 @@ begin
 
     if Context.LocalIter then
       IRec := FCPRows.GetAnItem
+      //LocalIter, row prohibit locks prevent new rows being *comitted*.
     else
-      IRec := FParentTable.FMasterRowList.GetAnItem;
+    begin
+      if OptApplies(optGuaranteedSerial, Context.Opts) then
+        IRec := FParentTable.FMasterRowList.GetAnItem
+      else
+      begin
+        FParentTable.FMasterRowLock.Acquire;
+        try
+          //But only master row lock protects against concurrent insertion into
+          //the structure (separate user operations)
+          IRec := FParentTable.FMasterRowList.GetAnItem;
+        finally
+          FParentTable.FMasterRowLock.Release;
+        end;
+      end;      
+    end;
 
     while Assigned(IRec) do
     begin
@@ -2761,7 +2806,19 @@ begin
       if Context.LocalIter then
         FCPRows.GetAnotherItem(IRec)
       else
-        FParentTable.FMasterRowList.GetAnotherItem(IRec);
+      begin
+        if OptApplies(optGuaranteedSerial, Context.Opts) then
+          FParentTable.FMasterRowList.GetAnotherItem(IRec)
+        else
+        begin
+          FParentTable.FMasterRowLock.Acquire;
+          try
+            FParentTable.FMasterRowList.GetAnotherItem(IRec);
+          finally
+            FParentTable.FMasterRowLock.Release;
+          end;
+        end;      
+      end;
     end;
     //Added all the rows, no extra validation required.
     result := NewIndex;
@@ -2796,6 +2853,7 @@ begin
 
   NewBuild := nil;
   UIdxContext.LocalIter := LocalIter;
+  UIdxContext.Opts := Opts;
 
   //Re-asses opts, depending on how many indexes we actually need to build
   //in parallel.
@@ -5067,6 +5125,7 @@ begin
   CCEntityReferred := nil;
 
   Meta.Tid := Tid;
+  Meta.Opts := Opts;
 
   try
     //ReferringIndex.
@@ -5331,9 +5390,21 @@ begin
   MasterRows := Added;
   TidLocal := Meta.TableReferring.GetTidLocal(Meta.Tid);
   if MasterRows then
-    IRec := Meta.TableReferring.FMasterRowList.GetAnItem
+  begin
+    if OptApplies(optGuaranteedSerial, Meta.Opts) then
+      IRec := Meta.TableReferring.FMasterRowList.GetAnItem
+    else
+    begin
+      Meta.TableReferring.FMasterRowLock.Acquire;
+      try
+        IRec := Meta.TableReferring.FMasterRowList.GetAnItem;
+      finally
+        Meta.TableReferring.FMasterRowLock.Release;
+      end;
+    end;    
+  end
   else if not TidLocal.LayoutChangeRequired then //Layout change -> No rows added.
-    IRec := TidLocal.FCPRows.GetAnItem
+      IRec := TidLocal.FCPRows.GetAnItem
   else
     IRec := nil; //Skip if layout change.
 
@@ -5383,7 +5454,19 @@ begin
       end;
     end;
     if MasterRows then
-      Meta.TableReferring.FMasterRowList.GetAnotherItem(IRec)
+    begin    
+      if OptApplies(optGuaranteedSerial, Meta.Opts) then
+        Meta.TableReferring.FMasterRowList.GetAnotherItem(IRec)
+      else
+      begin
+        Meta.TableReferring.FMasterRowLock.Acquire;
+        try
+          Meta.TableReferring.FMasterRowList.GetAnotherItem(IRec);
+        finally
+          Meta.TableReferring.FMasterRowLock.Release;
+        end;
+      end;    
+    end
     else
       TidLocal.FCPRows.GetAnotherItem(IRec);
   end;
