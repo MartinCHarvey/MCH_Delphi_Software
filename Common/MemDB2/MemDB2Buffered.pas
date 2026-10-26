@@ -6638,6 +6638,7 @@ var
   i: integer;
 begin
   result := nil;
+  AbsIndex := -1;
   for i := 0 to Pred(MetadataCopy.IndexDefs.Count) do
   begin
     Assert(Assigned(MetadataCopy.IndexDefs.Items[i]));
