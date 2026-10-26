@@ -3570,7 +3570,12 @@ var
   Added, Changed, Deleted, Null: boolean;
   AddAcc, ChangeAcc, DelAcc: boolean;
 begin
-  if not (optGuaranteedSerial in Opts) then
+  //Commit only serialisation: No rows/entities conflicting
+  //will be *committed*
+  //Differs from guaranteed serial, which also guarantees
+  //no concurrent insertions into datastructures, even for temp/non-commited
+  //items.
+  if not (optCommitOnlySerial in Opts) then
   begin
     //No locking, this is TidLocal.
     AddAcc := false;
