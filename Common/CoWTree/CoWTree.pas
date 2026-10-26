@@ -794,6 +794,8 @@ var
   Tmp: TCowTreeItem;
 begin
   Tmp := nil;
+  RetQR.q := nil;
+  RetQR.r := nil;
   try
     if Assigned(InQR.r.right) then
     begin
