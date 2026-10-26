@@ -212,6 +212,7 @@ const
   S_NEXT_PREVIOUS_REQUIRES_CURRENT = 'Next or previous by index requires current node.';
   S_INDEX_MOD_BAD_SELECTOR = 'Index selector does not agree with state of index.';
   S_ADD_REQUIRES_NODE = 'Index addition requires a node to add, and not in some other index.';
+  S_REMOVE_REQUIRES_NODE = 'Index removal requires a node to remove.';
   S_FIND_REQUIRES_SEARCHVAL = 'Index find requires search value';
 
 implementation
@@ -703,7 +704,7 @@ begin
     if not SelGood then
       raise EMemDBInternalException.Create(S_INDEX_MOD_BAD_SELECTOR);
     if not Assigned(Old) then
-      raise EMemDBException.Create(S_ADD_REQUIRES_NODE);
+      raise EMemDBException.Create(S_REMOVE_REQUIRES_NODE);
     NewRoot := Delete(Old, root, h, found) as TMemDBIndexLeaf;
     result := RdCk(found);
     if Result then
