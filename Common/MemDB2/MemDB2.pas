@@ -483,6 +483,7 @@ begin
   FApiObjects.Free;
   FApiObjectLock.Free;
   FLocalContext.Free;
+  FFlushFinishedEvent.Free;
   Assert(not Assigned(FROBReservation));
   FEntitiesSnapshot.Release;
   FEntitiesRegistered.Release;
