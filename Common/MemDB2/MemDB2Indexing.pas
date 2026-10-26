@@ -304,12 +304,23 @@ begin
         result := 0;
     ftUnicodeString: result := CompareStr(OtherRec.sVal, OwnRec.sVal);
     ftDouble:
-      if OtherRec.dVal > OwnRec.dVal then
+    begin
+      if OwnRec.dVal.IsNan then
+      begin
+        if OtherRec.dVal.IsNan then
+          result := 0
+        else
+          result := -1;
+      end
+      else if OtherRec.dVal.IsNan then
+        result := 1
+      else if OtherRec.dVal > OwnRec.dVal then
         result := 1
       else if OtherRec.dVal < OwnRec.dVal then
         result := -1
       else
         result := 0;
+    end;
     ftGuid: result := CompareGuids(OtherRec.gVal, OwnRec.gVal);
     ftBlob:
     begin
