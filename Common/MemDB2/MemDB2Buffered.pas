@@ -6937,6 +6937,7 @@ begin
               Names.Add(ILat.EntityName);
             end;
           end;
+          Names.CaseSensitive := true;
           Names.Sort;
           if Names.Count > 1 then
           begin
