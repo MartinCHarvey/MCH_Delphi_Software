@@ -549,8 +549,8 @@ begin
         Assert(Assigned(O.Data) = (O.size > 0));
         result := (S.size = O.size)
           and (Assigned(S.Data) = Assigned(O.Data))
-          and (not Assigned(S.Data))
-            or  (CompareMem(S.Data, O.Data, S.size));
+          and ((not Assigned(S.Data))
+            or  (CompareMem(S.Data, O.Data, S.size)));
       end;
       ftGuid: result := S.gVal = O.gVal;
     else
