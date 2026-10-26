@@ -7636,6 +7636,14 @@ end;
 function TMemDBDatabasePersistent.AssembleEntityList: TReffedList;
 var
   Proxy: TMemDBEntityProxy;
+  ProxyReffed: TReffed;
+  //This list assembling really is totally asynchronous and unlocked,
+  //compared to entity teardown: Tx Rollback, Zombies, and API object
+  //teardown can happen totally asynchronously with any other locks except
+  //the entity lock.
+
+  //Higher level synchronization then assured by comparing with Txion local
+  //copies of entity lists.
 begin
   result := TReffedList.Create;
   try
@@ -7644,7 +7652,9 @@ begin
       Proxy := FEntityList.FLink.Owner as TMemDBEntityProxy;
       while Assigned(Proxy) do
       begin
-        result.AddNoRef(Proxy.AddRef);
+        ProxyReffed := Proxy.TryAddRef;
+        if Assigned(ProxyReffed) then
+          result.AddNoRef(ProxyReffed);
         Proxy := Proxy.FSiblings.FLink.Owner as TMemDBEntityProxy;
       end;
     finally
