@@ -125,7 +125,9 @@ type
     function Delete(item: TCoWTreeItem; Inp: TCowTreeItem;
                              var h: TChkBool; var found:TChkBool): TCowTreeItem;
     function SearchAndInsert(item: TCoWTreeItem; Inp: TCowTreeItem;
-                             var h: TChkBool; var found:TChkBool): TCowTreeItem;
+                             var h: TChkBool; var found:TChkBool; var consumed: boolean): TCowTreeItem;
+    function SearchAndInsertInt(item: TCoWTreeItem; Inp: TCowTreeItem;
+                             var h: TChkBool; var found:TChkBool; var consumed: boolean): TCowTreeItem;
     function SearchNearItem(item: TCoWTreeItem; Inp: TCowTreeItem): TCowTreeItem;
     //Search based on key value (no de-dup of keys/nodes).
     function SearchItem(item: TCoWTreeItem; Inp: TCowTreeItem): TCowTreeItem;
@@ -376,10 +378,17 @@ begin
   end;
 end;
 
+function TCowTree.SearchAndInsert(item: TCoWTreeItem; Inp: TCowTreeItem;
+                                  var h: TChkBool; var found:TChkBool; var consumed: boolean): TCowTreeItem;
+begin
+  consumed := false;
+  result := SearchAndInsertInt(item, InP, h, found, consumed);
+end;
+
 //Slight change here. On failure, return NIL, rather than
 //unchanged root. It makes exception handling easier.
-function TCowTree.SearchAndInsert(item: TCoWTreeItem; Inp: TCowTreeItem;
-                         var h: TChkBool; var found:TChkBool): TCowTreeItem;
+function TCowTree.SearchAndInsertInt(item: TCoWTreeItem; Inp: TCowTreeItem;
+                         var h: TChkBool; var found:TChkBool; var consumed:boolean): TCowTreeItem;
 var
   comparison: integer;
   Retp, CallP: TCowTreeItem;
@@ -401,6 +410,10 @@ begin
       WrCk(h, true);
       WrCk(found, false);
 
+      //Disambiguate before/after supplied node becomes part
+      //of the tree which we free on exception.
+      consumed := true;
+
       result := NewNode;
       NewNode := nil; // transfer ownership
       Exit;
@@ -412,7 +425,7 @@ begin
     begin
       // go left
       CallP := InP.left;
-      Retp := SearchAndInsert(item, CallP, h, found);
+      Retp := SearchAndInsertInt(item, CallP, h, found, consumed);
       if Assigned(RetP) then //subtree ptr changed, but we know what it was before.
       begin
         Assert(RetP <> CallP);
@@ -444,7 +457,7 @@ begin
     begin
       // go right
       CallP := InP.right;
-      Retp := SearchAndInsert(item, CallP, h, found);
+      Retp := SearchAndInsertInt(item, CallP, h, found, consumed);
       if Assigned(RetP) then  //subtree ptr changed, but we know what it was before.
       begin
         Assert(RetP <> CallP);
@@ -794,6 +807,8 @@ var
   Tmp: TCowTreeItem;
 begin
   Tmp := nil;
+  RetQR.q := nil;
+  RetQR.r := nil;
   try
     if Assigned(InQR.r.right) then
     begin

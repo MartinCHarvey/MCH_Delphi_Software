@@ -76,6 +76,7 @@ function TCowSimpleTree.Add(item: TCoWTreeItem): boolean;
 var
   OutP: TCowTreeItem;
   h, found: TChkBool;
+  consumed: boolean;
 begin
 {$IFOPT C+}
   found := TChkBool.Create;
@@ -93,7 +94,13 @@ begin
       result := false;
       exit;
     end;
-    OutP := SearchAndInsert(item, Root, h, found);
+    try
+      OutP := SearchAndInsert(item, Root, h, found, consumed);
+    except
+      if not Consumed then
+        Item.Release;
+      raise;
+    end;
     result := not RdCk(found);
     Assert(result = Assigned(Outp));
     if Assigned(OutP) then

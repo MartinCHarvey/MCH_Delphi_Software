@@ -212,6 +212,7 @@ const
   S_NEXT_PREVIOUS_REQUIRES_CURRENT = 'Next or previous by index requires current node.';
   S_INDEX_MOD_BAD_SELECTOR = 'Index selector does not agree with state of index.';
   S_ADD_REQUIRES_NODE = 'Index addition requires a node to add, and not in some other index.';
+  S_REMOVE_REQUIRES_NODE = 'Index removal requires a node to remove.';
   S_FIND_REQUIRES_SEARCHVAL = 'Index find requires search value';
 
 implementation
@@ -303,12 +304,23 @@ begin
         result := 0;
     ftUnicodeString: result := CompareStr(OtherRec.sVal, OwnRec.sVal);
     ftDouble:
-      if OtherRec.dVal > OwnRec.dVal then
+    begin
+      if OwnRec.dVal.IsNan then
+      begin
+        if OtherRec.dVal.IsNan then
+          result := 0
+        else
+          result := -1;
+      end
+      else if OtherRec.dVal.IsNan then
+        result := 1
+      else if OtherRec.dVal > OwnRec.dVal then
         result := 1
       else if OtherRec.dVal < OwnRec.dVal then
         result := -1
       else
         result := 0;
+    end;
     ftGuid: result := CompareGuids(OtherRec.gVal, OwnRec.gVal);
     ftBlob:
     begin
@@ -625,7 +637,7 @@ end;
 function TMemDbIndexGeneric.Add(Sel: TAbSelType; var New: TMemDBIndexLeafGeneric): boolean;
 var
   Root, NewRoot: TMemDBIndexLeafGeneric;
-  SelGood: boolean;
+  SelGood, consumed: boolean;
   h, found: TChkBool;
 begin
 {$IFOPT C+}
@@ -650,14 +662,19 @@ begin
 
     New.FOriginalIndex := self;
     try
-      NewRoot := SearchAndInsert(New, Root, h, found) as TMemDBIndexLeaf;
+      NewRoot := SearchAndInsert(New, Root, h, found, consumed) as TMemDBIndexLeaf;
     except
-      New := nil; //Unfortunately consumed as part of clean-up
+      //Default case is node consumed and discarded on exception,
+      //which might be before or after new-tree-building-phase.
+      if not Consumed then
+        New.Release;
+      New := nil;
       raise;
     end;
     result := not RdCk(found);
     if Result then
     begin
+      Assert(Consumed);
       New := nil; //Consumed with good addition.
 
       //Mods are serialised. No clever interlocked roots.
@@ -671,7 +688,10 @@ begin
       end;
     end
     else
+    begin
+      Assert(not Consumed);
       New.FOriginalIndex := nil;
+    end;
       //Just about the only time when we can alter node fields.
 {$IFOPT C+}
   finally
@@ -703,7 +723,7 @@ begin
     if not SelGood then
       raise EMemDBInternalException.Create(S_INDEX_MOD_BAD_SELECTOR);
     if not Assigned(Old) then
-      raise EMemDBException.Create(S_ADD_REQUIRES_NODE);
+      raise EMemDBException.Create(S_REMOVE_REQUIRES_NODE);
     NewRoot := Delete(Old, root, h, found) as TMemDBIndexLeaf;
     result := RdCk(found);
     if Result then
