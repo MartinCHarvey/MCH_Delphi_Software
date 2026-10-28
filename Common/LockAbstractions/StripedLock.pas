@@ -24,6 +24,9 @@ IN THE SOFTWARE.
 }
 interface
 
+//Compilation problems here? Try using this conditional...
+{$IFDEF USE_STRIPED_LOCK}
+
 uses
   CRC32,
 {$IFOPT C+}
@@ -48,7 +51,11 @@ type
     procedure Release;
   end;
 
+{$ENDIF}
+
 implementation
+
+{$IFDEF USE_STRIPED_LOCK}
 
 {$IFDEF MSWINDOWS}
 uses
@@ -143,5 +150,6 @@ initialization
   InitLocks;
 finalization
   FiniLocks;
+{$ENDIF}
 end.
 

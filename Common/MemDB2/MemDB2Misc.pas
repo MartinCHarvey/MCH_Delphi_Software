@@ -161,7 +161,19 @@ type
   TMDBABSelTypeStrings = array[TABSelType] of string;
   TMemAPIPositionStrings = array[TMemAPIPosition] of string;
 
-  TMemDBTempFileStream = class(TWriteCachedFileStream)
+  TMemDBTempCachedFileStream = class(TWriteCachedFileStream)
+  private
+    FFileName: string;
+{$IFDEF USE_TRACKABLES}
+    FProxy: TTrackProxy;
+{$ENDIF}
+  public
+    constructor Create(const FileName: string);
+    destructor Destroy; override;
+    property FileName:string read FFileName;
+  end;
+
+  TMemDBTempFileStream = class(TFileStream)
   private
     FFileName: string;
 {$IFDEF USE_TRACKABLES}
@@ -183,10 +195,12 @@ type
     optIndexEvolveParallel,
     optGuaranteedSerial,
     //Datastructures absolutley guaranteed single threaded.
-    optCommitOnlySerial
+    optCommitOnlySerial,
     //Datastructures guaranteed *commit serial*, i.e.
     //no row or entity changes comitted, but entitiy or row creation
     //and hence insertion into entity / master row lists might still happen.
+    optLowMemory
+    //When rollbacks can't alloc.
   );
 
 const
@@ -250,7 +264,7 @@ const
 
 var
   AllIndexAttrs: TMDBIndexAttrs;
-  MemDBXlateExceptions: TExceptionHandlerChain;
+  MemDBXlateExceptions: array [0..1] of TExceptionHandlerChain;
 
 procedure AppendTrailingDirSlash(var Path: string);
 
@@ -271,7 +285,8 @@ function MakeOptimizationSet(const Policies: TOptimizePolicies;
                              InitFirstTrans, InitNextTrans, UserOp: boolean;
                              DBSizeHint: TDBSizeHint;
                              TxionSizeEstimate: int64;
-                             Mode:TMDBAccessMode): TOptimizeSet;
+                             Mode:TMDBAccessMode;
+                             LowMemory: boolean): TOptimizeSet;
 
 function CleardownOptSet: TOptimizeSet;
 
@@ -302,7 +317,8 @@ function MakeOptimizationSet(const Policies: TOptimizePolicies;
                              InitFirstTrans, InitNextTrans, UserOp: boolean;
                              DBSizeHint: TDBSizeHint;
                              TxionSizeEstimate: int64;
-                             Mode:TMDBAccessMode): TOptimizeSet;
+                             Mode:TMDBAccessMode;
+                             LowMemory: boolean): TOptimizeSet;
 var
   Opt: TOptimization;
   Policy: POptimizePolicy;
@@ -332,6 +348,8 @@ begin
     result:= result + [optGuaranteedSerial, optCommitOnlySerial]
   else if (Mode = amWriteExclusive) then
     result := result + [optCommitOnlySerial];
+  if LowMemory then
+    result := result + [optLowMemory];
 end;
 
 function EmptyOptimizeSet: TOptimizeSet;
@@ -464,9 +482,10 @@ begin
   result := (Left.Tid <> Right.Tid) or (Left.SelType <> Right.SelType);
 end;
 
-{ TMemDBTempFileStream }
 
-constructor TMemDBTempFileStream.Create(const FileName: string);
+{ TMemDBTempCachedFileStream }
+
+constructor TMemDBTempCachedFileStream.Create(const FileName: string);
 begin
   FFileName := FileName;
 {$IFDEF MSWINDOWS}
@@ -474,6 +493,34 @@ begin
 {$ELSE}
   inherited Create(FileName, fmCreate);
 {$ENDIF}
+{$IFDEF USE_TRACKABLES}
+  FProxy := TTrackProxy.Create;
+  FProxy.Init(self);
+{$ENDIF}
+end;
+
+destructor TMemDBTempCachedFileStream.Destroy;
+var
+  Tmp: string;
+begin
+  Tmp := FFileName;
+  try
+{$IFDEF USE_TRACKABLES}
+    FProxy.Free;
+{$ENDIF}
+    inherited;
+  finally
+    if Length(Tmp) > 0 then
+      SysUtils.DeleteFile(Tmp);
+  end;
+end;
+
+{ TMemDBTempFileStream }
+
+constructor TMemDBTempFileStream.Create(const FileName: string);
+begin
+  FFileName := FileName;
+  inherited Create(FileName, fmCreate or fmShareExclusive);
 {$IFDEF USE_TRACKABLES}
   FProxy := TTrackProxy.Create;
   FProxy.Init(self);
@@ -638,8 +685,27 @@ end;
 
 { TMemDBStats }
 
-function MemDBGeneralXlateExceptions(EClass: SysUtils.ExceptClass;
-                              EMsg: string): boolean;
+function MemDbGeneralFilterExceptions(EClass: SysUtils.ExceptClass;
+                                             EMsg: string):TExceptionFilterAction;
+begin
+  while Assigned(EClass) do
+  begin
+    if (EClass = EMemDBInternalException)
+      or (EClass = EMemDBConsistencyException)
+      or (EClass = EMemDBAPIException)
+      or (EClass = EMemDBConcurrencyException)
+      or (EClass = EMemDBException) then
+    begin
+      result := tetaThrowOnceAllRecorded;
+      exit;
+    end;
+    EClass := SysUtils.ExceptClass(EClass.ClassParent);
+  end;
+  result := tetaIgnore;
+end;
+
+procedure MemDBGeneralXlateExceptions(EClass: SysUtils.ExceptClass;
+                              EMsg: string);
 begin
   while Assigned(EClass) do
   begin
@@ -655,7 +721,6 @@ begin
       raise EMemDbException.Create(EMsg);
     EClass := SysUtils.ExceptClass(EClass.ClassParent);
   end;
-  result := false;
 end;
 
 initialization
@@ -664,9 +729,16 @@ initialization
 {$ENDIF}
 
   AllIndexAttrs := GetAllIndexAttrs;
-  with MemDBXlateExceptions do
+  with MemDBXlateExceptions[0] do
   begin
-    Func := MemDBGeneralXlateExceptions;
+    FilterFunc := MemDBGeneralFilterExceptions;
+    XlatorFunc := MemDBGeneralXlateExceptions;
+    Next := @MemDBXlateExceptions[1];
+  end;
+  with MemDBXlateExceptions[1] do
+  begin
+    FilterFunc := ParalleliserFilterCommonExceptions;
+    XLatorFunc := ParalleliserForwardCommonExceptions;
     Next := nil;
   end;
   //N.B. When you do things in parallel, even commits and rollbacks under the

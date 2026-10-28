@@ -37,7 +37,7 @@ interface
 //Not in this unit unless changes made, thanks. Slows stuff down.
 {$ENDIF}
 
-uses BinaryTree, DLList, Trackables, Parallelizer, TinyLock;
+uses BinaryTree, DLList, Trackables, Parallelizer, TinyLock, SysUtils;
 
 {
   Concurrency: Indexes can be added and removed in parallel, via the
@@ -329,9 +329,10 @@ type
     property SearchVal: TObject read FSearchVal write FSearchVal;
   end;
 
+
 implementation
 
-uses SysUtils, LockAbstractions, PComp;
+uses LockAbstractions, PComp;
 //Use Windows CMPXCHG not TInterlocked, which is broken on XE4.
 
 const
@@ -898,10 +899,54 @@ begin
   result := Pointer(rvOK);
 end;
 
-function IndexedStoreSwallowENoMemExceptions(EClass: SysUtils.ExceptClass;
-                                             EMsg: string): boolean;
+function IndexedStoreRecordCommonExceptions(EClass: SysUtils.ExceptClass;
+                                             EMsg: string):TExceptionFilterAction;
 begin
-  result := (EClass = EOutOfMemory);
+  while Assigned(EClass) do
+  begin
+    if (EClass = EOutOfMemory)
+      or (EClass = EAccessViolation)
+      or (EClass = EListError)
+      or (EClass = EIntError)
+      or (EClass = EMathError)
+      or (EClass = EStackOverflow) then
+    begin
+      result := tetaRecordException;
+      exit;
+    end;
+    EClass := ExceptClass(EClass.ClassParent);
+  end;
+  result := tetaIgnore;
+end;
+
+procedure IndexedStoreNoForwardCommonExceptions(EClass: SysUtils.ExceptClass;
+                                             EMsg: string);
+begin
+  { NOP }
+end;
+
+procedure IndexedStoreForwardCommonExceptions(EClass: SysUtils.ExceptClass;
+                                             EMsg: string);
+begin
+  //The EExternalError classes here are not going to have the full Win32
+  //exception information, but this is good enough for the moment.
+  while Assigned(EClass) do
+  begin
+    if (EClass = EOutOfMemory) then
+      raise EOutOfMemory.Create(EMsg)
+    else if (EClass = EAccessViolation) then
+      raise EAccessViolation.Create(EMsg)
+    else if (EClass = EListError) then
+      raise EListError.Create(EMsg)
+    else if (EClass = EIntError) then
+      raise EIntError.Create(EMsg)
+    else if (EClass = EMathError) then
+     raise EMathError.Create(EMsg)
+    else if (EClass = EStackOverflow) then
+     raise EStackOverflow.Create(EMsg);
+    EClass := ExceptClass(EClass.ClassParent);
+  end;
+  { else NOP }
 end;
 
 function TIndexedStoreG.PerformAsyncActions(ExcHandlers: PExceptionHandlerChain): TIsRetVal;
@@ -911,7 +956,7 @@ var
   Refs1,Refs2,Rets: TPHRefs;
   Handlers: TParallelHandlers;
   Excepts: TPHExcepts;
-  LocalExcHander: TExceptionHandlerChain;
+  LocalExcHandler: TExceptionHandlerChain;
 
 begin
   result := rvOK;
@@ -933,8 +978,12 @@ begin
   end;
   if AsyncCount = 0 then
     exit;
-  LocalExcHander.Func := IndexedStoreSwallowENoMemExceptions;
-  LocalExcHander.Next := ExcHandlers;
+  LocalExcHandler.FilterFunc := IndexedStoreRecordCommonExceptions;
+  //Record so we can forward ourselves later.
+  LocalExcHandler.XlatorFunc := IndexedStoreNoForwardCommonExceptions;
+  //Don't forward from inside paralleliser.
+
+  LocalExcHandler.Next := ExcHandlers;
   SetLength(Refs1, AsyncCount);
   //SetLength(Refs2, AsyncCount);
   SetLength(Rets, AsyncCount);
@@ -969,7 +1018,7 @@ begin
 {$ENDIF}
   end;
   Assert(AsyncIdx = AsyncCount);
-  Parallelizer.ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @LocalExcHander);
+  Parallelizer.ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @LocalExcHandler);
   //Now run the tiny little tail func for successful deletions,
   //and failed additions, and once that's happened re-raise if necessary.
   //Only exceptions we expect to handle explicitly here are ENoMem, everything
@@ -981,7 +1030,7 @@ begin
       iasNone: Assert(false);
       iasAsyncAdding: begin
         //Check for failed ret, or out of memory.
-        if (TIsRetVal(Rets[AsyncIdx]) <> rvOK) or (Excepts[AsyncIdx] = EOutOfMemory) then
+        if (TIsRetVal(Rets[AsyncIdx]) <> rvOK) or (Assigned(Excepts[AsyncIdx].HandledBy)) then
           self.AddIndexCleanupTail(Index)
         else
           Index.AsyncState := iasNone;
@@ -997,8 +1046,8 @@ begin
   end;
   for AsyncIdx := 0 to Pred(AsyncCount) do
   begin
-    if Excepts[AsyncIdx] = EOutOfMemory then
-      raise EOutOfMemory.Create(S_NO_MEM_FORWARDED);
+    if Assigned(Excepts[AsyncIdx].HandledBy) then
+      IndexedStoreForwardCommonExceptions(Excepts[AsyncIdx].EClass, Excepts[AsyncIdx].EMsg);
   end;
   //Exceptions get forwarded as expected. Now collate return codes.
   for AsyncIdx := 0 to Pred(AsyncCount) do

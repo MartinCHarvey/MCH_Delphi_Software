@@ -144,18 +144,20 @@ procedure TReorderBuffer.Abort(var Reservation: PReservation);
 var
   Tmp: PReservation;
 begin
-  if Assigned(Reservation) then
-  begin
-    Assert(not Assigned(Reservation.FData));
-    FLock.Acquire;
-    try
+  FLock.Acquire;
+  try
+    if Assigned(Reservation) then
+    begin
+      //Check inside because some errphase aborts can happen
+      //not in tiptCommitRollback.
+      Assert(not Assigned(Reservation.FData));
       Tmp := Reservation;
       Reservation := nil;
       DLListRemoveObj(@Tmp.FListItem);
-    finally
-      FLock.Release;
+      DisposeReservation(Tmp);
     end;
-    DisposeReservation(Tmp);
+  finally
+    FLock.Release;
   end;
 end;
 

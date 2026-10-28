@@ -74,7 +74,11 @@ type
     FRatios: TRWRatios;
     FDestroy: boolean;
 
-    FExclusiveCrit: TCriticalSection;
+    //Used to be a critical section, but changed to a semaphore, because
+    //the holding and releasing thread can be different, and mutex behaviour
+    //(release on thread quit) is perhaps not what we want when different
+    //threads could start and finish the transaction.
+    FExclusiveCrit: TSemaphore;
   protected
     function CanReturnIdle: boolean;
     function CalcNextState(Reason: TRWWLockReason; var NewReason:TRWWLockReason; var ClearContended: boolean): TRWWLockState;
@@ -132,7 +136,7 @@ begin
   FDestroyed := TEvent.Create(nil, true, false, '');
   for Reason := Low(Reason) to High(Reason) do
     FThreadWaits[Reason] := TEvent.Create(nil, true, false, '');
-  FExclusiveCrit := TCriticalSection.Create;
+  FExclusiveCrit := TSemaphore.Create(nil, 1, 1, '');
   FRatios[lrSharedRead] := 64;
   FRatios[lrSharedWrite] := 8;
   FRatios[lrExclusiveWrite] := 1;
@@ -246,9 +250,9 @@ begin
 
       //If in active or exit states for this reason, check
       //no active anywhere else.
-      Assert((FState <> ActiveState(Reason))
-        or (FState <> ExitState(Reason))
-        or (OnlyActiveAdmittedCurReason(Reason)));
+      Assert(((FState <> ActiveState(Reason))
+        and (FState <> ExitState(Reason)))
+        or OnlyActiveAdmittedCurReason(Reason));
 
       if FState = ActiveState(Reason) then
       begin

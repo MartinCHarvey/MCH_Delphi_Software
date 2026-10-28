@@ -54,7 +54,7 @@ type
     //Really don't call any of these functions if you're an end user.
     procedure JournalReplayCycle(JournalEntry: TStream; Initial: boolean);
     function UserCommitCycle: TStream;
-    procedure UserRollbackCycle;
+    procedure UserRollbackCycle(LowMemory: boolean);
   end;
 
   TMemAPIDatabase = class(TMemAPIDBTopLevel)
@@ -398,7 +398,8 @@ begin
                                 false,
                                 SizeHint,
                                 TxionSizeEstimate,
-                                amWriteExclusive);
+                                amWriteExclusive,
+                                false);
 
   PseudoTid := TTransactionId.NewTransactionID(ilSerialisable); //if only writer, should be serialisable.
   Ctxt := TXTransactionLocalContext.Create;
@@ -459,7 +460,7 @@ begin
     SizeHint.ShouldUpdateLayout := true;
     DB.SizeHint(T.Tid, SizeHint, T.LocalContext);
     OptSet := MakeOptimizationSet(DB.Policies, false, false, true,
-                                  SizeHint, 0, T.Mode);
+                                  SizeHint, 0, T.Mode, false);
     if T.LocalContext.FCacheList.Capacity < SizeHint.TotalIndexes then
       T.LocalContext.FCacheList.Capacity := SizeHint.TotalIndexes;
 
@@ -470,8 +471,8 @@ begin
     DbgUnderCommitLock := true;
 {$ENDIF}
     try
+      T.ROBReserve;
       try
-        T.ROBReserve;
 
         DB.ToJournal(T.Tid, result, T.LocalContext);
 
@@ -490,8 +491,6 @@ begin
           DB.MetaIndexLock.Release;
         end;
       except
-        T.ROBAbort;
-
         DB.MetaIndexLock.Acquire;
         try
           DB.Rollback(T.Tid, rbpIndexRollback, OptSet, T.LocalContext);
@@ -509,12 +508,13 @@ begin
     //Note final cleanup outside commit lock.
     DB.Commit(T.Tid, ccpCleardown, OptSet, T.LocalContext);
   except
+    //No ROBAbort here, moved to caller to cover all cases.
     result.Free;
     raise; //Rely on later rollback etc to clear pins and such.
   end;
 end;
 
-procedure TMemAPIDatabaseInternal.UserRollbackCycle;
+procedure TMemAPIDatabaseInternal.UserRollbackCycle(LowMemory: boolean);
 var
   T: TMemDBTransaction;
   SizeHint: TDBSizeHint;
@@ -526,7 +526,7 @@ begin
 
   FillChar(SizeHint, sizeof(SizeHint), 0);
   DB.SizeHint(T.Tid, SizeHint, T.LocalContext);
-  OptSet := MakeOptimizationSet(DB.Policies, false, false, true, SizeHint, 0, T.Mode);
+  OptSet := MakeOptimizationSet(DB.Policies, false, false, true, SizeHint, 0, T.Mode, LowMemory);
 
   DB.MetaIndexLock.Acquire;
   try

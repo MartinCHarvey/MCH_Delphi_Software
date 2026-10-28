@@ -264,7 +264,12 @@ end;
 function TCowTreeItem.DupInit(SrcTree: TCowTree): TCowTreeItem;
 begin
   result := DupNoInit(SrcTree);
-  result.CopyFrom(self, SrcTree);
+  try
+    result.CopyFrom(self, SrcTree);
+  except
+    result.Release;
+    raise;
+  end;
 end;
 
 { TCowTree }
@@ -902,6 +907,8 @@ begin
   RetQR.q := nil;
   RetQR.r := nil;
   result := nil;
+  CallP := nil;
+  RetP := nil;
   try
     if InP = nil then
     begin
@@ -923,6 +930,7 @@ begin
       begin
         Tmp := InP.DupInit(self);
         Tmp.left := RetP; //Transfer from called.
+        Retp := nil;
 {$IFOPT C+}
         Tmp.right := InP.right.AddRef as TCowTreeItem;
 {$ELSE}
@@ -943,6 +951,7 @@ begin
         RetP := balanceRight(CallP, True, h);
         Assert(RetP <> CallP);
         Tmp := RetP; //Rebalance has done all the copying for us.
+        RetP := nil;
         CallP.ReleaseToCache(Self.FCache); //Release the tmp generated above.
       end;
     end
@@ -963,6 +972,7 @@ begin
         Tmp.left := TCowTreeItem(InP.left.AddRef);
 {$ENDIF}
         Tmp.right := RetP; //Transfer from called.
+        RetP := nil;
         Tmp.bal := InP.bal;
       end
       else
@@ -978,6 +988,7 @@ begin
         RetP := balanceLeft(CallP, True, h);
         Assert(RetP <> CallP);
         Tmp := RetP; //Rebalance has done all the copying for us.
+        RetP := nil;
         CallP.ReleaseToCache(Self.FCache);
       end;
     end
@@ -1048,6 +1059,7 @@ begin
           //Rebalance has modified it again, and its guaranteed a temp creation.
           Tmp.ReleaseToCache(Self.FCache);
           Tmp := RetP;
+          RetP := nil;
         end;
       end;
     end;
@@ -1057,6 +1069,8 @@ begin
     Tmp.Release;
     RetQR.q.Release;
     RetQR.r.Release;
+    if RetP <> CallP then
+      RetP.Release;
     raise;
   end;
 end;

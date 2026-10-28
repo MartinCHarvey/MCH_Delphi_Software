@@ -32,16 +32,43 @@ type
   TParallelHandler = function(Ref1, Ref2: pointer):pointer of object;
   TParallelHandlers = array of TParallelHandler;
   TPHRefs = array of pointer;
-  TPHExcepts = array of SysUtils.ExceptClass;
-  TExceptionTranslator = function(EClass: SysUtils.ExceptClass;
-                                   EMsg: string): boolean;
+
+  TExceptionFilterAction = (
+    tetaIgnore, //Try next handler in chain, might fall off end
+    tetaSwallowException,
+    tetaRecordException,
+    tetaThrowOnceAllRecorded );
+
+  //This function filters exceptions from threads.
+  TExceptionFilter     = function(EClass: SysUtils.ExceptClass;
+                                   EMsg: string): TExceptionFilterAction;
+  //This function rethrows if it can.
+  TExceptionTranslator = procedure(EClass: SysUtils.ExceptClass;
+                                   EMsg: string);
+
   EParallelException = class(Exception);
 
   PExceptionHandlerChain = ^TExceptionHandlerChain;
   TExceptionHandlerChain = record
-    Func: TExceptionTranslator;
+    FilterFunc: TExceptionFilter;
+    XlatorFunc: TExceptionTranslator;
     Next: PExceptionHandlerChain;
   end;
+
+  TPHExceptRecord = record
+    HandledBy: PExceptionHandlerChain; //Actually just the immediate handler.
+    EClass: SysUtils.ExceptClass;
+    EMsg: string;
+    RaiseFinally: boolean;
+  end;
+
+  TPHExcepts = array of TPHExceptRecord;
+  TPHFinalAction = (
+    //In order of importance
+    tfaBadThrow, //Bad throw in exception handler mechanism.
+    tfaUnhFwd, //Unhandled exception, forwarding
+    tfaFilterFwd, //Filtered / handled exception, forwarding.
+    tfaNone);
 
 procedure ExecParallel(Handlers: TParallelHandlers;
                        const Refs1: TPHRefs;
@@ -49,6 +76,11 @@ procedure ExecParallel(Handlers: TParallelHandlers;
                        var  Excepts: TPHExcepts;
                        var  Rets: TPHRefs;
                        const Xlators: PExceptionHandlerChain = nil);
+
+function ParalleliserFilterCommonExceptions(EClass: SysUtils.ExceptClass;
+                                             EMsg: string):TExceptionFilterAction;
+procedure ParalleliserForwardCommonExceptions(EClass: SysUtils.ExceptClass;
+                                             EMsg: string);
 
 implementation
 
@@ -61,7 +93,9 @@ uses
 
 const
   S_UNEXPECTED_WAIT_RET = 'Unexpected return from parallel wait: ';
-  S_FWD_EXCEPTION = 'Exception forwarded between threads (untranslated): ';
+  S_FWD_EXCEPTION = 'Unhandled exception forwarded: ';
+  S_BAD_THROW_IN_FILTER = 'Exception filter itself raised: ';
+  S_XLATOR_DID_NOT_RE_RAISE = 'Exception translator failed to re-raise: ';
 
 type
   TParallelHandlerThread = class(TThread)
@@ -96,6 +130,52 @@ begin
   end;
 end;
 
+function ParalleliserFilterCommonExceptions(EClass: SysUtils.ExceptClass;
+                                             EMsg: string):TExceptionFilterAction;
+begin
+  while Assigned(EClass) do
+  begin
+    if (EClass = EOutOfMemory)
+      or (EClass = EAccessViolation)
+      or (EClass = EListError)
+      or (EClass = EIntError)
+      or (EClass = EMathError)
+      or (EClass = EStackOverflow)
+      or (EClass = EThread) then
+    begin
+        result := tetaThrowOnceAllRecorded;
+        exit;
+    end;
+    EClass := ExceptClass(EClass.ClassParent);
+  end;
+  result := tetaIgnore;
+end;
+
+procedure ParalleliserForwardCommonExceptions(EClass: SysUtils.ExceptClass;
+                                             EMsg: string);
+begin
+  //The EExternalError classes here are not going to have the full Win32
+  //exception information, but this is good enough for the moment.
+  while Assigned(EClass) do
+  begin
+    if (EClass = EOutOfMemory) then
+      raise EOutOfMemory.Create(EMsg)
+    else if (EClass = EAccessViolation) then
+      raise EAccessViolation.Create(EMsg)
+    else if (EClass = EListError) then
+      raise EListError.Create(EMsg)
+    else if (EClass = EIntError) then
+      raise EIntError.Create(EMsg)
+    else if (EClass = EMathError) then
+      raise EMathError.Create(EMsg)
+    else if (EClass = EStackOverflow) then
+      raise EStackOverflow.Create(EMsg)
+    else if (EClass = EThread) then
+      raise EThread.Create(EMsg);
+    EClass := ExceptClass(EClass.ClassParent);
+  end;
+end;
+
 
 procedure ExecParallel(Handlers: TParallelHandlers;
                        const Refs1: TPHRefs;
@@ -113,15 +193,34 @@ var
   WaitHandles: THandleArray;
   WaitRet: DWORD;
 {$ENDIF}
-  ExceptHandled: boolean;
   PExcChain: PExceptionHandlerChain;
+  FilterHandled: boolean;
+  FilterRet: TExceptionFilterAction;
+  FinalMsg: string;
+  FinalAction: TPHFinalAction;
+
 begin
+  FinalAction := tfaNone;
+
   L := Length(Handlers);
   Assert(L > 0);
   Assert((Length(Refs1) = L) or (Length(Refs1) = 0));
   Assert((Length(Refs2) = L) or (Length(Refs2) = 0));
   SetLength(Excepts, L);
+  for i := Low(Excepts) to High(Excepts) do
+  begin
+    Assert(not Assigned(Excepts[i].HandledBy));
+    Assert(not Assigned(Excepts[i].EClass));
+    Assert(Length(Excepts[i].EMsg) = 0);
+  end;
   SetLength(Rets, L);
+  PExcChain := XLators;
+  while Assigned(PExcChain) do
+  begin
+    Assert(Assigned(PExcChain.FilterFunc));
+    Assert(Assigned(PExcChain.XlatorFunc));
+    PExcChain := PExcChain.Next;
+  end;
 {$IFDEF USE_WINDOWS_LOCKS}
   SetLength(WaitHandles, L);
 {$ENDIF}
@@ -148,8 +247,8 @@ begin
     BatchOfs := 0;
     while BatchOfs < L do
     begin
-      if L < MAXIMUM_WAIT_OBJECTS then
-        BatchL := L
+      if (L - BatchOfs) < MAXIMUM_WAIT_OBJECTS then
+        BatchL := (L - BatchOfs)
       else
         BatchL := MAXIMUM_WAIT_OBJECTS;
       WaitRet := Windows.WaitForMultipleObjects(BatchL, @WaitHandles[BatchOfs], true, INFINITE);
@@ -165,22 +264,79 @@ begin
     begin
       if Threads[i].FRaised then
       begin
-        ExceptHandled := false;
         PExcChain := Xlators;
-        while Assigned(PExcChain) do
+        FilterHandled := false;
+        while Assigned(PExcChain) and not FilterHandled do
         begin
-          ExceptHandled := PExcChain.Func(Threads[i].FExceptClass, Threads[i].FExceptMsg);
-          if ExceptHandled then
-            break
+          try
+            FilterRet := PExcChain.FilterFunc(Threads[i].FExceptClass, Threads[i].FExceptMsg);
+          except
+            on E: Exception do
+            begin
+              if FinalAction > tfaBadThrow then
+              begin
+                FinalAction := tfaBadThrow;
+                FinalMsg := S_BAD_THROW_IN_FILTER + E.ClassName + ' ' + E.Message;
+                FilterRet := tetaSwallowException;
+              end;
+            end;
+          end;
+          case FilterRet of
+            tetaSwallowException: FilterHandled := true;
+            tetaRecordException: begin
+              FilterHandled := true;
+              Excepts[i].HandledBy := PExcChain;
+              Excepts[i].EClass := Threads[i].FExceptClass;
+              Excepts[i].EMsg := Threads[i].FExceptMsg;
+              Excepts[i].RaiseFinally := false;
+            end;
+            tetaThrowOnceAllRecorded: begin
+              FilterHandled := true;
+              Excepts[i].HandledBy := PExcChain;
+              Excepts[i].EClass := Threads[i].FExceptClass;
+              Excepts[i].EMsg := Threads[i].FExceptMsg;
+              Excepts[i].RaiseFinally := true;
+              if FinalAction > tfaFilterFwd then
+                FinalAction := tfaFilterFwd;
+            end;
+            tetaIgnore: { NOP } ;
           else
-            PExcChain := PExcChain.Next;
+            {NOP}
+          end;
+          PExcChain := PExcChain.Next;
         end;
-        if not ExceptHandled then
-          raise EParallelException.Create(S_FWD_EXCEPTION + ' (' +
-            Threads[i].FExceptClass.ClassName + ') ' + Threads[i].FExceptMsg);
-        Excepts[i] := Threads[i].FExceptClass;
+        if not FilterHandled then
+        begin
+          if FinalAction > tfaUnhFwd then
+          begin
+            FinalAction := tfaUnhFwd;
+            FinalMsg := S_FWD_EXCEPTION + ' (' +
+              Threads[i].FExceptClass.ClassName + ') ' + Threads[i].FExceptMsg;
+          end;
+        end;
       end;
       Rets[i] := Threads[i].FRet;
+    end;
+    case FinalAction of
+      tfaBadThrow, tfaUnhFwd: raise EParallelException.Create(FinalMsg);
+      tfaFilterFwd: begin
+        //Expect translator / filter function to work together and re-throw the EClass
+        //we recorded.
+        for i := 0 to Pred(L) do
+        begin
+          if Assigned(Excepts[i].HandledBy) and (Excepts[i].RaiseFinally) then
+          begin
+            //Expect this function to re-raise, but if it doesn't we'll
+            //raise that it didn't raise ...
+            Excepts[i].HandledBy.XlatorFunc(Excepts[i].EClass, Excepts[i].EMsg);
+            raise EParallelException.Create(S_XLATOR_DID_NOT_RE_RAISE
+              + Excepts[i].EClass.ClassName + ' ' + Excepts[i].EMsg);
+          end;
+        end;
+      end;
+      tfaNone: {NOP};
+    else
+      { NOP }
     end;
   finally
     for i := 0 to Pred(L) do
