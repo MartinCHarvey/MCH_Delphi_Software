@@ -858,7 +858,13 @@ begin
   try
     FileName := FBaseDirectory + IntToStr(FWriteSeq) + FileExts[jftIncremental];
 {$IFDEF MSWINDOWS}
-    OutputStream := TWriteCachedFileStream.Create(FileName, FILE_CACHE_SIZE);
+    //Make it slightly less likely ENoMem destroys journal thread.
+    try
+      OutputStream := TWriteCachedFileStream.Create(FileName, FILE_CACHE_SIZE);
+    except
+      on E:EOutOfMemory do
+        OutputStream := TFileStream.Create(FileName, fmCreate or fmShareExclusive);
+    end;
 {$ELSE}
     OutputStream := TWriteCachedFileStream.Create(FileName, fmCreate);
 {$ENDIF}
@@ -915,7 +921,13 @@ begin
   try
     FileName := FBaseDirectory + IntToStr(FWriteSeq) + FileExts[jftInitOrCheckpoint];
 {$IFDEF MSWINDOWS}
-    OutputStream := TWriteCachedFileStream.Create(FileName, FILE_CACHE_SIZE);
+    //Make it slightly less likely ENoMem destroys journal thread.
+    try
+      OutputStream := TWriteCachedFileStream.Create(FileName, FILE_CACHE_SIZE);
+    except
+      on E:EOutOfMemory do
+        OutputStream := TFileStream.Create(FileName, fmCreate or fmShareExclusive);
+    end;
 {$ELSE}
     OutputStream := TWriteCachedFileStream.Create(FileName, fmCreate);
 {$ENDIF}

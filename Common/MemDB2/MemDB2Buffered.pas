@@ -1126,6 +1126,11 @@ begin
   Handlers[Pred(PCount)] := Handler;
   Refs1[Pred(PCount)] := Ref1;
   Refs2[Pred(PCount)] := Ref2;
+  Excepts[Pred(PCount)].HandledBy := nil;
+  Excepts[Pred(PCount)].EClass := nil;
+  Excepts[Pred(PCount)].EMsg := '';
+  Excepts[Pred(PCount)].RaiseFinally := false;
+  Rets[Pred(PCount)] := nil;
 end;
 
 { TMemDBAPI }
@@ -1423,7 +1428,10 @@ begin
   if AssignedNotSentinel(MC) then
     result := FieldByNameInt(MC as TMemTableMetadataItem, Name, AbsIndex)
   else
+  begin
     result := nil;
+    AbsIndex := -1;
+  end;
 end;
 
 function TTidLocal.META_FieldsByNames(selType: TABSelType; const Names: TMDBFieldNames; var AbsIdxs: TFieldOffsets; PinReason: TPinReason): TMemFieldDefs;
@@ -1464,7 +1472,10 @@ begin
   if AssignedNotSentinel(MC) then
     result := IndexByNameInt(MC as TMemTableMetadataItem, Name, AbsIndex)
   else
+  begin
     result := nil;
+    AbsIndex := -1;
+  end;
 end;
 
 procedure TTidLocal.META_CurIndexDefToFieldDefs(IndexDef: TMemIndexDef; var FieldDefs: TMemFieldDefs; var FieldAbsIdxs: TFieldOffsets);
@@ -2567,12 +2578,14 @@ var
   PinRet, TreeRet: boolean;
   PinFields: TMemDBStreamable;
   CurFields, PrevFields: TMemRowFields;
+  DCPHeldRow: TMemDBRow;
 
 begin
   INode := nil;
   NewIndex := nil;
   PrevFields := nil;
   result := nil;
+  DCPHeldRow := nil;
   try
     Context := PBuildValidateIdxParallelContext(Ref1);
     i := Integer(Ref2);
@@ -2602,80 +2615,114 @@ begin
       SparseFieldOffsets := SparseOffsets;
     end;
 
-    if Context.LocalIter then
-      IRec := FCPRows.GetAnItem
-      //LocalIter, row prohibit locks prevent new rows being *comitted*.
-    else
-    begin
-      if OptApplies(optGuaranteedSerial, Context.Opts) then
-        IRec := FParentTable.FMasterRowList.GetAnItem
-      else
-      begin
-        FParentTable.FMasterRowLock.Acquire;
-        try
-          //But only master row lock protects against concurrent insertion into
-          //the structure (separate user operations)
-          IRec := FParentTable.FMasterRowList.GetAnItem;
-        finally
-          FParentTable.FMasterRowLock.Release;
-        end;
-      end;      
-    end;
-      
-    while Assigned(IRec) do
-    begin
-      Row := IRec.Item as TMemDBRow;
-
-      //Don't gratuitously create INodes if we don't need them.
-      if not Assigned(INode) then
-        INode := TMemDBIndexLeaf.Create;
-
-      //First, pin.
+    try
       if Context.LocalIter then
-      begin
-        //Expect all rows modded and atomic view, try next bufsel.
-        //Table deletion should not get here.
-        PinRet := Row.PinForIndex(FTid, abNext, INode);
-        if not PinRet then
-          raise EMemDBInternalException.Create(S_PIN_FAILED_DURING_INDEX_BUILD);
-      end
-      else
-      begin
-        //Not necessarily all rows modded,
-        //May have some deleted or NULL rows.
-        //Also, Cur data may have changed behind our back,
-
-        //However, ABLatest pin should not be able to resurrect data
-        //(would fail concurrency check).
-        PinRet := Row.PinForIndex(FTid, abLatest, INode);
-      end;
-
-      //Then add to tree
-      if PinRet then
-      begin
-        TreeRet := NewIndex.Add(abCurrent, INode);
-        if not TreeRet then
-          raise EMemDBInternalException.Create(S_INSERT_FAILED_DURING_INDEX_BUILD);
-      end;
-      //All done, next row.
-      if Context.LocalIter then
-        FCPRows.GetAnotherItem(IRec)
+        IRec := FCPRows.GetAnItem
+        //LocalIter, row prohibit locks prevent new rows being *comitted*.
       else
       begin
         if OptApplies(optGuaranteedSerial, Context.Opts) then
-          FParentTable.FMasterRowList.GetAnotherItem(IRec)
+          IRec := FParentTable.FMasterRowList.GetAnItem
         else
         begin
           FParentTable.FMasterRowLock.Acquire;
           try
-            FParentTable.FMasterRowList.GetAnotherItem(IRec);
+            //But only master row lock protects against concurrent insertion into
+            //the structure (separate user operations)
+            IRec := FParentTable.FMasterRowList.GetAnItem;
+            if Assigned(IRec) then
+              Row := IRec.Item as TMemDBRow
+            else
+              Row := nil;
+            while Assigned(IRec) and not Row.DCPHold do
+            begin
+              FParentTable.FMasterRowList.GetAnotherItem(IRec);
+              if Assigned(IRec) then
+                Row := IRec.Item as TMemDBRow
+              else
+                Row := nil;
+            end;
+            DCPHeldRow := Row;
           finally
             FParentTable.FMasterRowLock.Release;
           end;
-        end;      
+        end;
       end;
+
+      while Assigned(IRec) do
+      begin
+        Row := IRec.Item as TMemDBRow;
+
+        //Don't gratuitously create INodes if we don't need them.
+        if not Assigned(INode) then
+          INode := TMemDBIndexLeaf.Create;
+
+        //First, pin.
+        if Context.LocalIter then
+        begin
+          //Expect all rows modded and atomic view, try next bufsel.
+          //Table deletion should not get here.
+          PinRet := Row.PinForIndex(FTid, abNext, INode);
+          if not PinRet then
+            raise EMemDBInternalException.Create(S_PIN_FAILED_DURING_INDEX_BUILD);
+        end
+        else
+        begin
+          //Not necessarily all rows modded,
+          //May have some deleted or NULL rows.
+          //Also, Cur data may have changed behind our back,
+
+          //However, ABLatest pin should not be able to resurrect data
+          //(would fail concurrency check).
+          PinRet := Row.PinForIndex(FTid, abLatest, INode);
+        end;
+
+        //Then add to tree
+        if PinRet then
+        begin
+          TreeRet := NewIndex.Add(abCurrent, INode);
+          if not TreeRet then
+            raise EMemDBInternalException.Create(S_INSERT_FAILED_DURING_INDEX_BUILD);
+        end;
+        //All done, next row.
+        if Context.LocalIter then
+          FCPRows.GetAnotherItem(IRec)
+        else
+        begin
+          if OptApplies(optGuaranteedSerial, Context.Opts) then
+            FParentTable.FMasterRowList.GetAnotherItem(IRec)
+          else
+          begin
+            FParentTable.FMasterRowLock.Acquire;
+            try
+              Assert(IRec.Item = Row);
+              Assert(Row = DCPHeldRow);
+              Row.DCPRelease;
+              DCPHeldRow := nil;
+              FParentTable.FMasterRowList.GetAnotherItem(IRec);
+              if Assigned(IRec) then
+                Row := IRec.Item as TMemDBRow
+              else
+                Row := nil;
+              while Assigned(IRec) and not Row.DCPHold do
+              begin
+                FParentTable.FMasterRowList.GetAnotherItem(IRec);
+                if Assigned(IRec) then
+                  Row := IRec.Item as TMemDBRow
+                else
+                  Row := nil;
+              end;
+              DCPHeldRow := Row;
+            finally
+              FParentTable.FMasterRowLock.Release;
+            end;
+          end;
+        end;
+      end;
+      //Added all the rows.
+    finally
+      DCPHeldRow.DCPRelease;
     end;
-    //Added all the rows.
 
     //Now validate the entire index if applicable.
     if IDef.IndexAttrs * [iaUnique , iaNotEmpty] <> [] then
@@ -2751,74 +2798,110 @@ var
   Row: TMemDBRow;
   IRec: TItemRec;
   PinRet, TreeRet: boolean;
+  DCPHeldRow: TMemDBRow;
 
 begin
   INode := nil;
   NewIndex := nil;
   result := nil;
+  DCPHeldRow := nil;
   try
     Context := PBuildValidateIdxParallelContext(Ref1);
     NewIndex := TMemDBIndexInternal.Create;
 
-    if Context.LocalIter then
-      IRec := FCPRows.GetAnItem
-      //LocalIter, row prohibit locks prevent new rows being *comitted*.
-    else
-    begin
-      if OptApplies(optGuaranteedSerial, Context.Opts) then
-        IRec := FParentTable.FMasterRowList.GetAnItem
-      else
-      begin
-        FParentTable.FMasterRowLock.Acquire;
-        try
-          //But only master row lock protects against concurrent insertion into
-          //the structure (separate user operations)
-          IRec := FParentTable.FMasterRowList.GetAnItem;
-        finally
-          FParentTable.FMasterRowLock.Release;
-        end;
-      end;      
-    end;
-
-    while Assigned(IRec) do
-    begin
-      Row := IRec.Item as TMemDBRow;
-
-      if not Assigned(INode) then
-        INode := TMemDBInternalIndexLeaf.Create;
-
+    try
       if Context.LocalIter then
-      begin
-        PinRet := Row.PinForIndex(FTid, abNext, INode);
-        if not PinRet then
-          raise EMemDBInternalException.Create(S_PIN_FAILED_DURING_INTERNAL_INDEX_BUILD);
-      end
-      else
-        PinRet := Row.PinForIndex(FTid, abLatest, INode);
-
-      if PinRet then
-      begin
-        TreeRet := NewIndex.Add(abCurrent, INode);
-        if not TreeRet then
-          raise EMemDBInternalException.Create(S_INSERT_FAILED_DURING_INTERNAL_INDEX_BUILD);
-      end;
-      //All done, next row.
-      if Context.LocalIter then
-        FCPRows.GetAnotherItem(IRec)
+        IRec := FCPRows.GetAnItem
+        //LocalIter, row prohibit locks prevent new rows being *comitted*.
       else
       begin
         if OptApplies(optGuaranteedSerial, Context.Opts) then
-          FParentTable.FMasterRowList.GetAnotherItem(IRec)
+          IRec := FParentTable.FMasterRowList.GetAnItem
         else
         begin
           FParentTable.FMasterRowLock.Acquire;
           try
-            FParentTable.FMasterRowList.GetAnotherItem(IRec);
+            //But only master row lock protects against concurrent insertion into
+            //the structure (separate user operations)
+            IRec := FParentTable.FMasterRowList.GetAnItem;
+            if Assigned(IRec) then
+              Row := IRec.Item as TMemDBRow
+            else
+              Row := nil;
+            while Assigned(IRec) and not Row.DCPHold do
+            begin
+              FParentTable.FMasterRowList.GetAnotherItem(IRec);
+              if Assigned(IRec) then
+                Row := IRec.Item as TMemDBRow
+              else
+                Row := nil;
+            end;
+            DCPHeldRow := Row;
           finally
             FParentTable.FMasterRowLock.Release;
           end;
-        end;      
+        end;
       end;
+
+      while Assigned(IRec) do
+      begin
+        Row := IRec.Item as TMemDBRow;
+
+        if not Assigned(INode) then
+          INode := TMemDBInternalIndexLeaf.Create;
+
+        if Context.LocalIter then
+        begin
+          PinRet := Row.PinForIndex(FTid, abNext, INode);
+          if not PinRet then
+            raise EMemDBInternalException.Create(S_PIN_FAILED_DURING_INTERNAL_INDEX_BUILD);
+        end
+        else
+          PinRet := Row.PinForIndex(FTid, abLatest, INode);
+
+        if PinRet then
+        begin
+          TreeRet := NewIndex.Add(abCurrent, INode);
+          if not TreeRet then
+            raise EMemDBInternalException.Create(S_INSERT_FAILED_DURING_INTERNAL_INDEX_BUILD);
+        end;
+        //All done, next row.
+        if Context.LocalIter then
+          FCPRows.GetAnotherItem(IRec)
+        else
+        begin
+          if OptApplies(optGuaranteedSerial, Context.Opts) then
+            FParentTable.FMasterRowList.GetAnotherItem(IRec)
+          else
+          begin
+            FParentTable.FMasterRowLock.Acquire;
+            try
+              Assert(IRec.Item = Row);
+              Assert(Row = DCPHeldRow);
+              Row.DCPRelease;
+              DCPHeldRow := nil;
+              FParentTable.FMasterRowList.GetAnotherItem(IRec);
+              if Assigned(IRec) then
+                Row := IRec.Item as TMemDBRow
+              else
+                Row := nil;
+              while Assigned(IRec) and not Row.DCPHold do
+              begin
+                FParentTable.FMasterRowList.GetAnotherItem(IRec);
+                if Assigned(IRec) then
+                  Row := IRec.Item as TMemDBRow
+                else
+                  Row := nil;
+              end;
+              DCPHeldRow := Row;
+            finally
+              FParentTable.FMasterRowLock.Release;
+            end;
+          end;
+        end;
+      end;
+    finally
+      DCPHeldRow.DCPRelease;
     end;
     //Added all the rows, no extra validation required.
     result := NewIndex;
@@ -2917,7 +3000,13 @@ begin
 
     if OptApplies(optIndexBuildParallel, Opts) and (PCount > 0) then
     begin
-      ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
+      try
+        ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
+      except
+        for i := Low(Rets) to High(Rets) do
+          TReffed(Rets[i]).Release;
+        raise;
+      end;
 
       RIdx := 0;
       for i := 0 to Pred(Length(FIndexChangesets)) do
@@ -3673,9 +3762,12 @@ begin
   if Length(IdxName) > 0 then
   begin
     Idx := META_IndexByName(abCurrent, IdxName, AbsIndex, PinEvolve);
-    Assert(AbsIndex >= 0);
+    Assert(Assigned(Idx) = (AbsIndex >= 0));
     Assert(AbsIndex < FLocalIndexCopies.Count);
-    result := FLocalIndexCopies.Items[AbsIndex] as TMemDbIndex;
+    if Assigned(Idx) then
+      result := FLocalIndexCopies.Items[AbsIndex] as TMemDbIndex
+    else
+      result := nil;
   end
   else
   begin
@@ -4771,23 +4863,27 @@ var
   TidLocal: TTidLocal;
 begin
   //Assume if metadata deleted or null, then changes have been made to data structs.
-  //Either changed layout, or deleted all the fields. Need to always commit, because
+  //Either changed layout, or deleted all the fields. Need to always rollback, because
   //CPTid clearing required.
 
   //Don't lock master row list, instead used Tid Local, even if it has more
   //lock acquisitions.
-  TidLocal := GetOptTidLocal(Tid);
-  if Assigned(TidLocal) then
+  if Phase = rbpMetaRollback then
+    inherited
+  else
   begin
-    //Some very pathalogical cases involve rollback for nonexistent Tid.
-    case Phase of
-      rbpIndexRollback: TidLocal.IndexRollback(Ctxt);
-      rbpMetaRollback: inherited;
-      rbpDelayedRollback: begin
-        TidLocal.Rollback;
-        TidLocal.Free;
-        //Not particularly harmful if we remove table mod locks late.
-        FindRmRowProhibitLocks(Tid);
+    TidLocal := GetOptTidLocal(Tid);
+    if Assigned(TidLocal) then
+    begin
+      //Some very pathalogical cases involve rollback for nonexistent Tid.
+      case Phase of
+        rbpIndexRollback: TidLocal.IndexRollback(Ctxt);
+        rbpDelayedRollback: begin
+          TidLocal.Rollback;
+          TidLocal.Free;
+          //Not particularly harmful if we remove table mod locks late.
+          FindRmRowProhibitLocks(Tid);
+        end;
       end;
     end;
   end;
@@ -5386,94 +5482,132 @@ var
   Row: TMemDBRow;
   AddToList: boolean;
   IRet: TIsRetVal;
+  DCPHeldRow: TMemDBRow;
 begin
   //We know meta is up to date.
   CC := FMetadata.PinCurrent(Meta.Tid, pinFinalCheck);
   NC := FMetadata.GetNext(Meta.Tid);
   FMetadata.ChangeFlagsFromPinned(CC, NC, Added, Changed, Deleted, Null);
+  DCPHeldRow := nil;
 
   MasterRows := Added;
   TidLocal := Meta.TableReferring.GetTidLocal(Meta.Tid);
-  if MasterRows then
-  begin
-    if OptApplies(optGuaranteedSerial, Meta.Opts) then
-      IRec := Meta.TableReferring.FMasterRowList.GetAnItem
-    else
-    begin
-      Meta.TableReferring.FMasterRowLock.Acquire;
-      try
-        IRec := Meta.TableReferring.FMasterRowList.GetAnItem;
-      finally
-        Meta.TableReferring.FMasterRowLock.Release;
-      end;
-    end;    
-  end
-  else if not TidLocal.LayoutChangeRequired then //Layout change -> No rows added.
-      IRec := TidLocal.FCPRows.GetAnItem
-  else
-    IRec := nil; //Skip if layout change.
-
-  while Assigned(IRec) do
-  begin
-    Row := IRec.Item as TMemDBRow;
-    if MasterRows or Row.AnyChangesForTid(Meta.Tid, Meta.Ctxt) then
-    begin
-      CC := Row.GetCurUnderCommitLock;
-      NC := Row.GetNext(Meta.Tid);
-
-      Row.ChangeFlagsFromPinned(CC, NC, Added, Changed, Deleted, Null);
-      if not (Deleted or Null) then
-      begin
-        if Changed then
-        begin
-          AddToList := MasterRows;
-          if not AddToList then
-          begin
-            //We're pinning here not from an index, but "raw".
-            //Need up to date fields. Can be out of date and not caught
-            //by row local pre-commit if iso < repeatable read.
-
-            CF := CC as TMemRowFields;
-            NF := NC as TMemRowFields;
-            //Not TidLocal.LayoutChangeRequired, so neither of these fields
-            //should be sparse.
-            if CF.Sparse or NF.Sparse then
-              raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_2);
-            AddToList := not SameLayoutFieldsSame(CF, NF,
-              Meta.IndexReferring.FinalFieldOffsets);
-          end;
-        end
-        else
-        begin
-          //Must be row added, or MasterRows (meta added, add all rows).
-          if not (Added or MasterRows) then
-            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_2);
-          AddToList := true;
-        end;
-        if AddToList then
-        begin
-          IRet := Meta.Lists.FReferringAdded.AddItem(Row, IRecAdd);
-          if (IRet <> rvOK) then
-            raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_2);
-        end;
-      end;
-    end;
+  try
     if MasterRows then
-    begin    
+    begin
       if OptApplies(optGuaranteedSerial, Meta.Opts) then
-        Meta.TableReferring.FMasterRowList.GetAnotherItem(IRec)
+        IRec := Meta.TableReferring.FMasterRowList.GetAnItem
       else
       begin
         Meta.TableReferring.FMasterRowLock.Acquire;
         try
-          Meta.TableReferring.FMasterRowList.GetAnotherItem(IRec);
+          //But only master row lock protects against concurrent insertion into
+          //the structure (separate user operations)
+          IRec := Meta.TableReferring.FMasterRowList.GetAnItem;
+          if Assigned(IRec) then
+            Row := IRec.Item as TMemDBRow
+          else
+            Row := nil;
+          while Assigned(IRec) and not Row.DCPHold do
+          begin
+            Meta.TableReferring.FMasterRowList.GetAnotherItem(IRec);
+            if Assigned(IRec) then
+              Row := IRec.Item as TMemDBRow
+            else
+              Row := nil;
+          end;
+          DCPHeldRow := Row;
         finally
           Meta.TableReferring.FMasterRowLock.Release;
         end;
-      end;    
+      end;
     end
+    else if not TidLocal.LayoutChangeRequired then //Layout change -> No rows added.
+        IRec := TidLocal.FCPRows.GetAnItem
     else
-      TidLocal.FCPRows.GetAnotherItem(IRec);
+      IRec := nil; //Skip if layout change.
+
+    while Assigned(IRec) do
+    begin
+      Row := IRec.Item as TMemDBRow;
+      if MasterRows or Row.AnyChangesForTid(Meta.Tid, Meta.Ctxt) then
+      begin
+        CC := Row.GetCurUnderCommitLock;
+        NC := Row.GetNext(Meta.Tid);
+
+        Row.ChangeFlagsFromPinned(CC, NC, Added, Changed, Deleted, Null);
+        if not (Deleted or Null) then
+        begin
+          if Changed then
+          begin
+            AddToList := MasterRows;
+            if not AddToList then
+            begin
+              //We're pinning here not from an index, but "raw".
+              //Need up to date fields. Can be out of date and not caught
+              //by row local pre-commit if iso < repeatable read.
+
+              CF := CC as TMemRowFields;
+              NF := NC as TMemRowFields;
+              //Not TidLocal.LayoutChangeRequired, so neither of these fields
+              //should be sparse.
+              if CF.Sparse or NF.Sparse then
+                raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_2);
+              AddToList := not SameLayoutFieldsSame(CF, NF,
+                Meta.IndexReferring.FinalFieldOffsets);
+            end;
+          end
+          else
+          begin
+            //Must be row added, or MasterRows (meta added, add all rows).
+            if not (Added or MasterRows) then
+              raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_2);
+            AddToList := true;
+          end;
+          if AddToList then
+          begin
+            IRet := Meta.Lists.FReferringAdded.AddItem(Row, IRecAdd);
+            if (IRet <> rvOK) then
+              raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_2);
+          end;
+        end;
+      end;
+      if MasterRows then
+      begin
+        if OptApplies(optGuaranteedSerial, Meta.Opts) then
+          Meta.TableReferring.FMasterRowList.GetAnotherItem(IRec)
+        else
+        begin
+          Meta.TableReferring.FMasterRowLock.Acquire;
+          try
+            Assert(IRec.Item = Row);
+            Assert(Row = DCPHeldRow);
+            Row.DCPRelease;
+            DCPHeldRow := nil;
+            Meta.TableReferring.FMasterRowList.GetAnotherItem(IRec);
+            if Assigned(IRec) then
+              Row := IRec.Item as TMemDBRow
+            else
+              Row := nil;
+            while Assigned(IRec) and not Row.DCPHold do
+            begin
+              Meta.TableReferring.FMasterRowList.GetAnotherItem(IRec);
+              if Assigned(IRec) then
+                Row := IRec.Item as TMemDBRow
+              else
+                Row := nil;
+            end;
+            DCPHeldRow := Row;
+          finally
+            Meta.TableReferring.FMasterRowLock.Release;
+          end;
+        end;
+      end
+      else
+        TidLocal.FCPRows.GetAnotherItem(IRec);
+    end;
+  finally
+    DCPHeldRow.DCPRelease;
   end;
 end;
 
@@ -7407,10 +7541,10 @@ begin
   //Assemble entity list Ok here.
   EntityList := AssembleEntityList;
   TxList := CtxtLocal.GetEntityList(Low(TMDBIsolationLevel));
+  result := false;
   try
     if not EntityList.SameMembers(TxList) then
       raise EMemDBInternalException.Create(S_ENTITY_LIST_CONFUSION_CHECKING_CHANGES);
-    result := false;
     for i := 0 to Pred(EntityList.Count) do
     begin
       Proxy := EntityList.Items[i] as TReffedProxy;
@@ -7542,14 +7676,17 @@ var
   Rets: TPHRefs;
   PCount: integer;
   TPORoll: TPORollbackContext;
+  Parallel: boolean;
 
 begin
   inherited;
   CtxtLocal := Ctxt as TXTransactionLocalContext;
   //Rollbacks always occur on the entity list that has been registered for the
   //txion.
+  Parallel := OptApplies(optEntitiesParallel, Opts) and not
+    OptApplies(optLowMemory, Opts);
 
-  if OptApplies(optEntitiesParallel, Opts) then
+  if Parallel then
   begin
     ParallelInit(Handlers, Refs1, Refs2, Excepts, Rets, PCount);
     TPORoll.Tid := Tid;
@@ -7564,7 +7701,7 @@ begin
     begin
       Proxy := EList.Items[i] as TMemDBEntityProxy;
       Entity := Proxy.Proxy as TMemDBEntity;
-      if OptApplies(optEntitiesParallel, Opts) then
+      if Parallel then
       begin
         ParallelAddHandler(RollbackParallel, Entity, @TPORoll,
           Handlers, refs1, Refs2, Excepts, Rets, PCount);
@@ -7572,7 +7709,7 @@ begin
       else
         Entity.Rollback(Tid, Phase, Opts, Ctxt);
     end;
-    if OptApplies(optEntitiesParallel, Opts) and (PCount > 0) then
+    if Parallel and (PCount > 0) then
       ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
 
     if Phase = rbpDelayedRollback then

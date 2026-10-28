@@ -279,6 +279,7 @@ type
   TMemDBMultiBuffered = class(TMemDBReferenceReporter)
   private
   protected
+    FDCPHoldCount: integer;
     FListCreateClass: TMemDbStreamableClass;
     FMultiItems: TDLEntry; //Current, Next, TID1, Next TID 2, etc.
     FPinnedItems: TDLEntry; //Pinned 1, 2, 3 etc.
@@ -374,6 +375,11 @@ type
 
     //User traversal.
     function PinForCursorFromInode(const Tid: TTRansactionId; INode: TMemDBIndexLeafGeneric; Reason: TPinReason): boolean;
+
+    //Navigated to via master list, no data pinning, but need to hold in memory.
+    function DCPHold: boolean;
+    procedure DCPRelease;
+
     //Index maintenance.
 
     //Generally, no un-pin for data. Commit/Rollback will clear.
@@ -433,6 +439,7 @@ type
     destructor Destroy; override;
   end;
 
+{$IFDEF USE_STRIPED_LOCK}
   TMemDbMultiBufferedStriped = class(TMemDBMultiBuffered)
   protected
     FLock: TStripedLock;
@@ -444,6 +451,7 @@ type
     constructor Create;
     destructor Destroy; override;
   end;
+{$ENDIF}
 
 implementation
 
@@ -783,7 +791,7 @@ begin
   //Any pins at all.
   IndexPins := not DlItemIsEmpty(@FIndexPins);
   ItemPins := not DlItemIsEmpty(@FPinnedItems);
-  Pins := IndexPins or ItemPins;
+  Pins := IndexPins or ItemPins or (FDCPHoldCount > 0);
 end;
 
 procedure TMemDBMultiBuffered.DCPPre(var Update: TReferenceUpdate);
@@ -801,6 +809,48 @@ begin
   DCPMake(Data, Changes, Pins);
   inherited DCPPost(Data, Changes, Pins, Update);
 end;
+
+function TMemDBMultiBuffered.DCPHold: boolean;
+var
+  Data, Changes, Pins: boolean;
+  RefUp: TReferenceUpdate;
+begin
+  LockSelf;
+  try
+    DCPPre(RefUp);
+    Assert(FDCPHoldCount >= 0);
+    DCPMake(Data, Changes, Pins);
+    result := Data or Changes or Pins;
+    if result then
+      Inc(FDCPHoldCount);
+    DcpPost(RefUp);
+  finally
+    UnlockSelf;
+  end;
+  Assert(RefUp.Pre = RefUp.Post);
+  //No DCPLazyHandle.
+end;
+
+procedure TMemDBMultiBuffered.DCPRelease;
+var
+  RefUp: TReferenceUpdate;
+begin
+  //Make allowed-nil like general release.
+  if Assigned(Self) then
+  begin
+    LockSelf;
+    try
+      DcpPre(RefUp);
+      Assert(FDCPHoldCount > 0);
+      Dec(FDCPHoldCount);
+      DCPPost(RefUp);
+    finally
+      UnlockSelf;
+    end;
+    DCPLazyHandle(RefUp);
+  end;
+end;
+
 
 procedure TMemDBMultiBuffered.CPTidMake(var Changes: boolean; var Pins: boolean; const Tid: TTransactionId);
 begin
@@ -2158,6 +2208,8 @@ begin
   FLock.Release;
 end;
 
+{$IFDEF USE_STRIPED_LOCK}
+
 { TMemDBMultiBufferedStriped }
 
 
@@ -2195,5 +2247,7 @@ begin
   inherited;
   Tmp.Free;
 end;
+
+{$ENDIF}
 
 end.

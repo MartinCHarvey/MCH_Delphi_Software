@@ -96,7 +96,7 @@ type
 
     //RWWLock handling slightly messier than I wanted ...
     //We expect the case where this flag is false to be vanishingly rare;
-    FRWWLocked: boolean;
+    FRWWLocked: integer;
     //Journalling not under same lock as commit, need a re-order buffer
     //to make sure things are journalled in same order they are comitted.
     FROBReservation: PReservation;
@@ -111,14 +111,14 @@ type
     FCRInterface: TMemAPIDatabaseInternal;
     FLocalContext: TXTransactionLocalContext;
   protected
+    //Could make this public if needed later by MemDB2 API.
+    procedure ROBCommit;
   public
     //Public but internal use only.
     procedure HandleNewEntityUnderDBLocks(Entity: TMemDBEntity);
-    procedure ROBReserve;
-    procedure ROBAbort;
 
     procedure CommitAndFree;
-    procedure RollbackAndFree;
+    procedure RollbackAndFree(LowMemory: boolean = false);
 
     procedure RegisterCreatedApi(Api: TMemDBApi);
     procedure DeregisterCreatedApi(Api: TMemDBApi);
@@ -128,6 +128,10 @@ type
     destructor Destroy; override;
 
     function GetAPI: TMemAPIDatabase;
+
+    //Need public so accessible in MemDBAPI.
+    procedure ROBReserve;
+    procedure ROBAbort;
 
     property Mode: TMDBAccessMode read FMode;
     property Sync: TMDBSyncMode read FSync;
@@ -189,7 +193,7 @@ type
     FOnUIStateChange: TNotifyEvent;
   protected
     procedure RemoveSession(Session: TMemDBSession);
-    procedure RemoveTransaction(Transaction: TMemDBTransaction; Commit: boolean);
+    procedure RemoveTransaction(Transaction: TMemDBTransaction; Commit: boolean; LowMemory: boolean);
 
     procedure StopDBLocked;
     function CheckClientsDone: boolean;
@@ -210,6 +214,7 @@ type
     procedure HandleNewEntityUnderDBLocks(Entity: TMemDBEntity; OwnerTx: TMemDBTransaction);
     function ROBReserve: PReservation;
     procedure ROBAbort(var Reservation: PReservation);
+    procedure ROBCommit(var Reservation: PReservation; Data: TObject);
   public
 
     constructor Create;
@@ -368,13 +373,27 @@ end;
 
 procedure TMemDBTransaction.ROBReserve;
 begin
+  Assert(FCommitRollbackInProgress = tiptCommitRollback);
   Assert(not Assigned(FROBReservation));
   FROBReservation := FDB.ROBReserve;
+  Assert(Assigned(FROBReservation));
 end;
 
+//Can be called at any time - only aborts
+//if uncommitted reservation
 procedure TMemDBTransaction.ROBAbort;
 begin
+  //Can occur outside of tiptCommitRollback,
   FDB.ROBAbort(FROBReservation);
+  Assert(not Assigned(FROBReservation));
+end;
+
+procedure TMemDBTransaction.ROBCommit;
+begin
+  Assert(FCommitRollbackInProgress = tiptCommitRollback);
+  Assert(Assigned(FROBReservation));
+  FDB.ROBCommit(FROBReservation, self);
+  Assert(not Assigned(FROBReservation));
 end;
 
 function TMemDBTransaction.GetAPI: TMemAPIDatabase;
@@ -386,12 +405,12 @@ end;
 
 procedure TMemDBTransaction.CommitAndFree;
 begin
-  FDB.RemoveTransaction(self, true);
+  FDB.RemoveTransaction(self, true, false);
 end;
 
-procedure TMemDBTransaction.RollbackAndFree;
+procedure TMemDBTransaction.RollbackAndFree(LowMemory: boolean);
 begin
-  FDB.RemoveTransaction(self, false);
+  FDB.RemoveTransaction(self, false, LowMemory);
 end;
 
 constructor TMemDBTransaction.Create;
@@ -617,7 +636,12 @@ begin
   FROB.Abort(Reservation);
 end;
 
-procedure TMemDB.RemoveTransaction(Transaction: TMemDBTransaction; Commit: boolean);
+procedure TMemDB.ROBCommit(var Reservation: PReservation; Data: TObject);
+begin
+  FROB.Commit(Reservation, Data);
+end;
+
+procedure TMemDB.RemoveTransaction(Transaction: TMemDBTransaction; Commit: boolean; LowMemory: boolean);
 var
   idx: integer;
   WaitJournalDone: boolean;
@@ -653,11 +677,15 @@ begin
     else
       //Allow DB force close / rollback cases to quietly clear up as much as they can.
       //At least drop the locks correctly.
-      if Transaction.FRWWLocked then
-      begin
+
+      //Unfortunately, we lose tipCommitRollback serialisation here.
+      if LockAbstractions.InterlockedCompareExchange(Transaction.FRWWLocked,
+        Ord(false), Ord(true)) = Ord(True) then
         FRWWLock.Release(DBAccessModeToLockReason(Transaction.FMode));
-        Transaction.FRWWLocked := false;
-      end;
+      //And unentangle the ROB as best we can.
+      Transaction.ROBAbort;
+      DrainReorderBuffer;
+
       goto txion_remove;
   end;
 
@@ -677,6 +705,8 @@ begin
 
     //Some pathalogical error cases, will have allocated txion,
     //and added to list, but not got transaction commit/rollback API object.
+
+    //If not got FCRInterface, then cannot have done ROBReserve.
     if Assigned(Transaction.FCRInterface) then
     begin
       if Commit then
@@ -686,50 +716,58 @@ begin
 
         //This may raise exceptions if pre-commit checks fail.
         //Arranges streams in transaction for final journalling;
-        CommitStream := Transaction.FCRInterface.UserCommitCycle;
+        try
+          CommitStream := Transaction.FCRInterface.UserCommitCycle;
 
-        //Exceptions after here less likely / not expected.
-        Assert(not Assigned(Transaction.Changeset));
-        Transaction.FChangeset := CommitStream;
-        //And only set up the wait if no prior exception.
-        WaitJournalDone := Commit and (Transaction.FSync = amFlushBuffers);
-        if WaitJournalDone then
-        begin
-          Assert(not Assigned(Transaction.FlushFinishedEvent));
-          Transaction.FFlushFinishedEvent := TEvent.Create(nil, true, false, '');
+          //Exceptions after here less likely / not expected.
+          //Cleanup of all state may not be instant, but should happen
+          //after subsequent rollback.
+          Assert(not Assigned(Transaction.Changeset));
+          Transaction.FChangeset := CommitStream;
+          //And only set up the wait if no prior exception.
+          WaitJournalDone := Commit and (Transaction.FSync = amFlushBuffers);
+          if WaitJournalDone then
+          begin
+            Assert(not Assigned(Transaction.FlushFinishedEvent));
+            Transaction.FFlushFinishedEvent := TEvent.Create(nil, true, false, '');
+          end;
+
+          //Now remove internal API object for transaction:
+          //No longer needed, db restart case frees underlying DB obejcts.
+
+          //Also cleardown all refs on internal entities; leaving those refs
+          //for a while would result in old tables etc not being cleared,
+          //under continuous overlapping transactions.
+          Transaction.FCRInterface.Free;
+          Transaction.FCRInterface := nil;
+          Transaction.FLocalContext.Free;
+          Transaction.FLocalContext := nil;
+          Transaction.FEntitiesSnapshot.Release;
+          Transaction.FEntitiesSnapshot := nil;
+          Transaction.FEntitiesRegistered.Release;
+          Transaction.FEntitiesRegistered := nil;
+
+          //And now journal it.
+          Transaction.AddRef;
+          try
+            Transaction.ROBCommit;
+          except
+            Transaction.Release;
+            raise;
+          end;
+        except
+          Transaction.ROBAbort;
+          raise;
         end;
-
-        //Now remove internal API object for transaction:
-        //No longer needed, db restart case frees underlying DB obejcts.
-
-        //Also cleardown all refs on internal entities; leaving those refs
-        //for a while would result in old tables etc not being cleared,
-        //under continuous overlapping transactions.
-        Transaction.FCRInterface.Free;
-        Transaction.FCRInterface := nil;
-        Transaction.FLocalContext.Free;
-        Transaction.FLocalContext := nil;
-        Transaction.FEntitiesSnapshot.Release;
-        Transaction.FEntitiesSnapshot := nil;
-        Transaction.FEntitiesRegistered.Release;
-        Transaction.FEntitiesRegistered := nil;
-
-        //And now journal it.
-        Transaction.AddRef;
-        FROB.Commit(Transaction.FROBReservation, Transaction);
       end
       else
       begin
         try
-          //Very likely that transaction does not have a
-          //re-order buffer reservation, but just in case.
-          //Additionally, we need to drain the ROB, in case
-          //another txion is waiting for writeback...
-          FROB.Abort(Transaction.FROBReservation);
+          Transaction.ROBAbort;
 
           //Since everything is multi-buffered, barring out of memory
           //exceptions we do not expect this to fail.
-          Transaction.FCRInterface.UserRollbackCycle;
+          Transaction.FCRInterface.UserRollbackCycle(LowMemory);
           //We really need rollback to work to clear pins and refcounts.
           //If it doesn't then something's very very broken.
 
@@ -768,20 +806,19 @@ begin
   //If failed rollback, DB in error, exception swallowed, and drop the R/W lock.
 
   Assert(Transaction.FMode in [amReadShared, amWriteExclusive, amReadWriteShared]);
-  if Transaction.FRWWLocked then
-  begin
-    FRWWLock.Release(DBAccessModeToLockReason(Transaction.FMode));
-    Transaction.FRWWLocked := false;
-  end;
 
-  //Before, not after waiting for flush finished...
+  if LockAbstractions.InterlockedCompareExchange(Transaction.FRWWLocked,
+    Ord(false), Ord(true)) = Ord(True) then
+    FRWWLock.Release(DBAccessModeToLockReason(Transaction.FMode));
+
+  //Before, not after waiting for flush finished for normal case
+  //Txion processing.
   DrainReorderBuffer;
 
   if WaitJournalDone then
     Transaction.FlushFinishedEvent.WaitFor(INFINITE);
 
 txion_remove:
-
   FSessionLock.Acquire;
   try
     idx := Transaction.FSession.FSessionTransactions.IndexOf(Transaction);
@@ -870,7 +907,7 @@ begin
     end;
     Assert(Mode in [amReadShared, amWriteExclusive, amReadWriteShared]);
     FRWWLock.Acquire(DBAccessModeToLockReason(Mode));
-    result.FRWWLocked := true;
+    result.FRWWLocked := Ord(true);
 
     result.FCRInterface := FDatabase.Interfaced.GetAPIObject(result, APIInternalCommitRollback)
       as TMemAPIDatabaseInternal;
@@ -1323,7 +1360,12 @@ begin
       Ctxt.PRegisteredList := @EntRegistered;
       try
         TmpName := TPath.GetTempFileName();
-        ChangesetStream := TMemDBTempFileStream.Create(TmpName);
+        try
+          ChangesetStream := TMemDBTempCachedFileStream.Create(TmpName);
+        except
+          on E: EOutOfMemory do
+            ChangesetStream := TMemDBTempFileStream.Create(TmpName);
+        end;
         PseudoTid := TTransactionId.NewTransactionID(ilSerialisable); //if no writes, should definitley be serialisable.
         try
           FDatabase.CommitLock.Acquire; //This if we don't acquire at lrSharedRead for ever.

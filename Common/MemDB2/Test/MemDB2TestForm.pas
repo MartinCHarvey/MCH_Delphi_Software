@@ -1347,6 +1347,8 @@ procedure TForm1.ConcurrencyBtnClick(Sender: TObject);
     //Reminder, table contains only odd numbered rows.
 
     //Check conflict occurs at ilReadRepeatable and above.
+    Dat2 := nil;
+    DBAPI2 := nil;
     T1 := FSession.StartTransaction(amReadWriteShared, amLazyWrite, ilReadComitted);
     T2 := FSession.StartTransaction(amReadWriteShared, amLazyWrite, ilReadRepeatable);
     try
@@ -5458,7 +5460,10 @@ var
     Iter := 0;
     while true do
     begin
-      Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
+      //Flush buffers Tx write so that out of memory can't
+      //wipe out the journal thread whilst we are working.
+      //TODO - Harden journal thread (Also noted in other AI bugfixes).
+      Trans := FSession.StartTransaction(WMode, amFlushBuffers, Iso);
       try
         DBAPI := Trans.GetAPI;
         try
@@ -5490,7 +5495,6 @@ var
        on E: EOutOfMemory do
        begin
         Trans.RollbackAndFree;
-        LogtimeIncr('Exhaust memory table fill done, ' + IntToStr(Iter) + ' iterations');
         exit;
        end;
        on E: Exception do
@@ -5505,7 +5509,10 @@ var
 
   procedure BigRowDelete;
   begin
-    Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
+    //Flush buffers Tx write so that out of memory can't
+    //wipe out the journal thread whilst we are working.
+    //TODO - Harden journal thread (Also noted in other AI bugfixes).
+    Trans := FSession.StartTransaction(WMode, amFlushBuffers, Iso);
     try
       DBAPI := Trans.GetAPI;
       try
@@ -5525,8 +5532,7 @@ var
     except
      on E: EOutOfMemory do
      begin
-      Trans.RollbackAndFree;
-      LogtimeIncr('Exhaust memory delete all rows: Expected memory exhaustion, OK.');
+      Trans.RollbackAndFree(true);
       exit;
      end;
      on E: Exception do
@@ -5540,29 +5546,41 @@ var
 
   procedure CarefulRowDelete;
   var
-    BlocSize, BlocLeft: integer;
+    BlocSize, BlocLeft, BlocDone: integer;
   begin
     BlocSize := 1;
     while true do
     begin
-      Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
+      BlocDone := 0;
+      //Flush buffers Tx write so that out of memory can't
+      //wipe out the journal thread whilst we are working.
+      //TODO - Harden journal thread (Also noted in other AI bugfixes).
+      Trans := FSession.StartTransaction(WMode, amFlushBuffers, Iso);
       try
-        BlocLeft := BlocSize;
-        TableData := DBAPI.GetAPIObjectFromEntity('ExhaustMemTbl', APITableData) as TMemAPITableData;
+        DBAPI := Trans.GetAPI;
         try
-          TableData.Locate(ptFirst, '');
-          while (BlocLeft > 0) and TableData.RowSelected do
-          begin
-            Dec(BlocLeft);
-            TableData.Delete;
+          BlocLeft := BlocSize;
+          TableData := DBAPI.GetAPIObjectFromEntity('ExhaustMemTbl', APITableData) as TMemAPITableData;
+          try
+            TableData.Locate(ptFirst, '');
+            while (BlocLeft > 0) and TableData.RowSelected do
+            begin
+              TableData.Delete;
+              Dec(BlocLeft);
+              Inc(BlocDone);
+            end;
+          finally
+            TableData.Free;
           end;
         finally
-          TableData.Free;
+          DBAPI.Free;
+          DBAPI := nil;
         end;
         Trans.CommitAndFree;
-        if BlocLeft > 0 then
-          exit; //All rows deleted.
-
+        //No exception, so deleted everything we wanted to if BlocDone = 0
+        if BlocDone = 0 then
+          exit;
+        //Else, try to delete more if we can.
         if BlocSize < (OO_BATCH div 2) then
           BlocSize := BlocSize * 2
         else
@@ -5570,9 +5588,27 @@ var
       except
         on E: Exception do
         begin
-          Trans.RollbackAndFree;
-          LogtimeIncr('Exhaust memory careful row delete unexpected failed: ' + E.Message);
-          raise;
+          if Assigned(DBAPI) then
+            DBAPI.Free;
+          Trans.RollbackAndFree((E is EOutOfMemory) or (E is EThread));
+          //OK, did not manage to do what we wanted. Try a smaller Block?
+          if not ((E is EOutOfMemory) or (E is EThread)) then
+          begin
+            LogtimeIncr('Exhaust memory careful row delete unexpected failed: ' + E.Message);
+            raise;
+          end
+          else
+          begin
+            if BlocSize > 1 then
+              BlocSize := BlocSize div 2
+            else
+            begin
+              //Already trying to do stuff at smallest possible block size,
+              //still failed. Re-throw.
+              LogtimeIncr('Exhaust memory test stymied by fragmentation: ' + E.Message);
+              raise;
+            end;
+          end;
         end;
       end;
     end;
@@ -5584,6 +5620,8 @@ begin
     LogTimeIncr('Don''t run this on > 32 bit process (machine will grind to a halt).');
     exit;
   end;
+  LogtimeIncr('Exhaust memory test. (this may take a moment).');
+  Application.ProcessMessages;
   ResetClick(Sender);
 
   //First up (obvious), create the table.
@@ -5598,6 +5636,7 @@ begin
 
   //Now slowly back the table out a few rows at a time.
   CarefulRowDelete;
+  LogtimeIncr('Exhaust memory test OK!');
 end;
 
 procedure TForm1.ResetClick(Sender: TObject);
