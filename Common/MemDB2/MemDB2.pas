@@ -167,7 +167,7 @@ type
     //also use it synchronously, so that inconsistencies between
     //written to journal / commited to memory can be caught immediately.
     procedure CheckDBErrFlagSynchronous; override;
-    procedure SetDBErrFlagSynchronous(Msg: string); override;
+    procedure SetDBErrFlag(Msg: string); override;
     procedure JournalTxion(T: TReffed); override;
   end;
 
@@ -216,7 +216,7 @@ type
     procedure HandleNewEntityUnderDBLocks(Entity: TMemDBEntity; OwnerTx: TMemDBTransaction);
 
     procedure CommitAPICheckDBErrFlagSynchronous;
-    procedure CommitAPISetDBErrFlagSynchronous(Msg: string);
+    procedure CommitAPISetDBErrFlag(Msg: string);
     procedure CommitAPIJournalTxion(T: TReffed);
   public
 
@@ -624,9 +624,9 @@ begin
   FDB.CommitAPICheckDbErrFlagSynchronous;
 end;
 
-procedure TMemDBAPICallbacks.SetDBErrFlagSynchronous(Msg: string);
+procedure TMemDBAPICallbacks.SetDBErrFlag(Msg: string);
 begin
-  FDB.CommitAPISetDBErrFlagSynchronous(Msg);
+  FDB.CommitAPISetDBErrFlag(Msg);
 end;
 
 procedure TMemDBAPICallbacks.JournalTxion(T: TReffed);
@@ -645,14 +645,16 @@ begin
   end;
 end;
 
-procedure TMemDB.CommitAPISetDBErrFlagSynchronous(Msg: string);
+procedure TMemDB.CommitAPISetDBErrFlag(Msg: string);
 begin
   FSessionLock.Acquire;
   try
-    if FPhase in [mdbInit, mdbRunning] then
+    //TODO - Called from init, init first checkpoint?
+    Assert(FPhase in [mdbInit, mdbRunning, mdbClosingWaitClients, mdbError]);
+    if FPhase  in [mdbInit, mdbRunning] then
     begin
       FPhase := mdbError;
-      FLastError := S_UNEXPECTED_BAD_OR_OUT_OF_SYNC + Msg;
+      FLastError := S_UNEXPECTED_ROLLBACK_FAILED + Msg;
     end;
   finally
     FSessionLock.Release;
@@ -745,31 +747,11 @@ begin
       end
       else
       begin
-        try
-          //Since everything is multi-buffered, barring out of memory
-          //exceptions we do not expect this to fail.
-          Transaction.FCRInterface.UserRollbackCycle(LowMemory);
-          //We really need rollback to work to clear pins and refcounts.
-          //If it doesn't then something's very very broken.
-        except
-          on E: Exception do
-          begin
-            FSessionLock.Acquire;
-            try
-              Assert(FPhase in [mdbRunning, mdbClosingWaitClients, mdbError]);
-              if FPhase = mdbRunning then
-              begin
-                FPhase := mdbError;
-                FLastError := S_UNEXPECTED_ROLLBACK_FAILED + E.Message;
-              end;
-            finally
-              FSessionLock.Release;
-            end;
-            //We will swallow the exception having put the DB into the error
-            //state. Unfortunately pins and refcounts will be hosed, but at least we
-            //drop the R/W lock.
-          end;
-        end;
+        //Since everything is multi-buffered, barring out of memory
+        //exceptions we do not expect this to fail.
+        Transaction.FCRInterface.UserRollbackCycle(LowMemory);
+        //We really need rollback to work to clear pins and refcounts.
+        //If it doesn't then something's very very broken.
       end;
     end;
   except
@@ -1295,6 +1277,9 @@ end;
 //It *is* possible to not hold those locks, and even to Checkpoint in
 //lrSharedR/W via snapshots, but that is not the point of it.
 //Email the author if you'd like a more concurrent friendly checkpoint.
+
+//TODO - Make this slightly less keen to put DB into err state,
+//Stream writing not a problem.
 function TMemDB.Checkpoint: boolean;
 var
   ChangesetStream: TStream;
@@ -1306,6 +1291,7 @@ var
 begin
   EntSnapshot := nil;
   EntRegistered := nil;
+  ChangesetStream := nil;
   FSessionLock.Acquire;
   try
     result := FPhase = mdbRunning;
@@ -1332,52 +1318,62 @@ begin
             ChangesetStream := TMemDBTempFileStream.Create(TmpName);
         end;
         PseudoTid := TTransactionId.NewTransactionID(ilSerialisable); //if no writes, should definitley be serialisable.
-        try
-          FDatabase.CommitLock.Acquire; //This if we don't acquire at lrSharedRead for ever.
+
+        FDatabase.CommitLock.Acquire; //This if we don't acquire at lrSharedRead for ever.
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
-          DbgUnderCommitLock := true;
+        DbgUnderCommitLock := true;
 {$ENDIF}
+        try
+          CommitAPICheckDBErrFlagSynchronous;
+          //Serialisable so StartTransaction under commit lock.
+          FDatabase.StartTransaction(PseudoTid, Ctxt);
           try
-            CommitAPICheckDBErrFlagSynchronous;
+            FDatabase.ToScratch(PseudoTid, ChangesetStream, Ctxt);
+          finally
+            //We probably shouldn't need to to this at all, but keep
+            //it here for safety.
             try
-              //Serialisable so StartTransaction under commit lock.
-              FDatabase.StartTransaction(PseudoTid, Ctxt);
+              FDatabase.MetaIndexLock.Acquire;
               try
-                FDatabase.ToScratch(PseudoTid, ChangesetStream, Ctxt);
+                FDatabase.Rollback(PseudoTid, rbpIndexRollback, [], Ctxt);
+                FDatabase.Rollback(PseudoTid, rbpMetaRollback, [], Ctxt);
               finally
-                //We probably shouldn't need to to this at all, but keep
-                //it here for safety.
-                FDatabase.MetaIndexLock.Acquire;
-                try
-                  FDatabase.Rollback(PseudoTid, rbpIndexRollback, [], Ctxt);
-                  FDatabase.Rollback(PseudoTid, rbpMetaRollback, [], Ctxt);
-                finally
-                  FDatabase.MetaIndexLock.Release;
-                end;
+                FDatabase.MetaIndexLock.Release;
               end;
-              FJournal.Checkpoint(ChangesetStream)
             except
               on E: Exception do
               begin
-                //Any error to create entire DB stream and return it to it's
-                //previous state is a fatal error.
-                CommitAPISetDBErrFlagSynchronous(E.Message);
+                //Fatal if not able to rollback pins etc.
+                CommitAPISetDBErrFlag(E.Message);
                 raise;
               end;
             end;
-          finally
-{$IFDEF DBG_UNDER_COMMIT_LOCK}
-            DbgUnderCommitLock := false;
-{$ENDIF}
-            FDatabase.CommitLock.Release;
-            FDatabase.Rollback(PseudoTid, rbpDelayedRollback, CleardownOptSet, Ctxt);
+            //Not fatal if failed to create the stream or write to it.
+            FJournal.Checkpoint(ChangesetStream);
+            ChangesetStream := nil;
           end;
+        finally
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+          DbgUnderCommitLock := false;
+{$ENDIF}
+          FDatabase.CommitLock.Release;
+        end;
+        try
+          FDatabase.Rollback(PseudoTid, rbpDelayedRollback, CleardownOptSet, Ctxt);
         except
-          ChangesetStream.Free;
-          DeleteFile(TmpName);
-          raise;
+          on E: Exception do
+          begin
+            //Fatal if not able to rollback pins etc.
+            CommitAPISetDBErrFlag(E.Message);
+            raise;
+          end;
         end;
       finally
+        if Assigned(ChangesetStream) then
+        begin
+          ChangesetStream.Free;
+          DeleteFile(TmpName);
+        end;
         Ctxt.Free;
         EntSnapshot.Release;
         EntRegistered.Release;

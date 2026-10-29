@@ -57,7 +57,7 @@ type
     //also use it synchronously, so that inconsistencies between
     //written to journal / commited to memory can be caught immediately.
     procedure CheckDBErrFlagSynchronous; virtual; abstract;
-    procedure SetDBErrFlagSynchronous(Msg: string); virtual; abstract;
+    procedure SetDBErrFlag(Msg: string); virtual; abstract;
     procedure JournalTxion(T: TReffed); virtual; abstract;
   end;
 
@@ -530,29 +530,44 @@ begin
           //otherwise out of order Txion data in queue.
           T.Changeset := DataStream;
           DataStream := nil;
+
           FCallbackInt.JournalTxion(T);
-          //It's in the journal, but we have a reference to it,
+          //Transaction in the journal, but we have a reference to it,
           //so can still cleanup parts not used by journal.
         except
           on E: Exception do
           begin
             //Any discrepancy between journal and memory,
             //or not clean memory commit we must set error flag.
-            FCallbackInt.SetDBErrFlagSynchronous(E.Message);
+            FCallbackInt.SetDBErrFlag(E.Message);
             raise;
           end;
         end;
       except
-        //For non fatal errors in pre-commit, we must
-        //rollback indices under commit lock (Index Next only has one
-        //instance, and that temporary under commit lock).
-        DB.MetaIndexLock.Acquire;
-        try
-          DB.Rollback(T.Tid, rbpIndexRollback, OptSet, T.LocalContext);
-        finally
-          DB.MetaIndexLock.Release;
+        on OuterE: Exception do
+        begin
+          //For non fatal errors in pre-commit, we must
+          //rollback indices under commit lock (Index Next only has one
+          //instance, and that temporary under commit lock).
+          try
+            DB.MetaIndexLock.Acquire;
+            try
+              DB.Rollback(T.Tid, rbpIndexRollback, OptSet, T.LocalContext);
+            finally
+              DB.MetaIndexLock.Release;
+            end;
+          except
+            on InnerE: Exception do
+            begin
+              //We're already gonna re-raise one exception
+              //don't re-raise a second on top / overriding,
+              //keep the original error, it's probably the cause
+              //of the subsequent inner failure.
+              FCallbackInt.SetDBErrFlag(OuterE.Message);
+            end;
+          end;
+          raise;
         end;
-        raise;
       end;
     finally
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
@@ -561,11 +576,23 @@ begin
       DB.CommitLock.Release;
     end;
     //Note final cleanup outside commit lock.
-    DB.Commit(T.Tid, ccpCleardown, OptSet, T.LocalContext);
+    //All commit stages after pre-commit should work, else DBErrflag.
+    try
+      DB.Commit(T.Tid, ccpCleardown, OptSet, T.LocalContext);
+    except
+      on E: Exception do
+      begin
+        //Doesn't set err flag totally atomically or synchronously,
+        //but hey, that's the best we can do.
+        FCallbackInt.SetDBErrFlag(E.Message);
+        raise;
+      end;
+    end;
     //Still have ref on Txion, clean up references we no longer use.
     T.CleanJournalledTransaction;
   except
     DataStream.Free;
+    T.Changeset := nil; //Just in case err happened in journal Q.
     raise; //Rely on later rollback etc to clear pins and such.
   end;
 end;
@@ -579,20 +606,25 @@ var
 begin
   T := FAssociatedTransaction as TMemDBTransaction;
   Assert(Assigned(T));
-
   FillChar(SizeHint, sizeof(SizeHint), 0);
   DB.SizeHint(T.Tid, SizeHint, T.LocalContext);
   OptSet := MakeOptimizationSet(DB.Policies, false, false, true, SizeHint, 0, T.Mode, LowMemory);
 
-  DB.MetaIndexLock.Acquire;
   try
-    DB.Rollback(T.Tid, rbpMetaRollback, OptSet, T.LocalContext);
-  finally
-    DB.MetaIndexLock.Release;
+    DB.MetaIndexLock.Acquire;
+    try
+      DB.Rollback(T.Tid, rbpMetaRollback, OptSet, T.LocalContext);
+    finally
+      DB.MetaIndexLock.Release;
+    end;
+    //OK to rollback general double buffered outside lock:
+    //we know changes won't be committed to current world-view.
+    DB.Rollback(T.Tid, rbpDelayedRollback, OptSet, T.LocalContext);
+  except
+    on E: Exception do
+      FCallbackInt.SetDBErrFlag(E.Message);
+    //Swallow exception, but put DB into err state.
   end;
-  //OK to rollback general double buffered outside lock:
-  //we know changes won't be committed to current world-view.
-  DB.Rollback(T.Tid, rbpDelayedRollback, OptSet, T.LocalContext);
 end;
 
 { TMemAPIDatabase }
