@@ -28,8 +28,7 @@ uses
   StripedLock in '..\..\LockAbstractions\StripedLock.pas',
   CRC32 in '..\..\CRC\CRC32.pas',
   PatchFreeMem in '..\..\PatchFreeMem\PatchFreeMem.pas',
-  PComp in '..\..\PComp\PComp.pas',
-  ReorderBuffer in '..\..\LockAbstractions\ReorderBuffer.pas';
+  PComp in '..\..\PComp\PComp.pas';
 
 {$R *.res}
 

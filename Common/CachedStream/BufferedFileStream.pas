@@ -429,9 +429,12 @@ end;
 
 destructor TWriteCachedFileStream.Destroy;
 begin
-  FlushCache;//make sure that the final calls to Write get recorded in the file
-  FreeAndNil(FReadStream);
-  inherited;
+  try
+    FlushCache;//make sure that the final calls to Write get recorded in the file
+  finally
+    FreeAndNil(FReadStream);
+    inherited;
+  end;
 end;
 
 function TWriteCachedFileStream.CreateHandle(FlagsAndAttributes: DWORD): THandle;

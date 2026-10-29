@@ -60,16 +60,19 @@ var
   Q: longword;
 begin
   CRC := OldCRC;
-  BufPtr := @Buf;
-  for DataOfs := 0 to Pred(Size) do
+  if Size > 0 then
   begin
-    ByteVal := BufPtr^;
-    AccValue := CRC shr 8;
-    Index := Crc and $FF;
-    Index := Index xor ByteVal;
-    Q := Crc32Table[Index];
-    CRC := AccValue xor Q;
-    Inc(BufPtr);
+    BufPtr := @Buf;
+    for DataOfs := 0 to Pred(Size) do //Longword - Pred(Size) wraps.
+    begin
+      ByteVal := BufPtr^;
+      AccValue := CRC shr 8;
+      Index := Crc and $FF;
+      Index := Index xor ByteVal;
+      Q := Crc32Table[Index];
+      CRC := AccValue xor Q;
+      Inc(BufPtr);
+    end;
   end;
   Result := CRC;
 end;
