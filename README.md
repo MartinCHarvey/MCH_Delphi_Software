@@ -5,10 +5,10 @@ Most recent (2026) development is in Common/MemDB2:
 
 - Builds on MemDB code, quick, and developed up to the end of 2025.
 - They share the same file format and API's.
-- MemDB best for single/lightly threaded straight-line workloads, and will be fastest for that use case.
+- *MemDB now legacy code. Will be removed start of Dec 2026.*
 - MemDB2 better for more deeply parallel / async workloads. Now suitable for general use.
 - MemDB2 now compiles & runs on both **Win32/64 and Android 32/64** 
-- SQL support for both MemDB and MemDB2 in progress.
+- SQL support for MemDB2 in progress.
 
 Also:
 - TP Lex / Yacc port for Delphi now at: https://github.com/MartinCHarvey/MCH-TPLY41
@@ -23,7 +23,7 @@ martin_c_harvey@hotmail.com
 
 Files / Folders:
 
-- KnowComment: A Delphi client for Instagram (and eventually Twitter too, but needs a few fixes).
+- KnowComment: A Delphi client for Instagram (and eventually Twitter too, but needs a few fixes). Needs port to MemDB2 in the next month.
 
 - CoCoDM: A Delphi port of the CoCo/R parser generator.
 
