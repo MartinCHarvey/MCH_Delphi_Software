@@ -880,8 +880,13 @@ begin
       if DoFlush then
       begin
 {$IFDEF WINDOWS_FLUSH}
-        (OutputStream as TWriteCachedFileStream).FlushCache;
-        FlushOK := FlushFileBuffers((OutputStream as TWriteCachedFileStream).Handle);
+        if OutputStream is TWriteCachedFileStream then
+        begin
+          (OutputStream as TWriteCachedFileStream).FlushCache;
+          FlushOK := FlushFileBuffers((OutputStream as TWriteCachedFileStream).Handle);
+        end
+        else
+          FlushOK := FlushFileBuffers((OutputStream as TFileStream).Handle);
         Assert(FlushOK);
 {$ELSE}
         //TODO - Need posixly nice file cache function, and fd to flush.
@@ -890,7 +895,7 @@ begin
       for Idx := 0 to Pred(Transactions.Count) do
       begin
         Transaction := TMemDbTransaction(Transactions[idx]);
-        if Transaction.Sync = amFlushBuffers then
+        if Assigned(Transaction.FlushFinishedEvent) then
           DoJournalWriteFlush(Transaction);
         Transaction.Release;
       end;

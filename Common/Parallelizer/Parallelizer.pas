@@ -273,11 +273,11 @@ begin
           except
             on E: Exception do
             begin
+              FilterRet := tetaSwallowException;
               if FinalAction > tfaBadThrow then
               begin
                 FinalAction := tfaBadThrow;
                 FinalMsg := S_BAD_THROW_IN_FILTER + E.ClassName + ' ' + E.Message;
-                FilterRet := tetaSwallowException;
               end;
             end;
           end;

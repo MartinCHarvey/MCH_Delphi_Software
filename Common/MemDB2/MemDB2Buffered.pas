@@ -2697,8 +2697,6 @@ begin
             try
               Assert(IRec.Item = Row);
               Assert(Row = DCPHeldRow);
-              Row.DCPRelease;
-              DCPHeldRow := nil;
               FParentTable.FMasterRowList.GetAnotherItem(IRec);
               if Assigned(IRec) then
                 Row := IRec.Item as TMemDBRow
@@ -2712,6 +2710,7 @@ begin
                 else
                   Row := nil;
               end;
+              DCPHeldRow.DCPRelease;
               DCPHeldRow := Row;
             finally
               FParentTable.FMasterRowLock.Release;
@@ -2878,8 +2877,6 @@ begin
             try
               Assert(IRec.Item = Row);
               Assert(Row = DCPHeldRow);
-              Row.DCPRelease;
-              DCPHeldRow := nil;
               FParentTable.FMasterRowList.GetAnotherItem(IRec);
               if Assigned(IRec) then
                 Row := IRec.Item as TMemDBRow
@@ -2893,6 +2890,7 @@ begin
                 else
                   Row := nil;
               end;
+              DCPHeldRow.DCPRelease;
               DCPHeldRow := Row;
             finally
               FParentTable.FMasterRowLock.Release;
@@ -5582,8 +5580,6 @@ begin
           try
             Assert(IRec.Item = Row);
             Assert(Row = DCPHeldRow);
-            Row.DCPRelease;
-            DCPHeldRow := nil;
             Meta.TableReferring.FMasterRowList.GetAnotherItem(IRec);
             if Assigned(IRec) then
               Row := IRec.Item as TMemDBRow
@@ -5597,6 +5593,7 @@ begin
               else
                 Row := nil;
             end;
+            DCPHeldRow.DCPRelease;
             DCPHeldRow := Row;
           finally
             Meta.TableReferring.FMasterRowLock.Release;

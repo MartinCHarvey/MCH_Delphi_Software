@@ -34,8 +34,7 @@ uses
   Trackables,
 {$ENDIF}
   SysUtils, Classes, MemDB2Misc, MemDB2Streamable, MemDB2Journal,
-  MemDB2Buffered, MemDB2API, LockAbstractions, RWWLock, MemDB2BufBase, Reffed,
-  ReOrderBuffer;
+  MemDB2Buffered, MemDB2API, LockAbstractions, RWWLock, MemDB2BufBase, Reffed;
 
 type
   PReffedList = ^TReffedList;
@@ -97,10 +96,6 @@ type
     //RWWLock handling slightly messier than I wanted ...
     //We expect the case where this flag is false to be vanishingly rare;
     FRWWLocked: integer;
-    //Journalling not under same lock as commit, need a re-order buffer
-    //to make sure things are journalled in same order they are comitted.
-    FROBReservation: PReservation;
-
     //Changeset states.
     FChangeset: TStream;
     FCommitRollbackInProgress: TInProgressType;
@@ -112,8 +107,8 @@ type
     FLocalContext: TXTransactionLocalContext;
   protected
     //Could make this public if needed later by MemDB2 API.
-    procedure ROBCommit;
   public
+    procedure CleanJournalledTransaction;
     //Public but internal use only.
     procedure HandleNewEntityUnderDBLocks(Entity: TMemDBEntity);
 
@@ -129,17 +124,14 @@ type
 
     function GetAPI: TMemAPIDatabase;
 
-    //Need public so accessible in MemDBAPI.
-    procedure ROBReserve;
-    procedure ROBAbort;
-
     property Mode: TMDBAccessMode read FMode;
     property Sync: TMDBSyncMode read FSync;
 
     property Tid: TTransactionId read FTid;
-    property FlushFinishedEvent: TEvent read FFlushFinishedEvent;
+    property FlushFinishedEvent: TEvent read FFlushFinishedEvent
+      write FFlushFinishedEvent;
     property ParentSession: TMemDBSession read FSession;
-    property Changeset: TStream read FChangeset;
+    property Changeset: TStream read FChangeset write FChangeset;
     property Session: TMemDBSession read FSession;
     property LocalContext: TXTransactionLocalContext read FLocalContext;
   end;
@@ -167,6 +159,18 @@ type
       GetTempStorageMode write SetTempStorageMode;
   end;
 
+  TMemDbAPICallbacks = class(TMemDBAPICallbackInt)
+  protected
+    FDB: TMemDB;
+  public
+    //Although DB err flag used async by journal,
+    //also use it synchronously, so that inconsistencies between
+    //written to journal / commited to memory can be caught immediately.
+    procedure CheckDBErrFlagSynchronous; override;
+    procedure SetDBErrFlagSynchronous(Msg: string); override;
+    procedure JournalTxion(T: TReffed); override;
+  end;
+
 {$IFDEF USE_TRACKABLES}
   TMemDB = class(TTrackable)
 {$ELSE}
@@ -183,14 +187,13 @@ type
     FInitWait: TEvent;
     FClientWait: TEvent;
     FPersistWait: TEvent;
-    FROB: TReorderBuffer;
-    FDrainLock: TCriticalSection;
     FRunningTeardown: boolean;
     FJournal: TMemDbDefaultJournal;
     FDatabase: TMemDbDatabasePersistent;
     FPhase: TMemDBPhase;
     FLastError: string;
     FOnUIStateChange: TNotifyEvent;
+    FCommitApiCallbacks: TMemDBAPiCallbacks;
   protected
     procedure RemoveSession(Session: TMemDBSession);
     procedure RemoveTransaction(Transaction: TMemDBTransaction; Commit: boolean; LowMemory: boolean);
@@ -209,12 +212,12 @@ type
       Initial: boolean);
     procedure HandleJournalTransactionWriteFlush(Sender: TObject; Transaction: TObject);
     procedure HandleUIStateChange(Sender: TObject);
-    procedure DrainReorderBuffer;
 
     procedure HandleNewEntityUnderDBLocks(Entity: TMemDBEntity; OwnerTx: TMemDBTransaction);
-    function ROBReserve: PReservation;
-    procedure ROBAbort(var Reservation: PReservation);
-    procedure ROBCommit(var Reservation: PReservation; Data: TObject);
+
+    procedure CommitAPICheckDBErrFlagSynchronous;
+    procedure CommitAPISetDBErrFlagSynchronous(Msg: string);
+    procedure CommitAPIJournalTxion(T: TReffed);
   public
 
     constructor Create;
@@ -243,10 +246,11 @@ const
   S_COMMIT_ROLLBACK_IN_PROGRESS = 'Commit or rollback for this transaction already in progress.';
   S_COMMIT_OR_ROLLBACK_BEFORE_FREE = 'Transactions should be committed or rolled back before destroying. Are you calling an inherited ''Free'' function? ';
   S_ERRORPHASE_ERROR = 'Can''t start transaction, error state: ';
-  S_ERRORPHASE_COMMIT_ERROR = 'Can''t stop transaction, error state: ';
+  S_ERRORPHASE_COMMIT_ERROR = 'DB in internal error state, Can''t commit transaction.';
   S_BADPHASE_ERROR = 'Can''t start transaction, DB not running or closing.';
   S_REINIT_DIFF_LOCATION = 'Database loaded at different location, unload first.';
-  S_UNEXPECTED_ROLLBACK_FAILED = 'Unexpected rollback failed, state uncertain: ';
+  S_UNEXPECTED_ROLLBACK_FAILED = 'Fatal: Unexpected rollback failed, state uncertain: ';
+  S_UNEXPECTED_BAD_OR_OUT_OF_SYNC = 'Fatal: Unexpected commit/checkpoint/journal failed, state uncertain: ';
   S_READONLY_HAS_CHANGED_DATA = 'Read-only transaction has changed data!';
   S_TRANSACTION_HAS_API_OBJECTS = 'Transaction has associated API objects. You should have freed them before commit/rollback';
   S_ENTITIES_OUT_OF_DATE = 'Aborted: Concurrency conflict: table/key list changed, not fixed up in time.';
@@ -366,34 +370,21 @@ end;
 
   { TMemDBTransaction }
 
+procedure TMemDBTransaction.CleanJournalledTransaction;
+begin
+  FCRInterface.Free;
+  FCRInterface := nil;
+  FLocalContext.Free;
+  FLocalContext := nil;
+  FEntitiesSnapshot.Release;
+  FEntitiesSnapshot := nil;
+  FEntitiesRegistered.Release;
+  FEntitiesRegistered := nil;
+end;
+
 procedure TMemDBTransaction.HandleNewEntityUnderDBLocks(Entity: TMemDBEntity);
 begin
   FDB.HandleNewEntityUnderDBLocks(Entity, self);
-end;
-
-procedure TMemDBTransaction.ROBReserve;
-begin
-  Assert(FCommitRollbackInProgress = tiptCommitRollback);
-  Assert(not Assigned(FROBReservation));
-  FROBReservation := FDB.ROBReserve;
-  Assert(Assigned(FROBReservation));
-end;
-
-//Can be called at any time - only aborts
-//if uncommitted reservation
-procedure TMemDBTransaction.ROBAbort;
-begin
-  //Can occur outside of tiptCommitRollback,
-  FDB.ROBAbort(FROBReservation);
-  Assert(not Assigned(FROBReservation));
-end;
-
-procedure TMemDBTransaction.ROBCommit;
-begin
-  Assert(FCommitRollbackInProgress = tiptCommitRollback);
-  Assert(Assigned(FROBReservation));
-  FDB.ROBCommit(FROBReservation, self);
-  Assert(not Assigned(FROBReservation));
 end;
 
 function TMemDBTransaction.GetAPI: TMemAPIDatabase;
@@ -503,7 +494,6 @@ begin
   FApiObjectLock.Free;
   FLocalContext.Free;
   FFlushFinishedEvent.Free;
-  Assert(not Assigned(FROBReservation));
   FEntitiesSnapshot.Release;
   FEntitiesRegistered.Release;
   inherited;
@@ -626,20 +616,60 @@ begin
   end;
 end;
 
-function TMemDB.ROBReserve: PReservation;
+//Check and set DB error flag synchronously, so that
+//any variance in data committed to memory and data
+//written to journal will result in immediate stop.
+procedure TMemDBAPICallbacks.CheckDBErrFlagSynchronous;
 begin
-  result := FROB.Reserve;
+  FDB.CommitAPICheckDbErrFlagSynchronous;
 end;
 
-procedure TMemDB.ROBAbort(var Reservation: PReservation);
+procedure TMemDBAPICallbacks.SetDBErrFlagSynchronous(Msg: string);
 begin
-  FROB.Abort(Reservation);
+  FDB.CommitAPISetDBErrFlagSynchronous(Msg);
 end;
 
-procedure TMemDB.ROBCommit(var Reservation: PReservation; Data: TObject);
+procedure TMemDBAPICallbacks.JournalTxion(T: TReffed);
 begin
-  FROB.Commit(Reservation, Data);
+  FDB.CommitAPIJournalTxion(T);
 end;
+
+procedure TMemDB.CommitAPICheckDBErrFlagSynchronous;
+begin
+  FSessionLock.Acquire;
+  try
+    if FPhase = mdbError then
+      raise EMemDBException.Create(S_ERRORPHASE_COMMIT_ERROR);
+  finally
+    FSessionLock.Release;
+  end;
+end;
+
+procedure TMemDB.CommitAPISetDBErrFlagSynchronous(Msg: string);
+begin
+  FSessionLock.Acquire;
+  try
+    if FPhase in [mdbInit, mdbRunning] then
+    begin
+      FPhase := mdbError;
+      FLastError := S_UNEXPECTED_BAD_OR_OUT_OF_SYNC + Msg;
+    end;
+  finally
+    FSessionLock.Release;
+  end;
+end;
+
+procedure TMemDB.CommitAPIJournalTxion(T: TReffed);
+begin
+  T.AddRef;
+  try
+    FJournal.TransactionCommitChangeset(T);
+  except
+    T.Release;
+    raise;
+  end;
+end;
+
 
 procedure TMemDB.RemoveTransaction(Transaction: TMemDBTransaction; Commit: boolean; LowMemory: boolean);
 var
@@ -673,20 +703,14 @@ begin
   if AsyncError then
   begin
     if Commit then
-      raise EMemDBException.Create(S_ERRORPHASE_COMMIT_ERROR + FLastError)
+      raise EMemDBException.Create(S_ERRORPHASE_COMMIT_ERROR)
     else
-      //Allow DB force close / rollback cases to quietly clear up as much as they can.
-      //At least drop the locks correctly.
-
-      //Unfortunately, we lose tipCommitRollback serialisation here.
-      if LockAbstractions.InterlockedCompareExchange(Transaction.FRWWLocked,
-        Ord(false), Ord(true)) = Ord(True) then
-        FRWWLock.Release(DBAccessModeToLockReason(Transaction.FMode));
-      //And unentangle the ROB as best we can.
-      Transaction.ROBAbort;
-      DrainReorderBuffer;
-
       goto txion_remove;
+      //See error case note.
+      //Unfortunately, we lose tipCommitRollback serialisation here.
+      //RWW Lock dropped OK.
+
+      //More work TODO with Txions blocked on failed journal writes.
   end;
 
   try
@@ -714,63 +738,19 @@ begin
         if FJournal.NeedFlowControl then
           Transaction.FSync := amFlushBuffers;
 
-        //This may raise exceptions if pre-commit checks fail.
-        //Arranges streams in transaction for final journalling;
-        try
-          CommitStream := Transaction.FCRInterface.UserCommitCycle;
-
-          //Exceptions after here less likely / not expected.
-          //Cleanup of all state may not be instant, but should happen
-          //after subsequent rollback.
-          Assert(not Assigned(Transaction.Changeset));
-          Transaction.FChangeset := CommitStream;
-          //And only set up the wait if no prior exception.
-          WaitJournalDone := Commit and (Transaction.FSync = amFlushBuffers);
-          if WaitJournalDone then
-          begin
-            Assert(not Assigned(Transaction.FlushFinishedEvent));
-            Transaction.FFlushFinishedEvent := TEvent.Create(nil, true, false, '');
-          end;
-
-          //Now remove internal API object for transaction:
-          //No longer needed, db restart case frees underlying DB obejcts.
-
-          //Also cleardown all refs on internal entities; leaving those refs
-          //for a while would result in old tables etc not being cleared,
-          //under continuous overlapping transactions.
-          Transaction.FCRInterface.Free;
-          Transaction.FCRInterface := nil;
-          Transaction.FLocalContext.Free;
-          Transaction.FLocalContext := nil;
-          Transaction.FEntitiesSnapshot.Release;
-          Transaction.FEntitiesSnapshot := nil;
-          Transaction.FEntitiesRegistered.Release;
-          Transaction.FEntitiesRegistered := nil;
-
-          //And now journal it.
-          Transaction.AddRef;
-          try
-            Transaction.ROBCommit;
-          except
-            Transaction.Release;
-            raise;
-          end;
-        except
-          Transaction.ROBAbort;
-          raise;
-        end;
+        //Commit cycle also puts DB into error state if one critical
+        //commit path fails.
+        Transaction.FCRInterface.UserCommitCycle;
+        WaitJournaldone := Assigned(Transaction.FLushFinishedEvent);
       end
       else
       begin
         try
-          Transaction.ROBAbort;
-
           //Since everything is multi-buffered, barring out of memory
           //exceptions we do not expect this to fail.
           Transaction.FCRInterface.UserRollbackCycle(LowMemory);
           //We really need rollback to work to clear pins and refcounts.
           //If it doesn't then something's very very broken.
-
         except
           on E: Exception do
           begin
@@ -802,23 +782,25 @@ begin
     raise;
   end;
   //If failed commit, hold the R/W lock.
-  //If good commit, drop the lock, drain and flush data.
+  //If good commit, drop the lock, and flush data.
   //If failed rollback, DB in error, exception swallowed, and drop the R/W lock.
 
   Assert(Transaction.FMode in [amReadShared, amWriteExclusive, amReadWriteShared]);
 
+  //Normal RWW lock drop.
   if LockAbstractions.InterlockedCompareExchange(Transaction.FRWWLocked,
     Ord(false), Ord(true)) = Ord(True) then
     FRWWLock.Release(DBAccessModeToLockReason(Transaction.FMode));
-
-  //Before, not after waiting for flush finished for normal case
-  //Txion processing.
-  DrainReorderBuffer;
 
   if WaitJournalDone then
     Transaction.FlushFinishedEvent.WaitFor(INFINITE);
 
 txion_remove:
+  //DB errorphase RWW (txions block on flush) lock drop.
+  if LockAbstractions.InterlockedCompareExchange(Transaction.FRWWLocked,
+    Ord(false), Ord(true)) = Ord(True) then
+    FRWWLock.Release(DBAccessModeToLockReason(Transaction.FMode));
+
   FSessionLock.Acquire;
   try
     idx := Transaction.FSession.FSessionTransactions.IndexOf(Transaction);
@@ -833,28 +815,6 @@ txion_remove:
     FSessionLock.Release;
   end;
   Transaction.Release;
-end;
-
-procedure TMemDB.DrainReorderBuffer;
-var
-  Obj: TObject;
-begin
-  FDrainLock.Acquire;
-  try
-    Obj := FROB.Drain;
-    while Assigned(Obj) do
-    begin
-      if Obj is TMemDBTransaction then
-        FJournal.TransactionCommitChangeset(Obj)
-      else if Obj is TStream then
-        FJournal.Checkpoint(Obj)
-      else
-        Assert(false);
-      Obj:= FROB.Drain;
-    end;
-  finally
-    FDrainLock.Release;
-  end;
 end;
 
 
@@ -911,6 +871,7 @@ begin
 
     result.FCRInterface := FDatabase.Interfaced.GetAPIObject(result, APIInternalCommitRollback)
       as TMemAPIDatabaseInternal;
+    result.FCRInterface.SetCallbackInterface(self.FCommitApiCallbacks);
 
     result.FCRInterface.TransactionStartCycle;
 
@@ -1011,9 +972,9 @@ begin
   FJournal.OnJournalWriteFlush := HandleJournalTransactionWriteFlush;
   FJournal.OnJournalError := HandleJournalError;
   FJournal.OnUIStateChange := HandleUIStateChange;
-  FROB := TReorderBuffer.Create;
-  FDrainLock := TCriticalSection.Create;
   FDatabase := TMemDBDatabase.Create;
+  FCommitApiCallbacks := TMemDbAPICallbacks.Create;
+  FCommitAPICallbacks.FDB := self;
   (FDatabase as TMemDBDatabase).Init(self);
   inherited;
 end;
@@ -1034,8 +995,7 @@ begin
   FDatabase.Free;
   FRWWLock.Free;
   FSessionLock.Free;
-  FROB.Free;
-  FDrainLock.Free;
+  FCommitAPICallbacks.Free;
   inherited;
 end;
 
@@ -1328,6 +1288,13 @@ begin
   end;
 end;
 
+//Claude says: Checkpoint: streams the entire table set while holding each FMasterRowLock,
+//which blocks inserts to that table.
+
+//My comments: Checkpoint is designed here for simplicity and safety.
+//It *is* possible to not hold those locks, and even to Checkpoint in
+//lrSharedR/W via snapshots, but that is not the point of it.
+//Email the author if you'd like a more concurrent friendly checkpoint.
 function TMemDB.Checkpoint: boolean;
 var
   ChangesetStream: TStream;
@@ -1335,12 +1302,10 @@ var
   PseudoTid: TTransactionId;
   Ctxt: TXTransactionLocalContext;
   EntSnapshot, EntRegistered: TReffedList;
-  Reservation: PReservation;
 
 begin
   EntSnapshot := nil;
   EntRegistered := nil;
-  Reservation := nil;
   FSessionLock.Acquire;
   try
     result := FPhase = mdbRunning;
@@ -1373,20 +1338,31 @@ begin
           DbgUnderCommitLock := true;
 {$ENDIF}
           try
-            Reservation := FROB.Reserve;
-            //Serialisable so StartTransaction under commit lock.
-            FDatabase.StartTransaction(PseudoTid, Ctxt);
+            CommitAPICheckDBErrFlagSynchronous;
             try
-              FDatabase.ToScratch(PseudoTid, ChangesetStream, Ctxt);
-            finally
-              //We probably shouldn't need to to this at all, but keep
-              //it here for safety.
-              FDatabase.MetaIndexLock.Acquire;
+              //Serialisable so StartTransaction under commit lock.
+              FDatabase.StartTransaction(PseudoTid, Ctxt);
               try
-                FDatabase.Rollback(PseudoTid, rbpIndexRollback, [], Ctxt);
-                FDatabase.Rollback(PseudoTid, rbpMetaRollback, [], Ctxt);
+                FDatabase.ToScratch(PseudoTid, ChangesetStream, Ctxt);
               finally
-                FDatabase.MetaIndexLock.Release;
+                //We probably shouldn't need to to this at all, but keep
+                //it here for safety.
+                FDatabase.MetaIndexLock.Acquire;
+                try
+                  FDatabase.Rollback(PseudoTid, rbpIndexRollback, [], Ctxt);
+                  FDatabase.Rollback(PseudoTid, rbpMetaRollback, [], Ctxt);
+                finally
+                  FDatabase.MetaIndexLock.Release;
+                end;
+              end;
+              FJournal.Checkpoint(ChangesetStream)
+            except
+              on E: Exception do
+              begin
+                //Any error to create entire DB stream and return it to it's
+                //previous state is a fatal error.
+                CommitAPISetDBErrFlagSynchronous(E.Message);
+                raise;
               end;
             end;
           finally
@@ -1397,13 +1373,10 @@ begin
             FDatabase.Rollback(PseudoTid, rbpDelayedRollback, CleardownOptSet, Ctxt);
           end;
         except
-          FROB.Abort(Reservation);
           ChangesetStream.Free;
           DeleteFile(TmpName);
           raise;
         end;
-        FROB.Commit(Reservation, ChangesetStream);
-
       finally
         Ctxt.Free;
         EntSnapshot.Release;
@@ -1411,8 +1384,6 @@ begin
       end;
     finally
       FRWWLock.Release(lrSharedRead);
-
-      DrainReorderBuffer;
 
       FSessionLock.Acquire;
       try

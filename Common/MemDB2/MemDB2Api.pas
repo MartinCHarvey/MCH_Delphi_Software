@@ -29,7 +29,7 @@ interface
 
 uses
   MemDB2Buffered, MemDb2Misc, MemDb2Streamable, MemDB2Indexing, Classes,
-  IndexedStore, MemDB2BufBase, ReorderBuffer;
+  IndexedStore, MemDB2BufBase, Reffed;
 
 type
   TMemDBDatabase = class;
@@ -47,13 +47,30 @@ type
     property DB: TMemDBDatabase read GetInterfacedObject;
   end;
 
+{$IF USE_TRACKABLES}
+  TMemDBAPICallbackInt = class(TTrackable)
+{$ELSE}
+  TMemDBAPICallbackInt = class
+{$ENDIF}
+  public
+    //Although DB err flag used async by journal,
+    //also use it synchronously, so that inconsistencies between
+    //written to journal / commited to memory can be caught immediately.
+    procedure CheckDBErrFlagSynchronous; virtual; abstract;
+    procedure SetDBErrFlagSynchronous(Msg: string); virtual; abstract;
+    procedure JournalTxion(T: TReffed); virtual; abstract;
+  end;
+
   TMemAPIDatabaseInternal = class(TMemAPIDBTopLevel)
   protected
+    FCallbackInt: TMemDBAPICallbackInt;
   public
+    procedure SetCallbackInterface(CBI: TMemDBAPICallbackInt);
+    destructor Destroy; override;
     procedure TransactionStartCycle;
     //Really don't call any of these functions if you're an end user.
     procedure JournalReplayCycle(JournalEntry: TStream; Initial: boolean);
-    function UserCommitCycle: TStream;
+    procedure UserCommitCycle;
     procedure UserRollbackCycle(LowMemory: boolean);
   end;
 
@@ -275,7 +292,7 @@ implementation
 
 uses
   MemDB2, SysUtils, IoUtils, BufferedFileStream, Math, NullStream,
-  Reffed;
+  LockAbstractions;
 
 const
   S_API_POST_OR_DISCARD_BEFORE_NAVIGATING =
@@ -336,6 +353,18 @@ begin
 end;
 
 { TMemAPIDatabaseInternal}
+
+procedure TMemAPIDatabaseInternal.SetCallbackInterface(CBI: TMemDBAPICallbackInt);
+begin
+  Assert(not Assigned(FCallbackInt));
+  FCallbackInt := CBI;
+end;
+
+destructor TMemAPIDatabaseInternal.Destroy;
+begin
+  FCallbackInt := nil;
+  inherited;
+end;
 
 procedure TMemAPIDatabaseInternal.TransactionStartCycle;
 var
@@ -445,16 +474,22 @@ begin
   end;
 end;
 
-function TMemAPIDatabaseInternal.UserCommitCycle: TStream;
+procedure TMemAPIDatabaseInternal.UserCommitCycle;
 var
   T: TMemDBTransaction;
   SizeHint: TDBSizeHint;
   OptSet: TOptimizeSet;
+  DataStream: TStream;
 begin
+  DataStream := nil;
   T := FAssociatedTransaction as TMemDBTransaction;
   Assert(Assigned(T));
   Assert(not Assigned(T.Changeset));
-  result := MakeStream(T.Session.TempStorageMode);
+
+  if (T.Sync = amFlushBuffers)
+    and not Assigned(T.FlushFinishedEvent) then
+    T.FlushFinishedEvent := TEvent.Create(nil, true, false, '');
+
   try
     FillChar(SizeHint, sizeof(SizeHint), 0);
     SizeHint.ShouldUpdateLayout := true;
@@ -471,26 +506,46 @@ begin
     DbgUnderCommitLock := true;
 {$ENDIF}
     try
-      T.ROBReserve;
+      //Under commit lock to robustly detect journal / memory copy not in sync.
+      FCallbackInt.CheckDBErrFlagSynchronous;
       try
-
-        DB.ToJournal(T.Tid, result, T.LocalContext);
+        //Errors setting up or in pre-commit are normal.
+        DataStream := MakeStream(T.Session.TempStorageMode);
+        DB.ToJournal(T.Tid, DataStream, T.LocalContext);
 
         DB.PreCommit(T.Tid, pcpEntitySet, OptSet, T.LocalContext);
         DB.PreCommit(T.Tid, pcpTables, OptSet, T.LocalContext);
         DB.PreCommit(T.Tid, pcpFKeys, OptSet, T.LocalContext);
 
-        //The assumption is all exceptions raised in pre-commit.
-        //We're not checking for errors or allocating memory by the time
-        //it comes to the commit step.
-        DB.Commit(T.Tid, ccpData, OptSet, T.LocalContext);
-        DB.MetaIndexLock.Acquire;
         try
-          DB.Commit(T.Tid, ccpMetaIndex, OptSet, T.LocalContext);
-        finally
-          DB.MetaIndexLock.Release;
+          //Incomplete / incorrect commit err fatal.
+          DB.Commit(T.Tid, ccpData, OptSet, T.LocalContext);
+          DB.MetaIndexLock.Acquire;
+          try
+            DB.Commit(T.Tid, ccpMetaIndex, OptSet, T.LocalContext);
+          finally
+            DB.MetaIndexLock.Release;
+          end;
+          //Similarly, failure to at least write to journal must be caught;
+          //otherwise out of order Txion data in queue.
+          T.Changeset := DataStream;
+          DataStream := nil;
+          FCallbackInt.JournalTxion(T);
+          //It's in the journal, but we have a reference to it,
+          //so can still cleanup parts not used by journal.
+        except
+          on E: Exception do
+          begin
+            //Any discrepancy between journal and memory,
+            //or not clean memory commit we must set error flag.
+            FCallbackInt.SetDBErrFlagSynchronous(E.Message);
+            raise;
+          end;
         end;
       except
+        //For non fatal errors in pre-commit, we must
+        //rollback indices under commit lock (Index Next only has one
+        //instance, and that temporary under commit lock).
         DB.MetaIndexLock.Acquire;
         try
           DB.Rollback(T.Tid, rbpIndexRollback, OptSet, T.LocalContext);
@@ -507,9 +562,10 @@ begin
     end;
     //Note final cleanup outside commit lock.
     DB.Commit(T.Tid, ccpCleardown, OptSet, T.LocalContext);
+    //Still have ref on Txion, clean up references we no longer use.
+    T.CleanJournalledTransaction;
   except
-    //No ROBAbort here, moved to caller to cover all cases.
-    result.Free;
+    DataStream.Free;
     raise; //Rely on later rollback etc to clear pins and such.
   end;
 end;
