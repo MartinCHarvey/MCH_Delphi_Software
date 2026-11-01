@@ -29,7 +29,11 @@ interface
 
 uses
   MemDB2Buffered, MemDb2Misc, MemDb2Streamable, MemDB2Indexing, Classes,
-  IndexedStore, MemDB2BufBase, Reffed;
+  IndexedStore, MemDB2BufBase, Reffed
+{$IFDEF USE_TRACKABLES}
+  , Trackables
+{$ENDIF}
+  ;
 
 type
   TMemDBDatabase = class;
@@ -47,7 +51,7 @@ type
     property DB: TMemDBDatabase read GetInterfacedObject;
   end;
 
-{$IF USE_TRACKABLES}
+{$IFDEF USE_TRACKABLES}
   TMemDBAPICallbackInt = class(TTrackable)
 {$ELSE}
   TMemDBAPICallbackInt = class
@@ -338,7 +342,14 @@ begin
     tsmDisk:
     begin
       TmpName := TPath.GetTempFileName();
-      result := TMemDBTempFileStream.Create(TmpName);
+      try
+        result := TMemDBTempCachedFileStream.Create(TmpName);
+      except
+        //In the low memory case, we will take extremely slow
+        //stream writing on windows (but not android?) on the chin.
+        on E: EOutOfMemory do
+          result := TMemDBTempFileStream.Create(TmpName);
+      end;
     end;
   else
     result := TMemoryStream.Create;
@@ -531,9 +542,8 @@ begin
           T.Changeset := DataStream;
           DataStream := nil;
 
+          //JournalTxion Adds Ref, Releases it on exception.
           FCallbackInt.JournalTxion(T);
-          //Transaction in the journal, but we have a reference to it,
-          //so can still cleanup parts not used by journal.
         except
           on E: Exception do
           begin
@@ -588,11 +598,11 @@ begin
         raise;
       end;
     end;
-    //Still have ref on Txion, clean up references we no longer use.
+    //Still have ref on Txion, clean up references we no longer use,
+    //iff everything else has gone OK.
     T.CleanJournalledTransaction;
   except
     DataStream.Free;
-    T.Changeset := nil; //Just in case err happened in journal Q.
     raise; //Rely on later rollback etc to clear pins and such.
   end;
 end;
@@ -602,13 +612,22 @@ var
   T: TMemDBTransaction;
   SizeHint: TDBSizeHint;
   OptSet: TOptimizeSet;
+  R: TReffed;
 
 begin
   T := FAssociatedTransaction as TMemDBTransaction;
   Assert(Assigned(T));
+
   FillChar(SizeHint, sizeof(SizeHint), 0);
-  DB.SizeHint(T.Tid, SizeHint, T.LocalContext);
-  OptSet := MakeOptimizationSet(DB.Policies, false, false, true, SizeHint, 0, T.Mode, LowMemory);
+  R := T.LocalContext.GetEntityList(Low(TMDBIsolationLevel));
+  if Assigned(R) then
+  begin
+    DB.SizeHint(T.Tid, SizeHint, T.LocalContext);
+    OptSet := MakeOptimizationSet(DB.Policies, false, false, true, SizeHint, 0, T.Mode, LowMemory);
+    R.Release;
+  end
+  else
+    OptSet := [optLowMemory];
 
   try
     DB.MetaIndexLock.Acquire;

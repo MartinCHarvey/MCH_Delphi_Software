@@ -7693,26 +7693,30 @@ begin
   end;
 
   EList := CTxtLocal.GetEntityList(Low(TMDBIsolationLevel));
-  try
-    for i := 0 to Pred(EList.Count) do
-    begin
-      Proxy := EList.Items[i] as TMemDBEntityProxy;
-      Entity := Proxy.Proxy as TMemDBEntity;
-      if Parallel then
+  if Assigned(EList) then
+  begin
+    //Some pathalogical error cases, can end up without an entity list.
+    try
+      for i := 0 to Pred(EList.Count) do
       begin
-        ParallelAddHandler(RollbackParallel, Entity, @TPORoll,
-          Handlers, refs1, Refs2, Excepts, Rets, PCount);
-      end
-      else
-        Entity.Rollback(Tid, Phase, Opts, Ctxt);
-    end;
-    if Parallel and (PCount > 0) then
-      ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
+        Proxy := EList.Items[i] as TMemDBEntityProxy;
+        Entity := Proxy.Proxy as TMemDBEntity;
+        if Parallel then
+        begin
+          ParallelAddHandler(RollbackParallel, Entity, @TPORoll,
+            Handlers, refs1, Refs2, Excepts, Rets, PCount);
+        end
+        else
+          Entity.Rollback(Tid, Phase, Opts, Ctxt);
+      end;
+      if Parallel and (PCount > 0) then
+        ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
 
-    if Phase = rbpDelayedRollback then
-      ConsolidateAndFreeCaches(Ctxt);
-  finally
-    CtxtLocal.PutEntityList(EList);
+      if Phase = rbpDelayedRollback then
+        ConsolidateAndFreeCaches(Ctxt);
+    finally
+      CtxtLocal.PutEntityList(EList);
+    end;
   end;
 end;
 
