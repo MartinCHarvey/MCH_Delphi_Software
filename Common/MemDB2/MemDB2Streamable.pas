@@ -866,7 +866,10 @@ begin
     RecFromStream(Stream, FDataRec);
   except
     if (FDataRec.FieldType = ftBlob) then
+    begin
       FreeMem(FDataRec.Data);
+      FDataRec.Data := nil;
+    end;
     raise;
   end;
 end;
