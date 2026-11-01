@@ -207,11 +207,14 @@ const
   S_SKIPPED_PREV_JOURNAL_ERROR = 'Txion write skipped, previous journal error.';
   S_EXCEPTION_TRANS_WRITE = 'Exception during journal write of transaction: ';
   S_EXCEPTION_CHECKPOINT_WRITE = 'Exception during journal write of transaction: ';
+  S_FLUSH_FAILED = 'File flush failed: ';
+  S_FILE_RENAME_FAILED  = 'File rename failed: ';
 
   CHECKPOINT_RATIO = 10; { More than 1/10th data in journal, re-checkpoint }
 
 type
-  TJournalFileType = (jftInitOrCheckpoint, jftIncremental);
+  TJournalFileType = (jftInitOrCheckpoint, jftIncremental,
+                      jftInitOrCheckpointTemp, jftIncrementalTemp);
   TJournalFileExts = array[TJournalFileType] of string;
 
 {$IFDEF USE_TRACKABLES}
@@ -227,7 +230,8 @@ type
 
 const
   JOURNAL_THREAD_POLL_LATENCY = 5000;
-  FileExts: TJournalFileExts = ('.dbinit', '.dbincr');
+  FileExts: TJournalFileExts = ('.dbinit', '.dbincr',
+                                '.dbinit_partial', '.dbincr_partial');
 
 { TMemDBJournalThread }
 
@@ -681,6 +685,10 @@ begin
   if DB1.FileSeq > DB2.FileSeq then
     result := 1
   else if DB1.FileSeq < DB2.FileSeq then
+    result := -1
+  else if Ord(DB1.FileType) > Ord(DB2.FileType) then
+    result := 1
+  else if Ord(DB1.FileType) < Ord(DB2.FileType) then
     result := -1;
 end;
 
@@ -775,6 +783,9 @@ begin
     //If higher numbered files (that we would subsequently overwite),
     //then fail the load process.
     //Lower numbered files can be trimmed at the end of start-up.
+
+    //Since we now have potentially temporary files, we build the list of sequence
+    //numbers for all final files.
     InitialSeq := 0;
     FinalSeq := 0;
     if RList.Count = 0 then
@@ -785,6 +796,7 @@ begin
 
     Found := false;
     StartIdx := 0;
+    //Find latest dbinit
     for Idx := Pred(RList.Count) downto 0 do
     begin
       DBInfo := TDBFileInfo(RList[Idx]);
@@ -803,10 +815,14 @@ begin
     for Idx := Succ(StartIdx) to Pred(RList.Count) do
     begin
       DBInfo := TDBFileInfo(RList[Idx]);
-      if (DBInfo.FileType <> jftIncremental) or
-         (DBInfo.FileSeq <> FinalSeq) then
-        exit; //Result = false.
-      Inc(FinalSeq);
+      //Ignore temporaries whilst finding incremental updates.
+      if DBInfo.FileType in [jftInitOrCheckpoint, jftIncremental] then
+      begin
+        if (DBInfo.FileType <> jftIncremental) or
+           (DBInfo.FileSeq <> FinalSeq) then
+          exit; //Result = false.
+        Inc(FinalSeq);
+      end;
     end;
     result := true;
   finally
@@ -825,11 +841,13 @@ var
   DBInfo: TDBFileInfo;
   FileName: string;
 begin
-  //Cleanup files before the initial sequence number we started loading from.
+  //Cleanup files before the initial sequence number we started loading from,
+  //And all temporary files (which might prevent further writing...)
   for Idx := 0 to Pred(RList.Count) do
   begin
     DBInfo := TDBFileInfo(RList[Idx]);
-    if DBInfo.FileSeq < InitialSeq  then
+    if (DBInfo.FileSeq < InitialSeq)
+      or (DBInfo.FileType in [jftInitOrCheckpointTemp, jftIncrementalTemp]) then
     begin
       FileName := FBaseDirectory + IntToStr(DBInfo.FileSeq)
         + FileExts[DbInfo.FileType];
@@ -841,7 +859,7 @@ end;
 function TMemDbDefaultJournal.PerformInitialLoad(Action: TMemDbJournalAction;
   var AnyFiles: boolean; var CreateCheckpoint: boolean; var ErrMsg: string): boolean;
 var
-  InitialSeq, FinalSeq: UInt64;
+  InitialSeq, FinalSeq, ReadSeq: UInt64;
   RList: TList;
   Idx: integer;
   DBInfo: TDBFileInfo;
@@ -849,7 +867,6 @@ var
   FileName: string;
   TotalInitFileSize: UInt64;
   TotalIncrFileSize: UInt64;
-  LastFileBlank: boolean;
   ReadFileCount: integer;
 begin
   Assert(Assigned(Action));
@@ -870,56 +887,58 @@ begin
   end;
   TotalInitFileSize := 0;
   TotalIncrFileSize := 0;
-  LastFileBlank := false;
   try
     result := false;
     AnyFiles := false;
     ReadFileCount := 0;
+    ReadSeq := InitialSeq;
     //Okay, now can do the initial load.
     for Idx := 0 to Pred(RList.Count) do
     begin
       DBInfo := TDBFileInfo(RList[Idx]);
-      if (DBInfo.FileSeq >= InitialSeq) and (DBInfo.FileSeq < FinalSeq) then
+      //Ignore the temporary files
+      if DBInfo.FileType in [jftInitOrCheckpoint, jftIncremental] then
       begin
-        if (DBInfo.FileType = jftInitOrCheckpoint) <> (DbInfo.FileSeq = InitialSeq) then
+        if (DBInfo.FileSeq >= InitialSeq) and (DBInfo.FileSeq < FinalSeq) then
         begin
-          ErrMsg := S_DB_FILES_NUMBERING_BAD;
-          exit; //Result = false, types or numbering in a mess.
-        end;
-        AnyFiles := true;
-        Inc(ReadFileCount);
-        FileName := FBaseDirectory + IntToStr(DBInfo.FileSeq)
-          + FileExts[DbInfo.FileType];
-        Stream := nil;
-        try
-{$IFDEF MSWINDOWS}
-          Stream := TReadOnlyCachedFileStream.Create(FileName, FILE_CACHE_SIZE);
-{$ELSE}
-          Stream := TReadOnlyCachedFileStream.Create(FileName, fmOpenRead);
-{$ENDIF}
-          try
-            DoJournalReplay(Stream, (DBInfo.FileSeq = InitialSeq));
-          except
-            on E: Exception do
-            begin
-              ErrMsg := S_EXCEPTION_REPLAY + E.Message + '(' + FileName + ')';
-              exit; //Result := false;
-            end;
+          if ((DBInfo.FileType = jftInitOrCheckpoint) <> (DbInfo.FileSeq = InitialSeq))
+            or (ReadSeq <> DBInfo.FileSeq) then
+          begin
+            ErrMsg := S_DB_FILES_NUMBERING_BAD;
+            exit; //Result = false, types or numbering in a mess.
           end;
-        finally
-          Stream.Free;
-        end;
-        case DBInfo.FileType of
-          jftInitOrCheckpoint: Inc(TotalInitFileSize, DBInfo.FileSize);
-          jftIncremental: Inc(TotalIncrFileSize, DBInfo.FileSize);
-        else
-          Assert(false);
-        end;
-        if (DBInfo.FileSeq = Pred(FinalSeq))
-          and LastFileBlank then
-        begin
-          Dec(FinalSeq);
-          SysUtils.DeleteFile(FileName);
+          AnyFiles := true;
+          Inc(ReadFileCount);
+          FileName := FBaseDirectory + IntToStr(DBInfo.FileSeq)
+            + FileExts[DbInfo.FileType];
+          Stream := nil;
+          try
+  {$IFDEF MSWINDOWS}
+            Stream := TReadOnlyCachedFileStream.Create(FileName, FILE_CACHE_SIZE);
+  {$ELSE}
+            Stream := TReadOnlyCachedFileStream.Create(FileName, fmOpenRead);
+  {$ENDIF}
+            try
+              DoJournalReplay(Stream, (DBInfo.FileSeq = InitialSeq));
+            except
+              on E: Exception do
+              begin
+                ErrMsg := S_EXCEPTION_REPLAY + E.Message + '(' + FileName + ')';
+                exit; //Result := false;
+              end;
+            end;
+          finally
+            Stream.Free;
+          end;
+          case DBInfo.FileType of
+            jftInitOrCheckpoint: Inc(TotalInitFileSize, DBInfo.FileSize);
+            jftIncremental: Inc(TotalIncrFileSize, DBInfo.FileSize);
+            jftInitOrCheckpointTemp,
+            jftIncrementalTemp: ;
+          else
+            Assert(false);
+          end;
+          Inc(ReadSeq);
         end;
       end;
     end;
@@ -944,7 +963,7 @@ procedure TMemDbDefaultJournal.PerformMultiTransactionWrite(Transactions: TList;
 var
   result: boolean;
   OutputStream: TStream;
-  FileName: string;
+  FileName, FinalFileName: string;
   Idx: integer;
   Transaction: TMemDBTransaction;
   DoFlush: boolean;
@@ -972,49 +991,56 @@ begin
       end
       else
       begin
-        FileName := FBaseDirectory + IntToStr(FWriteSeq) + FileExts[jftIncremental];
-    {$IFDEF MSWINDOWS}
-        //Make it slightly less likely ENoMem destroys journal thread.
+        FileName := FBaseDirectory + IntToStr(FWriteSeq) + FileExts[jftIncrementalTemp];
+        FinalFileName := FBaseDirectory + IntToStr(FWriteSeq) + FileExts[jftIncremental];
         try
-          OutputStream := TWriteCachedFileStream.Create(FileName, FILE_CACHE_SIZE);
-        except
-          //Streams bulk-copied from, performance hit not so bad in the out of
-          //memory case.
-          on E:EOutOfMemory do
-            OutputStream := TFileStream.Create(FileName, fmCreate or fmShareExclusive);
-        end;
-    {$ELSE}
-        OutputStream := TWriteCachedFileStream.Create(FileName, fmCreate);
-    {$ENDIF}
-        DoFlush := false;
-        try
-          for Idx := 0 to Pred(Transactions.Count) do
-          begin
-            Transaction := TMemDbTransaction(Transactions[idx]);
-            Assert(Transaction.Mode in [amWriteExclusive, amReadWriteShared]);
-            DoFlush := DoFlush or (Transaction.Sync = amFlushBuffers);
-            CopyTransactionStreamToOutput;
+      {$IFDEF MSWINDOWS}
+          //Make it slightly less likely ENoMem destroys journal thread.
+          try
+            OutputStream := TWriteCachedFileStream.Create(FileName, FILE_CACHE_SIZE);
+          except
+            //Streams bulk-copied from, performance hit not so bad in the out of
+            //memory case.
+            on E:EOutOfMemory do
+              OutputStream := TFileStream.Create(FileName, fmCreate or fmShareExclusive);
           end;
-          if DoFlush then
-          begin
-    {$IFDEF WINDOWS_FLUSH}
-            if OutputStream is TWriteCachedFileStream then
+      {$ELSE}
+          OutputStream := TWriteCachedFileStream.Create(FileName, fmCreate);
+      {$ENDIF}
+          DoFlush := false;
+          try
+            for Idx := 0 to Pred(Transactions.Count) do
             begin
-              (OutputStream as TWriteCachedFileStream).FlushCache;
-              FlushOK := FlushFileBuffers((OutputStream as TWriteCachedFileStream).Handle);
-            end
-            else
-              FlushOK := FlushFileBuffers((OutputStream as TFileStream).Handle);
-            Assert(FlushOK);
-    {$ELSE}
-            FlushOK := (fsync(Integer((OutputStream as TFileStream).Handle)) = 0);
-            Assert(FlushOK);
-    {$ENDIF}
+              Transaction := TMemDbTransaction(Transactions[idx]);
+              Assert(Transaction.Mode in [amWriteExclusive, amReadWriteShared]);
+              DoFlush := DoFlush or (Transaction.Sync = amFlushBuffers);
+              CopyTransactionStreamToOutput;
+            end;
+            if DoFlush then
+            begin
+      {$IFDEF WINDOWS_FLUSH}
+              if OutputStream is TWriteCachedFileStream then
+              begin
+                (OutputStream as TWriteCachedFileStream).FlushCache;
+                FlushOK := FlushFileBuffers((OutputStream as TWriteCachedFileStream).Handle);
+              end
+              else
+                FlushOK := FlushFileBuffers((OutputStream as TFileStream).Handle);
+      {$ELSE}
+              FlushOK := (fsync(Integer((OutputStream as TFileStream).Handle)) = 0);
+      {$ENDIF}
+              if not FlushOK then
+                raise EMemDBException.Create(S_FLUSH_FAILED + FileName);
+            end;
+          finally
+            OutputStream.Free;
           end;
+          if not RenameFile(FileName, FinalFileName) then
+            raise EMemDBException.Create(S_FILE_RENAME_FAILED + FileName);
           result := true; //Errors in this path caught via exceptions.
         finally
+          //Increment even on failure, because async stop not immediate.
           Inc(FWriteSeq);
-          OutputStream.Free;
         end;
       end;
     finally
@@ -1043,11 +1069,12 @@ end;
 
 procedure TMemDbDefaultJournal.PerformCheckpoint(Action: TMemDBJournalAction; JState: TJournalState);
 var
-  FileName: string;
+  FileName, FinalFileName: string;
   OutputStream: TStream;
   result: boolean;
   ErrMsg: string;
   ActionStream: TStream;
+  FlushOK: boolean;
 begin
   result := false;
   try
@@ -1055,31 +1082,51 @@ begin
       Assert(JState in [jscRunning, jscRunningError, jscFinishing, jscFinishingError]);
       if JState in [jscRunning, jscFinishing] then
       begin
-        FileName := FBaseDirectory + IntToStr(FWriteSeq) + FileExts[jftInitOrCheckpoint];
-    {$IFDEF MSWINDOWS}
-        //Make it slightly less likely ENoMem destroys journal thread.
         try
-          OutputStream := TWriteCachedFileStream.Create(FileName, FILE_CACHE_SIZE);
-        except
-          //Streams bulk-copied from, performance hit not so bad in the out of
-          //memory case.
-          on E:EOutOfMemory do
-            OutputStream := TFileStream.Create(FileName, fmCreate or fmShareExclusive);
-        end;
+          FileName := FBaseDirectory + IntToStr(FWriteSeq) + FileExts[jftInitOrCheckpointTemp];
+          FinalFileName := FBaseDirectory + IntToStr(FWriteSeq) + FileExts[jftInitOrCheckpoint];
+      {$IFDEF MSWINDOWS}
+          //Make it slightly less likely ENoMem destroys journal thread.
+          try
+            OutputStream := TWriteCachedFileStream.Create(FileName, FILE_CACHE_SIZE);
+          except
+            //Streams bulk-copied from, performance hit not so bad in the out of
+            //memory case.
+            on E:EOutOfMemory do
+              OutputStream := TFileStream.Create(FileName, fmCreate or fmShareExclusive);
+          end;
+      {$ELSE}
+          OutputStream := TWriteCachedFileStream.Create(FileName, fmCreate);
+      {$ENDIF}
+          try
+            Assert(Assigned(Action));
+            Assert(Assigned(Action.ActionObj));
+            Assert(Action.ActionObj is TStream);
+            ActionStream := Action.ActionObj as TStream;
+            ActionStream.Seek(0, soFromBeginning);
+            OutputStream.CopyFrom(ActionStream, ActionStream.Size);
+    {$IFDEF WINDOWS_FLUSH}
+            if OutputStream is TWriteCachedFileStream then
+            begin
+              (OutputStream as TWriteCachedFileStream).FlushCache;
+              FlushOK := FlushFileBuffers((OutputStream as TWriteCachedFileStream).Handle);
+            end
+            else
+              FlushOK := FlushFileBuffers((OutputStream as TFileStream).Handle);
     {$ELSE}
-        OutputStream := TWriteCachedFileStream.Create(FileName, fmCreate);
+            FlushOK := (fsync(Integer((OutputStream as TFileStream).Handle)) = 0);
     {$ENDIF}
-        try
-          Assert(Assigned(Action));
-          Assert(Assigned(Action.ActionObj));
-          Assert(Action.ActionObj is TStream);
-          ActionStream := Action.ActionObj as TStream;
-          ActionStream.Seek(0, soFromBeginning);
-          OutputStream.CopyFrom(ActionStream, ActionStream.Size);
+            if not FlushOK then
+              raise EMemDBException.Create(S_FLUSH_FAILED + FileName);
+          finally
+            OutputStream.Free;
+          end;
+          if not RenameFile(FileName, FinalFileName) then
+            raise EMemDBException.Create(S_FILE_RENAME_FAILED + FileName);
           result := true; //Errors on this path caught by exceptions.
         finally
+          //Increment even on failure, because async stop not immediate.
           Inc(FWriteSeq);
-          OutputStream.Free;
         end;
       end
       else

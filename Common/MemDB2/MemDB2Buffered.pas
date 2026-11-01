@@ -7277,7 +7277,7 @@ begin
   WrTag(Stream, mstDBStartV2);
   //Size hint.
   i64 := 0;
-  Stream.Write(i64, sizeof(i64));
+  Stream.WriteBuffer(i64, sizeof(i64));
   CtxtLocal := Ctxt as TXTransactionLocalContext;
 
   EList := CtxtLocal.GetEntityList(Low(TMDBIsolationLevel));
@@ -7301,7 +7301,7 @@ begin
     Stream.Seek(StartPos, soFromBeginning);
     ExpectTag(Stream, mstDBStartV2);
     i64 := EndPos - StartPos;
-    Stream.Write(i64, sizeof(i64));
+    Stream.WriteBuffer(i64, sizeof(i64));
     Stream.Seek(EndPos, soFromBeginning);
   end;
 end;
@@ -7320,7 +7320,7 @@ begin
   WrTag(Stream, mstDBStartV2);
   //Size hint.
   i64 := 0;
-  Stream.Write(i64, sizeof(i64));
+  Stream.WriteBuffer(i64, sizeof(i64));
   CtxtLocal := Ctxt as TXTransactionLocalContext;
 
   EList := CTxtLocal.GetEntityList(Low(TMDBIsolationLevel));
@@ -7344,7 +7344,7 @@ begin
     Stream.Seek(StartPos, soFromBeginning);
     ExpectTag(Stream, mstDBStartV2);
     i64 := EndPos - StartPos;
-    Stream.Write(i64, sizeof(i64));
+    Stream.WriteBuffer(i64, sizeof(i64));
     Stream.Seek(EndPos, soFromBeginning);
   end;
 end;
@@ -7364,7 +7364,7 @@ begin
   if not (NxtTag in [mstDBStart, mstDBStartV2]) then
     raise EMemDBException.Create(S_WRONG_TAG);
   if (NxtTag = mstDBStartV2) then
-    Stream.Read(i64, sizeof(i64));
+    Stream.ReadBuffer(i64, sizeof(i64));
 
   StrPos := Stream.Position;
   NxtTag := RdTag(Stream);
@@ -7442,7 +7442,7 @@ begin
   if not (NxtTag in [mstDBStart, mstDBStartV2]) then
     raise EMemDBException.Create(S_WRONG_TAG);
   if (NxtTag = mstDBStartV2) then
-    Stream.Read(i64, sizeof(i64));
+    Stream.ReadBuffer(i64, sizeof(i64));
 
   StrPos := Stream.Position;
   NxtTag := RdTag(Stream);

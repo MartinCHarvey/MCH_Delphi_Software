@@ -743,7 +743,6 @@ begin
       //Unfortunately, we lose tipCommitRollback serialisation here.
       //RWW Lock dropped OK.
 
-      //More work TODO with Txions blocked on failed journal writes.
   end;
 
   try
