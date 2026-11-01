@@ -859,7 +859,13 @@ end;
 
 procedure TMemFieldData.FromStream(Stream: TStream);
 begin
-  RecFromStream(Stream, FDataRec);
+  try
+    RecFromStream(Stream, FDataRec);
+  except
+    if (FDataRec.FieldType = ftBlob) then
+      FreeMem(FDataRec.Data);
+    raise;
+  end;
 end;
 
 procedure TMemFieldData.CheckSameAsStream(Stream: TStream);
@@ -868,8 +874,8 @@ var
   OK: boolean;
 begin
   FillChar(LocalRec, sizeof(LocalRec), 0);
-  RecFromStream(Stream, LocalRec);
   try
+    RecFromStream(Stream, LocalRec);
     OK := DataRecsSame(FDataRec, LocalRec);
   finally
     if (LocalRec.FieldType = ftBlob) then

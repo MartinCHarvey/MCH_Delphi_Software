@@ -171,12 +171,20 @@ const
     end;
   end;
 
-  procedure ReloadDB;
+  procedure ReloadDB(Hard: boolean);
   begin
-    FSession.Free;
-    LogTimeIncr('Zombie Session closed...');
-    FDB.StopDB;
-    LogTimeIncr('Zombie DB stopped...');
+    if not Hard then
+    begin
+      FSession.Free;
+      LogTimeIncr('Zombie Session closed (relatively nice way)...');
+      FDB.StopDB;
+      LogTimeIncr('Zombie DB stopped...');
+    end
+    else
+    begin
+      FDB.StopDB(true);
+      LogTimeIncr('Sessions/Txions/Zombie DB force closed the brutal way...');
+    end;
     FDB.InitDB(DB_LOCATION, jtV2);
     LogTimeIncr('Zombie DB started...');
     FSession := FDB.StartSession;
@@ -189,6 +197,8 @@ var
   Tr: TMemDBTransaction;
   DBAPI: TMemAPIDatabase;
   TDat: TMemAPiTableData;
+  HardClose: boolean;
+
 begin
   if (RMode <> amReadWriteShared) or (WMode <> amReadWriteShared) then
     LogTimeIncr('Need both modes to be amReadWriteShared. Done nothing.')
@@ -196,28 +206,31 @@ begin
   begin
     RModeCombo.Enabled := false;
     WModeCombo.Enabled := false;
-    for MaxTest := 0 to MAX_ZOMBIES do
+    for HardClose := False to True do
     begin
-      LogtimeIncr('Zombie test, iteration: ' +IntToStr(MaxTest));
-      ResetClick(Sender);
-      FSession.StartTransaction(RMode, amLazyWrite, Iso);
-      if MaxTest > 0 then
+      for MaxTest := 0 to MAX_ZOMBIES do
       begin
-        for TestNum := 1 to MaxTest do
+        LogtimeIncr('Zombie test, iteration: ' +IntToStr(MaxTest));
+        ResetClick(Sender);
+        FSession.StartTransaction(RMode, amLazyWrite, Iso);
+        if MaxTest > 0 then
         begin
-          LogTestName(TestNum);
-          DoZombie(TestNum);
-          LogtimeIncr('Zombie test, leak transaction iteration: ' +IntToStr(MaxTest)
-            + ' test number: ' +IntToStr(TestNum));
-          //Leak both a transaction, and a bunch of API abjects.
-          Tr := FSession.StartTransaction(RMode, amLazyWrite, Iso);
-          DBAPI := TR.GetAPI;
-          TDat := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
+          for TestNum := 1 to MaxTest do
+          begin
+            LogTestName(TestNum);
+            DoZombie(TestNum);
+            LogtimeIncr('Zombie test, leak transaction iteration: ' +IntToStr(MaxTest)
+              + ' test number: ' +IntToStr(TestNum));
+            //Leak both a transaction, and a bunch of API abjects.
+            Tr := FSession.StartTransaction(RMode, amLazyWrite, Iso);
+            DBAPI := TR.GetAPI;
+            TDat := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
+          end;
         end;
+        LogtimeIncr('Zombie test, reload: ' +IntToStr(MaxTest));
+        Application.ProcessMessages;
+        ReloadDB(HardClose);
       end;
-      LogtimeIncr('Zombie test, reload: ' +IntToStr(MaxTest));
-      Application.ProcessMessages;
-      ReloadDB
     end;
   end;
 end;
