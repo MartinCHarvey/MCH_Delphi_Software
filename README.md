@@ -6,7 +6,8 @@ Most recent (2026) development is in Common/MemDB2:
 - Builds on MemDB code, quick, and developed up to the end of 2025.
 - They share the same file format and API's.
 - *MemDB now legacy code. Will be removed start of Dec 2026.*
-- MemDB2 better for more deeply parallel / async workloads. Now suitable for general use.
+- MemDB2 better for more deeply parallel / async workloads.
+- Now suitable for general use, with many bugfixes from AI reivew. *Significantly more robust*.
 - MemDB2 now compiles & runs on both **Win32/64 and Android 32/64** 
 - SQL support for MemDB2 in progress.
 
