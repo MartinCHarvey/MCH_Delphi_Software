@@ -307,7 +307,7 @@ procedure GetTxionSizeEstimate(JournalEntry: TStream; var TxionSizeEstimate: int
 implementation
 
 uses
-  LockAbstractions;
+  LockAbstractions, RTLConsts;
 
 const
   S_MEM_DB_FIELD_TYPE = 'FieldType';
@@ -475,7 +475,7 @@ begin
   inherited;
   WrTag(Stream, mstStreamableListStart);
   Len := self.Count;
-  Stream.Write(Len, sizeof(Len));
+  Stream.WriteBuffer(Len, sizeof(Len));
   for idx := 0 to Pred(Len) do
     self.Items[idx].ToStream(Stream);
   WrTag(Stream, mstStreamableListEnd);
@@ -488,7 +488,7 @@ var
 begin
   inherited;
   ExpectTag(Stream, mstStreamableListStart);
-  Stream.Read(Len, sizeof(Len));
+  Stream.ReadBuffer(Len, sizeof(Len));
   ReleaseAndClear;
   for idx := 0 to Pred(Len) do
   begin
@@ -505,7 +505,7 @@ var
 begin
   inherited;
   ExpectTag(Stream, mstStreamableListStart);
-  Stream.Read(Len, sizeof(Len));
+  Stream.ReadBuffer(Len, sizeof(Len));
   if Len <> Count then
     raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
   for Idx := 0 to Pred(Count) do
@@ -607,20 +607,20 @@ end;
 procedure TMemFieldDef.ToStream(Stream: TStream);
 begin
   WrTag(Stream, mstFieldDefStartV2);
-  Stream.Write(FFieldType, sizeof(FFieldType));
+  Stream.WriteBuffer(FFieldType, sizeof(FFieldType));
   WrStreamString(Stream, FFieldName);
-  Stream.Write(FFieldIndex, sizeof(FFieldIndex));
+  Stream.WriteBuffer(FFieldIndex, sizeof(FFieldIndex));
   WrTag(Stream, mstFieldDefEnd);
 end;
 
 procedure TMemFieldDef.FromStream(Stream: TStream);
 begin
   ExpectTag(Stream, mstFieldDefStartV2);
-  Stream.Read(FFieldType, sizeof(FFieldType));
+  Stream.ReadBuffer(FFieldType, sizeof(FFieldType));
   if not ((FFieldType >= Low(FFieldType))  and (FFieldType <= High(FFieldType))) then
     raise EMemDBException.Create(S_MEM_DB_UNSTREAM_OOR);
   FFieldName := RdStreamString(Stream);
-  Stream.Read(FFieldIndex, sizeof(FFieldIndex));
+  Stream.ReadBuffer(FFieldIndex, sizeof(FFieldIndex));
   ExpectTag(Stream, mstFieldDefEnd);
 end;
 
@@ -631,13 +631,13 @@ var
   StreamFieldIndex: TFieldOffset;
 begin
   ExpectTag(Stream, mstFieldDefStartV2);
-  Stream.Read(StreamFieldType, sizeof(StreamFieldType));
+  Stream.ReadBuffer(StreamFieldType, sizeof(StreamFieldType));
   if StreamFieldType <> FFieldType then
     raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
   StreamFieldName := RdStreamString(Stream);
   if CompareStr(StreamFieldName, FieldName) <> 0 then
     raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
-  Stream.Read(StreamFieldIndex, sizeof(StreamFieldIndex));
+  Stream.ReadBuffer(StreamFieldIndex, sizeof(StreamFieldIndex));
   if StreamFieldIndex <> FFieldIndex then
     raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
 
@@ -710,10 +710,10 @@ begin
   WrTag(Stream, mstIndexDefStartV4);
   WrStreamString(Stream, FIndexName);
   i := Length(FFieldNames);
-  Stream.Write(i, sizeof(i));
+  Stream.WriteBuffer(i, sizeof(i));
   for i := 0 to Pred(Length(FFieldNames)) do
     WrStreamString(Stream, FFieldNames[i]);
-  Stream.Write(FIndexAttrs, sizeof(FIndexAttrs));
+  Stream.WriteBuffer(FIndexAttrs, sizeof(FIndexAttrs));
   WrTag(Stream, mstIndexDefEnd);
 end;
 
@@ -723,12 +723,12 @@ var
 begin
   ExpectTag(Stream, mstIndexDefStartV4);
   FIndexName := RdStreamString(Stream);
-  Stream.Read(i, sizeof(i));
+  Stream.ReadBuffer(i, sizeof(i));
   SetLength(FFieldNames, i);
   for i := 0 to Pred(Length(FFieldNames)) do
     FFieldNames[i] := RdStreamString(Stream);
 
-  Stream.Read(FIndexAttrs, sizeof(FIndexAttrs));
+  Stream.ReadBuffer(FIndexAttrs, sizeof(FIndexAttrs));
   if FIndexAttrs - AllIndexAttrs <> [] then
     raise EMemDBException.Create(S_MEM_DB_UNSTREAM_OOR);
 
@@ -747,7 +747,7 @@ begin
   if CompareStr(FIndexName, LclIndexName) <> 0 then
     raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
 
-  Stream.Read(i, sizeof(i));
+  Stream.ReadBuffer(i, sizeof(i));
   SetLength(LclFieldNames, i);
   for i := 0 to Pred(Length(LclFieldNames)) do
     LclFieldNames[i] := RdStreamString(Stream);
@@ -755,7 +755,7 @@ begin
   if not FieldNamesSame(FFieldNames, LclFieldNames) then
     raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
 
-  Stream.Read(LclIndexAttrs, sizeof(LclIndexAttrs));
+  Stream.ReadBuffer(LclIndexAttrs, sizeof(LclIndexAttrs));
   if LclIndexAttrs <> FIndexAttrs then
     raise EMemDBException.Create(S_JOURNAL_REPLAY_INCONSISTENT);
 
@@ -804,20 +804,22 @@ end;
 procedure TMemFieldData.ToStream(Stream: TStream);
 begin
   WrTag(Stream, mstFieldDataStart);
-  Stream.Write(FDataRec.FieldType, sizeof(FDataRec.FieldType));
+  Stream.WriteBuffer(FDataRec.FieldType, sizeof(FDataRec.FieldType));
   case FDataRec.FieldType of
-    ftInteger: Stream.Write(FDataRec.i32Val, sizeof(FDataRec.i32Val));
-    ftCardinal: Stream.Write(FDataRec.u32Val, sizeof(FDataRec.u32Val));
-    ftInt64: Stream.Write(FDataRec.i64Val, sizeof(FDataRec.i64Val));
-    ftUint64: Stream.Write(FDataRec.u64Val, sizeof(FDataRec.u64Val));
+    ftInteger: Stream.WriteBuffer(FDataRec.i32Val, sizeof(FDataRec.i32Val));
+    ftCardinal: Stream.WriteBuffer(FDataRec.u32Val, sizeof(FDataRec.u32Val));
+    ftInt64: Stream.WriteBuffer(FDataRec.i64Val, sizeof(FDataRec.i64Val));
+    ftUint64: Stream.WriteBuffer(FDataRec.u64Val, sizeof(FDataRec.u64Val));
     ftUnicodeString: WrStreamString(Stream, FDataRec.sVal);
-    ftDouble: Stream.Write(FDataRec.dVal, sizeof(FDataRec.dVal));
+    ftDouble: Stream.WriteBuffer(FDataRec.dVal, sizeof(FDataRec.dVal));
     ftBlob:
     begin
-      Stream.Write(FDataRec.size, sizeof(FDataRec.size));
-      Stream.Write(FDataRec.Data^, FDataRec.size);
+      Stream.WriteBuffer(FDataRec.size, sizeof(FDataRec.size));
+      if FDataRec.size > 0 then
+        if Stream.Write(FDataRec.Data^, FDataRec.size) <> FDataRec.size then
+          raise EWriteError.CreateRes(@SWriteError)
     end;
-    ftGuid: Stream.Write(FDataRec.gVal, sizeof(FDataRec.gVal));
+    ftGuid: Stream.WriteBuffer(FDataRec.gVal, sizeof(FDataRec.gVal));
   else
     raise EMemDBInternalException.Create(S_FIELD_TYPE_NOT_STREAMABLE);
   end;
@@ -827,14 +829,14 @@ end;
 procedure TMemFieldData.RecFromStream(Stream: TStream; var Rec: TMemDbFieldDataRec);
 begin
   ExpectTag(Stream, mstFieldDataStart);
-  Stream.Read(Rec.FieldType, sizeof(Rec.FieldType));
+  Stream.ReadBuffer(Rec.FieldType, sizeof(Rec.FieldType));
   case Rec.FieldType of
-    ftInteger: Stream.Read(Rec.i32Val, sizeof(Rec.i32Val));
-    ftCardinal: Stream.Read(Rec.u32Val, sizeof(Rec.u32Val));
-    ftInt64: Stream.Read(Rec.i64Val, sizeof(Rec.i64Val));
-    ftUint64: Stream.Read(Rec.u64Val, sizeof(Rec.u64Val));
+    ftInteger: Stream.ReadBuffer(Rec.i32Val, sizeof(Rec.i32Val));
+    ftCardinal: Stream.ReadBuffer(Rec.u32Val, sizeof(Rec.u32Val));
+    ftInt64: Stream.ReadBuffer(Rec.i64Val, sizeof(Rec.i64Val));
+    ftUint64: Stream.ReadBuffer(Rec.u64Val, sizeof(Rec.u64Val));
     ftUnicodeString: Rec.sVal := RdStreamString(Stream);
-    ftDouble: Stream.Read(Rec.dVal, sizeof(Rec.dVal));
+    ftDouble: Stream.ReadBuffer(Rec.dVal, sizeof(Rec.dVal));
     ftBlob:
     begin
       if Assigned(Rec.Data) then
@@ -842,14 +844,15 @@ begin
         FreeMem(Rec.Data);
         Rec.Data := nil;
       end;
-      Stream.Read(Rec.size, sizeof(Rec.size));
+      Stream.ReadBuffer(Rec.size, sizeof(Rec.size));
       if Rec.size > 0 then
       begin
         GetMem(Rec.Data, Rec.size);
-        Stream.Read(Rec.Data^, Rec.size);
+        if Stream.Read(Rec.Data^, Rec.size) <> Rec.Size then
+          raise EReadError.Create(SReadError);
       end;
     end;
-    ftGuid: Stream.Read(Rec.gVal, sizeof(Rec.gVal));
+    ftGuid: Stream.ReadBuffer(Rec.gVal, sizeof(Rec.gVal));
   else
     raise EMemDBException.Create(S_MEM_DB_UNSTREAM_OOR);
   end;
@@ -1193,12 +1196,12 @@ procedure WrTag(Stream: TStream; Tag: TMemStreamTag);
 begin
   //Extra range checking...
   Assert((Tag >= Low(Tag)) and (Tag <= High(Tag)));
-  Stream.Write(Tag, sizeof(Tag));
+  Stream.WriteBuffer(Tag, sizeof(Tag));
 end;
 
 function RdTag(Stream: TStream): TMemStreamTag;
 begin
-  Stream.Read(result, sizeof(result));
+  Stream.ReadBuffer(result, sizeof(result));
   if not ((result >= Low(result)) and (result <= High(result))) then
     raise EMemDBException.Create(S_BAD_TAG);
 end;
@@ -1207,7 +1210,7 @@ procedure ExpectTag(Stream: TStream; Tag: TMemStreamTag);
 var
   RdTag: TMemStreamTag;
 begin
-  Stream.Read(RdTag, sizeof(RdTag));
+  Stream.ReadBuffer(RdTag, sizeof(RdTag));
   if not ((RdTag >= Low(RdTag)) and (RdTag <= High(RdTag))) then
     raise EMemDBException.Create(S_BAD_TAG);
   if RdTag <> Tag then
@@ -1220,14 +1223,14 @@ end;
 procedure WrGuid(Stream:TStream; const G:TGUID);
 begin
   WrTag(Stream, mstGuidStart);
-  Stream.Write(G, sizeof(G));
+  Stream.WriteBuffer(G, sizeof(G));
   WrTag(Stream, mstGuidEnd);
 end;
 
 function RdGuid(Stream:TStream): TGUID;
 begin
   ExpectTag(Stream, mstGuidStart);
-  Stream.Read(result, sizeof(result));
+  Stream.ReadBuffer(result, sizeof(result));
   ExpectTag(Stream, mstGuidEnd);
 end;
 
@@ -1237,9 +1240,10 @@ var
 begin
   WrTag(Stream, mstStringStart);
   Len := S.Length;
-  Stream.Write(Len, sizeof(Len));
+  Stream.WriteBuffer(Len, sizeof(Len));
   if Len > 0 then
-    Stream.Write(S[1], Len * sizeof(S[1]));
+    if Stream.Write(S[1], Len * sizeof(S[1])) <> Len * sizeof(S[1]) then
+        raise EWriteError.CreateRes(@SWriteError);
   WrTag(Stream, mstStringEnd);
 end;
 
@@ -1248,10 +1252,11 @@ var
   Len: integer;
 begin
   ExpectTag(Stream, mstStringStart);
-  Stream.Read(Len, sizeof(Len));
+  Stream.ReadBuffer(Len, sizeof(Len));
   SetLength(result, Len);
   if Len > 0 then
-    Stream.Read(result[1], Len * sizeof(result[1]));
+    if Stream.Read(result[1], Len * sizeof(result[1])) <> Len * sizeof(result[1]) then
+      raise EReadError.Create(SReadError);
   ExpectTag(Stream, mstStringEnd);
 end;
 
@@ -1259,13 +1264,13 @@ procedure WrStreamChangeType(Stream: TStream; Changetype: TMDBChangeType);
 begin
   WrTag(Stream, mstItemChangeType);
   Assert((Changetype >= Low(Changetype)) and (Changetype <= High(Changetype)));
-  Stream.Write(Changetype, sizeof(Changetype));
+  Stream.WriteBuffer(Changetype, sizeof(Changetype));
 end;
 
 function RdStreamChangeType(Stream: TStream): TMDBChangeType;
 begin
   ExpectTag(Stream, mstItemChangeType);
-  Stream.Read(result, sizeof(result));
+  Stream.ReadBuffer(result, sizeof(result));
   if not ((result >= Low(result)) and (result <= High(result))) then
     raise EMemDBException.Create(S_BAD_CHANGETYPE);
 end;
@@ -1292,7 +1297,7 @@ begin
     try
       Tag := RdTag(JournalEntry);
       if Tag = mstDBStartV2 then
-        JournalEntry.Read(TxionSizeEstimate, sizeof(TxionSizeEstimate))
+        JournalEntry.ReadBuffer(TxionSizeEstimate, sizeof(TxionSizeEstimate))
       else
         TxionSizeEstimate := JournalEntry.Size - JournalEntry.Position;
     finally
