@@ -292,7 +292,7 @@ end;
 {$IFDEF USE_TRACKABLES}
 function TTrackedReffed.GetExtraInfoText: string;
 begin
-  result := result + 'Refcount: ' + IntToStr(FRef);
+  result := ' Refcount: ' + IntToStr(FRef);
 end;
 
 constructor TTrackedReffed.Create;
