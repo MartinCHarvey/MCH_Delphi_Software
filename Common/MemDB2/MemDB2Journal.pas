@@ -36,7 +36,7 @@ uses
 {$IFDEF USE_TRACKABLES}
   Trackables,
 {$ENDIF}
-  Classes, DLThreadQueue, MemDB2Streamable, MemDB2Misc, LockAbstractions;
+  Classes, DLThreadQueue, MemDB2Streamable, MemDB2Misc, LockAbstractions, Reffed;
 
 type
   TMemDbJournal = class;
@@ -114,7 +114,8 @@ type
     FOnJournalError: TJournalErrorEvent;
 
     procedure DoJournalInitialized(OK: boolean; AnyFiles: boolean; CreateCheckpoint: boolean; ErrMsg: string);
-    procedure DoJournalFinished;
+    procedure DoJournalFinished(Signal: boolean = true);
+    procedure ErrorDropTransaction(T: TReffed);
   protected
     procedure DoJournalReplay(Changesets: TObject; Initial: boolean);
     procedure DoJournalWriteFlush(Transaction: TObject);
@@ -187,7 +188,7 @@ implementation
 {$ENDIF}
 
 uses MemDB2,
-     SysUtils, BufferedFileStream, Reffed
+     SysUtils, BufferedFileStream
 {$IFDEF WINDOWS_FLUSH}
      , Windows
 {$ELSE}
@@ -209,6 +210,7 @@ const
   S_EXCEPTION_CHECKPOINT_WRITE = 'Exception during journal write of transaction: ';
   S_FLUSH_FAILED = 'File flush failed: ';
   S_FILE_RENAME_FAILED  = 'File rename failed: ';
+  S_UNHANDLED_EXCEPT_IN_JTHREAD = 'Unhandled in journal thread, DB toast: ';
 
   CHECKPOINT_RATIO = 10; { More than 1/10th data in journal, re-checkpoint }
 
@@ -241,6 +243,23 @@ begin
 end;
 
 { TMemDBJournal }
+
+procedure TMemDBJournal.ErrorDropTransaction(T: TReffed);
+var
+  Tr: TMemDBTransaction;
+begin
+  if Assigned(T) then
+  begin
+    Assert(T is TMemDBTransaction);
+    Tr := T as TMemDBTransaction;
+    if Assigned(Tr.FlushFinishedEvent) then
+      DoJournalWriteFlush(Tr);
+    if Tr.Sync = amFlushBuffers then
+      HighPriorityDone;
+    Tr.Release;
+  end;
+end;
+
 
 procedure TMemDBJournal.DoJournalReplay(Changesets: TObject; Initial: boolean);
 begin
@@ -281,7 +300,8 @@ begin
     if OK then
       FState := jscRunning
     else
-      FState := jscFinished;
+      //Best way of making sure we don't add any files after a bad load...
+      DoJournalFinished(false);
   finally
     FActionsPendingQueue.ReleaseLock;
   end;
@@ -319,19 +339,20 @@ begin
 {$ENDIF}
 end;
 
-procedure TMemDBJournal.DoJournalFinished;
+procedure TMemDBJournal.DoJournalFinished(Signal: boolean);
 begin
   FActionsPendingQueue.AcquireLock;
   try
-    Assert(FState in [jscFinishing, jscFinishingError]);
+    Assert(FState in [jscCreated, jscInitializing, jscFinishing, jscFinishingError]);
+    Assert((not Assigned(FJournalThread)) or (not FJournalThread.FreeOnTerminate));
     FState := jscFinished;
-    FJournalThread.FreeOnTerminate := true;
-    FJournalThread := nil;
+    FHighPriorityEvent.SetEvent;
   finally
     FActionsPendingQueue.ReleaseLock;
   end;
-  if Assigned(FOnJournalFinished) then
-    FOnJournalFinished(self);
+  if Signal then
+    if Assigned(FOnJournalFinished) then
+      FOnJournalFinished(self);
 end;
 
 procedure TMemDbJournal.DoJournalError(ErrMsg: string);
@@ -343,7 +364,7 @@ begin
   try
     Assert(FState in
       [jscInitializing, jscRunning, jscRunningError,
-       jscFinishing, jscFinishingError ]);
+       jscFinishing, jscFinishingError, jscFinished ]);
     if FState in [jscInitializing, jscRunning] then
     begin
       FState := jscRunningError;
@@ -384,6 +405,7 @@ var
   OCreateCheckpoint: boolean;
   ErrMsg: string;
   ActionState: TJournalState;
+  UnhandledExcept: boolean;
 
   function AmalgamateTransactions: TList;
   var
@@ -393,8 +415,9 @@ var
     i: integer;
 
   begin
-    result := TList.Create;
+    result := nil;
     try
+      result := TList.Create;
       LT := TMemDBTransaction(Action.ActionObj);
 
       //Exception case, OAction freed in outer function.
@@ -402,11 +425,7 @@ var
       try
         result.Add(LT);
       except
-        if Assigned(LT.FlushFinishedEvent) then
-          DoJournalWriteFlush(LT);
-        if LT.Sync = amFlushBuffers then
-          HighPriorityDone;
-        LT.Release;
+        ErrorDropTransaction(LT);
         raise;
       end;
 
@@ -430,11 +449,7 @@ var
               try
                 result.Add(LT);
               except
-                if Assigned(LT.FlushFinishedEvent) then
-                  DoJournalWriteFlush(LT);
-                if LT.Sync = amFlushBuffers then
-                  HighPriorityDone;
-                LT.Release;
+                ErrorDropTransaction(LT);
                 raise;
               end;
             finally
@@ -451,88 +466,117 @@ var
       begin
         //We have amalgamated some transactions, but they will never execute.
         //Need to release them as best we can.
-        for i := 0 to Pred(result.Count) do
+        if Assigned(result) then
         begin
-          LT := TMemDBTransaction(result[i]);
-          if Assigned(LT.FlushFinishedEvent) then
-            DoJournalWriteFlush(LT);
-          if LT.Sync = amFlushBuffers then
-            HighPriorityDone;
-          LT.Release;
+          for i := 0 to Pred(result.Count) do
+          begin
+            LT := TMemDBTransaction(result[i]);
+            ErrorDropTransaction(LT);
+          end;
+          result.Free;
+        end
+        else
+        begin
+          //List never created: first transaction not yet owned by it.
+          LT := TMemDBTransaction(Action.ActionObj);
+          ErrorDropTransaction(LT);
         end;
-        result.Free;
         raise;
       end;
     end;
   end;
 
 begin
-  while (FState <> jscFinished) do
+  UnhandledExcept := false;
+  FActionsPendingQueue.AcquireLock;
+  try
+    ActionState := FState;
+  finally
+    FActionsPendingQueue.ReleaseLock;
+  end;
+  while (ActionState <> jscFinished) do
   begin
-    FHighPriorityEvent.WaitFor(JOURNAL_THREAD_POLL_LATENCY);
-    //Pull things out of the Action pending queue.
-    //We can amalgamate commits where none of the transactions have
-    //the write-back flag set. Checkpoints also not amalgamated.
-    FActionsPendingQueue.AcquireLock;
     try
-      Action := FActionsPendingQueue.RemoveHeadObj as TMemDbJournalAction;
-      Assert(Assigned(Action) or (FHighPriorityActionCount = 0));
-      ActionState := FState;
-    finally
-      FActionsPendingQueue.ReleaseLock;
-    end;
-    //We must keep the journal thread processing events even
-    //when exceptions occur. All non-trivial call-outs from this
-    //loop must handle exceptions.
-    if Assigned(Action) then
-    begin
+      FHighPriorityEvent.WaitFor(JOURNAL_THREAD_POLL_LATENCY);
+      //Pull things out of the Action pending queue.
+      //We can amalgamate commits where none of the transactions have
+      //the write-back flag set. Checkpoints also not amalgamated.
+      FActionsPendingQueue.AcquireLock;
       try
-        case Action.ActionType of
-          jatInitialLoad:
-          begin
-            HighPriorityDone;
-            OK := false;
-            try
-              OK := PerformInitialLoad(Action, OAnyFiles, OCreateCheckpoint, ErrMsg);
-            except
-              on E:Exception do
-              begin
-                //Signal initial load failure in the normal manner.
-                OK := false;
-                ErrMsg := S_UNHANDLED_INITIAL_LOAD + E.Message;
-              end;
-            end;
-            DoJournalInitialized(OK, OAnyFiles, OCreateCheckpoint, ErrMsg);
-          end;
-          jatCommitTransaction:
-          begin
-            try
-              OAmalgamatedTrans := AmalgamateTransactions;
-              try
-                //Executes even when journal in jscRunningError,
-                //in which case performs only essential actions.
-                PerformMultiTransactionWrite(OAmalgamatedTrans, ActionState);
-              finally
-                OAmalgamatedTrans.Free;
-              end;
-            except
-              //Possible amalgamation actions might raise.
-              on E: Exception do
-                DoJournalError(S_UNHANDLED_TXION_WRITE + E.Message);
-            end;
-          end;
-          jatCheckPoint: PerformCheckPoint(Action, ActionState);
-          jatLastAction:
-          begin
-            HighPriorityDone;
-            PerformLastAction(Action);
-            DoJournalFinished;
-          end
-        else
-          Assert(false);
-        end;
+        Action := FActionsPendingQueue.RemoveHeadObj as TMemDbJournalAction;
+        Assert(Assigned(Action) or (FHighPriorityActionCount = 0));
+        ActionState := FState;
       finally
-        Action.Free;
+        FActionsPendingQueue.ReleaseLock;
+      end;
+      //We must keep the journal thread processing events even
+      //when exceptions occur. All non-trivial call-outs from this
+      //loop must handle exceptions.
+      if Assigned(Action) then
+      begin
+        try
+          case Action.ActionType of
+            jatInitialLoad:
+            begin
+              HighPriorityDone;
+              OK := false;
+              try
+                OK := PerformInitialLoad(Action, OAnyFiles, OCreateCheckpoint, ErrMsg);
+              except
+                on E:Exception do
+                begin
+                  //Signal initial load failure in the normal manner.
+                  OK := false;
+                  ErrMsg := S_UNHANDLED_INITIAL_LOAD + E.Message;
+                end;
+              end;
+              //Might call DoJournalFinished (but not signal up) on bad load ...
+              DoJournalInitialized(OK, OAnyFiles, OCreateCheckpoint, ErrMsg);
+            end;
+            jatCommitTransaction:
+            begin
+              try
+                OAmalgamatedTrans := AmalgamateTransactions;
+                try
+                  //Executes even when journal in jscRunningError,
+                  //in which case performs only essential actions.
+                  PerformMultiTransactionWrite(OAmalgamatedTrans, ActionState);
+                finally
+                  OAmalgamatedTrans.Free;
+                end;
+              except
+                //Possible amalgamation actions might raise.
+                on E: Exception do
+                  DoJournalError(S_UNHANDLED_TXION_WRITE + E.Message);
+              end;
+            end;
+            jatCheckPoint: PerformCheckPoint(Action, ActionState);
+            jatLastAction:
+            begin
+              HighPriorityDone;
+              PerformLastAction(Action);
+              DoJournalFinished;
+            end
+          else
+            Assert(false);
+          end;
+        finally
+          Action.Free;
+        end;
+      end;
+    except
+      //Shouldn't ever get here at all, buuut ...
+      on E:Exception do
+      begin
+        if not UnhandledExcept then //first totally unhandled exception
+        begin
+          DoJournalError(S_UNHANDLED_EXCEPT_IN_JTHREAD + E.Message);
+          UnhandledExcept := true;
+        end
+        else
+          raise;
+         //More than one totally unhandled except in journal thread
+         //dont even do DoJournalFinished, just let it die.
       end;
     end;
   end;
@@ -547,13 +591,16 @@ end;
 
 destructor TMemDBJournal.Destroy;
 begin
-  Assert(FState = jscFinished);
+  FActionsPendingQueue.AcquireLock;
+  try
+    if FState <> jscFinished then
+      DoJournalFinished(false);
+  finally
+    FActionsPendingQueue.ReleaseLock;
+  end;
   if Assigned(FJournalThread) then
   begin
     FJournalThread.WaitFor;
-    //Mem barrier - FJournalThread may free itself.
-    FActionsPendingQueue.AcquireLock;
-    FActionsPendingQueue.ReleaseLock;
     FJournalThread.Free;
   end;
 {$IFOPT C+}
@@ -573,11 +620,26 @@ end;
 procedure TMemDBJournal.Initialise;
 var
   Action: TMemDbJournalAction;
+  WaitOld: boolean;
 begin
   FActionsPendingQueue.AcquireLock;
   try
+    WaitOld := FState = jscFinished;
+    Assert(Assigned(FJournalThread) or (not WaitOld));
+  finally
+    FActionsPendingQueue.ReleaseLock;
+  end;
+  if WaitOld then
+    FJournalThread.WaitFor;
+  FActionsPendingQueue.AcquireLock;
+  try
     Assert(FState in [jscCreated, jscFinished]);
-    if FState = jscFinished then FState := jscCreated;
+    if WaitOld then
+    begin
+      FJournalThread.Free;
+      FJournalThread := nil;
+      FState := jscCreated;
+    end;
     if not Assigned(FJournalThread) then
     begin
       FJournalThread := TMemDBJournalThread.Create(true);
@@ -663,7 +725,7 @@ end;
 
 procedure TMemDBJournal.SynchronizeStateChange;
 begin
-  if Assigned(FJournalThread) then //Not always around at shutdown.
+  if Assigned(FJournalThread) then
     FJournalThread.Queue(DoUIStateChange);
 end;
 
@@ -703,47 +765,54 @@ var
   FileSeq: UInt64;
   DBInfo: TDBFileInfo;
 begin
-  RList := TList.Create;
   result := nil;
+  RList := TList.Create;
   FillChar(FindData, sizeof(FindData) ,0);
   try
     for FileType := Low(FileType) to High(FileType) do
     begin
       SearchStr := FBaseDirectory + '*' + FileExts[FileType];
       FindRet := SysUtils.FindFirst(SearchStr, faNormal, FindData);
-      while FindRet = 0 do
-      begin
-        FileName := FindData.Name;
-        //Check filename is some sort of UInt64 we understand, if not, throw out.
-
-        if Pos(FileExts[FileType], FileName) <>
-          Succ(Length(FileName) - Length(FileExts[FileType])) then
+      try
+        while FindRet = 0 do
         begin
-          Assert(false);
-          exit;
-        end;
-        FileName := Copy(FileName, 1,
-          Length(FileName) - Length(FileExts[FileType]));
-        try
-          FileSeq := StrToInt64(FileName);
+          FileName := FindData.Name;
+          //Check filename is some sort of UInt64 we understand, if not, throw out.
 
-          DBInfo := TDBFileInfo.Create;
-          DBInfo.FileSeq := FileSeq;
-          DBInfo.FileType := FileType;
-          DBInfo.FileSize := FindData.Size;
-          RList.Add(DBInfo)
-        except
-          on E: EConvertError do ; //Continue round loop.
+          if Pos(FileExts[FileType], FileName) <>
+            Succ(Length(FileName) - Length(FileExts[FileType])) then
+          begin
+            Assert(false);
+            exit;
+          end;
+          FileName := Copy(FileName, 1,
+            Length(FileName) - Length(FileExts[FileType]));
+          try
+            FileSeq := StrToInt64(FileName);
+
+            DBInfo := TDBFileInfo.Create;
+            DBInfo.FileSeq := FileSeq;
+            DBInfo.FileType := FileType;
+            DBInfo.FileSize := FindData.Size;
+            try
+              RList.Add(DBInfo)
+            except
+              DBInfo.Free; raise;
+            end;
+          except
+            on E: EConvertError do ; //Continue round loop.
+          end;
+          FindRet := SysUtils.FindNext(FindData);
         end;
-        FindRet := SysUtils.FindNext(FindData);
+      finally
+        SysUtils.FindClose(FindData);
       end;
-      SysUtils.FindClose(FindData);
     end;
     RList.Sort(CompareDBInfos);
     result := RList;
     RList := nil;
   finally
-    RList.Free;
+    FreeRList(RList);
   end;
 end;
 
@@ -751,10 +820,13 @@ procedure TMemDbDefaultJournal.FreeRList(var RList: TList);
 var
   LocalIdx: integer;
 begin
-  for LocalIdx := 0 to Pred(RList.Count) do
-    TObject(RList[LocalIdx]).Free;
-  RList.Free;
-  RList := nil;
+  if Assigned(RList) then
+  begin
+    for LocalIdx := 0 to Pred(RList.Count) do
+      TObject(RList[LocalIdx]).Free;
+    RList.Free;
+    RList := nil;
+  end;
 end;
 
 //FinalSeq ends up being the first *write* sequence number.
@@ -1049,11 +1121,7 @@ begin
       for Idx := 0 to Pred(Transactions.Count) do
       begin
         Transaction := TMemDbTransaction(Transactions[idx]);
-        if Assigned(Transaction.FlushFinishedEvent) then
-          DoJournalWriteFlush(Transaction);
-        if Transaction.Sync = amFlushBuffers then
-          HighPriorityDone;
-        Transaction.Release;
+        ErrorDropTransaction(Transaction);
       end;
     end;
   except

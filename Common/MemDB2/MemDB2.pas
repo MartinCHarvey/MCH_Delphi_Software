@@ -1047,6 +1047,7 @@ function TMemDB.InitDB(RootLocation: string;
 
 var
   FirstTime: boolean;
+  CompareLoc: string;
 
 begin
   FSessionLock.Acquire;
@@ -1122,7 +1123,9 @@ begin
     begin
       if Length (FJournal.BaseDirectory) > 0 then
       begin
-        if (RootLocation <> FJournal.BaseDirectory) or
+        CompareLoc := RootLocation;
+        AppendTrailingDirSlash(CompareLoc);
+        if (CompareLoc <> FJournal.BaseDirectory) or
           (JournalType <> FJournal.JournalType) then
           raise EMemDBException.Create(S_REINIT_DIFF_LOCATION);
       end;
@@ -1195,7 +1198,11 @@ begin
           try
             DBTmp.Free;
           except
-            DelErrFlag := true;
+            on E: Exception do
+            begin
+              DelErrFlag := true;
+              FLastError := E.Message;
+            end;
           end;
           try
             FPersistWait.WaitFor(INFINITE);
@@ -1208,7 +1215,6 @@ begin
                 FPhase := mdbClosed
               else
               begin
-                Assert(false);
                 FPhase := mdbClosedError;
               end;
             end;
