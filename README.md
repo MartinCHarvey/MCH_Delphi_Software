@@ -8,6 +8,7 @@ Most recent (2026) development is in Common/MemDB2:
 - *MemDB now legacy code. Will be removed start of Dec 2026.*
 - *MemDB now has an upgrade tool (to MemDB2 format) on the MemDB_Upgrade_Tool branch.*
 - MemDB2 better for more deeply parallel / async workloads.
+- MemDB2 now has *C API*, and pre-built binaries for Visual Studio jockeys.
 - Now suitable for general use, with many bugfixes from AI reivew. *Significantly more robust*.
 - Docs\ folder contains Claude code review for those of you worried about code quality.
 - MemDB2 now compiles & runs on both **Win32/64 and Android 32/64** 
