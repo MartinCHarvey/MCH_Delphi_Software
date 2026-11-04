@@ -1,4 +1,4 @@
-unit MemDBMisc;
+﻿unit MemDBMisc;
 {
 
 Copyright © 2020 Martin Harvey <martin_c_harvey@hotmail.com>
@@ -315,7 +315,7 @@ const
 
 var
   AllIndexAttrs: TMDBIndexAttrs;
-  MemDBXlateExceptions: TExceptionHandlerChain;
+  MemDBXlateExceptions: array [0..1] of TExceptionHandlerChain;
   Optimizations: TOptimizations;
 
 procedure AppendTrailingDirSlash(var Path: string);
@@ -820,8 +820,26 @@ begin
   inherited;
 end;
 
-function MemDBGeneralXlateExceptions(EClass: SysUtils.ExceptClass;
-                              EMsg: string): boolean;
+function MemDbGeneralFilterExceptions(EClass: SysUtils.ExceptClass;
+                                             EMsg: string):TExceptionFilterAction;
+begin
+  while Assigned(EClass) do
+  begin
+    if (EClass = EMemDBInternalException)
+      or (EClass = EMemDBConsistencyException)
+      or (EClass = EMemDBAPIException)
+      or (EClass = EMemDBException) then
+    begin
+      result := tetaThrowOnceAllRecorded;
+      exit;
+    end;
+    EClass := SysUtils.ExceptClass(EClass.ClassParent);
+  end;
+  result := tetaIgnore;
+end;
+
+procedure MemDBGeneralXlateExceptions(EClass: SysUtils.ExceptClass;
+                              EMsg: string);
 begin
   while Assigned(EClass) do
   begin
@@ -835,7 +853,6 @@ begin
       raise EMemDbException.Create(EMsg);
     EClass := SysUtils.ExceptClass(EClass.ClassParent);
   end;
-  result := false;
 end;
 
 {
@@ -850,9 +867,16 @@ end;
 
 initialization
   AllIndexAttrs := GetAllIndexAttrs;
-  with MemDBXlateExceptions do
+  with MemDBXlateExceptions[0] do
   begin
-    Func := MemDBGeneralXlateExceptions;
+    FilterFunc := MemDBGeneralFilterExceptions;
+    XlatorFunc := MemDBGeneralXlateExceptions;
+    Next := @MemDBXlateExceptions[1];
+  end;
+  with MemDBXlateExceptions[1] do
+  begin
+    FilterFunc := ParalleliserFilterCommonExceptions;
+    XLatorFunc := ParalleliserForwardCommonExceptions;
     Next := nil;
   end;
   //TOptimizeLevel = (olNever, olInitFirstTrans, olInitAllTrans, olAlways);
