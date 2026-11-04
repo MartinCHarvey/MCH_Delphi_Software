@@ -315,6 +315,7 @@ type
   protected
   public
     procedure SetPinned;
+    procedure SetIterInc(Inc: TMemAPIPosition);
     procedure SetFields(const Tid: TTransactionId;
                         NewRow: TMemDBRow;
                         INode: TMemDBIndexLeafGeneric;
@@ -476,8 +477,9 @@ type
   //Prohibits operations on all rows in a table whilst it is being modified.
   //Better to abort the silly little transactions changing individual rows
   //than one big one restructuring the table.
-{$IFOPT C+}
+{$IFDEF USE_TRACKABLES}
   TRowChangeLock = class(TTrackable)
+  public
 {$ELSE}
   TRowChangeLock = record
 {$ENDIF}
@@ -487,7 +489,7 @@ type
     AbortOther: boolean;
     NeedAbort: boolean;
   end;
-{$IFOPT C+}
+{$IFDEF USE_TRACKABLES}
   PRowChangeLock = TRowChangeLock;
 {$ELSE}
   PRowChangeLock = ^TRowChangeLock;
@@ -1284,6 +1286,11 @@ begin
   self.FIterInode := INode.AddRef as TMemDbIndexLeaf;
   self.FIterInc := Inc;
   self.FTidLocal := TidLocal;
+end;
+
+procedure TMemDBCursor.SetIterInc(Inc: TMemAPIPosition);
+begin
+  FIterInc := Inc;
 end;
 
 
@@ -4374,7 +4381,7 @@ end;
 
 function TMemDbTablePersistent.NewRowProhibitLock: PRowChangeLock;
 begin
-{$IFOPT C+}
+{$IFDEF USE_TRACKABLES}
   result := TRowChangeLock.Create;
 {$ELSE}
   New(Result);
@@ -4386,7 +4393,7 @@ end;
 procedure TMemDbTablePersistent.DisposeRowProhibitLock(Lock: PRowChangeLock);
 begin
   DLListRemoveObj(@Lock.FSiblings);
-{$IFOPT C+}
+{$IFDEF USE_TRACKABLES}
   Lock.Free;
 {$ELSE}
   Dispose(Lock);

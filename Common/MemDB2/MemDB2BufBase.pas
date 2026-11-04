@@ -33,7 +33,15 @@ interface
 
 uses
 {$IFDEF USE_TRACKABLES}
-  Trackables,
+  {$IFOPT C+}
+    Trackables,
+  {$ELSE}
+    Trackables,
+  {$ENDIF}
+{$ELSE}
+  {$IFOPT C+}
+    Trackables,
+  {$ENDIF}
 {$ENDIF}
   MemDB2Misc, Classes, MemDb2Streamable, DLList, TinyLock, LockAbstractions,
   MemDB2Indexing, StripedLock;
@@ -149,6 +157,7 @@ type
 {$IFOPT C+}
   //Just a bit of debug checking to prevent duplicate / unmatched notifications.
   TTidReference = class(TTrackable)
+  public
    Link: TDLEntry;
    Tid: TTransactionId;
   end;
@@ -205,6 +214,7 @@ type
 
 {$IFOPT C+}
   TMemDbMultiItem = class(TTrackable)
+  public
 {$ELSE}
   TMemDBMultiItem = record
 {$ENDIF}
@@ -221,6 +231,7 @@ type
 
 {$IFOPT C+}
   TMemDBPinnedItem = class(TTrackable)
+  public
 {$ELSE}
   TMemDbPinnedItem = record
 {$ENDIF}
@@ -241,6 +252,7 @@ type
 
 {$IFOPT C+}
   TMemDBIndexPin = class(TTrackable)
+  public
 {$ELSE}
   TMemDbIndexPin = record
 {$ENDIF}
