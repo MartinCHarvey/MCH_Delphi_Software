@@ -145,6 +145,7 @@ type
     FDB: TMemDB;
     FSessionTransactions: TList;
     FTempStorageMode: TTempStorageMode;
+    FClosing: boolean;
   protected
     function GetTempStorageMode: TTempStorageMode;
     procedure SetTempStorageMode(NewMode: TTempStorageMode);
@@ -167,7 +168,7 @@ type
     //also use it synchronously, so that inconsistencies between
     //written to journal / commited to memory can be caught immediately.
     procedure CheckDBErrFlagSynchronous; override;
-    procedure SetDBErrFlagSynchronous(Msg: string); override;
+    procedure SetDBErrFlag(Msg: string); override;
     procedure JournalTxion(T: TReffed); override;
   end;
 
@@ -216,8 +217,9 @@ type
     procedure HandleNewEntityUnderDBLocks(Entity: TMemDBEntity; OwnerTx: TMemDBTransaction);
 
     procedure CommitAPICheckDBErrFlagSynchronous;
-    procedure CommitAPISetDBErrFlagSynchronous(Msg: string);
+    procedure CommitAPISetDBErrFlag(Msg: string);
     procedure CommitAPIJournalTxion(T: TReffed);
+    function GetLastError: string;
   public
 
     constructor Create;
@@ -230,6 +232,9 @@ type
     function StartSession: TMemDBSession;
 
     property DBState: TMemDBPhase read FPhase;
+    //Reason for the most recent move to an error phase. Empty if none
+    //since the last InitDB.
+    property LastError: string read GetLastError;
     property OnUIStateChange: TNotifyEvent read FOnUIStateChange write FOnUIStateChange;
   end;
 
@@ -238,19 +243,18 @@ implementation
 uses IoUtils, Types;
 
 const
-  S_DB_CLOSING_OR_NOT_OPEN = 'DB closing, or not open: ';
+  S_DB_CLOSING_ERROR_OR_NOT_OPEN = 'DB closing, error state or not open: ';
   S_DB_SESSION_NOT_FOUND = 'Session not found';
   S_DB_HAS_SESSIONS = 'DB has open sessions.';
   S_DB_SESSION_HAS_TRANSACTIONS = 'Session has open transactions';
   S_DB_TRANSACTION_NOT_FOUND = 'Transaction not found';
   S_COMMIT_ROLLBACK_IN_PROGRESS = 'Commit or rollback for this transaction already in progress.';
   S_COMMIT_OR_ROLLBACK_BEFORE_FREE = 'Transactions should be committed or rolled back before destroying. Are you calling an inherited ''Free'' function? ';
-  S_ERRORPHASE_ERROR = 'Can''t start transaction, error state: ';
+  S_ERRORPHASE_ERROR = 'Can''t start transaction, DB in error state: ';
   S_ERRORPHASE_COMMIT_ERROR = 'DB in internal error state, Can''t commit transaction.';
   S_BADPHASE_ERROR = 'Can''t start transaction, DB not running or closing.';
   S_REINIT_DIFF_LOCATION = 'Database loaded at different location, unload first.';
-  S_UNEXPECTED_ROLLBACK_FAILED = 'Fatal: Unexpected rollback failed, state uncertain: ';
-  S_UNEXPECTED_BAD_OR_OUT_OF_SYNC = 'Fatal: Unexpected commit/checkpoint/journal failed, state uncertain: ';
+  S_UNEXPECTED_CLEANUP_OPS_FAILED = 'Fatal: Unexpected rollback or cleanup failed, state uncertain: ';
   S_READONLY_HAS_CHANGED_DATA = 'Read-only transaction has changed data!';
   S_TRANSACTION_HAS_API_OBJECTS = 'Transaction has associated API objects. You should have freed them before commit/rollback';
   S_ENTITIES_OUT_OF_DATE = 'Aborted: Concurrency conflict: table/key list changed, not fixed up in time.';
@@ -325,9 +329,19 @@ begin
   FRegisteredListLock.Acquire;
   try
     if Iso >= ilSnapshot then
-      result := PSnapshotList.CloneByRef
+    begin
+      if Assigned(PSnapshotList^) then
+        result := PSnapshotList.CloneByRef
+      else
+        result := nil;
+    end
     else
-      result := PRegisteredList.CloneByRef;
+    begin
+      if Assigned(PRegisteredList^) then
+        result := PRegisteredList.CloneByRef
+      else
+        result := nil;
+    end;
   finally
     FRegisteredListLock.Release;
   end;
@@ -547,7 +561,9 @@ end;
 function TMemDB.CheckClientsDone: boolean;
 begin
   result := (FSessionList.Count = 0) and (FCheckpointRefs <= 0);
-  if result and (FPhase = mdbClosingWaitClients) then
+  Assert(FPhase in [mdbInitCheckpoint, mdbRunning, mdbRunningError,
+    mdbClosingWaitClients, mdbClosingWaitClientsError ]);
+  if result and (FPhase in [mdbClosingWaitClients, mdbClosingWaitClientsError]) then
     FClientWait.SetEvent;
 end;
 
@@ -559,15 +575,19 @@ var
 begin
   //Oh this is nasty.
 
+  //Holding the session lock ensures that IdleTxionList is always accurate,
+  //and that the commit/rollback in progress state is accurate.
+
   //Holding the commit and meta index locks ensures that Txions we reference
   //cannot start accessing entity lists as part of commit or rollback cycle,
   //if they transition from no commit rollbacks in progress to commit
   //rollbacks in progress.
 
-  //However, for txions which have a commit/rollback in progress, we should not
-  //change the entity lists for them, because they access those lists
-  //(rollback / cleardown cases) after dropping commit/metaindex locks,
-  //and we can't safely change the entity lists at that time.
+  //However, for txions which have a commit/rollback in progress,
+  //or are committed / rolled back  we should not
+  //change the entity lists for them:
+  //  - Entity lists need to be stable over in progress commit / rollback.
+  //  - Entity list should not be added to once Txion comitted / rolled back.
 
   ///Exception cases, erm. I think they're ok ...
   IdleTxionList := TList.Create;
@@ -624,9 +644,9 @@ begin
   FDB.CommitAPICheckDbErrFlagSynchronous;
 end;
 
-procedure TMemDBAPICallbacks.SetDBErrFlagSynchronous(Msg: string);
+procedure TMemDBAPICallbacks.SetDBErrFlag(Msg: string);
 begin
-  FDB.CommitAPISetDBErrFlagSynchronous(Msg);
+  FDB.CommitAPISetDBErrFlag(Msg);
 end;
 
 procedure TMemDBAPICallbacks.JournalTxion(T: TReffed);
@@ -638,25 +658,40 @@ procedure TMemDB.CommitAPICheckDBErrFlagSynchronous;
 begin
   FSessionLock.Acquire;
   try
-    if FPhase = mdbError then
+    Assert(FPhase in [mdbInitCheckpoint,mdbRunning, mdbRunningError,
+      mdbClosingWaitClients, mdbClosingWaitClientsError]);
+    if FPhase  in [mdbRunningError, mdbClosingWaitClientsError] then
       raise EMemDBException.Create(S_ERRORPHASE_COMMIT_ERROR);
   finally
     FSessionLock.Release;
   end;
 end;
 
-procedure TMemDB.CommitAPISetDBErrFlagSynchronous(Msg: string);
+procedure TMemDB.CommitAPISetDBErrFlag(Msg: string);
+var
+  InitState, FinalState: TMemDBPhase;
 begin
   FSessionLock.Acquire;
+  InitState := FPhase;
   try
-    if FPhase in [mdbInit, mdbRunning] then
+    Assert(FPhase in [mdbInitCheckpoint,mdbRunning, mdbRunningError,
+                      mdbClosingWaitClients, mdbClosingWaitClientsError]);
+    if FPhase in [mdbInitCheckpoint, mdbRunning] then
     begin
-      FPhase := mdbError;
-      FLastError := S_UNEXPECTED_BAD_OR_OUT_OF_SYNC + Msg;
+      FPhase := mdbRunningError;
+      FLastError := S_UNEXPECTED_CLEANUP_OPS_FAILED + Msg;
+    end
+    else if FPhase in [mdbClosingWaitClients] then
+    begin
+      FPhase := mdbClosingWaitClientsError;
+      FLastError := S_UNEXPECTED_CLEANUP_OPS_FAILED + Msg;
     end;
   finally
+    FinalState := FPhase;
     FSessionLock.Release;
   end;
+  if InitState <> FinalState then
+    FJournal.SynchronizeStateChange;
 end;
 
 procedure TMemDB.CommitAPIJournalTxion(T: TReffed);
@@ -676,7 +711,6 @@ var
   idx: integer;
   WaitJournalDone: boolean;
   AsyncError: boolean;
-  CommitStream: TStream;
 
   label txion_remove;
 
@@ -692,7 +726,10 @@ begin
     idx := FTransactionList.IndexOf(Transaction);
     if idx < 0 then
       raise EMemDBException.Create(S_DB_TRANSACTION_NOT_FOUND);
-    AsyncError := FPhase = mdbError;
+    Assert(FPhase in [mdbRunning, mdbRunningError,
+                      mdbClosingWaitClients, mdbClosingWaitClientsError]);
+
+    AsyncError := FPhase in [mdbRunningError, mdbClosingWaitClientsError];
     if not AsyncError then
       Transaction.FCommitRollbackInProgress := tiptCommitRollback;
   finally
@@ -710,7 +747,6 @@ begin
       //Unfortunately, we lose tipCommitRollback serialisation here.
       //RWW Lock dropped OK.
 
-      //More work TODO with Txions blocked on failed journal writes.
   end;
 
   try
@@ -721,10 +757,13 @@ begin
 
     if not (Transaction.FMode in [amReadWriteShared, amWriteExclusive]) then
     begin
-      if FDatabase.AnyChangesForTid(Transaction.Tid, Transaction.FLocalContext) then
-        raise EMemDBInternalException.Create(S_READONLY_HAS_CHANGED_DATA);
-      //Internally read-only txions go through the rollback cycle to clear pins/refs etc.
-      Commit := false;
+      if Commit then
+      begin
+        if FDatabase.AnyChangesForTid(Transaction.Tid, Transaction.FLocalContext) then
+          raise EMemDBInternalException.Create(S_READONLY_HAS_CHANGED_DATA);
+        //Internally read-only txions go through the rollback cycle to clear pins/refs etc.
+        Commit := false;
+      end;
     end;
 
     //Some pathalogical error cases, will have allocated txion,
@@ -745,31 +784,11 @@ begin
       end
       else
       begin
-        try
-          //Since everything is multi-buffered, barring out of memory
-          //exceptions we do not expect this to fail.
-          Transaction.FCRInterface.UserRollbackCycle(LowMemory);
-          //We really need rollback to work to clear pins and refcounts.
-          //If it doesn't then something's very very broken.
-        except
-          on E: Exception do
-          begin
-            FSessionLock.Acquire;
-            try
-              Assert(FPhase in [mdbRunning, mdbClosingWaitClients, mdbError]);
-              if FPhase = mdbRunning then
-              begin
-                FPhase := mdbError;
-                FLastError := S_UNEXPECTED_ROLLBACK_FAILED + E.Message;
-              end;
-            finally
-              FSessionLock.Release;
-            end;
-            //We will swallow the exception having put the DB into the error
-            //state. Unfortunately pins and refcounts will be hosed, but at least we
-            //drop the R/W lock.
-          end;
-        end;
+        //Since everything is multi-buffered, barring out of memory
+        //exceptions we do not expect this to fail.
+        Transaction.FCRInterface.UserRollbackCycle(LowMemory);
+        //We really need rollback to work to clear pins and refcounts.
+        //If it doesn't then something's very very broken.
       end;
     end;
   except
@@ -830,12 +849,12 @@ begin
     FSessionLock.Acquire;
     try
       idx := FSessionList.IndexOf(Session);
-      if idx < 0 then
+      if (idx < 0)  or Session.FClosing then
         raise EMemDBException.Create(S_DB_SESSION_NOT_FOUND);
       if FPhase <> mdbRunning then
       begin
         //DB hosed is DB hosed.
-        if FPhase = mdbError then
+        if FPhase in [mdbRunningError, mdbClosingWaitClientsError] then
           raise EMemDBException.Create(S_ERRORPHASE_ERROR + FLastError)
         else
           raise EMemDBException.Create(S_BADPHASE_ERROR + FLastError)
@@ -895,34 +914,49 @@ end;
 procedure TMemDB.RemoveSession(Session: TMemDBSession);
 var
   idx: integer;
-  Tr: TMemDBTransaction;
+  TRList: TList;
 begin
-  FSessionLock.Acquire;
+  TRList := TList.Create;
   try
-    idx := FSessionList.IndexOf(Session);
-    if not(idx >= 0) then
-      raise EMemDBException.Create(S_DB_SESSION_NOT_FOUND);
-
+    FSessionLock.Acquire;
     try
+      idx := FSessionList.IndexOf(Session);
+      if not(idx >= 0) then
+        raise EMemDBException.Create(S_DB_SESSION_NOT_FOUND);
+
 {$IF COMPLAIN_LEAKED_TXIONS}
       if Session.FSessionTransactions.Count > 0 then
         raise EMemDBException.Create(S_DB_SESSION_HAS_TRANSACTIONS);
 {$ELSE}
+      Session.FClosing := true;
       //Quietly clear the transactions down for this session.
-      //Can do this recursively acquiring the session lock.
-      //Not pretty, but works, and is safe.
-      while Session.FSessionTransactions.Count > 0 do
-      begin
-        Tr := TMemDBTransaction(Session.FSessionTransactions.Items[0]);
-        Tr.RollbackAndFree;
-      end;
+      for idx := 0 to Pred(Session.FSessionTransactions.Count) do
+        TrList.Add(TMemDBTransaction(Session.FSessionTransactions.Items[idx]).AddRef);
 {$ENDIF}
     finally
-      FSessionList.Delete(idx);
+      FSessionLock.Release;
+    end;
+
+    for idx := 0 to Pred(TrList.Count) do
+      try
+        TMemDBTransaction(TrList[idx]).RollbackAndFree;
+      except
+        ; //Swallow the exception (wrong state, not in lists). TODO - Anything else?
+      end;
+
+    FSessionLock.Acquire;
+    try
+      idx := FSessionList.IndexOf(Session);
+      if idx >= 0 then
+        FSessionList.Delete(idx);
       CheckClientsDone;
+    finally
+      FSessionLock.Release;
     end;
   finally
-    FSessionLock.Release;
+    for idx := 0 to Pred(TrList.Count) do
+      TMemDBTransaction(TrList[idx]).Release;
+    TRList.Free;
   end;
 end;
 
@@ -931,9 +965,9 @@ begin
   result := nil;
   FSessionLock.Acquire;
   try
-    if not(FPhase in [mdbInit, mdbRunning]) then
-      raise EMemDBException.Create(S_DB_CLOSING_OR_NOT_OPEN + FLastError);
-    if FPhase = mdbInit then
+    if FRunningTeardown or not(FPhase in [mdbInit, mdbInitCheckpoint, mdbRunning]) then
+      raise EMemDBException.Create(S_DB_CLOSING_ERROR_OR_NOT_OPEN + FLastError);
+    if FPhase in [mdbInit, mdbInitCheckpoint] then
     begin
       FSessionLock.Release;
       try
@@ -942,7 +976,7 @@ begin
         FSessionLock.Acquire;
       end;
       if FPhase <> mdbRunning then
-        raise EMemDBException.Create(S_DB_CLOSING_OR_NOT_OPEN + FLastError);
+        raise EMemDBException.Create(S_DB_CLOSING_ERROR_OR_NOT_OPEN + FLastError);
     end;
     result := TMemDBSession.Create;
     result.FDB := self;
@@ -983,7 +1017,7 @@ end;
 destructor TMemDB.Destroy;
 begin
   StopDB(true);
-  Assert(FPhase in [mdbNull, mdbClosed, mdbError]);
+  Assert(FPhase in [mdbNull, mdbClosed, mdbClosedError]);
   Assert(FSessionList.Count = 0);
   Assert(FTransactionList.Count = 0);
   FSessionList.Free;
@@ -1013,7 +1047,12 @@ function TMemDB.InitDB(RootLocation: string;
     FJournal.JournalType := JournalType;
     FJournal.Initialise;
     FPhase := mdbInit;
+    FLastError := '';
   end;
+
+var
+  FirstTime: boolean;
+  CompareLoc: string;
 
 begin
   FSessionLock.Acquire;
@@ -1022,22 +1061,34 @@ begin
     begin
       result := false;
       case FPhase of
+        mdbClosedError: begin
+          //TODO - Any re-init from closed error state.
+          FPhase := mdbClosed;
+          StartupActions;
+        end;
         mdbNull, mdbClosed: StartupActions;
-        mdbInit, mdbRunning: result := true;
-        mdbClosingWaitClients, mdbClosingWaitPersist, mdbError: ;
+        mdbInit, mdbInitCheckpoint,
+        mdbRunning, mdbRunningError: result := true;
+        mdbClosingWaitClients, mdbClosingWaitClientsError,
+        mdbClosingWaitPersist: ;
       else
         Assert(false);
       end;
     end
     else
     begin
-      while not(FPhase in [mdbRunning, mdbError]) do
+      FirstTime := true;
+      while (not (FPhase in [mdbRunning, mdbRunningError, mdbClosedError]))
+            or (FirstTime and (FPhase in [mdbClosedError])) do
       begin
+        FirstTime := false;
         case FPhase of
-          // Can't open when in error state, call close to reset from failed
-          // load, (or other persist ops), and try again from state closed.
+          mdbClosedError: begin
+            //TODO - Any re-init from closed error state.
+            FPhase := mdbClosed;
+          end;
           mdbNull, mdbClosed: StartupActions;
-          mdbInit:
+          mdbInit, mdbInitCheckpoint:
             begin
               FSessionLock.Release;
               try
@@ -1047,7 +1098,7 @@ begin
                 Assert(FPhase >= mdbRunning);
               end;
             end;
-          mdbClosingWaitClients:
+          mdbClosingWaitClients, mdbClosingWaitClientsError:
             begin
               FSessionLock.Release;
               try
@@ -1069,13 +1120,17 @@ begin
           Assert(false);
         end;
       end;
-      result := FPhase = mdbRunning;
+      //You can get a good start, and still be in a
+      //running but errored state.
+      result := FPhase in [mdbRunning, mdbRunningError];
     end;
     if result then
     begin
       if Length (FJournal.BaseDirectory) > 0 then
       begin
-        if (RootLocation <> FJournal.BaseDirectory) or
+        CompareLoc := RootLocation;
+        AppendTrailingDirSlash(CompareLoc);
+        if (CompareLoc <> FJournal.BaseDirectory) or
           (JournalType <> FJournal.JournalType) then
           raise EMemDBException.Create(S_REINIT_DIFF_LOCATION);
       end;
@@ -1085,14 +1140,18 @@ begin
   end;
 end;
 
+//This is a blocking state machine, and I'm starting to wonder whether
+//I should have coded a nonblocking one ...
 procedure TMemDB.StopDBLocked;
 var
   DBTmp: TMemDbDatabasePersistent;
+  DelErrFlag: boolean;
+  DelErrMsg: string;
 begin
-  while not(FPhase in [mdbNull, mdbClosed, mdbError]) do
+  while not(FPhase in [mdbNull, mdbClosed]) do
   begin
     case FPhase of
-      mdbInit:
+      mdbInit, mdbInitCheckpoint:
         begin
           FSessionLock.Release;
           try
@@ -1102,7 +1161,7 @@ begin
             Assert(FPhase >= mdbRunning);
           end;
         end;
-      mdbRunning:
+      mdbRunning, mdbRunningError:
         begin
           if CheckClientsDone then
           begin
@@ -1110,9 +1169,14 @@ begin
             FPhase := mdbClosingWaitPersist
           end
           else
-            FPhase := mdbClosingWaitClients;
+          begin
+            if FPhase = mdbRunningError then
+              FPhase := mdbClosingWaitClientsError
+            else
+              FPhase := mdbClosingWaitClients;
+          end;
         end;
-      mdbClosingWaitClients:
+      mdbClosingWaitClients, mdbClosingWaitClientsError:
         begin
           FSessionLock.Release;
           try
@@ -1121,7 +1185,7 @@ begin
             FSessionLock.Acquire;
             Assert(FPhase >= mdbClosingWaitClients);
           end;
-          if FPhase = mdbClosingWaitClients then
+          if FPhase in [mdbClosingWaitClients, mdbClosingWaitClientsError] then
           begin
             FJournal.Finish;
             FPhase := mdbClosingWaitPersist;
@@ -1131,26 +1195,43 @@ begin
         begin
           //Can free DB here provided transactions having state journalled have
           //freed all API objects.
-
           DBTmp := FDatabase;
           FDatabase := TMemDBDatabase.Create;
           (FDatabase as TMemDBDatabase).Init(self);
           FSessionLock.Release;
-          DBTmp.Free;
 
+          DelErrFlag := false;
+          try
+            DBTmp.Free;
+          except
+            on E: Exception do
+            begin
+              DelErrFlag := true;
+              DelErrMsg := E.Message; //Session lock not held here.
+            end;
+          end;
           try
             FPersistWait.WaitFor(INFINITE);
           finally
             FSessionLock.Acquire;
             Assert(FPhase >= mdbClosingWaitPersist);
             if FPhase = mdbClosingWaitPersist then
-              FPhase := mdbClosed;
+            begin
+              if not DelErrFlag then
+                FPhase := mdbClosed
+              else
+              begin
+                FPhase := mdbClosedError;
+                FLastError := DelErrMsg;
+              end;
+            end;
           end;
         end;
-      mdbError:
-        begin
-          FPhase := mdbClosed;
-        end
+      mdbClosedError:
+      begin
+        //TODO - Any odd final cleanup from closed error state.
+        FPhase := mdbClosed;
+      end
     else
       Assert(false);
     end;
@@ -1159,67 +1240,111 @@ end;
 
 procedure TMemDB.StopDB(Force: boolean);
 var
-  Session: TMemDBSession;
+  SSList: TList;
+  idx: integer;
+  Owner: boolean;
 begin
-  FSessionLock.Acquire;
+  Owner := false;
+  SSList := TList.Create;
   try
-    if not Force then
-    begin
-{$IF COMPLAIN_LEAKED_SESSIONS}
-      if Session.FSessionTransactions.Count > 0 then
-        raise EMemDBException.Create(S_DB_HAS_SESSIONS);
-{$ENDIF}
-      //Otherwise will wait for sessions / txions to complete.
-    end
-    else
-    begin
-      while FSessionList.Count > 0 do
+    FSessionLock.Acquire;
+    try
+      if not Force then
       begin
-        Session := self.FSessionList.Items[0];
-        Session.Free;
+  {$IF COMPLAIN_LEAKED_SESSIONS}
+        if FSessionList.Count > 0 then
+          raise EMemDBException.Create(S_DB_HAS_SESSIONS);
+  {$ENDIF}
+        //Otherwise will wait for sessions / txions to complete.
+      end
+      else
+      begin
+        for idx := 0 to Pred(FSessionList.Count) do
+          SSList.Add(FSessionList[idx]);
       end;
+    finally
+      FSessionLock.Release;
     end;
+
+    //Unfortunately TMemDBSession not ref counted.
+    for idx := 0 to Pred(SSList.Count) do
+      TMemDBSession(SSList[idx]).Free;
+
+    FSessionLock.Acquire;
     try
       if not FRunningTeardown then
       begin
         //User might well try stop, followed by force stop...
         FRunningTeardown := true;
+        Owner := true;
         StopDBLocked;
       end;
     finally
-      FRunningTeardown := false;
+      if Owner then
+        FRunningTeardown := false;
+      FSessionLock.Release;
     end;
   finally
-    FSessionLock.Release;
+    SSList.Free;
   end;
 end;
 
 procedure TMemDB.HandleJournalInitialized(Sender: TObject; OK: boolean; AnyFiles: boolean;
   CreateCheckpoint: boolean; ErrMsg:string);
 begin
-  FSessionLock.Acquire;
   try
-    Assert(FPhase = mdbInit);
-    if OK then
-      FPhase := mdbRunning
-    else
-    begin
-      FPhase := mdbError;
-      FLastError := ErrMsg;
+    FSessionLock.Acquire;
+    try
+      if OK then
+      begin
+        if CreateCheckpoint then
+          FPhase := mdbInitCheckpoint
+        else
+        begin
+          FPhase := mdbRunning;
+          FInitWait.SetEvent;
+        end;
+      end
+      else
+      begin
+        CreateCheckpoint := false;
+        HandleJournalError(self, ErrMsg);
+        FInitWait.SetEvent;
+      end;
+    finally
+      FSessionLock.Release;
     end;
-    FInitWait.SetEvent;
-  finally
-    FSessionLock.Release;
-  end;
-  //Could make this atomic with reservations, but then we'd have
-  //to guarantee that we'd be the first to grab the commit lock,
-  //which we can't easily, so better to leave a small window, and
-  //reservations ensure txions journal in the same order they took
-  //the commit lock.
 
-  if OK and CreateCheckpoint then
-    Checkpoint;
-  FJournal.SynchronizeStateChange;
+    //If initial checkpoint, then do it outside the session lock,
+    //but, given we've now put the DB into InitCheckpoint, make darn
+    //sure that the DB either ends up in running or error state.
+    if CreateCheckpoint then
+    begin
+      try
+        try
+          Checkpoint;
+        except
+          on E: Exception do
+          begin
+            HandleJournalError(self, E.Message);
+            raise;
+          end;
+        end;
+      finally
+        FSessionLock.Acquire;
+        try
+          if FPhase in [mdbInitCheckpoint] then
+            FPhase := mdbRunning;
+          //Whether final state was to running, or to error.
+          FInitWait.SetEvent;
+        finally
+          FSessionLock.Release;
+        end;
+      end;
+    end;
+  finally
+    FJournal.SynchronizeStateChange;
+  end;
 end;
 
 procedure TMemDB.HandleJournalFinished(Sender: TObject);
@@ -1236,17 +1361,55 @@ begin
 end;
 
 procedure TMemDB.HandleJournalError(Sender: TObject; ErrMsg:string);
+var
+  InitState, FinalState: TMemDBPhase;
+begin
+  //Can put DB into error state from almost any other state.
+  FSessionLock.Acquire;
+  InitState := FPhase;
+  try
+    Assert(FPhase in
+    [ mdbInit, mdbInitCheckpoint,
+      mdbRunning, mdbRunningError,
+      mdbClosingWaitClients, mdbClosingWaitClientsError,
+      mdbClosingWaitPersist, mdbClosedError ]);
+    case FPhase of
+      mdbInit: begin
+        FPhase := mdbClosedError; //Journal error at init stops the journal thread.
+        FLastError := ErrMsg;
+      end;
+      mdbInitCheckpoint, mdbRunning: begin
+        FPhase := mdbRunningError; //Up and running - ish but toasted.
+        FLastError := ErrMsg;
+      end;
+      mdbRunningError: {NOP} ;
+      mdbClosingWaitClients: begin
+        FPhase := mdbClosingWaitClientsError; //Toasted but closing...
+        FLastError := ErrMsg;
+      end;
+      mdbClosingWaitClientsError,
+      mdbClosingWaitPersist, // I can't really recover from a write failure
+                             // at this late stage.
+      mdbClosedError: {NOP} ;
+    else
+      Assert(false);
+    end;
+  finally
+    FinalState := FPhase;
+    FSessionLock.Release;
+  end;
+  if InitState <> FinalState then
+    FJournal.SynchronizeStateChange;
+end;
+
+function TMemDB.GetLastError: string;
 begin
   FSessionLock.Acquire;
   try
-    //Assert(FPhase = mdbRunning);
-    FPhase := mdbError;
-    //Unblocking of threads etc handled by user destruction of DB.
-    FLastError := ErrMsg;
+    result := FLastError;
   finally
     FSessionLock.Release;
   end;
-  FJournal.SynchronizeStateChange;
 end;
 
 procedure TMemDB.HandleUIStateChange(Sender: TObject);
@@ -1290,25 +1453,26 @@ end;
 
 //Claude says: Checkpoint: streams the entire table set while holding each FMasterRowLock,
 //which blocks inserts to that table.
-
 //My comments: Checkpoint is designed here for simplicity and safety.
 //It *is* possible to not hold those locks, and even to Checkpoint in
 //lrSharedR/W via snapshots, but that is not the point of it.
 //Email the author if you'd like a more concurrent friendly checkpoint.
+
 function TMemDB.Checkpoint: boolean;
 var
   ChangesetStream: TStream;
-  TmpName: string;
   PseudoTid: TTransactionId;
   Ctxt: TXTransactionLocalContext;
   EntSnapshot, EntRegistered: TReffedList;
 
 begin
+  Ctxt := nil;
   EntSnapshot := nil;
   EntRegistered := nil;
+  ChangesetStream := nil;
   FSessionLock.Acquire;
   try
-    result := FPhase = mdbRunning;
+    result := FPhase in [mdbInitCheckpoint, mdbRunning];
     if result then
       Inc(FCheckpointRefs);
   finally
@@ -1321,32 +1485,32 @@ begin
     //inside DB classes as well.
     try
       Ctxt := TXTransactionLocalContext.Create;
-      Ctxt.PSnapshotList := @EntSnapshot;
-      Ctxt.PRegisteredList := @EntRegistered;
+      Ctxt.SetPtrs(@EntSnapshot, @EntRegistered);
       try
-        TmpName := TPath.GetTempFileName();
-        try
-          ChangesetStream := TMemDBTempCachedFileStream.Create(TmpName);
-        except
-          on E: EOutOfMemory do
-            ChangesetStream := TMemDBTempFileStream.Create(TmpName);
-        end;
+        ChangesetStream := MakeStream(tsmDisk); //Most conservative stream making mode.
+
         PseudoTid := TTransactionId.NewTransactionID(ilSerialisable); //if no writes, should definitley be serialisable.
         try
-          FDatabase.CommitLock.Acquire; //This if we don't acquire at lrSharedRead for ever.
-{$IFDEF DBG_UNDER_COMMIT_LOCK}
+          FDatabase.CommitLock.Acquire;
+  {$IFDEF DBG_UNDER_COMMIT_LOCK}
           DbgUnderCommitLock := true;
-{$ENDIF}
+  {$ENDIF}
           try
             CommitAPICheckDBErrFlagSynchronous;
+
             try
-              //Serialisable so StartTransaction under commit lock.
+              //Serialisable, lrSharedRead - no changes in progress.
               FDatabase.StartTransaction(PseudoTid, Ctxt);
+              //Once started transaction have pins to clear.
+              //Before started transaction, no entity lists(!).
+
+              FDatabase.ToScratch(PseudoTid, ChangesetStream, Ctxt);
+              FJournal.Checkpoint(ChangesetStream);
+              ChangesetStream := nil;
+            finally
+              //We probably shouldn't need to to this at all, but keep
+              //it here for safety.
               try
-                FDatabase.ToScratch(PseudoTid, ChangesetStream, Ctxt);
-              finally
-                //We probably shouldn't need to to this at all, but keep
-                //it here for safety.
                 FDatabase.MetaIndexLock.Acquire;
                 try
                   FDatabase.Rollback(PseudoTid, rbpIndexRollback, [], Ctxt);
@@ -1354,30 +1518,37 @@ begin
                 finally
                   FDatabase.MetaIndexLock.Release;
                 end;
-              end;
-              FJournal.Checkpoint(ChangesetStream)
-            except
-              on E: Exception do
-              begin
-                //Any error to create entire DB stream and return it to it's
-                //previous state is a fatal error.
-                CommitAPISetDBErrFlagSynchronous(E.Message);
-                raise;
+              except
+                on E: Exception do
+                begin
+                  //Fatal if not able to rollback pins etc.
+                  CommitAPISetDBErrFlag(E.Message);
+                  raise;
+                end;
               end;
             end;
           finally
-{$IFDEF DBG_UNDER_COMMIT_LOCK}
+  {$IFDEF DBG_UNDER_COMMIT_LOCK}
             DbgUnderCommitLock := false;
-{$ENDIF}
+  {$ENDIF}
             FDatabase.CommitLock.Release;
-            FDatabase.Rollback(PseudoTid, rbpDelayedRollback, CleardownOptSet, Ctxt);
           end;
-        except
-          ChangesetStream.Free;
-          DeleteFile(TmpName);
-          raise;
+        finally
+          //Rollbacks now also check whether entity lists to roll back on.
+          try
+            FDatabase.Rollback(PseudoTid, rbpDelayedRollback, CleardownOptSet, Ctxt);
+          except
+            on E: Exception do
+            begin
+              //Fatal if not able to rollback pins etc.
+              CommitAPISetDBErrFlag(E.Message);
+              raise;
+            end;
+          end;
         end;
       finally
+        if Assigned(ChangesetStream) then
+          ChangesetStream.Free;
         Ctxt.Free;
         EntSnapshot.Release;
         EntRegistered.Release;

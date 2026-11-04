@@ -140,7 +140,6 @@ uses
   Classes;
 
 type
-  //TODO - Write an appropriate caching layer for Android.
   TWriteCachedFileStream = TFileStream;
   TReadOnlyCachedFileStream = TFileStream;
 {$ENDIF}

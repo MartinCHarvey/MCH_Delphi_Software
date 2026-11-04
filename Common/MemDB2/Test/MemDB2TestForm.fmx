@@ -8,6 +8,7 @@ object Form1: TForm1
   FormFactor.Height = 480
   FormFactor.Devices = [dkDesktop, dkiPhone, dkiPad]
   OnCreate = FormCreate
+  OnDestroy = FormDestroy
   DesignerMobile = False
   DesignerWidth = 0
   DesignerHeight = 0

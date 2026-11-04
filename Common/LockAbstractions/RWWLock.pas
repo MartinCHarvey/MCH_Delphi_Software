@@ -210,10 +210,11 @@ end;
 
 function TRWWLock.TryAcquire(Reason: TRWWLockReason): boolean;
 var
-  Waiting, Acquired: boolean;
+  Waiting, Acquired, SignalDestroy: boolean;
 begin
   //Acquired := false;
   Waiting := false;
+  SignalDestroy := false;
 
   repeat
     FCrit.Acquire;
@@ -231,7 +232,7 @@ begin
           if CanReturnIdle then
           begin
             FState := lsIdle;
-            FDestroyed.SetEvent;
+            SignalDestroy := true;
           end;
         end;
         result := false;
@@ -261,7 +262,7 @@ begin
         Inc(FCounts[Reason].Active);
         if FContended then
           Inc(FCounts[Reason].AdmittedContended);
-        if FCounts[Reason].AdmittedContended = FRatios[Reason] then
+        if FCounts[Reason].AdmittedContended >= FRatios[Reason] then
         begin
           FState := ExitState(Reason);
           FThreadWaits[Reason].ResetEvent;
@@ -284,6 +285,8 @@ begin
       end;
     finally
       FCrit.Release;
+      if SignalDestroy then
+        FDestroyed.SetEvent;
     end;
     if Waiting then
       FThreadWaits[Reason].WaitFor(INFINITE);
@@ -393,7 +396,9 @@ var
   NewState: TRWWLockState;
   NewReason: TRWWLockReason;
   ClearContended: boolean;
+  SignalDestroy: boolean;
 begin
+  SignalDestroy := false;
   if Reason = lrExclusiveWrite then
     FExclusiveCrit.Release;
 
@@ -409,7 +414,7 @@ begin
       if CanReturnIdle then
       begin
         FState := lsIdle;
-        FDestroyed.SetEvent;
+        SignalDestroy := true;
       end;
       exit;
     end;
@@ -442,6 +447,8 @@ begin
     end;
   finally
     FCrit.Release;
+    if SignalDestroy then
+      FDestroyed.SetEvent;
   end;
 end;
 

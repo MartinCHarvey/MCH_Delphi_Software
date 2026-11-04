@@ -71,7 +71,7 @@ end;
 
 function TNullStream.Write(const Buffer; Count: Longint): Longint;
 begin
-  result := 0;
+  result := Count; //Just say "yes we wrote it fine".
 end;
 
 function TNullStream.Read(Buffer: TBytes; Offset, Count: Longint): Longint;
@@ -81,7 +81,7 @@ end;
 
 function TNullStream.Write(const Buffer: TBytes; Offset, Count: Longint): Longint;
 begin
-  result := 0;
+  result := Count; //Just say "yes we wrote it fine".
 end;
 
 function TNullStream.Seek(Offset: Longint; Origin: Word): Longint;

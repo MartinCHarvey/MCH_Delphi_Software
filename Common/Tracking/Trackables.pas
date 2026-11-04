@@ -103,7 +103,7 @@ type
   TFileStreamTrackProxy = class(TTrackProxy)
   end;
 
-  TTrackedMemoryStream = class(TTrackProxy)
+  TTrackedMemoryStream = class(TMemoryStream)
   private
     FTrackProxy: TMemStreamTrackProxy;
   public

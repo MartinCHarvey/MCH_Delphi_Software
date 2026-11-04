@@ -814,6 +814,7 @@ begin
   Tmp := nil;
   RetQR.q := nil;
   RetQR.r := nil;
+  RetP := nil;
   try
     if Assigned(InQR.r.right) then
     begin
@@ -847,6 +848,7 @@ begin
         //InQR.r changed to new value, was tmp.
         RetQR.r.ReleaseToCache(Self.FCache); //Release old tmp.
         RetQR.r := RetP;
+        RetP := nil;
       end;
       Result := RetQR;
       RetQR.q := nil;
@@ -884,6 +886,7 @@ begin
     Tmp.Release;
     RetQR.q.Release; //Release newly created node on exception.
     RetQR.r.Release; //Release newly modified subtree on exception.
+    RetP.Release;
     raise;
   end;
 end;
@@ -950,9 +953,9 @@ begin
         CallP := Tmp;
         RetP := balanceRight(CallP, True, h);
         Assert(RetP <> CallP);
+        Tmp.ReleaseToCache(Self.FCache); //Release the tmp generated above.
         Tmp := RetP; //Rebalance has done all the copying for us.
         RetP := nil;
-        CallP.ReleaseToCache(Self.FCache); //Release the tmp generated above.
       end;
     end
     else if comparison < 0 then
@@ -987,9 +990,9 @@ begin
         CallP := Tmp;
         RetP := balanceLeft(CallP, True, h);
         Assert(RetP <> CallP);
+        Tmp.ReleaseToCache(Self.FCache);
         Tmp := RetP; //Rebalance has done all the copying for us.
         RetP := nil;
-        CallP.ReleaseToCache(Self.FCache);
       end;
     end
     else

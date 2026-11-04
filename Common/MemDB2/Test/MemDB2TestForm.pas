@@ -57,8 +57,12 @@ type
     procedure OOMemoryClick(Sender: TObject);
     procedure TblModMultiClick(Sender: TObject);
     procedure ConcurrencyBtnClick(Sender: TObject);
+    procedure FormDestroy(Sender: TObject);
   private
     { Private declarations }
+    FDB: TMemDB;
+    FSession: TMemDBSession;
+
     FTimeStamp: TDateTime;
     RMode: TMDBAccessMode;
     WMode: TMDBAccessMode;
@@ -103,8 +107,6 @@ type
   EMemDBTestException = class(EMemDBException);
 
 var
-  FDB: TMemDB;
-  FSession: TMemDBSession;
   LIMIT_CUBEROOT: integer;
 
 function TestGuidFromInt(i: integer): TGUID;
@@ -171,12 +173,21 @@ const
     end;
   end;
 
-  procedure ReloadDB;
+  procedure ReloadDB(Hard: boolean);
   begin
-    FSession.Free;
-    LogTimeIncr('Zombie Session closed...');
-    FDB.StopDB;
-    LogTimeIncr('Zombie DB stopped...');
+    if not Hard then
+    begin
+      FSession.Free;
+      FSession := nil;
+      LogTimeIncr('Zombie Session closed (relatively nice way)...');
+      FDB.StopDB;
+      LogTimeIncr('Zombie DB stopped...');
+    end
+    else
+    begin
+      FDB.StopDB(true);
+      LogTimeIncr('Sessions/Txions/Zombie DB force closed the brutal way...');
+    end;
     FDB.InitDB(DB_LOCATION, jtV2);
     LogTimeIncr('Zombie DB started...');
     FSession := FDB.StartSession;
@@ -189,6 +200,8 @@ var
   Tr: TMemDBTransaction;
   DBAPI: TMemAPIDatabase;
   TDat: TMemAPiTableData;
+  HardClose: boolean;
+
 begin
   if (RMode <> amReadWriteShared) or (WMode <> amReadWriteShared) then
     LogTimeIncr('Need both modes to be amReadWriteShared. Done nothing.')
@@ -196,28 +209,31 @@ begin
   begin
     RModeCombo.Enabled := false;
     WModeCombo.Enabled := false;
-    for MaxTest := 0 to MAX_ZOMBIES do
+    for HardClose := False to True do
     begin
-      LogtimeIncr('Zombie test, iteration: ' +IntToStr(MaxTest));
-      ResetClick(Sender);
-      FSession.StartTransaction(RMode, amLazyWrite, Iso);
-      if MaxTest > 0 then
+      for MaxTest := 0 to MAX_ZOMBIES do
       begin
-        for TestNum := 1 to MaxTest do
+        LogtimeIncr('Zombie test, iteration: ' +IntToStr(MaxTest));
+        ResetClick(Sender);
+        FSession.StartTransaction(RMode, amLazyWrite, Iso);
+        if MaxTest > 0 then
         begin
-          LogTestName(TestNum);
-          DoZombie(TestNum);
-          LogtimeIncr('Zombie test, leak transaction iteration: ' +IntToStr(MaxTest)
-            + ' test number: ' +IntToStr(TestNum));
-          //Leak both a transaction, and a bunch of API abjects.
-          Tr := FSession.StartTransaction(RMode, amLazyWrite, Iso);
-          DBAPI := TR.GetAPI;
-          TDat := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
+          for TestNum := 1 to MaxTest do
+          begin
+            LogTestName(TestNum);
+            DoZombie(TestNum);
+            LogtimeIncr('Zombie test, leak transaction iteration: ' +IntToStr(MaxTest)
+              + ' test number: ' +IntToStr(TestNum));
+            //Leak both a transaction, and a bunch of API abjects.
+            Tr := FSession.StartTransaction(RMode, amLazyWrite, Iso);
+            DBAPI := TR.GetAPI;
+            TDat := DBAPI.GetAPIObjectFromEntity('Test table', APITableData) as TMemAPITableData;
+          end;
         end;
+        LogtimeIncr('Zombie test, reload: ' +IntToStr(MaxTest));
+        Application.ProcessMessages;
+        ReloadDB(HardClose);
       end;
-      LogtimeIncr('Zombie test, reload: ' +IntToStr(MaxTest));
-      Application.ProcessMessages;
-      ReloadDB
     end;
   end;
 end;
@@ -858,6 +874,7 @@ begin
     LogTimeIncr('Cannot checkpoint at this time')
   end;
   FSession.Free;
+  FSession  := nil;
   LogTimeIncr('Session closed...');
   FDB.StopDB;
   LogTimeIncr('DB stopped...');
@@ -1567,14 +1584,14 @@ procedure TForm1.ConcurrencyBtnClick(Sender: TObject);
         with Mod1 do
         begin
           FFormatChange := true;
-          FSession := MemDB2TestForm.FSession;
+          FSession := Form1.FSession;
           FEvent := SyncEvent;
         end;
         Mod2 := TConcurrentModThread.Create(true);
         with Mod2 do
         begin
           FFormatChange := false;
-          FSession := MemDB2TestForm.FSession;
+          FSession := Form1.FSession;
           FEvent := SyncEvent;
         end;
         Mod2.Resume;
@@ -1629,6 +1646,7 @@ end;
 
 type
   TMultiModThread = class(TThread)
+    FSession: TMemDBSession;
     FIndex: integer;
     FByTable: boolean;
     FParent: TForm1;
@@ -1763,6 +1781,7 @@ procedure TForm1.TblModMultiClick(Sender: TObject);
         FIndex := TabI;
         FByTable := ByTable;
         FParent := self;
+        FSession := Form1.FSession;
         Resume;
       end;
     end;
@@ -3581,9 +3600,29 @@ end;
 procedure TForm1.FormCreate(Sender: TObject);
 var
   Item: TListBoxItem;
+  i: integer;
 begin
+  DBStartTime := Now;
   FTimeStamp := DBStartTime;
-  LogTimeIncr('DB load time.');
+  try
+    FDB := TMemDB.Create;
+    FDB.InitDB(DB_LOCATION, jtV2);
+    FSession := FDB.StartSession;
+    LogTimeIncr('DB load time.');
+  except
+    on E: Exception do
+    begin
+      LogTimeIncr(E.Message);
+      FSession := nil;
+      FDB.Free;
+      FDB := nil;
+      for i := 0 to ComponentCount - 1 do
+        if Components[I] is TButton then
+          TButton(Components[I]).Enabled := False;
+      LogTimeIncr('Controls disabled, fix the DB files and restart the app.');
+    end;
+  end;
+
   LogTimeIncr(DB_LOCATION);
   Item := TListBoxItem.Create(RModeCombo);
   Item.Text := MDBAccessModeStrings[amReadShared];
@@ -3633,6 +3672,12 @@ begin
 {$IFOPT C-}
   FreeAndNil(DbgLabel);
 {$ENDIF}
+end;
+
+procedure TForm1.FormDestroy(Sender: TObject);
+begin
+  FDB.Free;
+  FDB := nil;
 end;
 
 procedure TForm1.IndexTest2Click(Sender: TObject);
@@ -5212,6 +5257,7 @@ end;
 
 type
   TRRThread = class(TThread)
+    FSession: TMemDBSession;
     WaitHandle: TEvent;
     RMode: TMDBAccessMode;
     Iso: TMDBIsolationLevel;
@@ -5299,6 +5345,7 @@ procedure TForm1.MultiRRTrans(Sender: TObject);
         Threads[i].RMode := self.RMode;
         Threads[i].Iso := self.Iso;
         Threads[i].EntireTablePerTrans := EntireTable;
+        Threads[i].FSession := Form1.FSession;
         Threads[i].Resume;
       end;
       Evt.SetEvent;
@@ -5462,7 +5509,6 @@ var
     begin
       //Flush buffers Tx write so that out of memory can't
       //wipe out the journal thread whilst we are working.
-      //TODO - Harden journal thread (Also noted in other AI bugfixes).
       Trans := FSession.StartTransaction(WMode, amFlushBuffers, Iso);
       try
         DBAPI := Trans.GetAPI;
@@ -5511,7 +5557,6 @@ var
   begin
     //Flush buffers Tx write so that out of memory can't
     //wipe out the journal thread whilst we are working.
-    //TODO - Harden journal thread (Also noted in other AI bugfixes).
     Trans := FSession.StartTransaction(WMode, amFlushBuffers, Iso);
     try
       DBAPI := Trans.GetAPI;
@@ -5554,7 +5599,6 @@ var
       BlocDone := 0;
       //Flush buffers Tx write so that out of memory can't
       //wipe out the journal thread whilst we are working.
-      //TODO - Harden journal thread (Also noted in other AI bugfixes).
       Trans := FSession.StartTransaction(WMode, amFlushBuffers, Iso);
       try
         DBAPI := Trans.GetAPI;
@@ -5755,11 +5799,4 @@ initialization
   LIMIT_CUBEROOT := Trunc(Math.Power(LIMIT, (1/3)));
   if LIMIT_CUBEROOT < 2 then
     LIMIT_CUBEROOT := 2;
-  FDB := TMemDB.Create;
-  DBStartTime := Now;
-  FDB.InitDB(DB_LOCATION, jtV2);
-  FSession := FDB.StartSession;
-finalization
-//  FSession.Free;
-  FDB.Free;
 end.

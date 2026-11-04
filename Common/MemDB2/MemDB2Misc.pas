@@ -185,9 +185,10 @@ type
     property FileName:string read FFileName;
   end;
 
-  TMemDBPhase = (mdbNull, mdbInit, mdbRunning,
-    mdbClosingWaitClients, mdbClosingWaitPersist, mdbClosed,
-    mdbError);
+  TMemDBPhase = (mdbNull, mdbInit, mdbInitCheckpoint,
+    mdbRunning, mdbRunningError,
+    mdbClosingWaitClients, mdbClosingWaitClientsError,
+    mdbClosingWaitPersist, mdbClosed, mdbClosedError);
 
   TOptimization = (
     optEntitiesParallel,
@@ -231,9 +232,16 @@ type
 
 const
   TMemDBPhaseStrings: array[TMemDBPhase] of string =
-    ('Null', 'Initialising', 'Running',
-    'Closing (WaitClients)', 'Closing (WaitPersist)', 'Closed',
-    'Error');
+    ('Null',
+    'Initialising',
+    'Initialising (first checkpoint)',
+    'Running',
+    'Running (error)',
+    'Closing (WaitClients)',
+    'Closing (WaitClients)(error)',
+    'Closing (WaitPersist)',
+    'Closed',
+    'Closed (Error)');
 
   THIRTY_TWO_K = 32 * 1024;
   TWO_FIFTY_SIX_K = 256 * 1024;

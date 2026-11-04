@@ -315,6 +315,7 @@ type
   protected
   public
     procedure SetPinned;
+    procedure SetIterInc(Inc: TMemAPIPosition);
     procedure SetFields(const Tid: TTransactionId;
                         NewRow: TMemDBRow;
                         INode: TMemDBIndexLeafGeneric;
@@ -476,8 +477,9 @@ type
   //Prohibits operations on all rows in a table whilst it is being modified.
   //Better to abort the silly little transactions changing individual rows
   //than one big one restructuring the table.
-{$IFOPT C+}
+{$IFDEF USE_TRACKABLES}
   TRowChangeLock = class(TTrackable)
+  public
 {$ELSE}
   TRowChangeLock = record
 {$ENDIF}
@@ -487,7 +489,7 @@ type
     AbortOther: boolean;
     NeedAbort: boolean;
   end;
-{$IFOPT C+}
+{$IFDEF USE_TRACKABLES}
   PRowChangeLock = TRowChangeLock;
 {$ELSE}
   PRowChangeLock = ^TRowChangeLock;
@@ -1284,6 +1286,11 @@ begin
   self.FIterInode := INode.AddRef as TMemDbIndexLeaf;
   self.FIterInc := Inc;
   self.FTidLocal := TidLocal;
+end;
+
+procedure TMemDBCursor.SetIterInc(Inc: TMemAPIPosition);
+begin
+  FIterInc := Inc;
 end;
 
 
@@ -4374,7 +4381,7 @@ end;
 
 function TMemDbTablePersistent.NewRowProhibitLock: PRowChangeLock;
 begin
-{$IFOPT C+}
+{$IFDEF USE_TRACKABLES}
   result := TRowChangeLock.Create;
 {$ELSE}
   New(Result);
@@ -4386,7 +4393,7 @@ end;
 procedure TMemDbTablePersistent.DisposeRowProhibitLock(Lock: PRowChangeLock);
 begin
   DLListRemoveObj(@Lock.FSiblings);
-{$IFOPT C+}
+{$IFDEF USE_TRACKABLES}
   Lock.Free;
 {$ELSE}
   Dispose(Lock);
@@ -7277,7 +7284,7 @@ begin
   WrTag(Stream, mstDBStartV2);
   //Size hint.
   i64 := 0;
-  Stream.Write(i64, sizeof(i64));
+  Stream.WriteBuffer(i64, sizeof(i64));
   CtxtLocal := Ctxt as TXTransactionLocalContext;
 
   EList := CtxtLocal.GetEntityList(Low(TMDBIsolationLevel));
@@ -7301,7 +7308,7 @@ begin
     Stream.Seek(StartPos, soFromBeginning);
     ExpectTag(Stream, mstDBStartV2);
     i64 := EndPos - StartPos;
-    Stream.Write(i64, sizeof(i64));
+    Stream.WriteBuffer(i64, sizeof(i64));
     Stream.Seek(EndPos, soFromBeginning);
   end;
 end;
@@ -7320,7 +7327,7 @@ begin
   WrTag(Stream, mstDBStartV2);
   //Size hint.
   i64 := 0;
-  Stream.Write(i64, sizeof(i64));
+  Stream.WriteBuffer(i64, sizeof(i64));
   CtxtLocal := Ctxt as TXTransactionLocalContext;
 
   EList := CTxtLocal.GetEntityList(Low(TMDBIsolationLevel));
@@ -7344,7 +7351,7 @@ begin
     Stream.Seek(StartPos, soFromBeginning);
     ExpectTag(Stream, mstDBStartV2);
     i64 := EndPos - StartPos;
-    Stream.Write(i64, sizeof(i64));
+    Stream.WriteBuffer(i64, sizeof(i64));
     Stream.Seek(EndPos, soFromBeginning);
   end;
 end;
@@ -7364,7 +7371,7 @@ begin
   if not (NxtTag in [mstDBStart, mstDBStartV2]) then
     raise EMemDBException.Create(S_WRONG_TAG);
   if (NxtTag = mstDBStartV2) then
-    Stream.Read(i64, sizeof(i64));
+    Stream.ReadBuffer(i64, sizeof(i64));
 
   StrPos := Stream.Position;
   NxtTag := RdTag(Stream);
@@ -7442,7 +7449,7 @@ begin
   if not (NxtTag in [mstDBStart, mstDBStartV2]) then
     raise EMemDBException.Create(S_WRONG_TAG);
   if (NxtTag = mstDBStartV2) then
-    Stream.Read(i64, sizeof(i64));
+    Stream.ReadBuffer(i64, sizeof(i64));
 
   StrPos := Stream.Position;
   NxtTag := RdTag(Stream);
@@ -7693,26 +7700,30 @@ begin
   end;
 
   EList := CTxtLocal.GetEntityList(Low(TMDBIsolationLevel));
-  try
-    for i := 0 to Pred(EList.Count) do
-    begin
-      Proxy := EList.Items[i] as TMemDBEntityProxy;
-      Entity := Proxy.Proxy as TMemDBEntity;
-      if Parallel then
+  if Assigned(EList) then
+  begin
+    //Some pathalogical error cases, can end up without an entity list.
+    try
+      for i := 0 to Pred(EList.Count) do
       begin
-        ParallelAddHandler(RollbackParallel, Entity, @TPORoll,
-          Handlers, refs1, Refs2, Excepts, Rets, PCount);
-      end
-      else
-        Entity.Rollback(Tid, Phase, Opts, Ctxt);
-    end;
-    if Parallel and (PCount > 0) then
-      ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
+        Proxy := EList.Items[i] as TMemDBEntityProxy;
+        Entity := Proxy.Proxy as TMemDBEntity;
+        if Parallel then
+        begin
+          ParallelAddHandler(RollbackParallel, Entity, @TPORoll,
+            Handlers, refs1, Refs2, Excepts, Rets, PCount);
+        end
+        else
+          Entity.Rollback(Tid, Phase, Opts, Ctxt);
+      end;
+      if Parallel and (PCount > 0) then
+        ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
 
-    if Phase = rbpDelayedRollback then
-      ConsolidateAndFreeCaches(Ctxt);
-  finally
-    CtxtLocal.PutEntityList(EList);
+      if Phase = rbpDelayedRollback then
+        ConsolidateAndFreeCaches(Ctxt);
+    finally
+      CtxtLocal.PutEntityList(EList);
+    end;
   end;
 end;
 

@@ -33,7 +33,15 @@ interface
 
 uses
 {$IFDEF USE_TRACKABLES}
-  Trackables,
+  {$IFOPT C+}
+    Trackables,
+  {$ELSE}
+    Trackables,
+  {$ENDIF}
+{$ELSE}
+  {$IFOPT C+}
+    Trackables,
+  {$ENDIF}
 {$ENDIF}
   MemDB2Misc, Classes, MemDb2Streamable, DLList, TinyLock, LockAbstractions,
   MemDB2Indexing, StripedLock;
@@ -149,6 +157,7 @@ type
 {$IFOPT C+}
   //Just a bit of debug checking to prevent duplicate / unmatched notifications.
   TTidReference = class(TTrackable)
+  public
    Link: TDLEntry;
    Tid: TTransactionId;
   end;
@@ -205,6 +214,7 @@ type
 
 {$IFOPT C+}
   TMemDbMultiItem = class(TTrackable)
+  public
 {$ELSE}
   TMemDBMultiItem = record
 {$ENDIF}
@@ -221,6 +231,7 @@ type
 
 {$IFOPT C+}
   TMemDBPinnedItem = class(TTrackable)
+  public
 {$ELSE}
   TMemDbPinnedItem = record
 {$ENDIF}
@@ -241,6 +252,7 @@ type
 
 {$IFOPT C+}
   TMemDBIndexPin = class(TTrackable)
+  public
 {$ELSE}
   TMemDbIndexPin = record
 {$ENDIF}
@@ -462,6 +474,7 @@ const
   S_CHANGESET_BAD_LISTS = 'Changeset has lists of items that are not consistent';
   S_DBL_BUF_LOOKAHEAD_FAILED = 'Double buffered lookahead failed, tag: ';
   S_REQUESTED_CHANGE_OF_DELETE_SENTINEL = 'Changing a deleted row would undelete it, not allowed.';
+  S_DIRECT_SET_NIL = 'DirectSet function used with NIL data. You can''t remove changes that way.';
   S_DIRECT_SET_OVER_PREVIOUS = 'Direct set function used, but would overwrite pre-exusting data.';
   S_MODIFIED_NO_PRECOMMIT = 'Error. Pre-commit check not performed on concurrent data.';
   S_JOURNAL_REPLAY_DUP_INST = 'Journal replay failed, trying to overwrite duplicate changes.';
@@ -1073,6 +1086,7 @@ var
   RefUp: TReferenceUpdate;
   TidUp: TTidUpdate;
   Iso: TMDBIsolationLevel;
+  NCreate: boolean;
 begin
   if Tid.Iso > MinIso then Iso := Tid.Iso else Iso := MinIso;
   LockSelf;
@@ -1113,7 +1127,8 @@ begin
         Assert(not (Cur.Item is TMemDeleteSentinel));
     end;
 
-    if not Assigned(Nxt) then
+    NCreate := not Assigned(Nxt);
+    if NCreate then
     begin
       Nxt := NewMulti;
       Nxt.Sel := MakeNextBufSelector(Tid);
@@ -1124,12 +1139,21 @@ begin
     end;
     if not Assigned(Nxt.Item) then
     begin
-      case DupType of
-        bctDeepClone: Nxt.Item := TMemDBStreamable.DeepClone(Cur.Item);
-        bctClone: Nxt.Item := TMemDBStreamable.Clone(Cur.Item);
-        bctRef: Nxt.Item := Cur.Item.AddRef as TMemDBStreamable;
-      else
-        Assert(false);
+      try
+        case DupType of
+          bctDeepClone: Nxt.Item := TMemDBStreamable.DeepClone(Cur.Item);
+          bctClone: Nxt.Item := TMemDBStreamable.Clone(Cur.Item);
+          bctRef: Nxt.Item := Cur.Item.AddRef as TMemDBStreamable;
+        else
+          Assert(false);
+        end;
+      except
+        if NCreate then
+        begin
+          DLListRemoveObj(@Nxt.Link);
+          DisposeMulti(Nxt);
+        end;
+        raise;
       end;
     end;
     DCPPost(RefUp);
@@ -1160,6 +1184,9 @@ var
   TidUp: TTidUpdate;
   Iso: TMDBIsolationLevel;
 begin
+  if not Assigned(Data) then
+    raise EMemDBInternalException.Create(S_DIRECT_SET_NIL);
+
   if Tid.Iso > MinIso then Iso := Tid.Iso else Iso := MinIso;
   LockSelf;
   try
@@ -2015,6 +2042,14 @@ begin
     Cur := FindCurMultiItem;
     Current := Cur.Item;
     Nxt := FindNxtMultiItem(Tid);
+    if not Assigned(Nxt) then
+    begin
+      //It's expected that someone has checked AnyChangesForTid
+      //before this point.
+      Assert(false);
+      exit;
+    end;
+    Assert(Assigned(Nxt.Item));
     Next := Nxt.Item;
   finally
     UnlockSelf;
