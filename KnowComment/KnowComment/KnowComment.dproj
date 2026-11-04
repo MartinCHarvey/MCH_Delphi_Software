@@ -5,7 +5,7 @@
         <FrameworkType>FMX</FrameworkType>
         <MainSource>KnowComment.dpr</MainSource>
         <Base>True</Base>
-        <Config Condition="'$(Config)'==''">Release</Config>
+        <Config Condition="'$(Config)'==''">Debug</Config>
         <Platform Condition="'$(Platform)'==''">Win64</Platform>
         <TargetedPlatforms>3</TargetedPlatforms>
         <AppType>Application</AppType>
@@ -140,13 +140,6 @@
         <DCCReference Include="ClientForm.pas">
             <Form>ClientFrm</Form>
         </DCCReference>
-        <DCCReference Include="..\..\Common\MemDB\MemDB.pas"/>
-        <DCCReference Include="..\..\Common\MemDB\MemDBApi.pas"/>
-        <DCCReference Include="..\..\Common\MemDB\MemDBBuffered.pas"/>
-        <DCCReference Include="..\..\Common\MemDB\MemDBIndexing.pas"/>
-        <DCCReference Include="..\..\Common\MemDB\MemDBJournal.pas"/>
-        <DCCReference Include="..\..\Common\MemDB\MemDBMisc.pas"/>
-        <DCCReference Include="..\..\Common\MemDB\MemDbStreamable.pas"/>
         <DCCReference Include="..\..\Common\Tracking\Trackables.pas"/>
         <DCCReference Include="..\..\Common\Indexed Store\IndexedStore.pas"/>
         <DCCReference Include="..\..\Common\Logging\GlobalLog.pas"/>
@@ -215,10 +208,24 @@
             <FormType>fmx</FormType>
         </DCCReference>
         <DCCReference Include="..\..\Common\Parallelizer\Parallelizer.pas"/>
-        <DCCReference Include="..\..\Common\LockAbstractions\LockAbstractions.pas"/>
         <DCCReference Include="..\..\Common\NullStream\NullStream.pas"/>
-        <DCCReference Include="..\..\Common\LockAbstractions\TinyLock.pas"/>
         <DCCReference Include="..\..\Common\PComp\PComp.pas"/>
+        <DCCReference Include="..\..\Common\MemDB2\MemDB2.pas"/>
+        <DCCReference Include="..\..\Common\MemDB2\MemDB2Api.pas"/>
+        <DCCReference Include="..\..\Common\MemDB2\MemDB2BufBase.pas"/>
+        <DCCReference Include="..\..\Common\MemDB2\MemDB2Buffered.pas"/>
+        <DCCReference Include="..\..\Common\MemDB2\MemDB2Indexing.pas"/>
+        <DCCReference Include="..\..\Common\MemDB2\MemDB2Journal.pas"/>
+        <DCCReference Include="..\..\Common\MemDB2\MemDB2Misc.pas"/>
+        <DCCReference Include="..\..\Common\MemDB2\MemDB2Streamable.pas"/>
+        <DCCReference Include="..\..\Common\MemDB2\MemDB2Utils.pas"/>
+        <DCCReference Include="..\..\Common\LockAbstractions\LockAbstractions.pas"/>
+        <DCCReference Include="..\..\Common\LockAbstractions\RWWLock.pas"/>
+        <DCCReference Include="..\..\Common\LockAbstractions\StripedLock.pas"/>
+        <DCCReference Include="..\..\Common\LockAbstractions\TinyLock.pas"/>
+        <DCCReference Include="..\..\Common\Reffed\Reffed.pas"/>
+        <DCCReference Include="..\..\Common\CoWTree\CoWTree.pas"/>
+        <DCCReference Include="..\..\Common\PatchFreeMem\PatchFreeMem.pas"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>

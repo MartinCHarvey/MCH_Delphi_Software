@@ -24,7 +24,7 @@ IN THE SOFTWARE.
 }
 interface
 
-uses MemDB, DBGeneric, DataObjects, SyncObjs;
+uses MemDB2, DBGeneric, DataObjects, SyncObjs;
 
 type
   TMemKDB = class(TGenericDB)
@@ -60,7 +60,7 @@ type
 implementation
 
 uses
-  MemDBMisc, SysUtils, MemDBApi, DBSchemaStrs, MemDBPersist, Classes;
+  MemDB2Misc, SysUtils, MemDB2Api, DBSchemaStrs, MemDBPersist, Classes;
 
 type
   TUpgradeState = (ugsPre, ugsPost, ugsInconsistent);
@@ -89,57 +89,54 @@ end;
 procedure TMemKDB.OpenOrCreateUserTable(T:TMemDBTransaction; out Msg: string);
 var
   DBAPI: TMemAPIDatabase;
-  Tbl: TMemDBHandle;
   TblMeta: TMemAPITableMetadata;
   ST: TKSiteType;
   UBX: TUserBlockIndexes;
 begin
   DBAPI := T.GetAPI;
+  TblMeta := nil;
   try
-    Tbl := DBAPI.OpenTableOrKey(S_USER_TABLE);
-    if not Assigned(Tbl) then
+    TblMeta := DBAPI.GetAPIObjectFromEntity(S_USER_TABLE, APITableMetadata) as TMemAPITableMetadata;
+    if not Assigned(TblMeta) then
     begin
       //Table.
-      Tbl := DBAPI.CreateTable(S_USER_TABLE);
-      TblMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
-      try
-        //Fields.
-        TblMeta.CreateField(S_USER_KEY, ftGuid);
-        TblMeta.CreateField(S_USER_INSTA_UNAME, ftUnicodeString);
-        TblMeta.CreateField(S_USER_INSTA_UID, ftUnicodeString);
-        TblMeta.CreateField(S_USER_INSTA_VERIFIED, ftInteger);
-        TblMeta.CreateField(S_USER_INSTA_PROF_URL, ftUnicodeString);
-        TblMeta.CreateField(S_USER_INSTA_FULL_NAME, ftUnicodeString);
-        TblMeta.CreateField(S_USER_INSTA_BIO, ftUnicodeString);
-        TblMeta.CreateField(S_USER_INSTA_FOLLOWS_COUNT, ftInteger);
-        TblMeta.CreateField(S_USER_INSTA_FOLLOWER_COUNT, ftInteger);
-        TblMeta.CreateField(S_USER_TWITTER_UNAME, ftUnicodeString);
-        TblMeta.CreateField(S_USER_TWITTER_UID, ftUnicodeString);
-        TblMeta.CreateField(S_USER_TWITTER_VERIFIED, ftInteger);
-        TblMeta.CreateField(S_USER_TWITTER_PROF_URL, ftUnicodeString);
-        TblMeta.CreateField(S_USER_TWITTER_FULL_NAME, ftUnicodeString);
-        TblMeta.CreateField(S_USER_TWITTER_BIO, ftUnicodeString);
-        TblMeta.CreateField(S_USER_TWITTER_FOLLOWS_COUNT, ftInteger);
-        TblMeta.CreateField(S_USER_TWITTER_FOLLOWER_COUNT, ftInteger);
-        TblMeta.CreateField(S_LAST_UPDATED, ftDouble);
-        TblMeta.CreateField(S_USER_INTEREST, ftInteger);
-        //Indexes - key based, ref integrity.
-        TblMeta.CreateIndex(S_INDEX_USER_TABLE_PRIMARY, S_USER_KEY, [iaUnique, iaNotEmpty]);
-        //Indexes, UID etc lookup.
-        for ST := Low(ST) to High(ST) do
+      DBAPI.CreateTable(S_USER_TABLE);
+      TblMeta := DBAPI.GetAPIObjectFromEntity(S_USER_TABLE, APITableMetadata) as TMemAPITableMetadata;
+      //Fields.
+      TblMeta.CreateField(S_USER_KEY, ftGuid);
+      TblMeta.CreateField(S_USER_INSTA_UNAME, ftUnicodeString);
+      TblMeta.CreateField(S_USER_INSTA_UID, ftUnicodeString);
+      TblMeta.CreateField(S_USER_INSTA_VERIFIED, ftInteger);
+      TblMeta.CreateField(S_USER_INSTA_PROF_URL, ftUnicodeString);
+      TblMeta.CreateField(S_USER_INSTA_FULL_NAME, ftUnicodeString);
+      TblMeta.CreateField(S_USER_INSTA_BIO, ftUnicodeString);
+      TblMeta.CreateField(S_USER_INSTA_FOLLOWS_COUNT, ftInteger);
+      TblMeta.CreateField(S_USER_INSTA_FOLLOWER_COUNT, ftInteger);
+      TblMeta.CreateField(S_USER_TWITTER_UNAME, ftUnicodeString);
+      TblMeta.CreateField(S_USER_TWITTER_UID, ftUnicodeString);
+      TblMeta.CreateField(S_USER_TWITTER_VERIFIED, ftInteger);
+      TblMeta.CreateField(S_USER_TWITTER_PROF_URL, ftUnicodeString);
+      TblMeta.CreateField(S_USER_TWITTER_FULL_NAME, ftUnicodeString);
+      TblMeta.CreateField(S_USER_TWITTER_BIO, ftUnicodeString);
+      TblMeta.CreateField(S_USER_TWITTER_FOLLOWS_COUNT, ftInteger);
+      TblMeta.CreateField(S_USER_TWITTER_FOLLOWER_COUNT, ftInteger);
+      TblMeta.CreateField(S_LAST_UPDATED, ftDouble);
+      TblMeta.CreateField(S_USER_INTEREST, ftInteger);
+      //Indexes - key based, ref integrity.
+      TblMeta.CreateIndex(S_INDEX_USER_TABLE_PRIMARY, S_USER_KEY, [iaUnique, iaNotEmpty]);
+      //Indexes, UID etc lookup.
+      for ST := Low(ST) to High(ST) do
+      begin
+        for UBX := Low(UBX) to High(UBX) do
         begin
-          for UBX := Low(UBX) to High(UBX) do
-          begin
-            TblMeta.CreateIndex(
-              UserBlockIndexNames[ST][UBX],
-              UserBlockIndexFieldNames[ST][UBX], []);
-          end;
+          TblMeta.CreateIndex(
+            UserBlockIndexNames[ST][UBX],
+            UserBlockIndexFieldNames[ST][UBX], []);
         end;
-      finally
-        TblMeta.Free;
       end;
     end;
   finally
+    TblMeta.Free;
     DBAPI.Free;
   end;
 end;
@@ -147,65 +144,61 @@ end;
 procedure TMemKDB.OpenOrCreateMediaTable(T:TMemDBTransaction; out Msg: string);
 var
   DBAPI: TMemAPIDatabase;
-  Tbl, FK: TMemDBHandle;
   TblMeta: TMemAPITableMetadata;
   FKMeta: TMemAPIForeignKey;
   ST: TKSiteType;
   MBX: TMediaBlockIndexes;
 begin
   DBAPI := T.GetAPI;
+  TblMeta := nil;
+  FKMeta := nil;
   try
     //Table.
-    Tbl := DBAPI.OpenTableOrKey(S_MEDIA_TABLE);
-    if not Assigned(Tbl) then
+    TblMeta := DBAPI.GetAPIObjectFromEntity(S_MEDIA_TABLE, APITableMetadata) as TMemAPITableMetadata;
+    if not Assigned(TblMeta) then
     begin
-      Tbl := DBAPI.CreateTable(S_MEDIA_TABLE);
-      TblMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
-      try
-        TblMeta.CreateField(S_MEDIA_KEY, ftGuid);
-        TblMeta.CreateField(S_MEDIA_OWNER_KEY, ftGuid);
-        TblMeta.CreateField(S_MEDIA_DATE, ftDouble);
-        TblMeta.CreateField(S_MEDIA_DATA_STR, ftUnicodeString);
-        TblMeta.CreateField(S_MEDIA_TYPE, ftInteger);
-        TblMeta.CreateField(S_MEDIA_RESOURCE_URL, ftUnicodeString);
-        TblMeta.CreateField(S_MEDIA_INSTA_MEDIA_ID, ftUnicodeString);
-        TblMeta.CreateField(S_MEDIA_INSTA_OWNER_ID, ftUnicodeString);
-        TblMeta.CreateField(S_MEDIA_INSTA_MEDIA_CODE, ftUnicodeString);
-        TblMeta.CreateField(S_MEDIA_TWITTER_MEDIA_ID, ftUnicodeString);
-        TblMeta.CreateField(S_MEDIA_TWITTER_OWNER_ID, ftUnicodeString);
-        TblMeta.CreateField(S_MEDIA_TWITTER_MEDIA_CODE, ftUnicodeString);
-        TblMeta.CreateField(S_LAST_UPDATED, ftDouble);
-        //Indexes - key based, ref integrity.
-        TblMeta.CreateIndex(S_INDEX_MEDIA_TABLE_PRIMARY, S_MEDIA_KEY, [iaUnique, iaNotEmpty]);
-        TblMeta.CreateIndex(S_INDEX_MEDIA_OWNER_KEY, S_MEDIA_OWNER_KEY, [iaNotEmpty]);
-        //Indexes, site UIDs.
-        for ST := Low(ST) to High(ST) do
+      DBAPI.CreateTable(S_MEDIA_TABLE);
+      TblMeta := DBAPI.GetAPIObjectFromEntity(S_MEDIA_TABLE, APITableMetadata) as TMemAPITableMetadata;
+      TblMeta.CreateField(S_MEDIA_KEY, ftGuid);
+      TblMeta.CreateField(S_MEDIA_OWNER_KEY, ftGuid);
+      TblMeta.CreateField(S_MEDIA_DATE, ftDouble);
+      TblMeta.CreateField(S_MEDIA_DATA_STR, ftUnicodeString);
+      TblMeta.CreateField(S_MEDIA_TYPE, ftInteger);
+      TblMeta.CreateField(S_MEDIA_RESOURCE_URL, ftUnicodeString);
+      TblMeta.CreateField(S_MEDIA_INSTA_MEDIA_ID, ftUnicodeString);
+      TblMeta.CreateField(S_MEDIA_INSTA_OWNER_ID, ftUnicodeString);
+      TblMeta.CreateField(S_MEDIA_INSTA_MEDIA_CODE, ftUnicodeString);
+      TblMeta.CreateField(S_MEDIA_TWITTER_MEDIA_ID, ftUnicodeString);
+      TblMeta.CreateField(S_MEDIA_TWITTER_OWNER_ID, ftUnicodeString);
+      TblMeta.CreateField(S_MEDIA_TWITTER_MEDIA_CODE, ftUnicodeString);
+      TblMeta.CreateField(S_LAST_UPDATED, ftDouble);
+      //Indexes - key based, ref integrity.
+      TblMeta.CreateIndex(S_INDEX_MEDIA_TABLE_PRIMARY, S_MEDIA_KEY, [iaUnique, iaNotEmpty]);
+      TblMeta.CreateIndex(S_INDEX_MEDIA_OWNER_KEY, S_MEDIA_OWNER_KEY, [iaNotEmpty]);
+      //Indexes, site UIDs.
+      for ST := Low(ST) to High(ST) do
+      begin
+        for MBX := Low(MBX) to High(MBX) do
         begin
-          for MBX := Low(MBX) to High(MBX) do
-          begin
-            TblMeta.CreateIndex(
-              MediaBlockIndexNames[ST][MBX],
-              MediaBlockIndexFieldNames[ST][MBX], []);
-          end;
+          TblMeta.CreateIndex(
+            MediaBlockIndexNames[ST][MBX],
+            MediaBlockIndexFieldNames[ST][MBX], []);
         end;
-      finally
-        TblMeta.Free
       end;
     end;
     //Foreign key constraints.
-    FK := DBAPI.OpenTableOrKey(S_MEDIA_CONSTRAINT_FK_USER_TABLE_UID);
-    if not Assigned(FK) then
+    FKMeta := DBAPI.GetAPIObjectFromEntity(S_MEDIA_CONSTRAINT_FK_USER_TABLE_UID, APIForeignKey) as TMemAPIForeignKey;
+    if not Assigned(FKMeta) then
     begin
-      FK := DBAPI.CreateForeignKey(S_MEDIA_CONSTRAINT_FK_USER_TABLE_UID);
-      FKMeta := DBAPI.GetApiObjectFromHandle(FK, APIForeignKey) as TMemAPIForeignKey;
-      try
-        FKMeta.SetReferencingChild(S_MEDIA_TABLE, S_INDEX_MEDIA_OWNER_KEY);
-        FKMeta.SetReferencedParent(S_USER_TABLE, S_INDEX_USER_TABLE_PRIMARY);
-      finally
-        FKMeta.Free;
-      end;
+      DBAPI.CreateForeignKey(S_MEDIA_CONSTRAINT_FK_USER_TABLE_UID);
+      FKMeta := DBAPI.GetAPIObjectFromEntity(S_MEDIA_CONSTRAINT_FK_USER_TABLE_UID, APIForeignKey) as TMemAPIForeignKey;
+
+      FKMeta.SetReferencingChild(S_MEDIA_TABLE, S_INDEX_MEDIA_OWNER_KEY);
+      FKMeta.SetReferencedParent(S_USER_TABLE, S_INDEX_USER_TABLE_PRIMARY);
     end;
   finally
+    FKMeta.Free;
+    TblMeta.Free;
     DBAPI.Free;
   end;
 end;
@@ -213,77 +206,73 @@ end;
 procedure TMemKDB.OpenOrCreateCommentTable(T:TMemDBTransaction; out Msg: string);
 var
   DBAPI: TMemAPIDatabase;
-  Tbl, FK: TMemDBHandle;
   TblMeta: TMemAPITableMetadata;
   FKMeta: TMemAPIForeignKey;
   ST: TKSiteType;
   CBX: TCommentBlockIndexes;
 begin
   DBAPI := T.GetAPI;
+  TblMeta := nil;
+  FKMeta := nil;
   try
     //Table.
-    Tbl := DBAPI.OpenTableOrKey(S_COMMENT_TABLE);
-    if not Assigned(Tbl) then
+    TblMeta := DBAPI.GetAPIObjectFromEntity(S_COMMENT_TABLE, APITableMetadata) as TMemAPITableMetadata;
+    if not Assigned(TblMeta) then
     begin
-      Tbl := DBAPI.CreateTable(S_COMMENT_TABLE);
-      TblMeta := DBAPI.GetApiObjectFromHandle(Tbl, APITableMetadata) as TMemAPITableMetadata;
-      try
-        TblMeta.CreateField(S_COMMENT_KEY, ftGuid);
-        TblMeta.CreateField(S_COMMENT_OWNER_KEY, ftGuid);
-        TblMeta.CreateField(S_COMMENT_MEDIA_KEY, ftGuid);
-        TblMeta.CreateField(S_COMMENT_INSTA_COMMENT_ID, ftUnicodeString);
-        TblMeta.CreateField(S_COMMENT_INSTA_OWNER_ID, ftUnicodeString);
-        TblMeta.CreateField(S_COMMENT_TWITTER_COMMENT_ID, ftUnicodeString);
-        TblMeta.CreateField(S_COMMENT_TWITTER_OWNER_ID, ftUnicodeString);
-        TblMeta.CreateField(S_COMMENT_DATE, ftDouble);
-        TblMeta.CreateField(S_COMMENT_DATA_STR, ftUnicodeString);
-        TblMeta.CreateField(S_COMMENT_TYPE, ftInteger);
-        TblMeta.CreateField(S_LAST_UPDATED, ftDouble);
+      DBAPI.CreateTable(S_COMMENT_TABLE);
+      TblMeta := DBAPI.GetAPIObjectFromEntity(S_COMMENT_TABLE, APITableMetadata) as TMemAPITableMetadata;
+      TblMeta.CreateField(S_COMMENT_KEY, ftGuid);
+      TblMeta.CreateField(S_COMMENT_OWNER_KEY, ftGuid);
+      TblMeta.CreateField(S_COMMENT_MEDIA_KEY, ftGuid);
+      TblMeta.CreateField(S_COMMENT_INSTA_COMMENT_ID, ftUnicodeString);
+      TblMeta.CreateField(S_COMMENT_INSTA_OWNER_ID, ftUnicodeString);
+      TblMeta.CreateField(S_COMMENT_TWITTER_COMMENT_ID, ftUnicodeString);
+      TblMeta.CreateField(S_COMMENT_TWITTER_OWNER_ID, ftUnicodeString);
+      TblMeta.CreateField(S_COMMENT_DATE, ftDouble);
+      TblMeta.CreateField(S_COMMENT_DATA_STR, ftUnicodeString);
+      TblMeta.CreateField(S_COMMENT_TYPE, ftInteger);
+      TblMeta.CreateField(S_LAST_UPDATED, ftDouble);
 
-        //Indexes - key based, ref integrity.
-        TblMeta.CreateIndex(S_INDEX_COMMENT_TABLE_PRIMARY, S_COMMENT_KEY, [iaUnique, iaNotEmpty]);
-        TblMeta.CreateIndex(S_INDEX_COMMENT_OWNER_KEY, S_COMMENT_OWNER_KEY, [iaNotEmpty]);
-        TblMeta.CreateIndex(S_INDEX_COMMENT_MEDIA_KEY, S_COMMENT_MEDIA_KEY, [iaNotEmpty]);
-        //Indexes, site UIDs.
-        for ST := Low(ST) to High(ST) do
+      //Indexes - key based, ref integrity.
+      TblMeta.CreateIndex(S_INDEX_COMMENT_TABLE_PRIMARY, S_COMMENT_KEY, [iaUnique, iaNotEmpty]);
+      TblMeta.CreateIndex(S_INDEX_COMMENT_OWNER_KEY, S_COMMENT_OWNER_KEY, [iaNotEmpty]);
+      TblMeta.CreateIndex(S_INDEX_COMMENT_MEDIA_KEY, S_COMMENT_MEDIA_KEY, [iaNotEmpty]);
+      //Indexes, site UIDs.
+      for ST := Low(ST) to High(ST) do
+      begin
+        for CBX := Low(CBX) to High(CBX) do
         begin
-          for CBX := Low(CBX) to High(CBX) do
-          begin
-            TblMeta.CreateIndex(
-              CommentBlockIndexNames[ST][CBX],
-              CommentBlockIndexFieldNames[ST][CBX], []);
-          end;
+          TblMeta.CreateIndex(
+            CommentBlockIndexNames[ST][CBX],
+            CommentBlockIndexFieldNames[ST][CBX], []);
         end;
-      finally
-        TblMeta.Free
       end;
     end;
     //Foreign key constraints.
-    FK := DBAPI.OpenTableOrKey(S_COMMENT_CONSTRAINT_FK_USER_TABLE_UID);
-    if not Assigned(FK) then
+    FKMeta := DBAPI.GetAPIObjectFromEntity(S_COMMENT_CONSTRAINT_FK_USER_TABLE_UID, APIForeignKey) as TMemAPIForeignKey;
+    if not Assigned(FKMeta) then
     begin
-      FK := DBAPI.CreateForeignKey(S_COMMENT_CONSTRAINT_FK_USER_TABLE_UID);
-      FKMeta := DBAPI.GetApiObjectFromHandle(FK, APIForeignKey) as TMemAPIForeignKey;
-      try
-        FKMeta.SetReferencingChild(S_COMMENT_TABLE, S_INDEX_COMMENT_OWNER_KEY);
-        FKMeta.SetReferencedParent(S_USER_TABLE, S_INDEX_USER_TABLE_PRIMARY);
-      finally
-        FKMeta.Free;
-      end;
+      DBAPI.CreateForeignKey(S_COMMENT_CONSTRAINT_FK_USER_TABLE_UID);
+      FKMeta := DBAPI.GetAPIObjectFromEntity(S_COMMENT_CONSTRAINT_FK_USER_TABLE_UID, APIForeignKey) as TMemAPIForeignKey;
+
+      FKMeta.SetReferencingChild(S_COMMENT_TABLE, S_INDEX_COMMENT_OWNER_KEY);
+      FKMeta.SetReferencedParent(S_USER_TABLE, S_INDEX_USER_TABLE_PRIMARY);
     end;
-    FK := DBAPI.OpenTableOrKey(S_COMMENT_CONSTRAINT_FK_MEDIA_TABLE_MID);
-    if not Assigned(FK) then
+    FKMeta.Free;
+    FKMeta := nil;
+
+    FKMeta := DBAPI.GetAPIObjectFromEntity(S_COMMENT_CONSTRAINT_FK_MEDIA_TABLE_MID, APIForeignKey) as TMemAPIForeignKey;
+    if not Assigned(FKMeta) then
     begin
-      FK := DBAPI.CreateForeignKey(S_COMMENT_CONSTRAINT_FK_MEDIA_TABLE_MID);
-      FKMeta := DBAPI.GetApiObjectFromHandle(FK, APIForeignKey) as TMemAPIForeignKey;
-      try
-        FKMeta.SetReferencingChild(S_COMMENT_TABLE, S_INDEX_COMMENT_MEDIA_KEY);
-        FKMeta.SetReferencedParent(S_MEDIA_TABLE, S_INDEX_MEDIA_TABLE_PRIMARY);
-      finally
-        FKMeta.Free;
-      end;
+      DBAPI.CreateForeignKey(S_COMMENT_CONSTRAINT_FK_MEDIA_TABLE_MID);
+      FKMeta := DBAPI.GetAPIObjectFromEntity(S_COMMENT_CONSTRAINT_FK_MEDIA_TABLE_MID, APIForeignKey) as TMemAPIForeignKey;
+
+      FKMeta.SetReferencingChild(S_COMMENT_TABLE, S_INDEX_COMMENT_MEDIA_KEY);
+      FKMeta.SetReferencedParent(S_MEDIA_TABLE, S_INDEX_MEDIA_TABLE_PRIMARY);
     end;
   finally
+    FKMeta.Free;
+    TblMeta.Free;
     DBAPI.Free;
   end;
 end;
@@ -312,18 +301,14 @@ var
   var
     T: TMemDBTransaction;
     TblMeta: TMemAPITableMetadata;
-    TblData: TMemAPITableData;
-    Handle: TMemDBHandle;
     DBAPI: TMemAPIDatabase;
-    Iter: boolean;
   begin
     T := S.StartTransaction(amReadWrite);
     try
       DBAPI := T.GetAPI;
       try
         //Rename old keys, fields, indices FK's to "old" values
-        Handle := DBAPI.OpenTableOrKey(S_USER_TABLE);
-        TblMeta := DBAPI.GetApiObjectFromHandle(Handle, APITableMetadata) as TMemAPITableMetadata;
+        TblMeta := DBAPI.GetAPIObjectFromEntity(S_USER_TABLE, APITableMetadata, true) as TMemAPITableMetadata;
         try
           TblMeta.RenameField(S_USER_KEY, S_USER_KEY_OLD);
           TblMeta.RenameIndex(S_INDEX_USER_TABLE_PRIMARY, S_INDEX_USER_TABLE_PRIMARY_OLD);
@@ -332,8 +317,7 @@ var
           TblMeta.Free;
         end;
 
-        Handle := DBAPI.OpenTableOrKey(S_MEDIA_TABLE);
-        TblMeta := DBAPI.GetApiObjectFromHandle(Handle, APITableMetadata) as TMemAPITableMetadata;
+        TblMeta := DBAPI.GetAPIObjectFromEntity(S_MEDIA_TABLE, APITableMetadata, true) as TMemAPITableMetadata;
         try
           TblMeta.RenameField(S_MEDIA_KEY, S_MEDIA_KEY_OLD);
           TblMeta.RenameIndex(S_INDEX_MEDIA_TABLE_PRIMARY, S_INDEX_MEDIA_TABLE_PRIMARY_OLD);
@@ -345,8 +329,7 @@ var
           TblMeta.Free;
         end;
 
-        Handle := DBAPI.OpenTableOrKey(S_COMMENT_TABLE);
-        TblMeta := DBAPI.GetApiObjectFromHandle(Handle, APITableMetadata) as TMemAPITableMetadata;
+        TblMeta := DBAPI.GetAPIObjectFromEntity(S_COMMENT_TABLE, APITableMetadata, true) as TMemAPITableMetadata;
         try
           TblMeta.RenameField(S_COMMENT_KEY, S_COMMENT_KEY_OLD);
           TblMeta.RenameIndex(S_INDEX_COMMENT_TABLE_PRIMARY, S_INDEX_COMMENT_TABLE_PRIMARY_OLD);
@@ -384,8 +367,6 @@ var
   var
     T: TMemDBTransaction;
     TblMeta: TMemAPITableMetadata;
-    TblData: TMemAPITableData;
-    Handle: TMemDBHandle;
     DBAPI: TMemAPIDatabase;
   begin
     T := S.StartTransaction(amReadWrite);
@@ -393,8 +374,7 @@ var
       DBAPI := T.GetAPI;
       try
         //Rename old keys, fields, indices FK's to "old" values
-        Handle := DBAPI.OpenTableOrKey(S_USER_TABLE);
-        TblMeta := DBAPI.GetApiObjectFromHandle(Handle, APITableMetadata) as TMemAPITableMetadata;
+        TblMeta := DBAPI.GetAPIObjectFromEntity(S_USER_TABLE, APITableMetadata, true) as TMemAPITableMetadata;
         try
           TblMeta.DeleteField(S_USER_KEY);
           TblMeta.RenameField(S_USER_KEY_OLD, S_USER_KEY);
@@ -403,8 +383,7 @@ var
           TblMeta.Free;
         end;
 
-        Handle := DBAPI.OpenTableOrKey(S_MEDIA_TABLE);
-        TblMeta := DBAPI.GetApiObjectFromHandle(Handle, APITableMetadata) as TMemAPITableMetadata;
+        TblMeta := DBAPI.GetAPIObjectFromEntity(S_MEDIA_TABLE, APITableMetadata, true) as TMemAPITableMetadata;
         try
           TblMeta.DeleteField(S_MEDIA_KEY);
           TblMeta.DeleteField(S_MEDIA_OWNER_KEY);
@@ -416,8 +395,7 @@ var
           TblMeta.Free;
         end;
 
-        Handle := DBAPI.OpenTableOrKey(S_COMMENT_TABLE);
-        TblMeta := DBAPI.GetApiObjectFromHandle(Handle, APITableMetadata) as TMemAPITableMetadata;
+        TblMeta := DBAPI.GetAPIObjectFromEntity(S_COMMENT_TABLE, APITableMetadata, true) as TMemAPITableMetadata;
         try
           TblMeta.DeleteField(S_COMMENT_KEY);
           TblMeta.DeleteField(S_COMMENT_OWNER_KEY);
@@ -468,7 +446,6 @@ var
     TblData: TMemAPITableData;
     TblMeta: TMemAPITableMetadata;
     FKMeta: TMemAPIForeignKey;
-    Handle, FK: TMemDBHandle;
     Iter: boolean;
   begin
     T := S.StartTransaction(amReadWrite);
@@ -476,8 +453,7 @@ var
       DBAPI := T.GetAPI;
       try
         //Populate new fields with data.
-        Handle := DBAPI.OpenTableOrKey(S_USER_TABLE);
-        TblData := DBAPI.GetApiObjectFromHandle(Handle, APITableData) as TMemAPITableData;
+        TblData := DBAPI.GetAPIObjectFromEntity(S_USER_TABLE, APITableData, true) as TMemAPITableData;
         try
           Iter := TblData.Locate(ptFirst, '');
           while Iter do
@@ -490,8 +466,7 @@ var
           TblData.Free;
         end;
 
-        Handle := DBAPI.OpenTableOrKey(S_MEDIA_TABLE);
-        TblData := DBAPI.GetApiObjectFromHandle(Handle, APITableData) as TMemAPITableData;
+        TblData := DBAPI.GetAPIObjectFromEntity(S_MEDIA_TABLE, APITableData, true) as TMemAPITableData;
         try
           Iter := TblData.Locate(ptFirst, '');
           while Iter do
@@ -505,8 +480,7 @@ var
           TblData.Free;
         end;
 
-        Handle := DBAPI.OpenTableOrKey(S_COMMENT_TABLE);
-        TblData := DBAPI.GetApiObjectFromHandle(Handle, APITableData) as TMemAPITableData;
+        TblData := DBAPI.GetAPIObjectFromEntity(S_COMMENT_TABLE, APITableData, true) as TMemAPITableData;
         try
           Iter := TblData.Locate(ptFirst, '');
           while Iter do
@@ -521,16 +495,14 @@ var
           TblData.Free;
         end;
 
-        Handle := DBAPI.OpenTableOrKey(S_USER_TABLE);
-        TblMeta := DBAPI.GetApiObjectFromHandle(Handle, APITableMetadata) as TMemAPITableMetadata;
+        TblMeta := DBAPI.GetAPIObjectFromEntity(S_USER_TABLE, APITableMetadata, true) as TMemAPITableMetadata;
         try
           TblMeta.CreateIndex(S_INDEX_USER_TABLE_PRIMARY, S_USER_KEY, [iaUnique, iaNotEmpty]);
         finally
           TblMeta.Free;
         end;
 
-        Handle := DBAPI.OpenTableOrKey(S_MEDIA_TABLE);
-        TblMeta := DBAPI.GetApiObjectFromHandle(Handle, APITableMetadata) as TMemAPITableMetadata;
+        TblMeta := DBAPI.GetAPIObjectFromEntity(S_MEDIA_TABLE, APITableMetadata, true) as TMemAPITableMetadata;
         try
           TblMeta.CreateIndex(S_INDEX_MEDIA_TABLE_PRIMARY, S_MEDIA_KEY, [iaUnique, iaNotEmpty]);
           TblMeta.CreateIndex(S_INDEX_MEDIA_OWNER_KEY, S_MEDIA_OWNER_KEY, [iaNotEmpty]);
@@ -538,8 +510,7 @@ var
           TblMeta.Free;
         end;
 
-        Handle := DBAPI.OpenTableOrKey(S_COMMENT_TABLE);
-        TblMeta := DBAPI.GetApiObjectFromHandle(Handle, APITableMetadata) as TMemAPITableMetadata;
+        TblMeta := DBAPI.GetAPIObjectFromEntity(S_COMMENT_TABLE, APITableMetadata, true) as TMemAPITableMetadata;
         try
           TblMeta.CreateIndex(S_INDEX_COMMENT_TABLE_PRIMARY, S_COMMENT_KEY, [iaUnique, iaNotEmpty]);
           TblMeta.CreateIndex(S_INDEX_COMMENT_OWNER_KEY, S_COMMENT_OWNER_KEY, [iaNotEmpty]);
@@ -548,8 +519,8 @@ var
           TblMeta.Free;
         end;
 
-        FK := DBAPI.CreateForeignKey(S_MEDIA_CONSTRAINT_FK_USER_TABLE_UID);
-        FKMeta := DBAPI.GetApiObjectFromHandle(FK, APIForeignKey) as TMemAPIForeignKey;
+        DBAPI.CreateForeignKey(S_MEDIA_CONSTRAINT_FK_USER_TABLE_UID);
+        FKMeta := DBAPI.GetAPIObjectFromEntity(S_MEDIA_CONSTRAINT_FK_USER_TABLE_UID, APIForeignKey, true) as TMemAPIForeignKey;
         try
           FKMeta.SetReferencingChild(S_MEDIA_TABLE, S_INDEX_MEDIA_OWNER_KEY);
           FKMeta.SetReferencedParent(S_USER_TABLE, S_INDEX_USER_TABLE_PRIMARY);
@@ -557,8 +528,8 @@ var
           FKMeta.Free;
         end;
 
-        FK := DBAPI.CreateForeignKey(S_COMMENT_CONSTRAINT_FK_USER_TABLE_UID);
-        FKMeta := DBAPI.GetApiObjectFromHandle(FK, APIForeignKey) as TMemAPIForeignKey;
+        DBAPI.CreateForeignKey(S_COMMENT_CONSTRAINT_FK_USER_TABLE_UID);
+        FKMeta := DBAPI.GetAPIObjectFromEntity(S_COMMENT_CONSTRAINT_FK_USER_TABLE_UID, APIForeignKey, true) as TMemAPIForeignKey;
         try
           FKMeta.SetReferencingChild(S_COMMENT_TABLE, S_INDEX_COMMENT_OWNER_KEY);
           FKMeta.SetReferencedParent(S_USER_TABLE, S_INDEX_USER_TABLE_PRIMARY);
@@ -566,8 +537,8 @@ var
           FKMeta.Free;
         end;
 
-        FK := DBAPI.CreateForeignKey(S_COMMENT_CONSTRAINT_FK_MEDIA_TABLE_MID);
-        FKMeta := DBAPI.GetApiObjectFromHandle(FK, APIForeignKey) as TMemAPIForeignKey;
+        DBAPI.CreateForeignKey(S_COMMENT_CONSTRAINT_FK_MEDIA_TABLE_MID);
+        FKMeta := DBAPI.GetAPIObjectFromEntity(S_COMMENT_CONSTRAINT_FK_MEDIA_TABLE_MID, APIForeignKey, true) as TMemAPIForeignKey;
         try
           FKMeta.SetReferencingChild(S_COMMENT_TABLE, S_INDEX_COMMENT_MEDIA_KEY);
           FKMeta.SetReferencedParent(S_MEDIA_TABLE, S_INDEX_MEDIA_TABLE_PRIMARY);
@@ -594,8 +565,6 @@ var
     DBAPI: TMemAPIDatabase;
     T: TMemDBTransaction;
     TblMeta: TMemAPITableMetadata;
-    FKMeta: TMemAPIForeignKey;
-    Handle, FK: TMemDBHandle;
   begin
     T := S.StartTransaction(amReadWrite);
     try
@@ -605,8 +574,7 @@ var
         DBAPI.DeleteTableOrKey(S_COMMENT_CONSTRAINT_FK_USER_TABLE_UID);
         DBAPI.DeleteTableOrKey(S_COMMENT_CONSTRAINT_FK_MEDIA_TABLE_MID);
 
-        Handle := DBAPI.OpenTableOrKey(S_MEDIA_TABLE);
-        TblMeta := DBAPI.GetApiObjectFromHandle(Handle, APITableMetadata) as TMemAPITableMetadata;
+        TblMeta := DBAPI.GetAPIObjectFromEntity(S_MEDIA_TABLE, APITableMetadata, true) as TMemAPITableMetadata;
         try
           TblMeta.DeleteIndex(S_INDEX_MEDIA_TABLE_PRIMARY);
           TblMeta.DeleteIndex(S_INDEX_MEDIA_OWNER_KEY);
@@ -614,8 +582,7 @@ var
           TblMeta.Free;
         end;
 
-        Handle := DBAPI.OpenTableOrKey(S_COMMENT_TABLE);
-        TblMeta := DBAPI.GetApiObjectFromHandle(Handle, APITableMetadata) as TMemAPITableMetadata;
+        TblMeta := DBAPI.GetAPIObjectFromEntity(S_COMMENT_TABLE, APITableMetadata, true) as TMemAPITableMetadata;
         try
           TblMeta.DeleteIndex(S_INDEX_COMMENT_TABLE_PRIMARY);
           TblMeta.DeleteIndex(S_INDEX_COMMENT_OWNER_KEY);
@@ -639,7 +606,6 @@ var
   procedure Phase3Convert;
   var
     T: TMemDBTransaction;
-    Handle: TMemDBHandle;
     TblMeta: TMemAPITableMetadata;
     DBAPI: TMemAPIDatabase;
   begin
@@ -653,8 +619,7 @@ var
         DBAPI.DeleteTableOrKey(S_COMMENT_CONSTRAINT_FK_USER_TABLE_UID_OLD);
 
         //Rename old keys, fields, indices FK's to "old" values
-        Handle := DBAPI.OpenTableOrKey(S_USER_TABLE);
-        TblMeta := DBAPI.GetApiObjectFromHandle(Handle, APITableMetadata) as TMemAPITableMetadata;
+        TblMeta := DBAPI.GetAPIObjectFromEntity(S_USER_TABLE, APITableMetadata, true) as TMemAPITableMetadata;
         try
           TblMeta.DeleteIndex(S_INDEX_USER_TABLE_PRIMARY_OLD);
           TblMeta.DeleteField(S_USER_KEY_OLD);
@@ -662,8 +627,7 @@ var
           TblMeta.Free;
         end;
 
-        Handle := DBAPI.OpenTableOrKey(S_MEDIA_TABLE);
-        TblMeta := DBAPI.GetApiObjectFromHandle(Handle, APITableMetadata) as TMemAPITableMetadata;
+        TblMeta := DBAPI.GetAPIObjectFromEntity(S_MEDIA_TABLE, APITableMetadata, true) as TMemAPITableMetadata;
         try
           TblMeta.DeleteIndex(S_INDEX_MEDIA_TABLE_PRIMARY_OLD);
           TblMeta.DeleteIndex(S_INDEX_MEDIA_OWNER_KEY_OLD);
@@ -673,8 +637,7 @@ var
           TblMeta.Free;
         end;
 
-        Handle := DBAPI.OpenTableOrKey(S_COMMENT_TABLE);
-        TblMeta := DBAPI.GetApiObjectFromHandle(Handle, APITableMetadata) as TMemAPITableMetadata;
+        TblMeta := DBAPI.GetAPIObjectFromEntity(S_COMMENT_TABLE, APITableMetadata, true) as TMemAPITableMetadata;
         try
           TblMeta.DeleteIndex(S_INDEX_COMMENT_MEDIA_KEY_OLD);
           TblMeta.DeleteIndex(S_INDEX_COMMENT_OWNER_KEY_OLD);
@@ -706,7 +669,6 @@ var
     T: TMemDBTransaction;
     DBAPI: TMemAPIDatabase;
     TblMeta: TMemAPITableMetadata;
-    Entity: TMemDBHandle;
     SL: TStringList;
     AllOldFormat, AllNewFormat: boolean;
 
@@ -731,8 +693,7 @@ var
         AllOldFormat := true;
         AllNewFormat := true;
 
-        Entity := DBAPI.OpenTableOrKey(S_USER_TABLE);
-        TblMeta := DBAPI.GetApiObjectFromHandle(Entity, APITableMetadata) as TMemAPITableMetadata;
+        TblMeta := DBAPI.GetAPIObjectFromEntity(S_USER_TABLE, APITableMetadata, true) as TMemAPITableMetadata;
         try
           SL := TblMeta.GetFieldNames;
           try
@@ -758,8 +719,7 @@ var
           TblMeta.Free;
         end;
 
-        Entity := DBAPI.OpenTableOrKey(S_MEDIA_TABLE);
-        TblMeta := DBAPI.GetApiObjectFromHandle(Entity, APITableMetadata) as TMemAPITableMetadata;
+        TblMeta := DBAPI.GetAPIObjectFromEntity(S_MEDIA_TABLE, APITableMetadata, true) as TMemAPITableMetadata;
         try
           SL := TblMeta.GetFieldNames;
           try
@@ -794,8 +754,7 @@ var
         end;
 
 
-        Entity := DBAPI.OpenTableOrKey(S_COMMENT_TABLE);
-        TblMeta := DBAPI.GetApiObjectFromHandle(Entity, APITableMetadata) as TMemAPITableMetadata;
+        TblMeta := DBAPI.GetAPIObjectFromEntity(S_COMMENT_TABLE, APITableMetadata, true) as TMemAPITableMetadata;
         try
           SL := TblMeta.GetFieldNames;
           try
@@ -970,8 +929,8 @@ function TMemKDB.DestroyTables: boolean;
 var
   S: TMemDBSession;
   T: TMemDBTransaction;
-  E: TMemDBHandle;
   DBAPI: TMemAPIDatabase;
+  SL: TStringList;
   i: integer;
   EStr: string;
 begin
@@ -982,21 +941,25 @@ begin
     try
       DBAPI := T.GetAPI;
       try
-        for i := 0 to 5 do
-        begin
-          case i of
-            0: EStr:= S_MEDIA_CONSTRAINT_FK_USER_TABLE_UID;
-            1: EStr:= S_COMMENT_CONSTRAINT_FK_USER_TABLE_UID;
-            2: EStr:= S_COMMENT_CONSTRAINT_FK_MEDIA_TABLE_MID;
-            3: EStr:= S_COMMENT_TABLE;
-            4: EStr:= S_MEDIA_TABLE;
-            5: EStr:= S_USER_TABLE;
-          else
-            Assert(false);
+        SL := DBAPI.GetEntityNames;
+        try
+          for i := 0 to 5 do
+          begin
+            case i of
+              0: EStr:= S_MEDIA_CONSTRAINT_FK_USER_TABLE_UID;
+              1: EStr:= S_COMMENT_CONSTRAINT_FK_USER_TABLE_UID;
+              2: EStr:= S_COMMENT_CONSTRAINT_FK_MEDIA_TABLE_MID;
+              3: EStr:= S_COMMENT_TABLE;
+              4: EStr:= S_MEDIA_TABLE;
+              5: EStr:= S_USER_TABLE;
+            else
+              Assert(false);
+            end;
+            if SL.IndexOf(EStr) >= 0 then
+              DBAPI.DeleteTableOrKey(EStr);
           end;
-          E := DBAPI.OpenTableOrKey(EStr);
-          if Assigned(E) then
-            DBAPI.DeleteTableOrKey(EStr);
+        finally
+          SL.Free;
         end;
       finally
         DBAPI.Free;
@@ -1018,7 +981,6 @@ function TMemKDB.ClearTablesData: boolean;
 var
   S: TMemDBSession;
   T: TMemDBTransaction;
-  E: TMemDBHandle;
   DBAPI: TMemAPIDatabase;
   TblData: TMemAPITableData;
   i: integer;
@@ -1040,10 +1002,9 @@ begin
           else
             Assert(false);
           end;
-          E := DBAPI.OpenTableOrKey(EStr);
-          if Assigned(E) then
+          TblData := DBAPI.GetAPIObjectFromEntity(EStr, APITableData) as TMemAPITableData;
+          if Assigned(TblData) then
           begin
-            TblData := DBAPI.GetApiObjectFromHandle(E, APITableData) as TMemAPITableData;
             try
               TblData.Locate(ptFirst, '');
               while TblData.RowSelected do

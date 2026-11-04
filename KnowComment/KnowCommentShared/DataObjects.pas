@@ -666,7 +666,7 @@ const
 implementation
 
 uses
-  SysUtils, KKUtils, GlobalLog, MemDBMisc;
+  SysUtils, KKUtils, GlobalLog, MemDB2Misc;
 
 const
   S_ADJACENT_PASSED_PREVIOUS = 'First/Next function passed previous value when not needed, check.';
@@ -2545,7 +2545,7 @@ begin
       Assert(OtherItem is TKKeyedObject);
       OtherKey := (OtherItem as TKKeyedObject).Key;
     end;
-    result := MemDBMisc.CompareGuids(OtherKey, OwnKey);
+    result := MemDB2Misc.CompareGuids(OtherKey, OwnKey);
   end
   else
   begin

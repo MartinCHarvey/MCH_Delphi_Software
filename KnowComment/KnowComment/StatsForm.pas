@@ -83,13 +83,7 @@ uses
   Trackables,
 {$ENDIF}
   DBContainer,
-  MemDBMisc;
-
-const
-  S_ENTITIES = ',  Entities: ';
-  S_INDEXES = ' Indexes: ';
-  S_FIELDS = ' Fields: ';
-  S_ROWS = ' Rows: ';
+  MemDB2Misc;
 
 function TStatsFrm.StringListsSame(A,B: TStrings): boolean;
 var
@@ -173,11 +167,6 @@ var
   Item: TFMXObject;
   Stats: TBatchLoaderStats;
   QueueStrings: TStringList;
-  DBStats: TMemStats;
-  EStat: TMemDBEntityStats;
-  //DB stats summed:
-  Entities, Indexes, Fields, Rows: Int64;
-  DBStr: string;
 begin
   if Assigned(DBCont) and Assigned(DBCont.BatchLoader) then
   begin
@@ -221,49 +210,14 @@ begin
         (Item as TControl).Enabled := false;
     end;
   end;
+  //MemDB2 has no DB stats API (entity / index / field / row counts).
+  //DB phase is a cheap property read, so just show that.
   if Assigned(DBCont)
     and Assigned(DBCont.DB)
     and Assigned(DBCont.DB.MemDB) then
-  begin
-    DBStats := nil;
-    try
-      Entities := 0;
-      Indexes := 0;
-      Fields := 0;
-      Rows := 0;
-      DBStats := DBCont.DB.MemDB.GetDBStats;
-      if Assigned(DBStats) then
-      begin
-        with DBStats as TMemDBStats do
-        begin
-          Entities := EntityStatsList.Count;
-          for idx := 0 to Pred(EntityStatsList.Count) do
-          begin
-            EStat := TObject(EntityStatsList[idx]) as TMemDBEntityStats;
-            if EStat is TMemDBTableStats then
-            begin
-              with EStat as TMemDBTableStats do
-              begin
-                Inc(Indexes, IndexCount);
-                Inc(Fields, FieldCount);
-                Inc(Rows, RowCount);
-              end;
-            end;
-          end;
-          DBStr := TMemDBPhaseStrings[Phase] +
-            S_ENTITIES + IntToStr(Entities) +
-            S_INDEXES + IntToStr(Indexes) +
-            S_FIELDS + IntToStr(Fields) +
-            S_ROWS + IntToStr(Rows);
-          DBStatsLbl.Text := DBStr;
-        end;
-      end
-      else
-        SetLength(DBStr, 0);
-    finally
-      DBStats.Free;
-    end;
-  end;
+    DBStatsLbl.Text := TMemDBPhaseStrings[DBCont.DB.MemDB.DBState]
+  else
+    DBStatsLbl.Text := '';
 end;
 
 procedure TStatsFrm.StopBtnClick(Sender: TObject);

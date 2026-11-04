@@ -73,7 +73,7 @@ var
 implementation
 
 uses
-  MemDB, FMX.ActnList, MainForm, DataObjects, MemDBMisc, UserPrefs;
+  MemDB2, FMX.ActnList, MainForm, DataObjects, MemDB2Misc, UserPrefs;
 
 procedure TDBContainer.HandleDBStateChange(Sender: TObject);
 var
@@ -81,7 +81,10 @@ var
   Error: boolean;
 begin
   Loaded := FDB.MemDB.DBState = mdbRunning;
-  Error := FDB.MemDB.DBState = mdbError;
+  //mdbRunningError: up but commits fail. mdbClosedError: failed at init
+  //(journal error). mdbClosingWaitClientsError: failed whilst closing.
+  Error := FDB.MemDB.DBState in
+    [mdbRunningError, mdbClosingWaitClientsError, mdbClosedError];
   if (Loaded <> PrevLoaded) or Error then
   begin
     PrevLoaded := Loaded;
