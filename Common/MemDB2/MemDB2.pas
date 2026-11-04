@@ -219,6 +219,7 @@ type
     procedure CommitAPICheckDBErrFlagSynchronous;
     procedure CommitAPISetDBErrFlag(Msg: string);
     procedure CommitAPIJournalTxion(T: TReffed);
+    function GetLastError: string;
   public
 
     constructor Create;
@@ -231,6 +232,9 @@ type
     function StartSession: TMemDBSession;
 
     property DBState: TMemDBPhase read FPhase;
+    //Reason for the most recent move to an error phase. Empty if none
+    //since the last InitDB.
+    property LastError: string read GetLastError;
     property OnUIStateChange: TNotifyEvent read FOnUIStateChange write FOnUIStateChange;
   end;
 
@@ -1043,6 +1047,7 @@ function TMemDB.InitDB(RootLocation: string;
     FJournal.JournalType := JournalType;
     FJournal.Initialise;
     FPhase := mdbInit;
+    FLastError := '';
   end;
 
 var
@@ -1141,6 +1146,7 @@ procedure TMemDB.StopDBLocked;
 var
   DBTmp: TMemDbDatabasePersistent;
   DelErrFlag: boolean;
+  DelErrMsg: string;
 begin
   while not(FPhase in [mdbNull, mdbClosed]) do
   begin
@@ -1201,7 +1207,7 @@ begin
             on E: Exception do
             begin
               DelErrFlag := true;
-              FLastError := E.Message;
+              DelErrMsg := E.Message; //Session lock not held here.
             end;
           end;
           try
@@ -1216,6 +1222,7 @@ begin
               else
               begin
                 FPhase := mdbClosedError;
+                FLastError := DelErrMsg;
               end;
             end;
           end;
@@ -1393,6 +1400,16 @@ begin
   end;
   if InitState <> FinalState then
     FJournal.SynchronizeStateChange;
+end;
+
+function TMemDB.GetLastError: string;
+begin
+  FSessionLock.Acquire;
+  try
+    result := FLastError;
+  finally
+    FSessionLock.Release;
+  end;
 end;
 
 procedure TMemDB.HandleUIStateChange(Sender: TObject);

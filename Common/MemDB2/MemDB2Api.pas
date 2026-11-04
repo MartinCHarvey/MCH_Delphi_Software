@@ -1774,6 +1774,13 @@ begin
           end;
         end;
       until not Assigned(Next);
+      //Cur was found walking outward to the edge. Set the iteration direction
+      //back inward, so Locate(ptNext/ptPrevious) and Delete(AutoInc) from the
+      //edge continue through the matching rows, not out of them.
+      if Pos = ptPrevious then
+        Cur.SetIterInc(ptNext)
+      else
+        Cur.SetIterInc(ptPrevious);
       result := Cur;
       Cur := nil;
     end
