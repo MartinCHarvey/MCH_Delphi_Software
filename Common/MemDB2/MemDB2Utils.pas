@@ -47,7 +47,7 @@ begin
     MemDBMisc.ftBlob: result := MemDB2Misc.ftBlob;
     MemDBMisc.ftGuid: result := MemDB2Misc.ftGuid;
   else
-    raise Exception.Create(S_UNKNOWN_FIELD_TYPE);
+    raise SysUtils.Exception.Create(S_UNKNOWN_FIELD_TYPE);
   end;
 end;
 
@@ -84,9 +84,9 @@ begin
     MemDBMisc.ftGuid: Dst.gVal := Src.gVal;
     MemDBMisc.ftBlob:
       //TODO - Memcopies for blobs?
-      raise Exception.Create(S_BLOB_NOT_SUPPORTED);
+      raise SysUtils.Exception.Create(S_BLOB_NOT_SUPPORTED);
   else
-    raise Exception.Create(S_UNKNOWN_FIELD_TYPE);
+    raise SysUtils.Exception.Create(S_UNKNOWN_FIELD_TYPE);
   end;
 end;
 
@@ -95,7 +95,7 @@ end;
 procedure ClearDestinationDB(Session: MemDB2.TMemDBSession);
 var
   Trans: MemDB2.TMemDBTransaction;
-  EntityNames: TStringList;
+  EntityNames: Classes.TStringList;
   DBAPI: MemDB2Api.TMemAPIDatabase;
   FKAPI: MemDB2Api.TMemAPIForeignKey;
   idx: integer;
@@ -168,7 +168,7 @@ var
   DstTrans: MemDB2.TMemDBTransaction;
   DstAPI: MemDB2Api.TMemAPIDatabase;
   idx: integer;
-  SList: TStringList;
+  SList: Classes.TStringList;
   FieldType: MemDBMisc.TMDBFieldType;
   OK: boolean;
   GotRow: boolean;
@@ -273,7 +273,7 @@ end;
 
 procedure CopyTables(SrcAPI: MemDBApi.TMemAPIDatabase; DstSess: MemDB2.TMemDBSession);
 var
-  EntityNames: TStringList;
+  EntityNames: Classes.TStringList;
   Entity: MemDBMisc.TMemDBHandle;
   idx: integer;
   TblMetaAPI: MemDBApi.TMemAPITableMetadata;
@@ -332,7 +332,7 @@ end;
 
 procedure CopyForeignKeys(SrcAPI: MemDBApi.TMemAPIDatabase; DstSess: MemDB2.TMemDBSession);
 var
-  EntityNames: TStringList;
+  EntityNames: Classes.TStringList;
   Entity: MemDBMisc.TMemDBHandle;
   idx: integer;
   FKAPI: MemDBApi.TMemAPIForeignKey;
