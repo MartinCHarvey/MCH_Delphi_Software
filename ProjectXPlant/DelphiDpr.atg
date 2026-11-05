@@ -70,7 +70,7 @@ IGNORE  cr + lf + tab + space
 PRODUCTIONS
   DelphiDpr DESCRIPTION "DprFile"
   =
-        "program" identifier semi UseClauses NextDecl
+        ("program" | "library") identifier semi UseClauses NextDecl
   .
 
   UseClauses DESCRIPTION "use clauses"

@@ -6,7 +6,7 @@ unit DelphiDpr;
 {==============================================================================
 DelphiDpr
 0.0.0.0
-Date of Generation: 11/06/2026 12:33
+Date of Generation: 05/11/2026 18:06
 Comment: Parses Delphi DPR files.
 Author: Martin Harvey
 Copyright: (c) Martin Harvey
@@ -22,7 +22,7 @@ uses  SysUtils,Classes,CocoBase;
 
 
 const
-maxT = 15;
+maxT = 16;
 type
   SymbolSet = array[0..maxT div setsize] of TBitSet;
 
@@ -125,9 +125,9 @@ implementation
 const
 
   EOFSYMB = 0;  identifierSym = 1;  stringSym = 2;  dotSym = 3;  semiSym = 4;
-  commaSym = 5;  programSym = 6;  usesSym = 7;  inSym = 8;  constSym = 9;
-  typeSym = 10;  varSym = 11;  beginSym = 12;  procedureSym = 13;
-  functionSym = 14;  NOSYMB = 15;  _noSym = NOSYMB;   {error token code}
+  commaSym = 5;  programSym = 6;  librarySym = 7;  usesSym = 8;  inSym = 9;
+  constSym = 10;  typeSym = 11;  varSym = 12;  beginSym = 13;
+  procedureSym = 14;  functionSym = 15;  NOSYMB = 16;  _noSym = NOSYMB;   {error token code}
 
 { --------------------------------------------------------------------------- }
 { Arbitrary Code from ATG file }
@@ -383,6 +383,11 @@ begin
 sym := inSym;
 end;
 
+  'l': if Equal('library') then
+begin
+sym := librarySym;
+end;
+
   'p': if Equal('procedure') then
 begin
 sym := procedureSym;
@@ -606,16 +611,18 @@ begin
    4 : Result := 'semi expected';
    5 : Result := 'comma expected';
    6 : Result := '"program" expected';
-   7 : Result := '"uses" expected';
-   8 : Result := '"in" expected';
-   9 : Result := '"const" expected';
-  10 : Result := '"type" expected';
-  11 : Result := '"var" expected';
-  12 : Result := '"begin" expected';
-  13 : Result := '"procedure" expected';
-  14 : Result := '"function" expected';
-  15 : Result := 'not expected';
-  16 : Result := 'invalid next declaration';
+   7 : Result := '"library" expected';
+   8 : Result := '"uses" expected';
+   9 : Result := '"in" expected';
+  10 : Result := '"const" expected';
+  11 : Result := '"type" expected';
+  12 : Result := '"var" expected';
+  13 : Result := '"begin" expected';
+  14 : Result := '"procedure" expected';
+  15 : Result := '"function" expected';
+  16 : Result := 'not expected';
+  17 : Result := 'invalid next declaration';
+  18 : Result := 'invalid DprFile';
 
 
   else
@@ -730,7 +737,7 @@ Get;
   functionSym : begin
 Get;
     end;
-else begin SynError(16);
+else begin SynError(17);
     end;
 end;
 end;
@@ -746,7 +753,12 @@ Expect(semiSym);
 end;
 
 procedure TDelphiDpr._DelphiDpr;begin
-Expect(programSym);
+if (fCurrentInputSymbol = programSym) then begin
+Get;
+end else if (fCurrentInputSymbol = librarySym) then begin
+Get;
+end else begin SynError(18);
+end;
 Expect(identifierSym);
 Expect(semiSym);
 _UseClauses;
@@ -796,6 +808,7 @@ end;  {Parse}
 procedure TDelphiDpr.InitSymSet;
 begin
 symSet[ 0, 0] := [EOFSYMB];
+symSet[ 0, 1] := [];
 end; {InitSymSet}
 
 end { DelphiDpr }.    
