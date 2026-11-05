@@ -30,7 +30,7 @@ uses
 {$IFDEF USE_TRACKABLES}
   Trackables,
 {$ENDIF}
-  SysUtils, SyncObjs;
+  SysUtils, LockAbstractions;
 
 type
   TRWWLockReason = (lrSharedRead, lrSharedWrite, lrExclusiveWrite);

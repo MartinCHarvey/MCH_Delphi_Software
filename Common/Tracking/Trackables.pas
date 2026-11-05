@@ -34,7 +34,7 @@ IN THE SOFTWARE.
 interface
 
 uses
-  BinaryTree, Classes, SyncObjs;
+  BinaryTree, Classes, LockAbstractions;
 
 const
   S_EMPTY = '';

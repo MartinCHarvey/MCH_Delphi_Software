@@ -32,7 +32,7 @@ uses
 {$IFOPT C+}
   Trackables,
 {$ENDIF}
-  SyncObjs;
+  LockAbstractions;
 
 type
 {$IFOPT C+}
