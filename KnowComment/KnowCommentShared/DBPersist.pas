@@ -24,7 +24,7 @@ IN THE SOFTWARE.
 }
 interface
 
-uses Trackables, DataObjects, CommonPool, SyncObjs, Classes, SysUtils,
+uses Trackables, DataObjects, CommonPool, LockAbstractions, Classes, SysUtils,
   DBGeneric, GlobalLog;
 
 type
@@ -481,7 +481,7 @@ begin
     if Assigned(WorkItem) then
     begin
   {$IFDEF DEBUG_DB_PERSIST}
-      Tmp := TInterlocked.Decrement(CallsOutstanding);
+      Tmp := LockAbstractions.InterlockedDecrement(CallsOutstanding);
       GLogLog(SV_INFO, 'DB Persist, workitem deleted, outstanding ops: ' + IntToStr(Tmp));
   {$ENDIF}
       WorkItem.ThreadRec.Thread.Queue(DoRequestCompleted);
@@ -489,7 +489,7 @@ begin
     else
     begin
   {$IFDEF DEBUG_DB_PERSIST}
-      Tmp := TInterlocked.Decrement(CallsOutstanding);
+      Tmp := LockAbstractions.InterlockedDecrement(CallsOutstanding);
       DoRequestCompleted;
       GLogLog(SV_WARN, 'DB Persist, complete in Gui thread, outstanding ops: ' +
         IntToStr(CallsOutstanding));
@@ -526,7 +526,7 @@ begin
   else
   begin
 {$IFDEF DEBUG_DB_PERSIST}
-    Tmp := TInterlocked.Increment(CallsOutstanding);
+    Tmp := LockAbstractions.InterlockedIncrement(CallsOutstanding);
     GLogLog(SV_INFO, 'DB Persist, workitem added, outstanding ops: ' + IntToStr(Tmp));
 {$ENDIF}
   end;

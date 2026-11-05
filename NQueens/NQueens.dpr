@@ -6,7 +6,7 @@ program NQueens;
 
 {
 
-Copyright © 2026 Martin Harvey <martin_c_harvey@hotmail.com>
+Copyright Â© 2026 Martin Harvey <martin_c_harvey@hotmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the “Software”), to deal in
@@ -35,7 +35,9 @@ uses
   DLList in '..\Common\DLList\DLList.pas',
   Trackables in '..\Common\Tracking\Trackables.pas',
   BinaryTree in '..\Common\Balanced Tree\BinaryTree.pas',
-  QueensCover in 'QueensCover.pas';
+  QueensCover in 'QueensCover.pas',
+  LockAbstractions in '..\Common\LockAbstractions\LockAbstractions.pas',
+  SRWLockWrapper in '..\Common\SRWLockWrapper\SRWLockWrapper.pas';
 
 var
  Queens: TQueensCover;

@@ -69,7 +69,7 @@
         <Base>true</Base>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Base)'!=''">
-        <DCC_Define>INCLUDE_AUTH;$(DCC_Define)</DCC_Define>
+        <DCC_Define>USE_WINDOWS_LOCKS;INCLUDE_AUTH;$(DCC_Define)</DCC_Define>
         <DCC_IMPLICIT_STRING_CAST>false</DCC_IMPLICIT_STRING_CAST>
         <Manifest_File>None</Manifest_File>
         <Icon_MainIcon>$(BDS)\bin\delphi_PROJECTICON.ico</Icon_MainIcon>
@@ -187,6 +187,7 @@
         <DCCReference Include="..\Common\LockAbstractions\LockAbstractions.pas"/>
         <DCCReference Include="..\Common\LockAbstractions\TinyLock.pas"/>
         <DCCReference Include="..\Common\PComp\PComp.pas"/>
+        <DCCReference Include="..\Common\SRWLockWrapper\SRWLockWrapper.pas"/>
         <None Include="Ideas, and TODO.txt"/>
         <None Include="..\Common\HTMLParser\HTMLGrammar.ATG"/>
         <None Include="..\Common\HTMLParser\HTMLGrammar.AGI"/>

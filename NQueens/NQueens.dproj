@@ -45,6 +45,7 @@
         <Base>true</Base>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Base)'!=''">
+        <DCC_Define>USE_WINDOWS_LOCKS;$(DCC_Define)</DCC_Define>
         <DCC_Namespace>System;Xml;Data;Datasnap;Web;Soap;$(DCC_Namespace)</DCC_Namespace>
         <DCC_DcuOutput>.\$(Platform)\$(Config)</DCC_DcuOutput>
         <DCC_ExeOutput>.\$(Platform)\$(Config)</DCC_ExeOutput>
@@ -100,6 +101,8 @@
         <DCCReference Include="..\Common\Tracking\Trackables.pas"/>
         <DCCReference Include="..\Common\Balanced Tree\BinaryTree.pas"/>
         <DCCReference Include="QueensCover.pas"/>
+        <DCCReference Include="..\Common\LockAbstractions\LockAbstractions.pas"/>
+        <DCCReference Include="..\Common\SRWLockWrapper\SRWLockWrapper.pas"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>

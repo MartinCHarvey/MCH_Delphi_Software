@@ -29,7 +29,7 @@ implementation
 
 {$R *.dfm}
 
-uses RWWLock, SyncObjs;
+uses RWWLock, LockAbstractions;
 
 type
   TLockStats = array[TRWWLockReason] of integer;
@@ -65,7 +65,7 @@ begin
       Reason := TRWWLockReason(i);
       FLock.Acquire(Reason);
       try
-        c:= InterlockedIncrement(POngoing[Reason]);
+        c:= LockAbstractions.InterlockedIncrement(POngoing[Reason]);
         if c > PHighest[reason] then //Not atomic, but don't mind.
           PHighest[reason] := c;
         for Reason2 := Low(Reason2) to High(Reason2) do
@@ -75,12 +75,12 @@ begin
             //This however, is atomic, cos we have a lock (doh!).
         end;
         Sleep(1); //Raise contention - this loop is so tiny.
-        InterlockedDecrement(POngoing[Reason]);
+        LockAbstractions.InterlockedDecrement(POngoing[Reason]);
       finally
         FLock.Release(Reason);
       end;
     except
-      InterlockedIncrement(PExceptions^);
+      LockAbstractions.InterlockedIncrement(PExceptions^);
     end;
   end;
 end;

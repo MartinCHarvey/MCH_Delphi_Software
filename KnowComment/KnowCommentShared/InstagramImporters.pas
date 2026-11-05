@@ -26,7 +26,7 @@ interface
 
 uses
   Importers, FetcherParser, DataObjects, JSONNodes, JSNodes, HTMLNodes,
-  CommonNodes, SyncObjs;
+  CommonNodes, LockAbstractions;
 
 type
   TInstaMediaImporter = class(TMediaImporter)

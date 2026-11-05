@@ -25,7 +25,7 @@ IN THE SOFTWARE.
 
 interface
 
-uses Workitems, DLThreadQueue, SyncObjs, Classes, Trackables, DLList;
+uses Workitems, DLThreadQueue, LockAbstractions, Classes, Trackables, DLList;
 
 type
   TCommonPool = class;

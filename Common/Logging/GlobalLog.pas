@@ -40,7 +40,7 @@ uses SysUtils,
 {$IFDEF MSWINDOWS}
      Messages,
 {$ENDIF}
-     Trackables, SyncObjs;
+     Trackables, LockAbstractions;
 
 const
   MinLogFileSize = 1; //In K

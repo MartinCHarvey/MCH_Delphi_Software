@@ -27,7 +27,7 @@ interface
 
 {$DEFINE USE_SHARED_WORK_FARM}
 
-uses DLThreadQueue, WorkItems, SyncObjs, Classes,
+uses DLThreadQueue, WorkItems, LockAbstractions, Classes,
   IdHTTP, IdSSLOpenSSL, IdIOHandler, IdIOHandlerStack, SysUtils, IdCookieManager,
   IdCookie, HTMLEscapeHelper, IdHeaderList, Trackables;
 

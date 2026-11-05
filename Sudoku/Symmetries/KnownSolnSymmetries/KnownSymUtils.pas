@@ -22,7 +22,7 @@ implementation
 
 { TSudokuSpecList }
 
-uses BufferedFileStream, SyncObjs, IdGlobal, SysUtils;
+uses BufferedFileStream, LockAbstractions, IdGlobal, SysUtils;
 
 constructor TSudokuSpecList.Create;
 begin
@@ -67,7 +67,7 @@ function TSudokuSpecList.InterlockedGetString: string;
 var
   Idx: integer;
 begin
-  Idx := Pred(TInterlocked.Increment(FIndex));
+  Idx := Pred(LockAbstractions.InterlockedIncrement(FIndex));
   if Idx < FStrings.Count then
     result := FStrings[idx]
   else

@@ -26,7 +26,7 @@ IN THE SOFTWARE.
 interface
 
 uses HTTPDocFetcher, SysUtils, IdHTTP, IdHeaderList, Classes, Trackables,
-     DLList, SyncObjs,
+     DLList, LockAbstractions,
      IdHMACSHA1, IdGlobal, WorkItems, CommonPool;
 
 //TODO - May need to support three legged oauth1 request as well.

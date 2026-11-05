@@ -6,7 +6,9 @@ uses
   SparseMatrix in '..\SparseMatrix.pas',
   DLList in '..\..\DLList\DLList.pas',
   Trackables in '..\..\Tracking\Trackables.pas',
-  BinaryTree in '..\..\Balanced Tree\BinaryTree.pas';
+  BinaryTree in '..\..\Balanced Tree\BinaryTree.pas',
+  LockAbstractions in '..\..\LockAbstractions\LockAbstractions.pas',
+  SRWLockWrapper in '..\..\SRWLockWrapper\SRWLockWrapper.pas';
 
 {$R *.res}
 

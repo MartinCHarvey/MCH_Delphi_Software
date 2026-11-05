@@ -10,7 +10,7 @@ procedure KnownSymmetries(BoardClass: TCellCountBoardClass; InputFile: string);
 implementation
 
 uses
-  WorkItems, SyncObjs, KnownSymUtils, SharedSymmetries, SysUtils;
+  WorkItems, KnownSymUtils, SharedSymmetries, SysUtils, LockAbstractions;
 
 type
   TCellCountKnownWI = class(TWorkItem)
@@ -100,13 +100,13 @@ end;
 
 procedure TCellCountKnownWI.DoNormalCompletion;
 begin
-  if TInterlocked.Decrement(WICountOutstanding) = 0 then
+  if LockAbstractions.InterlockedDecrement(WICountOutstanding) = 0 then
     WIDoneEvent.SetEvent;
 end;
 
 procedure TCellCountKnownWI.DoCancelledCompletion;
 begin
-  if TInterlocked.Decrement(WICountOutstanding) = 0 then
+  if LockAbstractions.InterlockedDecrement(WICountOutstanding) = 0 then
     WIDoneEvent.SetEvent;
 end;
 

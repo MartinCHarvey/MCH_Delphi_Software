@@ -25,7 +25,7 @@ IN THE SOFTWARE.
 interface
 
 uses
-  CommonPool, FetcherParser, Trackables, SyncObjs, Classes, DataObjects,
+  CommonPool, FetcherParser, Trackables, LockAbstractions, Classes, DataObjects,
   SysUtils;
 
 // TODO - eventually, have separate insta / twitter / etc importers.

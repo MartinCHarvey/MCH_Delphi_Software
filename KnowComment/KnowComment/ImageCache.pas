@@ -31,7 +31,7 @@ uses
 {$IFDEF USE_TRACKABLES}
   Trackables,
 {$ENDIF}
-  MemDB, Classes, HTTPDocFetcher, WorkItems, SyncObjs, CommonPool, DLList;
+  MemDB2, Classes, HTTPDocFetcher, WorkItems, LockAbstractions, CommonPool, DLList;
 
 type
   TImageCacheWorkitem = class;
@@ -130,7 +130,7 @@ var
 implementation
 
 uses
-  MemDBMisc, MemDBAPI, Windows, SysUtils;
+  MemDB2Misc, MemDB2API, Windows, SysUtils;
 
 const
   S_IMGCACHE_DIR = 'ImageCache\';
@@ -204,7 +204,6 @@ var
   Trans: TMemDBTransaction;
   DBAPI: TMemAPIDatabase;
   TableMeta: TMemAPITableMetadata;
-  TblHandle: TMemDBHandle;
   FieldNames: TStringList;
 begin
   if not FInit then
@@ -226,11 +225,11 @@ begin
       try
         DBAPI := Trans.GetAPI as TMemAPIDatabase;
         try
-          TblHandle := DBAPI.OpenTableOrKey(S_IMAGE_CACHE);
-          if not Assigned(TblHandle) then
+          TableMeta := DBAPI.GetAPIObjectFromEntity(S_IMAGE_CACHE, APITableMetadata) as TMemAPITableMetadata;
+          if not Assigned(TableMeta) then
           begin
-            TblHandle := DBAPI.CreateTable(S_IMAGE_CACHE);
-            TableMeta := DBAPI.GetApiObjectFromHandle(TblHandle, APITableMetadata) as TMemAPITableMetadata;
+            DBAPI.CreateTable(S_IMAGE_CACHE);
+            TableMeta := DBAPI.GetAPIObjectFromEntity(S_IMAGE_CACHE, APITableMetadata) as TMemAPITableMetadata;
             try
               TableMeta.CreateField(S_URL_FIELD, ftUnicodeString);
               TableMeta.CreateField(S_FILENAME_FIELD, ftUnicodeString);
@@ -245,8 +244,6 @@ begin
           else
           begin
             //TODO - Remove this code once datasets updated.
-            TblHandle := DBAPI.OpenTableOrKey(S_IMAGE_CACHE);
-            TableMeta := DBAPI.GetApiObjectFromHandle(TblHandle, APITableMetadata) as TMemAPITableMetadata;
             try
               FieldNames := TableMeta.GetFieldNames;
               try
@@ -344,7 +341,6 @@ procedure TImageCache.DBOpInThread(Workitem: TImageCacheWorkitem);
     DBAPI: TMemAPIDatabase;
     TableData: TMemAPITableData;
     TableMeta: TMemAPITableMetadata;
-    TblHandle: TMemDBHandle;
     Changed, DbgRet: boolean;
     SearchData: TMemDbFieldDataRec;
   begin
@@ -391,8 +387,7 @@ procedure TImageCache.DBOpInThread(Workitem: TImageCacheWorkitem);
         try
           DBAPI := Trans.GetAPI;
           try
-            TblHandle := DBAPI.OpenTableOrKey(S_IMAGE_CACHE);
-            TableMeta := DBAPI.GetApiObjectFromHandle(TblHandle, APITableMetadata) as TMemAPITableMetadata;
+            TableMeta := DBAPI.GetAPIObjectFromEntity(S_IMAGE_CACHE, APITableMetadata, true) as TMemAPITableMetadata;
             try
               IndexList := TableMeta.GetIndexNames;
               try
@@ -428,8 +423,7 @@ procedure TImageCache.DBOpInThread(Workitem: TImageCacheWorkitem);
         try
           DBAPI := Trans.GetAPI;
           try
-            TblHandle := DBAPI.OpenTableOrKey(S_IMAGE_CACHE);
-            TableData := DBAPI.GetApiObjectFromHandle(TblHandle, APITableData) as TMemAPITableData;
+            TableData := DBAPI.GetAPIObjectFromEntity(S_IMAGE_CACHE, APITableData, true) as TMemAPITableData;
             try
               Idx := 0;
               SearchData.FieldType := ftUnicodeString;
@@ -478,7 +472,6 @@ procedure TImageCache.DBOpInThread(Workitem: TImageCacheWorkitem);
     Trans: TMemDBTransaction;
     DBAPI: TMemAPIDatabase;
     TableData: TMemAPITableData;
-    TblHandle: TMemDBHandle;
     Data: TMemDbFieldDataRec;
     BatchCounter: integer;
     RowValid: boolean;
@@ -500,14 +493,13 @@ procedure TImageCache.DBOpInThread(Workitem: TImageCacheWorkitem);
               //Do in batches.
               Sess := FDB.StartSession;
               try
-                Trans := Sess.StartTransaction(amReadWrite, amLazyWrite, ilCommittedRead);
+                Trans := Sess.StartTransaction(amReadWrite);
                 try
                   DBAPI := Trans.GetAPI;
                   try
-                    TblHandle := DBAPI.OpenTableOrKey(S_IMAGE_CACHE);
-                    if Assigned(TblHandle) then
+                    TableData := DBAPI.GetAPIObjectFromEntity(S_IMAGE_CACHE, APITableData) as TMemAPITableData;
+                    if Assigned(TableData) then
                     begin
-                      TableData := DBAPI.GetApiObjectFromHandle(TblHandle, APITableData) as TMemAPITableData;
                       try
                         //Fingers crossed, ptFirst is *oldest*
                         BatchCounter := BATCH_SIZE;
@@ -523,9 +515,11 @@ procedure TImageCache.DBOpInThread(Workitem: TImageCacheWorkitem);
                             TableData.ReadField(S_FILENAME_FIELD, Data);
                             Assert(Data.FieldType = ftUnicodeString);
                             FileNameList.Add(Data.sVal);
+                            //MemDB2: Delete auto-increments to the next row
+                            //by last accessed index, so no Locate(ptNext).
                             TableData.Delete;
                             Dec(BatchCounter);
-                            RowValid := TableData.Locate(ptNext, S_LAST_ACCESSED_INDEX);
+                            RowValid := TableData.RowSelected;
                           end;
                         end;
                       finally
@@ -579,7 +573,6 @@ procedure TImageCache.DBOpInThread(Workitem: TImageCacheWorkitem);
     Trans: TMemDBTransaction;
     DBAPI: TMemAPIDatabase;
     TableData: TMemAPITableData;
-    TblHandle: TMemDBHandle;
     Data: TMemDbFieldDataRec;
   begin
     result := false;
@@ -590,10 +583,9 @@ procedure TImageCache.DBOpInThread(Workitem: TImageCacheWorkitem);
       try
         DBAPI := Trans.GetAPI as TMemAPIDatabase;
         try
-          TblHandle := DBAPI.OpenTableOrKey(S_IMAGE_CACHE);
-          if Assigned(TblHandle) then
+          TableData := DBAPI.GetAPIObjectFromEntity(S_IMAGE_CACHE, APITableData) as TMemAPITableData;
+          if Assigned(TableData) then
           begin
-            TableData := DBAPI.GetApiObjectFromHandle(TblHandle, APITableData) as TMemAPITableData;
             try
               Data.FieldType := ftUnicodeString;
               Data.sVal := Workitem.FRequest.URL;
@@ -677,7 +669,6 @@ procedure TImageCache.DBOpInThread(Workitem: TImageCacheWorkitem);
     Trans: TMemDBTransaction;
     DBAPI: TMemAPIDatabase;
     TableData: TMemAPITableData;
-    TblHandle: TMemDBHandle;
     Data: TMemDbFieldDataRec;
   begin
     result := false;
@@ -688,10 +679,9 @@ procedure TImageCache.DBOpInThread(Workitem: TImageCacheWorkitem);
       try
         DBAPI := Trans.GetAPI as TMemAPIDatabase;
         try
-          TblHandle := DBAPI.OpenTableOrKey(S_IMAGE_CACHE);
-          if Assigned(TblHandle) then
+          TableData := DBAPI.GetAPIObjectFromEntity(S_IMAGE_CACHE, APITableData) as TMemAPITableData;
+          if Assigned(TableData) then
           begin
-            TableData := DBAPI.GetApiObjectFromHandle(TblHandle, APITableData) as TMemAPITableData;
             try
               Data.FieldType := ftUnicodeString;
               Data.sVal := Workitem.FRequest.URL;

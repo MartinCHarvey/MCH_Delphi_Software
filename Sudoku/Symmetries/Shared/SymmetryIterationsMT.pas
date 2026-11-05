@@ -46,7 +46,7 @@ implementation
 
 uses
   SharedSymmetries, Contnrs, SysUtils, CellCountSymmetriesMT,
-  Classes, SyncObjs, WorkItems, CellCountShared;
+  Classes, WorkItems, CellCountShared, LockAbstractions;
 
 type
   TCellCountMTWI = class(TWorkItem)
@@ -125,13 +125,13 @@ end;
 
 procedure TCellCountMTWI.DoNormalCompletion;
 begin
-  if TInterlocked.Decrement(WICountOutstanding) = 0 then
+  if LockAbstractions.InterlockedDecrement(WICountOutstanding) = 0 then
     WIDoneEvent.SetEvent;
 end;
 
 procedure TCellCountMTWI.DoCancelledCompletion;
 begin
-  if TInterlocked.Decrement(WICountOutstanding) = 0 then
+  if LockAbstractions.InterlockedDecrement(WICountOutstanding) = 0 then
     WIDoneEvent.SetEvent;
 end;
 

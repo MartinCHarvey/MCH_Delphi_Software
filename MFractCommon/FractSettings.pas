@@ -5,7 +5,7 @@ unit FractSettings;
 interface
 
 uses
-  SysUtils, System.Types, System.UITypes, SSStreamables, DLList, SyncObjs,
+  SysUtils, System.Types, System.UITypes, SSStreamables, DLList, LockAbstractions,
   StreamingSystem, Classes,
 {$IF DEFINED(IS_FIREMONKEY)}
   FMX.Types,

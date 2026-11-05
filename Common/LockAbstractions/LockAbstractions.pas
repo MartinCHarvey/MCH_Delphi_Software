@@ -42,6 +42,9 @@ type
   TEvent = SyncObjs.TEvent;
   TSemaphore = SyncObjs.TSemaphore;
   THandleObject = SyncObjs.THandleObject;
+{$IFDEF MSWINDOWS}
+  THandleObjectArray = SyncObjs.THandleObjectArray;
+{$ENDIF}
   TWaitResult = SyncObjs.TWaitResult;
 
 const
