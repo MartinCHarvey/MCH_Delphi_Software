@@ -26,7 +26,7 @@ interface
 
 uses
   Importers, FetcherParser, DataObjects, JSONNodes, JSNodes, HTMLNodes,
-  CommonNodes, SyncObjs;
+  CommonNodes, LockAbstractions;
 
 // Twitter importers a bit different from instagram, basically,
 // user and media items only, buuuut,

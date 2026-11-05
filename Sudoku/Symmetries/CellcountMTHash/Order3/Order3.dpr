@@ -11,7 +11,9 @@ uses
   CellCountShared in '..\..\Shared\CellCountShared.pas',
   SymmetryIterationsMT in '..\..\Shared\SymmetryIterationsMT.pas',
   WorkItems in '..\..\..\..\Common\WorkItems\WorkItems.pas',
-  DLList in '..\..\..\..\Common\DLList\DLList.pas';
+  DLList in '..\..\..\..\Common\DLList\DLList.pas',
+  LockAbstractions in '..\..\..\..\Common\LockAbstractions\LockAbstractions.pas',
+  SRWLockWrapper in '..\..\..\..\Common\SRWLockWrapper\SRWLockWrapper.pas';
 
 begin
   try

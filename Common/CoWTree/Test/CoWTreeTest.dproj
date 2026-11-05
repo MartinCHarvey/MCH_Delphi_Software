@@ -46,6 +46,7 @@
         <Base>true</Base>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Base)'!=''">
+        <DCC_Define>USE_WINDOWS_LOCKS;$(DCC_Define)</DCC_Define>
         <Icon_MainIcon>$(BDS)\bin\delphi_PROJECTICON.ico</Icon_MainIcon>
         <DCC_Namespace>System;Xml;Data;Datasnap;Web;Soap;Vcl;Vcl.Imaging;Vcl.Touch;Vcl.Samples;Vcl.Shell;$(DCC_Namespace)</DCC_Namespace>
         <DCC_DcuOutput>.\$(Platform)\$(Config)</DCC_DcuOutput>
@@ -119,6 +120,7 @@
         <DCCReference Include="..\CoWABTree.pas"/>
         <DCCReference Include="..\CoWSimpleTree.pas"/>
         <DCCReference Include="..\..\PComp\PComp.pas"/>
+        <DCCReference Include="..\..\SRWLockWrapper\SRWLockWrapper.pas"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>

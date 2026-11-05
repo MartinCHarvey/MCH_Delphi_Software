@@ -6,7 +6,7 @@ uses
 {$IFDEF USE_TRACKABLES}
   Trackables,
 {$ENDIF}
-  SharedSymmetries, IndexedStore, SysUtils, SyncObjs, CellCountShared;
+  SharedSymmetries, IndexedStore, SysUtils, LockAbstractions, CellCountShared;
 
 //{$DEFINE DEBUG_CELLCOUNTS}
 

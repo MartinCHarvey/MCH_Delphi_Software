@@ -21,7 +21,8 @@ uses
   Parallelizer in '..\..\..\..\Common\Parallelizer\Parallelizer.pas',
   TinyLock in '..\..\..\..\Common\LockAbstractions\TinyLock.pas',
   LockAbstractions in '..\..\..\..\Common\LockAbstractions\LockAbstractions.pas',
-  PComp in '..\..\..\..\Common\PComp\PComp.pas';
+  PComp in '..\..\..\..\Common\PComp\PComp.pas',
+  SRWLockWrapper in '..\..\..\..\Common\SRWLockWrapper\SRWLockWrapper.pas';
 
 begin
   try

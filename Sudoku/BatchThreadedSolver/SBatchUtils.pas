@@ -3,7 +3,7 @@ unit SBatchUtils;
 interface
 
 uses
-  SysUtils, Classes, SyncObjs, WorkItems;
+  SysUtils, Classes, LockAbstractions, WorkItems;
 
 type
   EBatchSudokuError = class(Exception);
@@ -87,7 +87,7 @@ function TSudokuSpecList.InterlockedGetString: string;
 var
   Idx: integer;
 begin
-  Idx := Pred(TInterlocked.Increment(FIndex));
+  Idx := Pred(LockAbstractions.InterlockedIncrement(FIndex));
   if Idx < FStrings.Count then
     result := FStrings[idx]
   else
@@ -108,7 +108,7 @@ var
 
   procedure DoError;
   begin
-    if TInterlocked.Increment(Error) < 10 then
+    if LockAbstractions.InterlockedIncrement(Error) < 10 then
     begin
       ErrStr := 'Error on puzzle (roughly) ' + IntToStr(SpecList.FIndex) +
       ' : ' + PuzzleDesc;
@@ -163,8 +163,8 @@ begin
       case Solver.Stats.Classification of
         scInvalid, scMany:
           DoError;
-        scNone: TInterlocked.Increment(Unsolved);
-        scOne: TInterlocked.Increment(Solved);
+        scNone: LockAbstractions.InterlockedIncrement(Unsolved);
+        scOne: LockAbstractions.InterlockedIncrement(Solved);
       end;
 next:
       PuzzleDesc := SpecList.InterlockedGetString;
@@ -172,7 +172,7 @@ next:
   finally
     Solver.Free;
     TmpBoardState.Free;
-    SolversRunning := TInterlocked.Decrement(WorkItemsOutstanding);
+    SolversRunning := LockAbstractions.InterlockedDecrement(WorkItemsOutstanding);
     if SolversRunning = 0 then
       WorkItemsDone.SetEvent;
   end;

@@ -3,7 +3,7 @@ unit CellCountSymmetriesMT;
 interface
 
 uses
-  SharedSymmetries, SysUtils, SyncObjs, CellCountShared, Generics.Collections,
+  SharedSymmetries, SysUtils, LockAbstractions, CellCountShared, Generics.Collections,
   Generics.Defaults, Contnrs;
 
 //{$DEFINE DEBUG_CELLCOUNTS}

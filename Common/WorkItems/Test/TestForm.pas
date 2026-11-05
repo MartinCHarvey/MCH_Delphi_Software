@@ -4,7 +4,7 @@ interface
 
 uses
   Windows, Messages, SysUtils, Classes, Graphics, Controls, Forms, Dialogs,
-  StdCtrls, WorkItems;
+  StdCtrls, WorkItems, LockAbstractions;
 
 const
   WM_COMPLETION = WM_APP + 1;
@@ -146,19 +146,19 @@ end;
 
 procedure TTestWorkItem.DoNormalCompletion;
 begin
-  InterlockedIncrement(FCompleteInt^);
+  LockAbstractions.InterlockedIncrement(FCompleteInt^);
   CompleteCommon;
 end;
 
 procedure TTestWorkItem.DoCancelledCompletion;
 begin
-  InterlockedIncrement(FCancelInt^);
+  LockAbstractions.InterlockedIncrement(FCancelInt^);
   CompleteCommon;
 end;
 
 procedure TTestWorkItem.CompleteCommon;
 begin
-  if InterlockedDecrement(FInFlightInt^) = 0 then
+  if LockAbstractions.InterlockedDecrement(FInFlightInt^) = 0 then
     PostMessage(FHandle, WM_COMPLETION, 0, 0);
 end;
 

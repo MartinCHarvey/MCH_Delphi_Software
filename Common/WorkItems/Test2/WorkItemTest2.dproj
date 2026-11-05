@@ -52,6 +52,7 @@
         <Base>true</Base>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Base)'!=''">
+        <DCC_Define>USE_WINDOWS_LOCKS;$(DCC_Define)</DCC_Define>
         <Manifest_File>$(BDS)\bin\default_app.manifest</Manifest_File>
         <VerInfo_Keys>CompanyName=;FileDescription=;FileVersion=1.0.0.0;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=;ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
         <VerInfo_Locale>2057</VerInfo_Locale>
@@ -130,6 +131,7 @@
         <DCCReference Include="..\..\LockAbstractions\TinyLock.pas"/>
         <DCCReference Include="..\..\LockAbstractions\LockAbstractions.pas"/>
         <DCCReference Include="..\..\PComp\PComp.pas"/>
+        <DCCReference Include="..\..\SRWLockWrapper\SRWLockWrapper.pas"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>

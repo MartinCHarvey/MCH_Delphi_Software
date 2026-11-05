@@ -29,7 +29,7 @@ uses
   System.SysUtils, System.Types, System.UITypes, System.Rtti, System.Classes,
   System.Variants, FMX.Types, FMX.Controls, FMX.Forms, FMX.Dialogs,
   FMX.StdCtrls, FMX.Layouts, System.Actions, FMX.ActnList, FMX.Menus,
-  DBContainer, FMX.StdActns, BatchLoader, ImageCache, MemDB, FMX.Edit;
+  DBContainer, FMX.StdActns, BatchLoader, ImageCache, MemDB2, FMX.Edit;
 
 type
   TMainFrm = class(TForm)
@@ -140,7 +140,7 @@ uses
   Windows,
 {$ENDIF}
   ClientForm, DataObjects, FetcherParser, StatsForm, IOUtils, GlobalLog,
-  QueryForm, MemDBMisc, UserPrefs, AddNewUserForm, PrefsEditForm;
+  QueryForm, MemDB2Misc, UserPrefs, AddNewUserForm, PrefsEditForm;
 
 const
   S_DB_UNAVAILABLE = 'Database unavailable (failed load). Have you checked the default DB location?';
@@ -173,8 +173,10 @@ var
   r1, r2: boolean;
 begin
   //First off, check underlying DB not in transient state.
+  //Transient: mdbInit, mdbInitCheckpoint, mdbClosingWaitClients(Error),
+  //mdbClosingWaitPersist.
   result := DBCont.DB.MemDB.DBState in
-   [mdbNull, mdbRunning, mdbClosed, mdbError];
+   [mdbNull, mdbRunning, mdbRunningError, mdbClosed, mdbClosedError];
   //Stop everything in parallel as far as we can.
   if result then
   begin
@@ -297,11 +299,17 @@ begin
 end;
 
 procedure TMainFrm.HandleDBUnavailable(Sender: TObject);
+var
+  ErrStr: string;
 begin
   LoadingLbl.Visible := true;
   Application.OnIdle := nil;
   FreeAndNil(FClientForm);
-  LoadingLbl.Text := S_DB_UNAVAILABLE;
+  ErrStr := DBCont.DB.MemDB.LastError;
+  if Length(ErrStr) > 0 then
+    LoadingLbl.Text := S_DB_UNAVAILABLE + ' (' + ErrStr + ')'
+  else
+    LoadingLbl.Text := S_DB_UNAVAILABLE;
   CloseIfPending;
 end;
 

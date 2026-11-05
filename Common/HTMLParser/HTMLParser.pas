@@ -25,7 +25,7 @@ IN THE SOFTWARE.
 
 interface
 
-uses Classes, DLThreadQueue, SyncObjs, HTMLGrammar, HTMLNodes,
+uses Classes, DLThreadQueue, LockAbstractions, HTMLGrammar, HTMLNodes,
   Trackables, CommonNodes, JSONGrammar, JScriptGrammar, CSSGrammar,
   CoCoBase, HTMLEscapeHelper, CommonPool;
 
@@ -360,7 +360,7 @@ begin
         SExt[i] := '_';
   end;
   //Debug code from here on down.
-  LSeq := TInterlocked.Increment(Seq);
+  LSeq := LockAbstractions.InterlockedIncrement(Seq);
   if Result and Assigned(ParseResult) then
   begin
     if DocType = tdtHTML then

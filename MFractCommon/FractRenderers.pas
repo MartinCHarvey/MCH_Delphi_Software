@@ -20,7 +20,7 @@ uses
 {$IFDEF USE_TRACKABLES}
   Trackables,
 {$ENDIF}
-  SyncObjs
+  LockAbstractions
   ;
 
 type

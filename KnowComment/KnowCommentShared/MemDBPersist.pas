@@ -24,7 +24,7 @@ IN THE SOFTWARE.
 }
 interface
 
-uses MemDB, MemDBApi, DBPersist, DataObjects, DBGeneric, MemDBInit, MemDbMisc;
+uses MemDB2, MemDB2Api, DBPersist, DataObjects, DBGeneric, MemDBInit, MemDB2Misc;
 
 //TODO - There's a whole load of string/guid fixing to do here.
 
@@ -358,7 +358,7 @@ begin
       Assert(Mode <= T.Mode);
       Assert(Sync <= T.Sync);
       if Mode > amRead then
-        Assert(Iso = T.Isolation);
+        Assert(Iso = T.Tid.Iso);
     end;
     result := TxCtxt.DBAPI;
   end
@@ -413,7 +413,6 @@ end;
 function TMDBItemPersister.AccessTblData(const TxCtxt: TMDBTransactionContext; Lvl: TKListLevel): TMemAPITableData;
 var
   TblName: string;
-  TblHandle: TMemDBHandle;
 begin
   case Lvl of
     klUserList: TblName := S_USER_TABLE;
@@ -422,8 +421,7 @@ begin
   else
     raise EDBPersistError.Create(S_LEVEL_INTERNAL_ERROR);
   end;
-  TblHandle := TxCtxt.DBAPI.OpenTableOrKey(TblName);
-  result := TxCtxt.DBAPI.GetApiObjectFromHandle(TblHandle, APITableData) as TMemAPITableData;
+  result := TxCtxt.DBAPI.GetAPIObjectFromEntity(TblName, APITableData) as TMemAPITableData;
 end;
 
 //TODO - Remove Lvl param if always called at current level.
@@ -969,6 +967,7 @@ var
   NewGUID: TGUID;
   SubRes: boolean;
   OK: boolean;
+  Deleted: boolean;
 begin
   result := false;
   if not Assigned(ItemList) then
@@ -1008,18 +1007,12 @@ begin
             patDelete:
               begin
                 ActionGood := true;
-                //And with some understanding of transaction isolation level,
-                //Can go thru dataset last comitted read, and delete those
-                //without building a separate key list.
+                //MemDB2: Delete auto-increments the cursor to the next row
+                //in iteration order (ptNext, by parent index), so after a
+                //delete use RowSelected rather than Locate(ptNext).
                 FilteredDataSet := AccessTblData(TxCtxt, ListLevel);
-                FilteredDataSet.Isolation := ilCommittedRead;
-                //Committed read because auto-next on dataset delete does not
-                //necessarily take us to the correct "next" filtered row.
 {$IFDEF DEBUG_DATABASE_DELETE_2}
                 FilteredDataSet2 := AccessTblData(TxCtxt, ListLevel);
-                FilteredDataSet2.Isolation := ilCommittedRead;
-                //Committed read because auto-next on dataset delete does not
-                //necessarily take us to the correct "next" filtered row.
 {$ENDIF}
                 try
                   FilterSearchData.FieldType := ftGuid;
@@ -1058,6 +1051,7 @@ begin
                   while OK do
                   begin
                     Item := CreateItemFromTableCursor(FilteredDataset);
+                    Deleted := false;
 {$IFDEF DEBUG_DATABASE_DELETE}
                   if OK then
                   begin
@@ -1104,8 +1098,7 @@ begin
                       ' ItemKey: '+ Item.Key);
 {$ENDIF}
                           FilteredDataSet.Delete;
-                          //Delete only navigates to next isoDirtyRead,
-                          //else stays on same row.
+                          Deleted := true;
                         end
                         else
                         begin
@@ -1134,7 +1127,10 @@ begin
                     finally
                       Item.Free;
                     end;
-                    OK := FilteredDataSet.Locate(ptNext, GetParentIndexName(ListLevel));
+                    if Deleted then
+                      OK := FilteredDataSet.RowSelected
+                    else
+                      OK := FilteredDataSet.Locate(ptNext, GetParentIndexName(ListLevel));
 {$IFDEF DEBUG_DATABASE_DELETE}
                     if OK then
                     begin
@@ -1258,10 +1254,10 @@ begin
 
   TransactionSetup(Ctx, TxCtxt, amReadWrite);
   try
-    //Committed read because auto-next on dataset delete does not
-    //necessarily take us to the correct "next" filtered row.
+    //MemDB2: Delete auto-increments the cursor to the next row in
+    //iteration order, so after a delete use RowSelected rather than
+    //Locate(ptNext).
     Table := AccessTblData(TxCtxt, ListLevel);
-    Table.Isolation := ilCommittedRead;
     try
       if ListLevel <> Low(TKListLevel) then
       begin
@@ -1324,18 +1320,19 @@ begin
           DoDelete := DoDelete and SubRes;
         end;
         if DoDelete then
+        begin
           Table.Delete;
-        if ListLevel = Low(TKListLevel) then
+          Iter := Table.RowSelected;
+        end
+        else if ListLevel = Low(TKListLevel) then
           Iter := Table.Locate(ptNext, '')
         else
-        begin
           Iter := Table.Locate(ptNext, GetParentIndexName(ListLevel));
-          if Iter then
-          begin
-            Table.ReadField(GetParentFieldName(ListLevel), FilterSearchData);
-            Assert(FilterSearchData.FieldType = ftGuid);
-            Iter := FilterSearchData.gVal = ParentKey;
-          end;
+        if Iter and (ListLevel <> Low(TKListLevel)) then
+        begin
+          Table.ReadField(GetParentFieldName(ListLevel), FilterSearchData);
+          Assert(FilterSearchData.FieldType = ftGuid);
+          Iter := FilterSearchData.gVal = ParentKey;
         end;
       end;
     finally
@@ -1439,6 +1436,7 @@ var
   FilteredDataset: TMemAPITableData;
   FilterSearchData, FilterData: TMemDbFieldDataRec;
   OK: boolean;
+  Deleted: boolean;
   Item, SrcItem: TKKeyedObject;
 begin
   result := false;
@@ -1465,8 +1463,10 @@ begin
               if (ListLevel = klCommentList) and (ParentLevel = klUserList) then
               begin
                 ActionGood := true;
+                //MemDB2: Delete auto-increments the cursor to the next row
+                //in iteration order (ptNext, by owner index), so after a
+                //delete use RowSelected rather than Locate(ptNext).
                 FilteredDataSet := AccessTblData(TxCtxt, ListLevel);
-                FilteredDataSet.Isolation := ilCommittedRead;
                 try
                   FilterSearchData.FieldType := ftGuid;
                   FilterSearchData.gVal := ParentKey;
@@ -1476,14 +1476,21 @@ begin
                     Item := CreateItemFromTableCursor(FilteredDataSet);
                     Assert(ListLevel = High(TKListLevel));
                     // So we don't need to delete child objects.
+                    Deleted := false;
                     try
                       SrcItem := ItemList.SearchBySortVal(ksvKey, Item);
                       if not Assigned(SrcItem) then
+                      begin
                         FilteredDataSet.Delete;
+                        Deleted := true;
+                      end;
                     finally
                       Item.Free;
                     end;
-                    OK := FilteredDataSet.Locate(ptNext, GetOwnerIndexName(ListLevel));
+                    if Deleted then
+                      OK := FilteredDataSet.RowSelected
+                    else
+                      OK := FilteredDataSet.Locate(ptNext, GetOwnerIndexName(ListLevel));
                     if OK then
                       FilteredDataSet.ReadField(GetOwnerFieldName(ListLevel), FilterData);
                     OK := OK and DataRecsSame(FilterData, FilterSearchData)

@@ -51,6 +51,7 @@
         <Base>true</Base>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Base)'!=''">
+        <DCC_Define>USE_WINDOWS_LOCKS;$(DCC_Define)</DCC_Define>
         <Icon_MainIcon>$(BDS)\bin\delphi_PROJECTICON.ico</Icon_MainIcon>
         <Icns_MainIcns>$(BDS)\bin\delphi_PROJECTICNS.icns</Icns_MainIcns>
         <DCC_Namespace>System;Xml;Data;Datasnap;Web;Soap;$(DCC_Namespace)</DCC_Namespace>
@@ -126,6 +127,8 @@
         <DCCReference Include="..\..\Tracking\Trackables.pas"/>
         <DCCReference Include="..\..\DLList\DLList.pas"/>
         <DCCReference Include="..\..\Balanced Tree\BinaryTree.pas"/>
+        <DCCReference Include="..\..\LockAbstractions\LockAbstractions.pas"/>
+        <DCCReference Include="..\..\SRWLockWrapper\SRWLockWrapper.pas"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>
