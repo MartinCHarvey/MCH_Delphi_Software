@@ -228,7 +228,7 @@ function mdb_strlist_get(list: TMDBHandle; index: Integer; buf: PAnsiChar;
 implementation
 
 uses
-  Classes, SyncObjs, MemDB2, MemDB2Api, MemDB2Misc, MemDB2Buffered;
+  Classes, LockAbstractions, MemDB2, MemDB2Api, MemDB2Misc, MemDB2Buffered;
 
 const
   ERR_MSG_MAX = 1024; //Bytes including NUL.

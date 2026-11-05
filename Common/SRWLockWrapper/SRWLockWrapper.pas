@@ -28,10 +28,9 @@ interface
 
 {$IFDEF MSWINDOWS}
 
+//N.B. Must not use Trackables: Trackables -> LockAbstractions -> SRWLockWrapper
+//would be a circular unit reference.
 uses
-{$IFDEF USE_TRACKABLES}
-  Trackables,
-{$ENDIF}
   Winapi.Windows;
 
 (*
@@ -51,11 +50,7 @@ type
 
   { N.B. Note that this SRWLock is *not* recursive.
     It also doesn't allow promotion of readers to writers. }
-{$IFDEF USE_TRACKABLES}
-  TSRWLock = class(TTrackable)
-{$ELSE}
   TSRWLock = class
-{$ENDIF}
   private
     FLock: RTL_SRWLOCK;
   public

@@ -40,6 +40,16 @@ type
 {$ENDIF}
   TCriticalSection = SyncObjs.TCriticalSection;
   TEvent = SyncObjs.TEvent;
+  TSemaphore = SyncObjs.TSemaphore;
+  THandleObject = SyncObjs.THandleObject;
+  TWaitResult = SyncObjs.TWaitResult;
+
+const
+  wrSignaled = SyncObjs.wrSignaled;
+  wrTimeout = SyncObjs.wrTimeout;
+  wrAbandoned = SyncObjs.wrAbandoned;
+  wrError = SyncObjs.wrError;
+  INFINITE = Cardinal($FFFFFFFF);
 
 function InterlockedCompareExchange(var Destination: Integer; Exchange: Integer; Comparand: Integer): Integer;
 function InterlockedCompareExchange64(var Destination: Int64; Exchange: Int64; Comparand: Int64): Int64;
@@ -62,6 +72,9 @@ begin
 {$IFDEF USE_WINDOWS_LOCKS}
   result := Windows.InterlockedCompareExchange(Destination, Exchange, Comparand);
 {$ELSE}
+  {$IFDEF VER250}
+  Assert(false); //XE4: TInterlocked is broken, define USE_WINDOWS_LOCKS.
+  {$ENDIF}
   result := SyncObjs.TInterlocked.CompareExchange(Destination, Exchange, Comparand);
 {$ENDIF}
 end;
@@ -71,6 +84,9 @@ begin
 {$IFDEF USE_WINDOWS_LOCKS}
   result := Windows.InterlockedCompareExchange64(Destination, Exchange, Comparand);
 {$ELSE}
+  {$IFDEF VER250}
+  Assert(false); //XE4: TInterlocked is broken, define USE_WINDOWS_LOCKS.
+  {$ENDIF}
   result := SyncObjs.TInterlocked.CompareExchange(Destination, Exchange, Comparand);
 {$ENDIF}
 end;
@@ -80,6 +96,9 @@ begin
 {$IFDEF USE_WINDOWS_LOCKS}
   result := Windows.InterlockedCompareExchangePointer(Destination, Exchange, Comparand);
 {$ELSE}
+  {$IFDEF VER250}
+  Assert(false); //XE4: TInterlocked is broken, define USE_WINDOWS_LOCKS.
+  {$ENDIF}
   result := SyncObjs.TInterlocked.CompareExchange(Destination, Exchange, Comparand);
 {$ENDIF}
 end;
@@ -89,6 +108,9 @@ begin
 {$IFDEF USE_WINDOWS_LOCKS}
   result := Windows.InterlockedDecrement(Addend);
 {$ELSE}
+  {$IFDEF VER250}
+  Assert(false); //XE4: TInterlocked is broken, define USE_WINDOWS_LOCKS.
+  {$ENDIF}
   result := SyncObjs.TInterlocked.Decrement(Addend);
 {$ENDIF}
 end;
@@ -98,6 +120,9 @@ begin
 {$IFDEF USE_WINDOWS_LOCKS}
   result := Windows.InterlockedExchange(Target, Value);
 {$ELSE}
+  {$IFDEF VER250}
+  Assert(false); //XE4: TInterlocked is broken, define USE_WINDOWS_LOCKS.
+  {$ENDIF}
   result := SyncObjs.TInterlocked.Exchange(Target, Value);
 {$ENDIF}
 end;
@@ -121,6 +146,9 @@ begin
 {$IFDEF USE_WINDOWS_LOCKS}
   result := Windows.InterlockedExchangePointer(Target, Value);
 {$ELSE}
+  {$IFDEF VER250}
+  Assert(false); //XE4: TInterlocked is broken, define USE_WINDOWS_LOCKS.
+  {$ENDIF}
   result := SyncObjs.TInterlocked.Exchange(Target, Value);
 {$ENDIF}
 end;
@@ -130,6 +158,9 @@ begin
 {$IFDEF USE_WINDOWS_LOCKS}
   result := Windows.InterlockedIncrement(Addend);
 {$ELSE}
+  {$IFDEF VER250}
+  Assert(false); //XE4: TInterlocked is broken, define USE_WINDOWS_LOCKS.
+  {$ENDIF}
   result := SyncObjs.TInterlocked.Increment(Addend);
 {$ENDIF}
 end;

@@ -36,7 +36,7 @@ uses
   Trackables,
 {$ENDIF}
   IndexedStore, MemDB2Streamable, Classes, MemDB2Misc, DLList, LockAbstractions,
-  TinyLock, MemDB2BufBase, MemDB2Indexing, Reffed, SyncObjs;
+  TinyLock, MemDB2BufBase, MemDB2Indexing, Reffed;
 
 type
   TMemDBAPIInterfacedObject = class;
