@@ -3,15 +3,13 @@ GitHub repo for open sourced MCH Software.
 
 Most recent (2026) development is in Common/MemDB2:
 
-- Builds on MemDB code, quick, and developed up to the end of 2025.
-- They share the same file format and API's.
 - *MemDB now legacy code. Will be removed start of Dec 2026.*
 - *MemDB now has an upgrade tool (to MemDB2 format) on the MemDB_Upgrade_Tool branch.*
-- MemDB2 better for more deeply parallel / async workloads.
-- MemDB2 now has *C API*, and pre-built binaries for Visual Studio jockeys.
+- *MemDB2 now has C API, and pre-built binaries for Visual Studio jockeys*.
 - Now suitable for general use, with many bugfixes from AI reivew. *Significantly more robust*.
 - Docs\ folder contains Claude code review for those of you worried about code quality.
-- MemDB2 now compiles & runs on both **Win32/64 and Android 32/64** 
+- MemDB2 now compiles & runs on both **Win32/64 and Android 32/64**
+  - If you want to build for Android (running Delphi > XE4), remove "USE_WINDOWS_LOCKS" from project conditional defines, that bugfix is no longer needed.
 - SQL support for MemDB2 in progress.
 
 Also:
