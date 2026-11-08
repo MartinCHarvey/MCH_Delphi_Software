@@ -77,7 +77,12 @@ procedure ExecParallel(Handlers: TParallelHandlers;
                        var  Rets: TPHRefs;
                        const Xlators: PExceptionHandlerChain = nil);
 
-function ParalleliserFilterCommonExceptions(EClass: SysUtils.ExceptClass;
+function ParalleliserRecordCommonExceptions(EClass: SysUtils.ExceptClass;
+                                             EMsg: string):TExceptionFilterAction;
+procedure ParalleliserNoForwardCommonExceptions(EClass: SysUtils.ExceptClass;
+                                             EMsg: string);
+
+function ParalleliserPropagateCommonExceptions(EClass: SysUtils.ExceptClass;
                                              EMsg: string):TExceptionFilterAction;
 procedure ParalleliserForwardCommonExceptions(EClass: SysUtils.ExceptClass;
                                              EMsg: string);
@@ -118,19 +123,48 @@ type
 
 procedure TParallelHandlerThread.Execute;
 begin
-  try
-    FRet := FHandler(FRef1, FRef2);
-  except
-    on E: Exception do
-    begin
-      FRaised := true;
-      FExceptClass := ExceptClass(E.ClassType);
-      FExceptMsg := E.Message;
+  if not Terminated then //Some error cases destroy before TThread.Start
+  begin
+    try
+      FRet := FHandler(FRef1, FRef2);
+    except
+      on E: Exception do
+      begin
+        FRaised := true;
+        FExceptClass := ExceptClass(E.ClassType);
+        FExceptMsg := E.Message;
+      end;
     end;
   end;
 end;
 
-function ParalleliserFilterCommonExceptions(EClass: SysUtils.ExceptClass;
+function ParalleliserRecordCommonExceptions(EClass: SysUtils.ExceptClass;
+                                             EMsg: string):TExceptionFilterAction;
+begin
+  while Assigned(EClass) do
+  begin
+    if (EClass = EOutOfMemory)
+      or (EClass = EAccessViolation)
+      or (EClass = EListError)
+      or (EClass = EIntError)
+      or (EClass = EMathError)
+      or (EClass = EStackOverflow) then
+    begin
+      result := tetaRecordException;
+      exit;
+    end;
+    EClass := ExceptClass(EClass.ClassParent);
+  end;
+  result := tetaIgnore;
+end;
+
+procedure ParalleliserNoForwardCommonExceptions(EClass: SysUtils.ExceptClass;
+                                             EMsg: string);
+begin
+  { NOP }
+end;
+
+function ParalleliserPropagateCommonExceptions(EClass: SysUtils.ExceptClass;
                                              EMsg: string):TExceptionFilterAction;
 begin
   while Assigned(EClass) do
@@ -240,9 +274,12 @@ begin
         if Length(Refs2) > 0 then
           FRef2 := Refs2[i];
         FHandler := Handlers[i];
-        Start;
       end;
     end;
+    //Don't start any of the threads until all are allocated and up.
+    for i := 0 to Pred(L) do
+      Threads[i].Start;
+
 {$IFDEF USE_WINDOWS_LOCKS}
     BatchOfs := 0;
     while BatchOfs < L do

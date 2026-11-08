@@ -195,6 +195,7 @@ type
     FLastError: string;
     FOnUIStateChange: TNotifyEvent;
     FCommitApiCallbacks: TMemDBAPiCallbacks;
+    FSeenLowMem: boolean;
   protected
     procedure RemoveSession(Session: TMemDBSession);
     procedure RemoveTransaction(Transaction: TMemDBTransaction; Commit: boolean; LowMemory: boolean);
@@ -732,6 +733,7 @@ begin
     AsyncError := FPhase in [mdbRunningError, mdbClosingWaitClientsError];
     if not AsyncError then
       Transaction.FCommitRollbackInProgress := tiptCommitRollback;
+    FSeenLowMem := FSeenLowMem or LowMemory;
   finally
     FSessionLock.Release;
   end;
@@ -1043,6 +1045,7 @@ function TMemDB.InitDB(RootLocation: string;
     FInitWait.ResetEvent;
     FClientWait.ResetEvent;
     FPersistWait.ResetEvent;
+    FSeenLowMem := false;
     FJournal.BaseDirectory := RootLocation;
     FJournal.JournalType := JournalType;
     FJournal.Initialise;
@@ -1202,6 +1205,7 @@ begin
 
           DelErrFlag := false;
           try
+            DBTmp.FastTeardown := not FSeenLowMem;
             DBTmp.Free;
           except
             on E: Exception do
