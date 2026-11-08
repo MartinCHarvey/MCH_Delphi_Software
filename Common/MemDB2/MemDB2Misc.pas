@@ -273,10 +273,14 @@ const
 var
   AllIndexAttrs: TMDBIndexAttrs;
   MemDBXlateExceptions: array [0..1] of TExceptionHandlerChain;
+  MemDBRecordAndSwallowExceptions: array [0..1] of TExceptionHandlerChain;
 
 procedure AppendTrailingDirSlash(var Path: string);
 
 function CompareGuids(const OtherGuid, OwnGuid: TGUID): integer;
+
+procedure MemDBGeneralXlateExceptions(EClass: SysUtils.ExceptClass;
+                              EMsg: string);
 
 //Optimization helper functions.
 type
@@ -693,6 +697,31 @@ end;
 
 { TMemDBStats }
 
+function MemDbGeneralRecordExceptions(EClass: SysUtils.ExceptClass;
+                                             EMsg: string):TExceptionFilterAction;
+begin
+  while Assigned(EClass) do
+  begin
+    if (EClass = EMemDBInternalException)
+      or (EClass = EMemDBConsistencyException)
+      or (EClass = EMemDBAPIException)
+      or (EClass = EMemDBConcurrencyException)
+      or (EClass = EMemDBException) then
+    begin
+      result := tetaRecordException;
+      exit;
+    end;
+    EClass := SysUtils.ExceptClass(EClass.ClassParent);
+  end;
+  result := tetaIgnore;
+end;
+
+procedure MemDbGeneralNoXlateExceptions(EClass: SysUtils.ExceptClass;
+                              EMsg: string);
+begin
+  { NOP }
+end;
+
 function MemDbGeneralFilterExceptions(EClass: SysUtils.ExceptClass;
                                              EMsg: string):TExceptionFilterAction;
 begin
@@ -745,10 +774,23 @@ initialization
   end;
   with MemDBXlateExceptions[1] do
   begin
-    FilterFunc := ParalleliserFilterCommonExceptions;
+    FilterFunc := ParalleliserPropagateCommonExceptions;
     XLatorFunc := ParalleliserForwardCommonExceptions;
     Next := nil;
   end;
+  with MemDBRecordAndSwallowExceptions[0] do
+  begin
+    FilterFunc := MemDBGeneralRecordExceptions;
+    XlatorFunc := MemDBGeneralNoXlateExceptions;
+    Next := @MemDBRecordAndSwallowExceptions[1];
+  end;
+  with MemDBRecordAndSwallowExceptions[1] do
+  begin
+    FilterFunc := ParalleliserRecordCommonExceptions;
+    XLatorFunc := ParalleliserNoForwardCommonExceptions;
+    Next := nil;
+  end;
+
   //N.B. When you do things in parallel, even commits and rollbacks under the
   //MetaIndex lock involve some degree of memory allocation and freeing.
   //Calling sleep whilst under that lock is fairly terminal for performance.

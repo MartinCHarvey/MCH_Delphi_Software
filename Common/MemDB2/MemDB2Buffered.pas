@@ -185,6 +185,7 @@ type
     FParentDB: TMemDBDatabasePersistent;
     FProxy: TMemDBEntityProxy;
     FInterfaced: TMemDBAPIInterfacedObject;
+    FFastTeardown: boolean;
   protected
     FMetadata: TMemDBEntityMetadata;
     function HandleInterfacedObjRequest(Transaction: TObject; ID: TMemDBAPIId): TMemDBAPI;virtual;
@@ -209,6 +210,7 @@ type
     property Proxy: TMemDBEntityProxy read FProxy;
     property Interfaced: TMemDBAPIInterfacedObject read FInterfaced;
     property Metadata: TMemDBEntityMetadata read FMetadata;
+    property FastTeardown: boolean read FFastTeardown write FFastTeardown;
   end;
 
   TMemDBFKMetaLists = record
@@ -513,6 +515,7 @@ type
     FMasterInternalIndex: TMemDBIndexInternal;
 
   protected
+    function TableFastTeardown(Ref1, Ref2: pointer):pointer;
 
     //Returns whether Row lock newly created; Called Under master row lock.
     function AddAllRowProhibitForTableMod(const Tid:TTransactionId): boolean;
@@ -618,6 +621,8 @@ type
   TMemDBDatabasePersistent = class(TMemDBJournalCreator)
   private
   protected
+    FFastTeardown: boolean;
+
     //Stripe locking performance degrades if more threads than CPU's,
     //because threads become idle holding striped rowlocks. Hence the throttling.
     FPolicies: TOptimizePolicies;
@@ -630,6 +635,8 @@ type
 
     FCommitLock: TCriticalSection;
     FMetaIndexLock: TCriticalSection;
+
+    function DBFastTeardown(Ref1, Ref2: pointer):pointer;
 
     function HandleInterfacedObjRequest(Transaction: TObject; ID: TMemDBAPIId): TMemDBAPI;virtual;
     procedure LookaheadHelper(Stream: TStream;
@@ -676,6 +683,7 @@ type
     property Interfaced: TMemDBAPIInterfacedObject read FInterfaced;
     property CommitLock: TCriticalSection read FCommitLock;
     property MetaIndexLock: TCriticalSection read FMetaIndexLock;
+    property FastTeardown: boolean read FFastTeardown write FFastTeardown;
   end;
 
   //Helper class to manage A/B buffered lists.
@@ -915,6 +923,9 @@ const
   S_FKEYS_INTERNAL_7 = 'Foreign key checking internal error 7.';
   S_ENTITY_LIST_CONFUSION_CHECKING_CHANGES = 'Error: did not expect async mod of entity lists at this time.';
   S_API_TABLE_METADATA_NOT_COMMITED = 'No committed metadata for this table (api level)';
+  S_INTERNAL_LIST_ERROR_REPLAY = 'Internal error: Master row list / index on journal replay.';
+  S_INTERNAL_LIST_ERROR_ROW_HANDLING = 'Internal error adding / removing from master row list during change.';
+
 
 { Misc Functions }
 
@@ -2361,7 +2372,8 @@ begin
                 raise EMemDBInternalException.Create(S_CONCURRENT_MODIFY_DURING_REPLAY);
             end
             else
-              Assert(RV = rvNotFound);
+              if RV <> rvNotFound then
+                raise EMemDBInternalException.Create(S_INTERNAL_LIST_ERROR_REPLAY);
           finally
             FParentTable.FMasterRowLock.Release;
           end;
@@ -2426,6 +2438,7 @@ procedure TTidLocal.RowCPTidHandle(Sender: TObject; const Update: TTidUpdate);
 var
   IRec: TItemRec;
   GeneralPre, GeneralPost:boolean;
+  RV: TISRetVal;
 begin
   Assert(Assigned(Sender));
   GeneralPre := Update.Changes.Pre or Update.Pins.Pre;
@@ -2435,8 +2448,9 @@ begin
     Assert(Update.Tid = FTid);
     if GeneralPost then
     begin
-      FCPRows.AddItem(Sender, IRec);
-      Assert(Assigned(IRec));
+      RV := FCPRows.AddItem(Sender, IRec);
+      if RV <> rvOK then
+        raise EMemDBInternalException.Create(S_INTERNAL_LIST_ERROR_ROW_HANDLING);
     end
     else
     begin
@@ -2446,7 +2460,9 @@ begin
       IRec := FCPRows.GetAnItem;
       if not (Assigned(IRec) and (IRec.Item = Sender)) then
         raise EMemDBInternalException.Create(S_ROW_MAINT_INTERNAL);
-      FCPRows.RemoveItem(IRec);
+      RV := FCPRows.RemoveItem(IRec);
+      if RV <> rvOK then
+        raise EMemDBInternalException.Create(S_INTERNAL_LIST_ERROR_ROW_HANDLING);
     end;
   end;
   //And now deal with NoChanges -> Changes transition separately.
@@ -4420,13 +4436,37 @@ begin
   FMetadata := TMemDbTableMetadata.Create;
 end;
 
-destructor TMemDBTablePersistent.Destroy;
-{$IFNDEF CHECK_TEARDOWN_REFS}
+function TMemDBTablePersistent.TableFastTeardown(Ref1, Ref2: pointer):pointer;
 var
+  Index: TMemDBIndexGeneric;
+begin
+  FParentDB.FIndexThrottle.Acquire;
+  try
+    Index := TObject(Ref1) as TMemDBIndexGeneric;
+    Index.Release; //Should only need one deref at DB teardown time.
+  finally
+    FParentDB.FIndexThrottle.Release;
+  end;
+  result := nil;
+end;
+
+destructor TMemDBTablePersistent.Destroy;
+var
+  Handlers: TParallelHandlers;
+  Refs1: TPHRefs;
+  Refs2: TPHRefs;
+  Excepts: TPHExcepts;
+  Rets: TPHRefs;
+  PCount: integer;
+  i: integer;
+{$IFNDEF CHECK_TEARDOWN_REFS}
   Row: TMemDBRow;
   IRec: TItemRec;
+  RV: TIsRetVal;
 {$ENDIF}
 begin
+  ParallelInit(Handlers, Refs1, Refs2, Excepts, Rets, PCount);
+
   //TidLocal structure should always be empty.
   if Assigned(FTidLocalLock) then
   begin
@@ -4439,6 +4479,51 @@ begin
   end;
 
   //Release indexes first before unceromoniously removing rows underneath them.
+  //No fast teardown in failed constructor case.
+{$IFNDEF CHECK_TEARDOWN_REFS}
+  if FFastTeardown then
+  begin
+    //TODO - Exception handling cases needs to be considered here.
+    //Will not run this path if we've had an out of memory exception.
+
+    try
+      for i := 0 to Pred(FMasterIndexes.Count) do
+      begin
+        Assert(Assigned(FMasterIndexes[i]));
+        ParallelAddHandler(TableFastTeardown, FMasterIndexes[i], nil,
+          Handlers, Refs1, Refs2, Excepts, Rets, PCount);
+        FMasterIndexes[i] := nil;
+      end;
+      ParallelAddHandler(TableFastTeardown, FMasterInternalIndex, nil,
+        Handlers, Refs1, Refs2, Excepts, Rets, PCount);
+      Assert(Assigned(FMasterInternalIndex));
+      FMasterInternalIndex := nil;
+
+      //Swallow exceptions from within the threads, but before they
+      //execute can reasonably recover.
+      if PCount > 0 then
+        ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBRecordAndSwallowExceptions);
+    except
+      //Assuming record and swallow has caught all exceptions the thread is likely
+      //to raise, we're left with failure to allocate arrays, and failure to
+      //start threads.
+      for i := 0 to Pred(FMasterIndexes.Count) do
+      begin
+        if not Assigned(FMasterIndexes[i]) then
+        begin
+          Assert(i < Length(Refs1));
+          FMasterIndexes[i] := TObject(Refs1[i]) as TMemDBIndex;
+        end;
+      end;
+      if not Assigned(FMasterInternalIndex) then
+      begin
+        Assert(Length(Refs1) = Succ(FMasterIndexes.Count));
+        FMasterInternalIndex := TObject(Refs1[FMasterIndexes.Count]) as TMemDBIndexInternal;
+      end;
+    end;
+  end;
+{$ENDIF}
+
   FMasterIndexes.Release;
   FMasterInternalIndex.Release;
 
@@ -4467,7 +4552,11 @@ begin
         //N.B. Ordering here looks a bit nasty.
         //Removing from master list first (because IStore index changes
         //require access to row.
-        FMasterRowList.RemoveItem(IRec);
+        RV := FMasterRowList.RemoveItem(IRec);
+        //If the remove fails, the item stays in the list: raise rather
+        //than loop forever on the same item.
+        if RV <> rvOK then
+          raise EMemDBInternalException.Create(S_INTERNAL_INDEXING_ERROR);
 
         while Row.FProxy.TryRelease do ;
         //Row does not DCP handle in destructor.
@@ -4485,6 +4574,13 @@ begin
   FTidLocalLock.Free;
   FMetadata.Free;
   inherited;
+  ///And now we can forward an exception if necessary.
+  for i := 0 to Pred(Length(Excepts)) do
+    if Assigned(Excepts[i].EClass) then
+    begin
+      MemDBGeneralXlateExceptions(Excepts[i].EClass, Excepts[i].EMsg);
+      ParalleliserForwardCommonExceptions(Excepts[i].EClass, Excepts[i].EMsg);
+    end;
 end;
 
 procedure TMemDBTablePersistent.RowDCPHandleAndForward(Sender: TObject; const Update: TReferenceUpdate);
@@ -5952,7 +6048,8 @@ begin
               DelRowFields, Meta.FieldDefsReferredAbsIdx));
 {$ENDIF}
             DeletedRV := Meta.Lists.FReferredDeleted.RemoveItem(DeletedIRec);
-            Assert(DeletedRV = rvOK);
+            if DeletedRV <> rvOK then
+              raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_5);
           end;
           DeletedIRec := NextDeletedIRec;
         end;
@@ -6979,11 +7076,11 @@ var
 begin
   Entity := TMemDBEntity(Ref1);
   PreContext := PPOPreContext(Ref2);
-  Entity.FParentDB.FEntityThrottle.Acquire;
+  FEntityThrottle.Acquire;
   try
     Entity.PreCommit(PreContext.Tid, PreContext.Phase, PreContext.Opts, PreContext.Ctxt);
   finally
-    Entity.FParentDB.FEntityThrottle.Release;
+    FEntityThrottle.Release;
   end;
   result := nil;
 end;
@@ -7213,11 +7310,11 @@ var
 begin
   Entity := TMemDBEntity(Ref1);
   PContext := PPOPrepareContext(Ref2);
-  Entity.FParentDB.FEntityThrottle.Acquire;
+  FEntityThrottle.Acquire;
   try
     Entity.Prepare(PContext.Tid, PContext.Opts, PContext.FromScratch, PContext.Ctxt);
   finally
-    Entity.FParentDB.FEntityThrottle.Release;
+    FEntityThrottle.Release;
   end;
   result := nil;
 end;
@@ -7578,11 +7675,11 @@ begin
   Entity := TMemDBEntity(Ref1);
   PPOContext := PPOCommitContext(Ref2);
 
-  Entity.FParentDB.FEntityThrottle.Acquire;
+  FEntityThrottle.Acquire;
   try
     Entity.Commit(PPOContext.Tid, PPOContext.Phase, PPOContext.Opts, PPOContext.Ctxt);
   finally
-    Entity.FParentDB.FEntityThrottle.Release;
+    FEntityThrottle.Release;
   end;
   result := nil;
 end;
@@ -7656,11 +7753,11 @@ begin
   Entity := TMemDBEntity(Ref1);
   PPORoll := PPORollbackContext(Ref2);
 
-  Entity.FParentDB.FEntityThrottle.Acquire;
+  FEntityThrottle.Acquire;
   try
     Entity.Rollback(PPORoll.Tid, PPORoll.Phase, PPORoll.Opts, PPORoll.Ctxt);
   finally
-    Entity.FParentDB.FEntityThrottle.Release;
+    FEntityThrottle.Release;
   end;
   result := nil;
 end;
@@ -7876,6 +7973,34 @@ begin
   FIndexThrottle := TSemaphore.Create(nil, FPolicies.MaxParallel, High(integer), '', false);
 end;
 
+{
+procedure ParallelInit(
+  var Handlers: TParallelHandlers;
+  var Refs1: TPHRefs;
+  var Refs2: TPHRefs;
+  var Excepts: TPHExcepts;
+  var Rets: TPHRefs;
+  var PCount: integer);
+begin
+}
+
+function TMemDBDatabasePersistent.DBFastTeardown(Ref1, Ref2: pointer):pointer;
+var
+  Proxy: TMemDBEntityProxy;
+  Entity: TMemDBEntity;
+begin
+  FEntityThrottle.Acquire;
+  try
+    Proxy := TObject(Ref1) as TMemDBEntityProxy;
+    Entity := Proxy.Proxy as TMemDBEntity;
+    Entity.FastTeardown := true;
+    while Proxy.TryRelease do ;
+  finally
+    FEntityThrottle.Release;
+  end;
+  result := nil;
+end;
+
 destructor TMemDBDatabasePersistent.Destroy;
 var
   EntityList: TReffedList;
@@ -7890,7 +8015,15 @@ var
   FKs, Del: boolean;
   Ctxt: TXTransactionLocalContext;
 {$ENDIF}
+  Handlers: TParallelHandlers;
+  Refs1: TPHRefs;
+  Refs2: TPHRefs;
+  Excepts: TPHExcepts;
+  Rets: TPHRefs;
+  PCount: integer;
 begin
+  ParallelInit(Handlers, Refs1, Refs2, Excepts, Rets, PCount);
+
   EntSnapshot := nil;
   EntRegistered := nil;
 {$IFDEF CHECK_TEARDOWN_REFS}
@@ -7948,19 +8081,58 @@ begin
     EntRegistered.Release;
   end;
 {$ELSE}
-  //Destructor, raw entity list OK.
-  EntityList := AssembleEntityList;
-  try
-    for i := 0 to Pred(EntityList.Count) do
-    begin
-      Proxy := EntityList.Items[i] as TMemDBEntityProxy;
-      //Refcount should be 1 (has metadata),
-      //expect no client code running.
-      while Proxy.TryRelease do ;
-      EntityList.Items[i] := nil;
+  //No fast teardown in failed ctor case.
+  if FFastTeardown then
+  begin
+    //When everything in working set, does little except hammer the mem manager locks.
+    //when everything *not* in working set, and a decent SSD, we get a performance
+    //speedup from multiple threads issuing page faults in parallel.
+
+    //TODO - Exception handling cases needs to be considered here.
+    //Will not run this path if we've had an out of memory exception.
+
+    EntityList := AssembleEntityList;
+    try
+      for i := 0 to Pred(EntityList.Count) do
+      begin
+        Assert(Assigned(EntityList.Items[i]));
+        Proxy := EntityList.Items[i] as TMemDBEntityProxy;
+        ParallelAddHandler(DBFastTeardown, Proxy, nil,
+          Handlers, Refs1, Refs2, Excepts, Rets, PCount);
+        EntityList.Items[i] := nil;
+      end;
+      if PCount > 0 then
+        ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBRecordAndSwallowExceptions);
+    except
+      for i := 0 to Pred(EntityList.Count) do
+      begin
+        if not Assigned(EntityList.Items[i]) then
+        begin
+          Assert(i < Length(Refs1));
+          Proxy := Refs1[i];
+          EntityList.Items[i] := Proxy;
+        end;
+      end;
     end;
-  finally
+    //Might actually release the whole thing...
     EntityList.Release;
+  end
+  else
+  begin
+    //Destructor, raw entity list OK.
+    EntityList := AssembleEntityList;
+    try
+      for i := 0 to Pred(EntityList.Count) do
+      begin
+        Proxy := EntityList.Items[i] as TMemDBEntityProxy;
+        //Refcount should be 1 (has metadata),
+        //expect no client code running.
+        while Proxy.TryRelease do ;
+        EntityList.Items[i] := nil;
+      end;
+    finally
+      EntityList.Release;
+    end;
   end;
 {$ENDIF}
   Assert(DlItemIsEmpty(@FEntityList));
@@ -7971,6 +8143,12 @@ begin
   FEntityThrottle.Free;
   FIndexThrottle.Free;
   inherited;
+  for i := 0 to Pred(Length(Excepts)) do
+    if Assigned(Excepts[i].EClass) then
+    begin
+      MemDBGeneralXlateExceptions(Excepts[i].EClass, Excepts[i].EMsg);
+      ParalleliserForwardCommonExceptions(Excepts[i].EClass, Excepts[i].EMsg);
+    end;
 end;
 
 function TMemDBDatabasePersistent.HandleInterfacedObjRequest(Transaction: TObject; ID: TMemDBAPIId): TMemDBAPI;
@@ -8400,4 +8578,7 @@ begin
   inherited;
 end;
 
+initialization
+  Assert(@MemDBXlateExceptions = @MemDBXlateExceptions[0]);
+  Assert(@MemDBRecordAndSwallowExceptions = @MemDBRecordAndSwallowExceptions[0]);
 end.

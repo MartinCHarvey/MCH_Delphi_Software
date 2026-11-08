@@ -62,6 +62,8 @@ type
     rvAsyncInProgress
     );
 
+  EIndexedStoreError = class(Exception);
+
   TItemRec = class;
   TIndexedStoreG = class;
   TIndexNodeLink = class;
@@ -126,6 +128,13 @@ type
   TItemRec = class
 {$ENDIF}
   private
+    //Locking rule: FIndexNodesLock protects only DLList operations on
+    //FIndexNodes (and walks of it via GetIndexLinkByRoot). Nothing in a
+    //locked region can raise in a correct program (no allocation, no
+    //key comparisons, DLList ops are pointer updates), so locked regions
+    //do not use try..finally. Assertions about what was found are
+    //evaluated after the lock is released, so a failing assertion can't
+    //leave the lock held (TinyLock spins forever, it is not re-entrant).
     FIndexNodesLock: TTinyLock;
     FIndexNodes: TDLEntry;
     FItem: TObject;
@@ -153,6 +162,7 @@ type
     FTag: TTagType;
     FSiblingListEntry: TDLEntry;
     FAsyncState: TIndexAsyncState;
+    FAsyncSucceeded: boolean;
   public
     constructor Create;
     destructor Destroy; override;
@@ -161,6 +171,8 @@ type
     property Tag: TTagType read FTag write FTag;
     property SiblingListEntry: TDLEntry read FSiblingListEntry write FSiblingListEntry;
     property AsyncState: TIndexAsyncState read FAsyncState write FAsyncState;
+    //Set by the parallel handlers when an async add / delete runs to completion.
+    property AsyncSucceeded: boolean read FAsyncSucceeded write FAsyncSucceeded;
   end;
 
   TStoreTraversalEvent = procedure(Store: TIndexedStoreG;
@@ -224,13 +236,28 @@ type
 
     function PerformAsyncActions(ExcHandlers: PExceptionHandlerChain): TIsRetVal;
     procedure ForceClearAsyncFlags;
-    //To be used only in cases where exceptions in async ops,
-    //and you'd like to serialise everything to clean up the mess.
-    //Alloc failures handled, so most likely case is exceptions in index node
-    //comparison.
+    //Performs any outstanding async index adds / deletes synchronously,
+    //so no index is left in an async state. PerformAsyncActions now always
+    //cleans up after itself (even on exceptions), so this is only needed if
+    //async ops were requested and then never performed.
+    //Raises EIndexedStoreError if rebuilding an index fails with an error code.
 
     function AddItem(NewItem: TObject; var Res: TItemRec): TISRetVal;
     function AddItemInPlace(NewItem: TObject; const LPos: PDLEntry; var Res: TItemRec): TISRetVal;
+    //AddItem / AddItemInPlace: on an error code or an exception the item is
+    //normally not in the store, and Res is nil. The one exception is a
+    //double fault (the index node comparison raises, and then raises again
+    //while rolling back): the item is then left in the store, counted, but
+    //missing from some indices, and AddItem returns rvInternalError (or
+    //re-raises the original exception) with Res still assigned.
+    //
+    //RemoveItem / RemoveItemInPlace: on an error code or an exception, the
+    //item is still in the store (ItemRec not freed, Count unchanged), but may
+    //already have been removed from some of the indices.
+    //
+    //N.B. Do not modify indexed fields of an item while it is in the store.
+    //In a unique index, removal can then find and remove a *different*
+    //item's node with the same key.
     function RemoveItem(ItemRec: TItemRec): TISRetVal;
     function RemoveItemInPlace(ItemRec: TItemRec; var LPos:PDLEntry): TIsRetVal;
     function GetAnItem: TItemRec;
@@ -404,6 +431,12 @@ const
     'Store found an index link node, but it was not attached to an index node.';
   S_NO_MEM_FORWARDED =
     'Out of memory exception forwarded from client thread';
+  S_ASYNC_EXCEPTION_FORWARDED =
+    'Exception in async index operation: ';
+  S_DELETE_CHILDREN_FAILED =
+    'DeleteChildren: could not remove item from store, error code: ';
+  S_FORCE_CLEAR_REBUILD_FAILED =
+    'ForceClearAsyncFlags: could not rebuild index, error code: ';
 
 { Misc functions }
 
@@ -443,11 +476,16 @@ begin
 end;
 
 procedure TItemRec.SetItem(NewItem: TObject);
+{$IFOPT C+}
+var
+  Empty: boolean;
+{$ENDIF}
 begin
 {$IFOPT C+}
   AcquireTinyLock(FIndexNodesLock);
-  Assert(DLList.DlItemIsEmpty(@FIndexNodes), S_ITEMREC_ITEM_CHANGED_WHILST_INDEXED);
+  Empty := DLList.DlItemIsEmpty(@FIndexNodes);
   ReleaseTinyLock(FIndexNodesLock);
+  Assert(Empty, S_ITEMREC_ITEM_CHANGED_WHILST_INDEXED);
 {$ENDIF}
   FItem := NewItem;
 end;
@@ -593,7 +631,7 @@ end;
 function TIndexedStoreG.AddIndexNodeForItem(Index: TSIndex; Item: TItemRec; UseLocks: boolean):TISRetVal;
 var
   IndexNode: TIndexNode;
-  IndexLink: TIndexNodeLink;
+  IndexLink, NewLink, Existing: TIndexNodeLink;
   InClassType: TIndexNodeClass;
 begin
   if (not Assigned(Index)) or
@@ -603,39 +641,44 @@ begin
     result := rvInternalError;
     exit;
   end;
-  IndexLink := TIndexNodeLink.Create;
-  //First exception, no special handling.
-
-  InClassType := Index.NodeClassType;
+  IndexNode := nil;
+  IndexLink := nil;
   try
+    InClassType := Index.NodeClassType;
+    IndexLink := TIndexNodeLink.Create;
+    //First exception, no special handling.
     IndexNode := InClassType.Create;
-  except
-    on E: EOutOfMemory do
-    begin
-      IndexLink.Free;
-      raise;
-    end;
-  end;
 
-  //No mem allocation for remainder of function,
-  //expect no exceptions in INode comparison funcs.
-  IndexNode.FIndexLink := IndexLink;
-  IndexLink.IndexNode := IndexNode;
-  IndexLink.ItemRec := Item;
-  IndexLink.FTSIndex := Index;
-  if Index.Root.Add(IndexNode) then
-  begin
-    result := rvOK;
-    if UseLocks then
-      AcquireTinyLock(Item.FIndexNodesLock);
-    Assert(not Assigned(Item.GetIndexLinkByRoot(Index, UseLocks)), S_ITEM_ALREADY_INDEXED);
-    DLListInsertTail(@Item.FIndexNodes, @IndexLink.SiblingListEntryIdx);
-    if UseLocks then
-      ReleaseTinyLock(Item.FIndexNodesLock);
-  end
-  else
-  begin
-    result := rvDuplicateKey;
+    //No mem allocation for remainder of function,
+    //expect no exceptions in INode comparison funcs.
+    IndexNode.FIndexLink := IndexLink;
+    IndexLink.IndexNode := IndexNode;
+    IndexLink.ItemRec := Item;
+    IndexLink.FTSIndex := Index;
+    if Index.Root.Add(IndexNode) then
+    begin
+      //Tree now owns the node, and the node references the link, so
+      //neither must be freed below, even if the assertion fires.
+      NewLink := IndexLink;
+      IndexNode := nil;
+      IndexLink := nil;
+      if UseLocks then
+        AcquireTinyLock(Item.FIndexNodesLock);
+{$IFOPT C+}
+      Existing := Item.GetIndexLinkByRoot(Index, UseLocks);
+{$ELSE}
+      Existing := nil;
+{$ENDIF}
+      if not Assigned(Existing) then
+        DLListInsertTail(@Item.FIndexNodes, @NewLink.SiblingListEntryIdx);
+      if UseLocks then
+        ReleaseTinyLock(Item.FIndexNodesLock);
+      Assert(not Assigned(Existing), S_ITEM_ALREADY_INDEXED);
+      result := rvOK;
+    end
+    else
+      result := rvDuplicateKey;
+  finally
     IndexNode.Free;
     IndexLink.Free;
   end;
@@ -646,6 +689,7 @@ function TIndexedStoreG.DeleteIndexNodeForItem(Index: TSIndex; Item: TItemRec; U
 var
   Link: TIndexNodeLink;
   INode: TIndexNode;
+  Removed: boolean;
 begin
   if (not Assigned(Item)) or (not Assigned(Index)) then
   begin
@@ -653,26 +697,47 @@ begin
     result := rvInternalError;
     exit;
   end;
+
   if UseLocks then
     AcquireTinyLock(Item.FIndexNodesLock);
-
   Link := Item.GetIndexLinkByRoot(Index, UseLocks);
+  if Assigned(Link) then
+    DLListRemoveObj(@Link.SiblingListEntryIdx);
+  if UseLocks then
+    ReleaseTinyLock(Item.FIndexNodesLock);
   if not Assigned(Link) then
   begin
-    if UseLocks then
-      ReleaseTinyLock(Item.FIndexNodesLock);
-
     Assert(false, S_DEL_INDEXNODE_NO_LINK);
     result := rvInternalError;
     exit;
   end;
-  DLListRemoveObj(@Link.SiblingListEntryIdx);
-  if UseLocks then
-    ReleaseTinyLock(Item.FIndexNodesLock);
 
+  //All or nothing. If the node can't be removed from the tree (the
+  //comparison raised, or the node wasn't found), put the link back on the
+  //item, so item, link and tree all stay consistent with each other.
+  //BinaryTree does all its comparisons before changing anything, so the
+  //tree itself is unchanged in both cases.
   INode := Link.IndexNode;
-  if Index.Root.Remove(INode) then
-    result := rvOK
+  Removed := false;
+  try
+    Removed := Index.Root.Remove(INode);
+  finally
+    if not Removed then
+    begin
+      if UseLocks then
+        AcquireTinyLock(Item.FIndexNodesLock);
+      DLListInsertTail(@Item.FIndexNodes, @Link.SiblingListEntryIdx);
+      if UseLocks then
+        ReleaseTinyLock(Item.FIndexNodesLock);
+    end;
+  end;
+  if Removed then
+  begin
+    //Tree has freed a node (not necessarily INode, see TBinTree.DelHelper),
+    //and no node references this link any more.
+    Link.Free;
+    result := rvOK;
+  end
   else
   begin
     //N.B. Assertions here tend to indicate you've modified an
@@ -680,7 +745,6 @@ begin
     Assert(false, S_DEL_INDEXNODE_FAILED);
     result := rvInternalError;
   end;
-  Link.Free;
 end;
 
 procedure TIndexedStoreG.AsyncIndexDeleteWorker(Index: TSIndex);
@@ -698,15 +762,16 @@ begin
 {$ENDIF}
   while Assigned(CurItem) do
   begin
+    //Items can legitimately be missing from the index: when rolling back
+    //a failed index add (see AddIndexCleanupTail), or after a double
+    //fault in AddItem, or a failed RemoveItem.
     if UseLocks then
       AcquireTinyLock(CurItem.FIndexNodesLock);
-
     Link := CurItem.GetIndexLinkByRoot(Index, UseLocks);
-    Assert(Assigned(Link), S_DEL_INDEX_INTERNAL_UNINDEXED_ITEM);
-    DLListRemoveObj(@Link.SiblingListEntryIdx);
+    if Assigned(Link) then
+      DLListRemoveObj(@Link.SiblingListEntryIdx);
     if UseLocks then
       ReleaseTinyLock(CurItem.FIndexNodesLock);
-
     Link.Free;
 {$IFOPT C+}
     CurItem := CurItem.FSiblingListEntryRec.FLink.Owner as TItemRec;
@@ -724,6 +789,11 @@ end;
 
 procedure TIndexedStoreG.AddIndexCleanupTail(NewIndex: TSIndex);
 begin
+  //Roll back a failed (or never performed) index add without any key
+  //comparisons: unlink every item from the index, then free the index,
+  //which frees the whole tree. Can't fail again if it was the node
+  //comparison functions that raised.
+  AsyncIndexDeleteWorker(NewIndex);
   DLListRemoveObj(@NewIndex.SiblingListEntry);
   NewIndex.Free;
 end;
@@ -737,43 +807,14 @@ begin
 end;
 
 function TIndexedStoreG.AsyncIndexAddWorker(NewIndex: TSIndex): TIsRetVal;
-
 var
   CurItem: TItemRec;
   UseLocks: boolean;
-
-  procedure Cleanup; //One index for all the items
-{$IFOPT C+}
-  var
-    res2: TIsRetVal;
-{$ENDIF}
-  begin
-    Assert(Assigned(CurItem));
-    Assert(Assigned(NewIndex));
-{$IFOPT C+}
-    CurItem := CurItem.FSiblingListEntryRec.BLink.Owner as TItemRec;
-{$ELSE}
-    CurItem := TItemRec(CurItem.FSiblingListEntryRec.BLink.Owner);
-{$ENDIF}
-    while Assigned(CurItem) do
-    begin
-{$IFOPT C+}
-      res2 := DeleteIndexNodeForItem(NewIndex, CurItem, UseLocks);
-      Assert(res2 = rvOK, S_ROLLBACK_ADD_INDEX_FAILED);
-{$ELSE}
-      DeleteIndexNodeForItem(NewIndex, CurItem, UseLocks);
-{$ENDIF}
-{$IFOPT C+}
-      CurItem := CurItem.FSiblingListEntryRec.BLink.Owner as TItemRec;
-{$ELSE}
-      CurItem := TItemRec(CurItem.FSiblingListEntryRec.BLink.Owner);
-{$ENDIF}
-    end;
-  end;
-
 begin
-  //Now need to go through all items that exist, adding a new index item.
-  //In case of failure, need to roll back all changes.
+  //Go through all items that exist, adding a new index node for each.
+  //On failure (error code or exception) partial work is NOT rolled back
+  //here. The caller rolls back via AddIndexCleanupTail, which doesn't need
+  //any key comparisons, so can't raise again.
   result := rvOK;
   UseLocks := NewIndex.AsyncState <> iasNone;
 
@@ -782,28 +823,16 @@ begin
 {$ELSE}
   CurItem := TItemRec(FItemRecList.FLink.Owner);
 {$ENDIF}
-  try
-    while Assigned(CurItem) do
-    begin
-      result := AddIndexNodeForItem(NewIndex, CurItem, UseLocks);
-      if result <> rvOK then break;
+  while Assigned(CurItem) do
+  begin
+    result := AddIndexNodeForItem(NewIndex, CurItem, UseLocks);
+    if result <> rvOK then break;
 {$IFOPT C+}
-      CurItem := CurItem.FSiblingListEntryRec.FLink.Owner as TItemRec;
+    CurItem := CurItem.FSiblingListEntryRec.FLink.Owner as TItemRec;
 {$ELSE}
-      CurItem := TItemRec(CurItem.FSiblingListEntryRec.FLink.Owner);
+    CurItem := TItemRec(CurItem.FSiblingListEntryRec.FLink.Owner);
 {$ENDIF}
-    end;
-  except
-    on E: EOutOfMemory do
-    begin
-      Cleanup;
-      raise;
-    end;
   end;
-
-  //OK, all done!
-  if result <> rvOK then
-    Cleanup;
 end;
 
 function TIndexedStoreG._AddIndex(IndNodeClassType: TIndexNodeClass; Tag:TTagType; Async: boolean): TISRetVal;
@@ -811,23 +840,20 @@ var
   NewIndex: TSIndex;
 
 begin
-  NewIndex := TSIndex.Create;
-  //First exception, no special handling.
-
   //Check tag not already represented.
   if Assigned(GetIndexByTag(Tag)) then
   begin
     result := rvDuplicateTag;
-    NewIndex.Free;
     exit;
   end;
   //Check index node class is sensible.
-  if not IndNodeClassType.InheritsFrom(TIndexNode) then
+  if not (Assigned(IndNodeClassType) and IndNodeClassType.InheritsFrom(TIndexNode)) then
   begin
     result := rvInvalidClassType;
-    NewIndex.Free;
     exit;
   end;
+  NewIndex := TSIndex.Create;
+  //First exception, no special handling.
   NewIndex.NodeClassType := IndNodeClassType;
   NewIndex.Tag := Tag;
   //New index has created root object.
@@ -841,15 +867,12 @@ begin
   begin
     try
       result := AsyncIndexAddWorker(NewIndex); //Executed synchronously.
-      if result <> rvOK then
-        AddIndexCleanupTail(NewIndex);
     except
-      on E:EOutOfMemory do
-      begin
-        AddIndexCleanupTail(NewIndex);
-        raise;
-      end;
+      AddIndexCleanupTail(NewIndex);
+      raise;
     end;
+    if result <> rvOK then
+      AddIndexCleanupTail(NewIndex);
   end;
 end;
 
@@ -890,63 +913,15 @@ var
   Ret: TIsRetVal;
 begin
   Ret := AsyncIndexAddWorker(TSIndex(Ref1));
+  TSIndex(Ref1).AsyncSucceeded := Ret = rvOK;
   result := Pointer(Ret);
 end;
 
 function TIndexedStoreG.ParallelDeleteHandler(Ref1, Ref2: pointer): pointer;
 begin
   AsyncIndexDeleteWorker(TSIndex(Ref1));
+  TSIndex(Ref1).AsyncSucceeded := true;
   result := Pointer(rvOK);
-end;
-
-function IndexedStoreRecordCommonExceptions(EClass: SysUtils.ExceptClass;
-                                             EMsg: string):TExceptionFilterAction;
-begin
-  while Assigned(EClass) do
-  begin
-    if (EClass = EOutOfMemory)
-      or (EClass = EAccessViolation)
-      or (EClass = EListError)
-      or (EClass = EIntError)
-      or (EClass = EMathError)
-      or (EClass = EStackOverflow) then
-    begin
-      result := tetaRecordException;
-      exit;
-    end;
-    EClass := ExceptClass(EClass.ClassParent);
-  end;
-  result := tetaIgnore;
-end;
-
-procedure IndexedStoreNoForwardCommonExceptions(EClass: SysUtils.ExceptClass;
-                                             EMsg: string);
-begin
-  { NOP }
-end;
-
-procedure IndexedStoreForwardCommonExceptions(EClass: SysUtils.ExceptClass;
-                                             EMsg: string);
-begin
-  //The EExternalError classes here are not going to have the full Win32
-  //exception information, but this is good enough for the moment.
-  while Assigned(EClass) do
-  begin
-    if (EClass = EOutOfMemory) then
-      raise EOutOfMemory.Create(EMsg)
-    else if (EClass = EAccessViolation) then
-      raise EAccessViolation.Create(EMsg)
-    else if (EClass = EListError) then
-      raise EListError.Create(EMsg)
-    else if (EClass = EIntError) then
-      raise EIntError.Create(EMsg)
-    else if (EClass = EMathError) then
-     raise EMathError.Create(EMsg)
-    else if (EClass = EStackOverflow) then
-     raise EStackOverflow.Create(EMsg);
-    EClass := ExceptClass(EClass.ClassParent);
-  end;
-  { else NOP }
 end;
 
 function TIndexedStoreG.PerformAsyncActions(ExcHandlers: PExceptionHandlerChain): TIsRetVal;
@@ -978,9 +953,9 @@ begin
   end;
   if AsyncCount = 0 then
     exit;
-  LocalExcHandler.FilterFunc := IndexedStoreRecordCommonExceptions;
+  LocalExcHandler.FilterFunc := ParalleliserRecordCommonExceptions;
   //Record so we can forward ourselves later.
-  LocalExcHandler.XlatorFunc := IndexedStoreNoForwardCommonExceptions;
+  LocalExcHandler.XlatorFunc := ParalleliserNoForwardCommonExceptions;
   //Don't forward from inside paralleliser.
 
   LocalExcHandler.Next := ExcHandlers;
@@ -1001,6 +976,7 @@ begin
     if (Index.AsyncState <> iasNone) then
     begin
       Refs1[AsyncIdx] := Index;
+      Index.AsyncSucceeded := false;
       case Index.AsyncState of
         iasAsyncAdding: Handlers[AsyncIdx] := ParallelAddHandler;
         iasAsyncDeleting: Handlers[AsyncIdx] := ParallelDeleteHandler;
@@ -1018,38 +994,55 @@ begin
 {$ENDIF}
   end;
   Assert(AsyncIdx = AsyncCount);
-  Parallelizer.ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @LocalExcHandler);
-  //Now run the tiny little tail func for successful deletions,
-  //and failed additions, and once that's happened re-raise if necessary.
-  //Only exceptions we expect to handle explicitly here are ENoMem, everything
-  //else gets forwarded thru.
-  for AsyncIdx := 0 to Pred(AsyncCount) do
-  begin
-    Index := Refs1[AsyncIdx];
-    case Index.AsyncState of
-      iasNone: Assert(false);
-      iasAsyncAdding: begin
-        //Check for failed ret, or out of memory.
-        if (TIsRetVal(Rets[AsyncIdx]) <> rvOK) or (Assigned(Excepts[AsyncIdx].HandledBy)) then
-          self.AddIndexCleanupTail(Index)
-        else
-          Index.AsyncState := iasNone;
+  try
+    Parallelizer.ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @LocalExcHandler);
+  finally
+    //Always run the tail funcs, even if ExecParallel raised (exception class
+    //not recorded by any handler, or a handler that throws once all are
+    //recorded), so no index is left in an async state. None of this calls
+    //the index node comparison functions, so it should not raise.
+    for AsyncIdx := 0 to Pred(AsyncCount) do
+    begin
+{$IFOPT C+}
+      Index := TObject(Refs1[AsyncIdx]) as TSIndex;
+{$ELSE}
+      Index := TSIndex(Refs1[AsyncIdx]);
+{$ENDIF}
+      case Index.AsyncState of
+        iasAsyncAdding: begin
+          if Index.AsyncSucceeded then
+            Index.AsyncState := iasNone
+          else
+            AddIndexCleanupTail(Index); //Failed return code, or exception.
+        end;
+        iasAsyncDeleting: begin
+          //Delete worker is idempotent: re-run it if it didn't complete.
+          if not Index.AsyncSucceeded then
+            AsyncIndexDeleteWorker(Index);
+          DeleteIndexTail(Index);
+        end;
+      else
+        Assert(false);
       end;
-      iasAsyncDeleting: begin
-        Assert(TIsRetVal(Rets[AsyncIdx]) = rvOK);
-        //Index.AsyncState := iasNone;
-        self.DeleteIndexTail(Index);
-      end;
-    else
-      Assert(false);
     end;
   end;
+  //Forward any exceptions recorded from the workers.
   for AsyncIdx := 0 to Pred(AsyncCount) do
   begin
     if Assigned(Excepts[AsyncIdx].HandledBy) then
-      IndexedStoreForwardCommonExceptions(Excepts[AsyncIdx].EClass, Excepts[AsyncIdx].EMsg);
+    begin
+      ParalleliserForwardCommonExceptions(Excepts[AsyncIdx].EClass, Excepts[AsyncIdx].EMsg);
+      //If we get here, it's not a class the paralleliser knows how to
+      //re-create. Don't silently lose it.
+      if Assigned(Excepts[AsyncIdx].EClass) then
+        raise EIndexedStoreError.Create(S_ASYNC_EXCEPTION_FORWARDED
+          + Excepts[AsyncIdx].EClass.ClassName + ': ' + Excepts[AsyncIdx].EMsg)
+      else
+        raise EIndexedStoreError.Create(S_ASYNC_EXCEPTION_FORWARDED
+          + Excepts[AsyncIdx].EMsg);
+    end;
   end;
-  //Exceptions get forwarded as expected. Now collate return codes.
+  //Now collate return codes.
   for AsyncIdx := 0 to Pred(AsyncCount) do
   begin
     if TIsRetVal(Rets[AsyncIdx]) <> rvOK then
@@ -1062,14 +1055,43 @@ end;
 
 procedure TIndexedStoreG.ForceClearAsyncFlags;
 var
-  Index: TSIndex;
+  Index, NextIndex: TSIndex;
+  NodeClassType: TIndexNodeClass;
+  Tag: TTagType;
+  RV: TISRetVal;
 begin
-  //No checking here.
+{$IFOPT C+}
   Index := FIndices.FLink.Owner as TSIndex;
+{$ELSE}
+  Index := TSIndex(FIndices.FLink.Owner);
+{$ENDIF}
   while Assigned(Index) do
   begin
-    Index.AsyncState := iasNone;
-    Index := Index.FSiblingListEntry.FLink.Owner as TSIndex;
+{$IFOPT C+}
+    NextIndex := Index.FSiblingListEntry.FLink.Owner as TSIndex;
+{$ELSE}
+    NextIndex := TSIndex(Index.FSiblingListEntry.FLink.Owner);
+{$ENDIF}
+    case Index.AsyncState of
+      iasAsyncAdding: begin
+        //Discard whatever is there (may be partially built), and rebuild
+        //synchronously. New index goes on the end of the list, with state
+        //iasNone, so the loop skips it.
+        NodeClassType := Index.NodeClassType;
+        Tag := Index.Tag;
+        AddIndexCleanupTail(Index);
+        RV := _AddIndex(NodeClassType, Tag, false);
+        if RV <> rvOK then
+          raise EIndexedStoreError.Create(S_FORCE_CLEAR_REBUILD_FAILED + IntToStr(Ord(RV)));
+      end;
+      iasAsyncDeleting: begin
+        //Delete worker is idempotent, so safe even if partially done.
+        Index.AsyncState := iasNone;
+        DeleteIndexInternal(Index);
+      end;
+      iasNone: ; //Nothing to do.
+    end;
+    Index := NextIndex;
   end;
 end;
 
@@ -1106,36 +1128,53 @@ end;
 function TIndexedStoreG.AddItemInPlace(NewItem: TObject; const LPos: PDLEntry; var Res: TItemRec): TISRetVal;
 var
   Index: TSIndex;
-{$IFOPT C+}
-  FailRet: TISRetVal;
-{$ENDIF}
 
-  procedure Cleanup; //All Indexes for the one item.
+  //Remove the item from all the indices before "Index" (the one we failed
+  //to add it to), and then from the item list. Returns false if it could not
+  //be removed from all of them (double fault), in which case it is left in
+  //the store, and counted, so the store stays internally consistent.
+  function Cleanup: boolean;
+  var
+    CleanIndex: TSIndex;
+    RV: TISRetVal;
   begin
     Assert(Assigned(Index));
     Assert(Assigned(Res));
+    result := true;
 {$IFOPT C+}
-    Index := Index.SiblingListEntry.BLink.Owner as TSIndex;
+    CleanIndex := Index.SiblingListEntry.BLink.Owner as TSIndex;
 {$ELSE}
-    Index := TSIndex(Index.SiblingListEntry.BLink.Owner);
+    CleanIndex := TSIndex(Index.SiblingListEntry.BLink.Owner);
 {$ENDIF}
-    while Assigned(Index) do
+    while Assigned(CleanIndex) do
     begin
+      //If the comparison function raises again, don't let that replace
+      //the original exception, and carry on with the other indices.
+      try
+        RV := DeleteIndexNodeForItem(CleanIndex, Res, false);
+      except
+        RV := rvInternalError;
+      end;
+      if RV <> rvOK then
+        result := false;
 {$IFOPT C+}
-      Failret := DeleteIndexNodeForItem(Index, Res, false);
-      Assert(Failret = rvOK, S_ROLLBACK_ADD_ITEM_FAILED);
+      CleanIndex := CleanIndex.SiblingListEntry.BLink.Owner as TSIndex;
 {$ELSE}
-      DeleteIndexNodeForItem(Index, Res, false);
-{$ENDIF}
-{$IFOPT C+}
-      Index := Index.SiblingListEntry.BLink.Owner as TSIndex;
-{$ELSE}
-      Index := TSIndex(Index.SiblingListEntry.BLink.Owner);
+      CleanIndex := TSIndex(CleanIndex.SiblingListEntry.BLink.Owner);
 {$ENDIF}
     end;
-    DLListRemoveObj(@Res.FSiblingListEntryRec);
-    Res.Free;
-    Res := nil;
+    if result then
+    begin
+      DLListRemoveObj(@Res.FSiblingListEntryRec);
+      Res.Free;
+      Res := nil;
+    end
+    else
+    begin
+      //Can't free the item rec: it's still referenced from at least one
+      //index (DeleteIndexNodeForItem leaves the link in place on failure).
+      Inc(FCount);
+    end;
   end;
 
 begin
@@ -1144,6 +1183,27 @@ begin
     result := rvInvalidItem;
     exit;
   end;
+  //Check for async ops before doing anything: saves a rollback.
+{$IFOPT C+}
+  Index := FIndices.FLink.Owner as TSIndex;
+{$ELSE}
+  Index := TSIndex(FIndices.FLink.Owner);
+{$ENDIF}
+  while Assigned(Index) do
+  begin
+    if Index.AsyncState <> iasNone then
+    begin
+      Res := nil;
+      result := rvAsyncInProgress;
+      exit;
+    end;
+{$IFOPT C+}
+    Index := Index.SiblingListEntry.FLink.Owner as TSIndex;
+{$ELSE}
+    Index := TSIndex(Index.SiblingListEntry.FLink.Owner);
+{$ENDIF}
+  end;
+
   //Create the item.
   Res := CreateItemRec(NewItem);
   //No exception handler here, first allocation, can fall straight out.
@@ -1154,8 +1214,8 @@ begin
   else
     DLListInsertTail(@FItemRecList, @Res.FSiblingListEntryRec);
 
-  //For all the indices that exist try and add, protect with exception handler
-  //for out of memory cases.
+  //For all the indices that exist try and add, protect with exception
+  //handler for out of memory, or exceptions in index node comparisons.
   result := rvOK;
 {$IFOPT C+}
   Index := FIndices.FLink.Owner as TSIndex;
@@ -1165,11 +1225,6 @@ begin
   try
     while Assigned(Index) do
     begin
-      if Index.AsyncState <> iasNone then
-      begin
-        result := rvAsyncInProgress;
-        break;
-      end;
       result := AddIndexNodeForItem(Index, Res, false);
       if result <> rvOK then break;
 {$IFOPT C+}
@@ -1179,16 +1234,16 @@ begin
 {$ENDIF}
     end;
   except
-    on E: EOutOfMemory do
-    begin
-      Cleanup; //Prev indices which were not async.
-      raise;
-    end;
+    Cleanup; //Prev indices.
+    raise;
   end;
 
   //If fail, then unindex and remove.
   if result <> rvOK then
-    Cleanup
+  begin
+    if not Cleanup then
+      result := rvInternalError;
+  end
   else
     Inc(FCount);
 
@@ -1205,10 +1260,11 @@ end;
 function TIndexedStoreG.RemoveItemInPlace(ItemRec: TItemRec; var LPos:PDLEntry): TIsRetVal;
 var
   Index: TSIndex;
-  CallRes: TISRetVal;
 begin
-  //Rollbacks not easily possible here, so just keep going as best we can
-  //but accumulate error flag.
+  //Rollbacks not easily possible here. On failure, stop, and leave the item
+  //in the store (not freed, still counted), removed from the indices before
+  //the failing one, still in the failing one and the ones after it.
+  LPos := nil;
   if not Assigned(ItemRec) then
   begin
     result := rvInvalidItem;
@@ -1246,9 +1302,11 @@ begin
 {$ENDIF}
   while Assigned(Index) do
   begin
-    CallRes := DeleteIndexNodeForItem(Index, ItemRec, false);
-    if (result = rvOK) and (CallRes <> rvOK) then
-      result := CallRes;
+    //All or nothing for each index. If it fails (or raises), the item is
+    //still linked to this index.
+    result := DeleteIndexNodeForItem(Index, ItemRec, false);
+    if result <> rvOK then
+      exit;
 {$IFOPT C+}
     Index := Index.SiblingListEntry.FLink.Owner as TSIndex;
 {$ELSE}
@@ -1384,6 +1442,7 @@ function TIndexedStoreG._TraverseByIndex(IndexTag: TTagType; Event:
 var
   Order: TBinTraversalOrder;
   Index: TSIndex;
+  OldEvent: TStoreTraversalEvent;
 begin
   Index := GetIndexByTag(IndexTag);
   if not Assigned(Index) then
@@ -1401,12 +1460,20 @@ begin
     result := rvNilEvent;
     exit;
   end;
-  FTraversalEvent := Event;
   if Forwards then
     Order := btoInOrderLoHi
   else
     Order := btoInOrderHiLo;
-  Index.Root.Traverse(TraversalHandler, Order);
+  //N.B. Event must not add items to, or remove them from, the store:
+  //that changes the tree whilst it is being traversed.
+  //Save / restore so nested traversals work.
+  OldEvent := FTraversalEvent;
+  FTraversalEvent := Event;
+  try
+    Index.Root.Traverse(TraversalHandler, Order);
+  finally
+    FTraversalEvent := OldEvent;
+  end;
   result := rvOK;
 end;
 
@@ -1484,9 +1551,14 @@ var
   Index: TSIndex;
   Link: TIndexNodeLink;
   ResNode: TIndexNode;
+  Start: TItemRec;
 
 begin
-  if not Assigned(Res) then
+  //Res is nil on every error path, so callers looping on Assigned(Res)
+  //(rather than the return code) terminate.
+  Start := Res;
+  Res := nil;
+  if not Assigned(Start) then
   begin
     result := rvInvalidItem;
     exit;
@@ -1502,7 +1574,7 @@ begin
     result := rvAsyncInProgress;
     exit;
   end;
-  Link := Res.GetIndexLinkByRoot(Index, false);
+  Link := Start.GetIndexLinkByRoot(Index, false);
   if not Assigned(Link) then
   begin
     Assert(false, S_NO_INDEX_LINK);
@@ -1658,12 +1730,17 @@ procedure TIndexedStoreG.DeleteChildren;
 var
   Rec: TItemRec;
   Obj: TObject;
+  RV: TISRetVal;
 begin
   Rec := GetAnItem;
   while Assigned(Rec) do
   begin
     Obj := Rec.FItem;
-    RemoveItem(Rec);
+    RV := RemoveItem(Rec);
+    //If not removed, item is still in the store: don't free it, and don't
+    //go round the loop again with the same item.
+    if RV <> rvOK then
+      raise EIndexedStoreError.Create(S_DELETE_CHILDREN_FAILED + IntToStr(Ord(RV)));
     Obj.Free;
     Rec := GetAnItem;
   end;
@@ -1681,6 +1758,9 @@ begin
 {$ENDIF}
   while Assigned(Index) do
   begin
+    //Abandon any async op not yet performed. Delete worker copes with
+    //partially built indices.
+    Index.AsyncState := iasNone;
     DeleteIndexInternal(Index);
 {$IFOPT C+}
     Index := FIndices.FLink.Owner as TSIndex;
@@ -1899,14 +1979,18 @@ var
   OrdTag, BitsLost: TTagType;
 
 begin
-  if not (FAllowNullTags or Assigned(Tag)) then
-    result := rvInvalidTag
-  else
+  //Tag is an output parameter, so don't check its incoming value.
+  result := _IndexInfoByOrdinal(Idx, OrdTag, IndNodeClassType);
+  if result = rvOK then
   begin
-    result := _IndexInfoByOrdinal(Idx, OrdTag, IndNodeClassType);
     Tag := pointer(OrdTag);
     BitsLost := OrdTag and (not TTagType(Tag));
     Assert(BitsLost = 0);
+  end
+  else
+  begin
+    Tag := nil;
+    IndNodeClassType := nil;
   end;
 end;
 
