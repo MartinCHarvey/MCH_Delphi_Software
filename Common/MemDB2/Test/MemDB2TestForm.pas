@@ -92,7 +92,7 @@ implementation
 {$R *.fmx}
 
 uses
-  IOUtils, MemDB2API, Math, MemDB2Buffered, SyncObjs;
+  IOUtils, MemDB2API, Math, MemDB2Buffered, LockAbstractions;
 
 const
   LIMIT = 1000;

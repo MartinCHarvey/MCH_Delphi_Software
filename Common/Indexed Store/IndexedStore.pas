@@ -899,56 +899,6 @@ begin
   result := Pointer(rvOK);
 end;
 
-function IndexedStoreRecordCommonExceptions(EClass: SysUtils.ExceptClass;
-                                             EMsg: string):TExceptionFilterAction;
-begin
-  while Assigned(EClass) do
-  begin
-    if (EClass = EOutOfMemory)
-      or (EClass = EAccessViolation)
-      or (EClass = EListError)
-      or (EClass = EIntError)
-      or (EClass = EMathError)
-      or (EClass = EStackOverflow) then
-    begin
-      result := tetaRecordException;
-      exit;
-    end;
-    EClass := ExceptClass(EClass.ClassParent);
-  end;
-  result := tetaIgnore;
-end;
-
-procedure IndexedStoreNoForwardCommonExceptions(EClass: SysUtils.ExceptClass;
-                                             EMsg: string);
-begin
-  { NOP }
-end;
-
-procedure IndexedStoreForwardCommonExceptions(EClass: SysUtils.ExceptClass;
-                                             EMsg: string);
-begin
-  //The EExternalError classes here are not going to have the full Win32
-  //exception information, but this is good enough for the moment.
-  while Assigned(EClass) do
-  begin
-    if (EClass = EOutOfMemory) then
-      raise EOutOfMemory.Create(EMsg)
-    else if (EClass = EAccessViolation) then
-      raise EAccessViolation.Create(EMsg)
-    else if (EClass = EListError) then
-      raise EListError.Create(EMsg)
-    else if (EClass = EIntError) then
-      raise EIntError.Create(EMsg)
-    else if (EClass = EMathError) then
-     raise EMathError.Create(EMsg)
-    else if (EClass = EStackOverflow) then
-     raise EStackOverflow.Create(EMsg);
-    EClass := ExceptClass(EClass.ClassParent);
-  end;
-  { else NOP }
-end;
-
 function TIndexedStoreG.PerformAsyncActions(ExcHandlers: PExceptionHandlerChain): TIsRetVal;
 var
   AsyncCount, AsyncIdx: integer;
@@ -978,9 +928,9 @@ begin
   end;
   if AsyncCount = 0 then
     exit;
-  LocalExcHandler.FilterFunc := IndexedStoreRecordCommonExceptions;
+  LocalExcHandler.FilterFunc := ParalleliserRecordCommonExceptions;
   //Record so we can forward ourselves later.
-  LocalExcHandler.XlatorFunc := IndexedStoreNoForwardCommonExceptions;
+  LocalExcHandler.XlatorFunc := ParalleliserNoForwardCommonExceptions;
   //Don't forward from inside paralleliser.
 
   LocalExcHandler.Next := ExcHandlers;
@@ -1047,7 +997,7 @@ begin
   for AsyncIdx := 0 to Pred(AsyncCount) do
   begin
     if Assigned(Excepts[AsyncIdx].HandledBy) then
-      IndexedStoreForwardCommonExceptions(Excepts[AsyncIdx].EClass, Excepts[AsyncIdx].EMsg);
+      ParalleliserForwardCommonExceptions(Excepts[AsyncIdx].EClass, Excepts[AsyncIdx].EMsg);
   end;
   //Exceptions get forwarded as expected. Now collate return codes.
   for AsyncIdx := 0 to Pred(AsyncCount) do
