@@ -76,6 +76,8 @@ type
     procedure BasicTraversal(Sender: TObject);
     procedure DropBigFKeys;
     procedure AddBigFKeys;
+    procedure SynchronousCheckpoint;
+    procedure AsynchronousCheckpoint;
   public
     { Public declarations }
   end;
@@ -862,8 +864,10 @@ begin
   LogTimeIncr('Total time (slow): ' + ElapsedToTimeStr(ElSlow));
 end;
 
-procedure TForm1.CheckpointBtnClick(Sender: TObject);
+procedure TForm1.SynchronousCheckpoint;
 begin
+  LogTimeIncr('Testing synchronous checkpoint...');
+  Application.ProcessMessages;
   FTimeStamp := Now;
   if FDB.Checkpoint then
   begin
@@ -882,6 +886,283 @@ begin
   LogTimeIncr('DB started...');
   FSession := FDB.StartSession;
   LogTimeIncr('Session running.');
+end;
+
+type
+  TFillerThread = class(TThread)
+  private
+    FSession: TMemDBSession;
+    ET: TDateTime;
+    ErrMsg: string;
+    WLow, WHigh: integer;
+  protected
+    procedure Execute; override;
+  end;
+
+  TCheckpointThread = class(TThread)
+  private
+    FSession: TMemDBSession;
+    ET: TDateTime;
+    ErrMsg: string;
+  protected
+    procedure Execute; override;
+  end;
+
+procedure TFillerThread.Execute;
+
+const
+  FILL_ROWS = 100;
+
+var
+  TR: TMemDBTransaction;
+  TD: TMemAPITableData;
+  DBAPI: TMemAPIDatabase;
+  i, j: integer;
+  DR: TMemDBFieldDataRec;
+  NT: TDateTime;
+begin
+  j := 0;
+  WLow := j;
+  NT := Now;
+  while (NT < ET) and not Terminated do
+  begin
+    //FlushBuffers to write lots of files, past the pending checkpoint.
+    TR := FSession.StartTransaction(amReadWriteShared, amFlushBuffers, ilReadRepeatable);
+    try
+      DBAPI := Tr.GetAPI;
+      try
+        TD := DBAPI.GetAPIObjectFromEntity('AsyncCheckpointTbl', APITableData) as TMemAPITableData;
+        try
+          DR.FieldType := ftInteger;
+          for i := 0 to FILL_ROWS do
+          begin
+            TD.Append;
+            DR.i32Val := j;
+            TD.WriteField('Field1', DR);
+            TD.WriteField('Field2', DR);
+            TD.WriteField('Field3', DR);
+            TD.WriteField('Field4', DR);
+            TD.Post;
+            Inc(j);
+          end;
+        finally
+          TD.Free;
+        end;
+      finally
+        DBAPI.Free;
+      end;
+      Tr.CommitAndFree;
+      WHigh := Pred(j);
+      Sleep(100);
+    except
+      on E: Exception do
+      begin
+        Tr.RollbackAndFree((E is EOutOfMemory) or (E is EThread));
+        ErrMsg := E.Message;
+        raise;
+      end;
+    end;
+    NT := Now;
+  end;
+end;
+
+procedure TCheckpointThread.Execute;
+var
+  NT: TDateTime;
+begin
+  NT := Now;
+  while (NT < ET) and not Terminated do
+  begin
+    try
+      if not FSession.ParentDB.Checkpoint(true) then
+        raise Exception.Create('Checkpoint: DB not running.');
+    except
+      on E: Exception do
+      begin
+        ErrMsg := E.Message;
+        raise;
+      end;
+    end;
+    Sleep(8000);
+    NT := Now;
+  end;
+end;
+
+procedure TForm1.AsynchronousCheckpoint;
+
+  procedure SetupTable;
+  var
+    Trans: TMemDBTransaction;
+    DBAPI: TMemAPIDatabase;
+    TableMeta: TMemAPITableMetadata;
+  begin
+    Trans := FSession.StartTransaction(WMode, amLazyWrite, Iso);
+    try
+      DBAPI := Trans.GetAPI;
+      try
+        DBAPI.CreateTable('AsyncCheckpointTbl');
+        TableMeta := DBAPI.GetAPIObjectFromEntity('AsyncCheckpointTbl', APITableMetadata) as TMemAPITableMetadata;
+        try
+          TableMeta.CreateField('Field1', ftInteger);
+          TableMeta.CreateField('Field2', ftInteger);
+          TableMeta.CreateField('Field3', ftInteger);
+          TableMeta.CreateField('Field4', ftInteger);
+          TableMeta.CreateIndex('Index1', 'Field1', []);
+          TableMeta.CreateIndex('Index2', 'Field2', []);
+          TableMeta.CreateIndex('Index3', 'Field3', []);
+          TableMeta.CreateIndex('Index4', 'Field4', []);
+        finally
+          TableMeta.Free;
+        end;
+      finally
+        DBAPI.Free;
+      end;
+      Trans.CommitAndFree;
+      LogTimeIncr('Created Async checkpoint table OK.');
+    except
+      on E: Exception do
+      begin
+        Trans.RollbackAndFree;
+        LogTimeIncr('Async checkpoint table, create failed: ' + E.Message);
+        raise;
+      end;
+    end;
+  end;
+
+
+var
+  FillerThread: TFillerThread;
+  CheckpointThread: TCheckpointThread;
+  ST: TDateTime;
+  WLow, WHigh, RLow, RHigh: integer;
+
+  procedure CheckSanity;
+  var
+    TR: TMemDbTransaction;
+    DBAPI: TMemAPIDatabase;
+    TD: TMemAPITableData;
+    f, l, i: integer;
+    DR: TMemDbFieldDataRec;
+  begin
+    TR := FSession.StartTransaction(amReadShared, amLazyWrite, ilReadRepeatable);
+    try
+      DBAPI := Tr.GetAPI;
+      try
+        TD := DBAPI.GetAPIObjectFromEntity('AsyncCheckpointTbl', APITableData) as TMemAPITableData;
+        try
+          TD.Locate(ptFirst, 'Index1');
+          if not TD.RowSelected then
+            raise Exception.Create('No first row after async checkpoint');
+          TD.ReadField('Field1', DR);
+          if DR.FieldType <> ftInteger then
+            raise Exception.Create('Unexpected field type after async checkpoint');
+          f := DR.i32Val;
+          RLow := f;
+
+          TD.Locate(ptLast, 'Index1');
+          if not TD.RowSelected then
+            raise Exception.Create('No first row after async checkpoint');
+          TD.ReadField('Field1', DR);
+          if DR.FieldType <> ftInteger then
+            raise Exception.Create('Unexpected field type after async checkpoint');
+          l := DR.i32Val;
+          RHigh := l;
+
+          if (RLow <> WLow) or (RHigh <> WHigh) then
+            raise Exception.Create('First and last row data does not agree.');
+
+          for i := f to l do
+          begin
+            DR.FieldType := ftInteger;
+            Dr.i32Val := i;
+            TD.FindByIndex('Index4', DR);
+            if not TD.RowSelected then
+              raise Exception.Create('Rows not contiguous.');
+
+            TD.ReadField('Field1', DR);
+            if (DR.FieldType <> ftInteger)
+              or (DR.i32Val <> i) then
+                raise Exception.Create('Field values not consistent');
+            TD.ReadField('Field2', DR);
+            if (DR.FieldType <> ftInteger)
+              or (DR.i32Val <> i) then
+                raise Exception.Create('Field values not consistent');
+            TD.ReadField('Field3', DR);
+            if (DR.FieldType <> ftInteger)
+              or (DR.i32Val <> i) then
+                raise Exception.Create('Field values not consistent');
+            TD.ReadField('Field4', DR);
+            if (DR.FieldType <> ftInteger)
+              or (DR.i32Val <> i) then
+                raise Exception.Create('Field values not consistent');
+          end;
+        finally
+          TD.Free;
+        end;
+      finally
+        DBAPI.Free;
+      end;
+      tr.RollbackAndFree(false);
+    except
+      on E: Exception do
+      begin
+        Tr.RollbackAndFree((E is EOutOfMemory) or (E is EThread));
+        LogtimeIncr('Error: ' + E.Message);
+        raise;
+      end;
+    end;
+  end;
+
+begin
+  LogTimeIncr('Testing asynchronous checkpoint (30 secs)...');
+  Application.ProcessMessages;
+  ResetClick(self);
+  SetupTable;
+  ST := Now;
+  FillerThread := TFillerThread.Create(true);
+  try
+    FillerThread.FSession := FSession;
+    //Keep filler thread running a bit longer
+    //than checkpoint thread, so subsequent reload from
+    //checkpoint in the middle of incr transactions.
+    FillerThread.ET := ST + (25 / (3600.0 * 24.0));
+    CheckpointThread := TCheckpointThread.Create(true);
+    try
+      CheckpointThread.FSession := FSession;
+      CheckpointThread.ET := ST + (20 / (3600.0 * 24.0));
+
+      CheckpointThread.Start;
+      FillerThread.Start;
+    finally
+      CheckpointThread.WaitFor;
+      CheckpointThread.Free;
+    end;
+  finally
+    FillerThread.WaitFor;
+    WLow := FillerThread.WLow;
+    WHigh := FIllerThread.WHigh;
+    FillerThread.Free;
+  end;
+  LogTimeIncr('Done some async checkpoints, now reload DB.');
+  Application.ProcessMessages;
+  FSession.Free;
+  FSession  := nil;
+  LogTimeIncr('Session closed...');
+  FDB.StopDB;
+  LogTimeIncr('DB stopped...');
+  FDB.InitDB(DB_LOCATION, jtV2);
+  LogTimeIncr('DB started...');
+  FSession := FDB.StartSession;
+  LogTimeIncr('Session running.');
+  LogTimeIncr('Check DB sanity ...');
+  CheckSanity;
+  LogTimeIncr('Done!');
+end;
+
+procedure TForm1.CheckpointBtnClick(Sender: TObject);
+begin
+  SynchronousCheckpoint;
+  AsynchronousCheckpoint;
 end;
 
 type
@@ -5495,6 +5776,7 @@ var
       begin
         Trans.RollbackAndFree;
         LogTimeIncr('Exhaust memory table, create failed: ' + E.Message);
+        raise;
       end;
     end;
   end;

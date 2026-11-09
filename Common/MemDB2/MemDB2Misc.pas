@@ -307,7 +307,9 @@ function DefaultOptimizePolicies: TOptimizePolicies;
 
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
 var
-  DbgUnderCommitLock: boolean;
+  //Commit lock is recursive: this is a nesting count, not a flag.
+  //Only modified whilst holding the commit lock.
+  DbgUnderCommitLock: integer;
 {$ENDIF}
 
 implementation
@@ -762,7 +764,7 @@ end;
 
 initialization
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
-  DbgUnderCommitLock := false;
+  DbgUnderCommitLock := 0;
 {$ENDIF}
 
   AllIndexAttrs := GetAllIndexAttrs;

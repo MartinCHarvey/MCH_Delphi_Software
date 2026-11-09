@@ -36,7 +36,8 @@ uses
 {$IFDEF USE_TRACKABLES}
   Trackables,
 {$ENDIF}
-  Classes, DLThreadQueue, MemDB2Streamable, MemDB2Misc, LockAbstractions, Reffed;
+  Classes, DLThreadQueue, MemDB2Streamable, MemDB2Misc, LockAbstractions,
+  Reffed, DLList;
 
 type
   TMemDbJournal = class;
@@ -55,6 +56,11 @@ type
   TMemDBJournalActionType =
     (jatInitialLoad, jatCommitTransaction, jatCheckPoint, jatLastAction);
 
+  TMemDBJournalCheckpointType =
+    (jctReserve, jctCommit, jctAbort, jctComplete);
+    //Reserve, commit, abort are asynchronous,
+    //Complete is synchronous.
+
 {$IFDEF USE_TRACKABLES}
   TMemDBJournalAction = class(TTrackable)
 {$ELSE}
@@ -62,12 +68,21 @@ type
 {$ENDIF}
   private
     FActionType: TMemDBJournalActionType;
+    FCheckpointType: TMemDBJournalCheckpointType;
     FActionObj: TObject;
     //jatCommit: Transaction object (not owned).
     //jatCheckPoint: TMemDatabaseItem (changeset, owned).
+
+    //ChkGuid for asynchronous checkpoints.
+    FChkGuid: TGuid;
+    //AutoInitChk for auto initial synchronous checkpoint on load.
+    FAutoInitChk: boolean;
   public
     property ActionObj: TObject read FActionObj write FActionObj;
     property ActionType: TMemDBJournalActionType read FActionType write FActionType;
+    property CheckpointType: TMemDBJournalCheckpointType read FCheckpointType write FCheckpointType;
+    property ChkGuid: TGuid read FChkGuid write FChkGuid;
+    property AutoInitChk: boolean read FAutoInitChk write FAutoInitChk;
   end;
 
   TJournalInitializedEvent = procedure(Sender: TObject; OK: boolean;
@@ -93,6 +108,20 @@ type
                         );
 
 {$IFDEF USE_TRACKABLES}
+  TMemDBCheckpointReservation = class(TTrackable)
+{$ELSE}
+  TMemDBCheckpointReservation = class
+{$ENDIF}
+  private
+    FSiblingListEntry: TDLEntry;
+    FGuid: TGuid;
+    FSeq: UInt64; //File sequence number reserved.
+  public
+    constructor Create;
+    destructor Destroy; override;
+  end;
+
+{$IFDEF USE_TRACKABLES}
   TMemDBJournal = class(TTrackable)
 {$ELSE}
   TMemDBJournal = class
@@ -113,6 +142,8 @@ type
     FOnJournalWriteFlush: TJournalTransactionWriteFlushEvent;
     FOnJournalError: TJournalErrorEvent;
 
+    FTempCheckpoints: TDLEntry; //List of reserved GUID's, files.
+
     procedure DoJournalInitialized(OK: boolean; AnyFiles: boolean; CreateCheckpoint: boolean; ErrMsg: string);
     procedure DoJournalFinished(Signal: boolean = true);
     procedure ErrorDropTransaction(T: TReffed);
@@ -131,14 +162,24 @@ type
     procedure ThreadFunc;
     procedure HighPriorityDone;
     procedure DoUIStateChange;
+
+    procedure AddToTempCheckpoints(const ChkGuid: TGuid; Seq: UInt64);
+    function GetFromTempCheckpoints(const ChkGuid: TGuid): UInt64;
+    //As GetFromTempCheckpoints, but silently does nothing if not found.
+    procedure DiscardTempCheckpoint(const ChkGuid: TGuid);
   public
     constructor Create;
     destructor Destroy; override;
 
     //Called by MemDB.
-    procedure Initialise;
+    procedure Initialise(AutoInitialCheckpoint: boolean);
     procedure TransactionCommitChangeset(Transaction: TObject);
-    procedure Checkpoint(Changeset: TObject);
+    //Can do both blocking and non-blocking checkpoints.
+    //Blocking ones can be done automatically, nonblocking you do
+    //yourself.
+    procedure Checkpoint(CType: TMemDBJournalCheckpointType;
+                         const Id: TGuid;
+                         Changeset: TObject);
     procedure Finish;
     function NeedFlowControl: boolean;
     procedure SynchronizeStateChange;
@@ -165,6 +206,7 @@ type
     FJournalType : TMemDBJournalType;
     FWriteSeq: UInt64;
     procedure FreeRList(var RList: TList);
+    procedure WriteNullIncremental(Seq: UInt64);
   protected
     function GetInitialFileList: TList;
     function GetListAndInitialSeqs(var RList: TList; var InitialSeq:Uint64; var FinalSeq: UInt64): boolean;
@@ -211,6 +253,8 @@ const
   S_FLUSH_FAILED = 'File flush failed: ';
   S_FILE_RENAME_FAILED  = 'File rename failed: ';
   S_UNHANDLED_EXCEPT_IN_JTHREAD = 'Unhandled in journal thread, DB toast: ';
+  S_CHECKPOINT_RESERVATION_NOT_FOUND = 'Async checkpoint file reservation not found.';
+  S_GAP_FILL_FAILED = 'Could not replace abandoned async checkpoint with empty incremental: ';
 
   CHECKPOINT_RATIO = 10; { More than 1/10th data in journal, re-checkpoint }
 
@@ -234,6 +278,20 @@ const
   JOURNAL_THREAD_POLL_LATENCY = 5000;
   FileExts: TJournalFileExts = ('.dbinit', '.dbincr',
                                 '.dbinit_partial', '.dbincr_partial');
+
+{ TMemDBCheckpointReservation }
+
+constructor TMemDBCheckpointReservation.Create;
+begin
+  inherited;
+  DLItemInitObj(self, @self.FSiblingListEntry);
+end;
+
+destructor TMemDBCheckpointReservation.Destroy;
+begin
+  Assert(DLitemIsEmpty(@self.FSiblingListEntry));
+  inherited;
+end;
 
 { TMemDBJournalThread }
 
@@ -586,10 +644,13 @@ constructor TMemDBJournal.Create;
 begin
   FActionsPendingQueue := TDLProxyThreadQueue.Create;
   FHighPriorityEvent := TEvent.Create(nil, true, false, '');
+  DLItemInitList(@FTempCheckpoints);
   inherited;
 end;
 
 destructor TMemDBJournal.Destroy;
+var
+  R: TMemDBCheckpointReservation;
 begin
   FActionsPendingQueue.AcquireLock;
   try
@@ -603,14 +664,20 @@ begin
     FJournalThread.WaitFor;
     FJournalThread.Free;
   end;
-{$IFOPT C+}
   FActionsPendingQueue.AcquireLock;
   try
     Assert(FActionsPendingQueue.Count = 0);
+    Assert(DLItemIsEmpty(@FTempCheckpoints));
+    R := FTempCheckpoints.FLink.Owner as TMemDBCheckpointReservation;
+    while Assigned(R) do
+    begin
+      DLListRemoveObj(@R.FSiblingListEntry);
+      R.Free;
+      R := FTempCheckpoints.FLink.Owner as TMemDBCheckpointReservation;
+    end;
   finally
     FActionsPendingQueue.ReleaseLock;
   end;
-{$ENDIF}
   FActionsPendingQueue.Free;
   Assert(FHighPriorityActionCount = 0);
   FHighPriorityEvent.Free;
@@ -648,6 +715,7 @@ begin
     end;
     Action := TMemDbJournalAction.Create;
     Action.ActionType := jatInitialLoad;
+    Action.AutoInitChk := AutoInitialCheckpoint;
     FActionsPendingQueue.AddTailobj(Action);
     //Needs to happen rapidly.
     Inc(FHighPriorityActionCount);
@@ -685,16 +753,20 @@ begin
   end;
 end;
 
-procedure TMemDBJournal.Checkpoint(Changeset: TObject);
+procedure TMemDBJournal.Checkpoint(CType: TMemDBJournalCheckpointType;
+                         const Id: TGuid;
+                         Changeset: TObject);
 var
   Action: TMemDbJournalAction;
 begin
-  Assert(Assigned(Changeset));
+  Assert(Assigned(Changeset) = not (CType in [jctReserve, jctAbort]));
   FActionsPendingQueue.AcquireLock;
   try
     Assert(FState in [jscRunning, jscRunningError]);
     Action := TMemDbJournalAction.Create;
     Action.ActionType := jatCheckPoint;
+    Action.CheckpointType := CType;
+    Action.ChkGuid := Id;
     Action.ActionObj := Changeset;
     FActionsPendingQueue.AddTailObj(Action);
   finally
@@ -733,6 +805,67 @@ procedure TMemDBJournal.DoUIStateChange;
 begin
   if Assigned(FOnUIStateChange) then
     FOnUIStateChange(self);
+end;
+
+procedure TMemDBJournal.AddToTempCheckpoints(const ChkGuid: TGuid; Seq: UInt64);
+var
+  R: TMemDBCheckpointReservation;
+begin
+  R := TMemDBCheckpointReservation.Create;
+  R.FGuid := ChkGuid;
+  R.FSeq := Seq;
+  FActionsPendingQueue.AcquireLock;
+  try
+    DLListInsertTail(@FTempCheckpoints, @R.FSiblingListEntry);
+  finally
+    FActionsPendingQueue.ReleaseLock;
+  end;
+end;
+
+function TMemDBJournal.GetFromTempCheckpoints(const ChkGuid: TGuid): UInt64;
+var
+  R: TMemDBCheckpointReservation;
+begin
+  FActionsPendingQueue.AcquireLock;
+  try
+    R := FTempCheckpoints.FLink.Owner as TMemDBCheckpointReservation;
+    while Assigned(R) do
+    begin
+      if R.FGuid = ChkGuid then
+      begin
+        result := R.FSeq;
+        DLListRemoveObj(@R.FSiblingListEntry);
+        R.Free;
+        exit;
+      end;
+      R := R.FSiblingListEntry.FLink.Owner as TMemDBCheckpointReservation;
+    end;
+  finally
+    FActionsPendingQueue.ReleaseLock;
+  end;
+  raise EMemDBException.Create(S_CHECKPOINT_RESERVATION_NOT_FOUND);
+end;
+
+procedure TMemDBJournal.DiscardTempCheckpoint(const ChkGuid: TGuid);
+var
+  R: TMemDBCheckpointReservation;
+begin
+  FActionsPendingQueue.AcquireLock;
+  try
+    R := FTempCheckpoints.FLink.Owner as TMemDBCheckpointReservation;
+    while Assigned(R) do
+    begin
+      if R.FGuid = ChkGuid then
+      begin
+        DLListRemoveObj(@R.FSiblingListEntry);
+        R.Free;
+        exit;
+      end;
+      R := R.FSiblingListEntry.FLink.Owner as TMemDBCheckpointReservation;
+    end;
+  finally
+    FActionsPendingQueue.ReleaseLock;
+  end;
 end;
 
 { TMemDbDefaultJournal }
@@ -835,6 +968,7 @@ var
   Idx, StartIdx: integer;
   Found: boolean;
   DBInfo: TDBFileInfo;
+  PendingGaps: UInt64;
 
 begin
   result := false;
@@ -884,12 +1018,25 @@ begin
     FinalSeq := Succ(InitialSeq);
     //Found initial file number. Expect all subsequent (if they exist) to be in numerical order,
     //with no gaps.
+
+    //Exception: an async checkpoint that was reserved but never committed
+    //(crash, or failure writing it) leaves a checkpoint temporary, and
+    //incremental files may follow it. Its snapshot is also in the earlier
+    //files, so when later files follow it, treat it as an empty incremental
+    //(as jctAbort would have written). A trailing one is just ignored.
+    PendingGaps := 0;
     for Idx := Succ(StartIdx) to Pred(RList.Count) do
     begin
       DBInfo := TDBFileInfo(RList[Idx]);
-      //Ignore temporaries whilst finding incremental updates.
-      if DBInfo.FileType in [jftInitOrCheckpoint, jftIncremental] then
+      if (DBInfo.FileType = jftInitOrCheckpointTemp)
+        and (DBInfo.FileSeq = FinalSeq + PendingGaps) then
+        Inc(PendingGaps)
+      //Ignore other temporaries whilst finding incremental updates.
+      else if DBInfo.FileType in [jftInitOrCheckpoint, jftIncremental] then
       begin
+        if (PendingGaps > 0) and (DBInfo.FileSeq = FinalSeq + PendingGaps) then
+          Inc(FinalSeq, PendingGaps);
+        PendingGaps := 0;
         if (DBInfo.FileType <> jftIncremental) or
            (DBInfo.FileSeq <> FinalSeq) then
           exit; //Result = false.
@@ -928,6 +1075,41 @@ begin
   end;
 end;
 
+//Overwrite the checkpoint temporary at Seq with an empty incremental, and
+//rename it to the final incremental name. Used by jctAbort, and at load
+//for async checkpoints abandoned before commit or abort.
+procedure TMemDbDefaultJournal.WriteNullIncremental(Seq: UInt64);
+var
+  FileName, FinalFileName: string;
+  OutputStream: TFileStream;
+  NullStream: TStream;
+  FlushOK: boolean;
+begin
+  FileName := FBaseDirectory + IntToStr(Seq) + FileExts[jftInitOrCheckpointTemp];
+  FinalFileName := FBaseDirectory + IntToStr(Seq) + FileExts[jftIncremental];
+  NullStream := MakeNullIncremental;
+  try
+    OutputStream := TFileStream.Create(FileName, fmCreate or fmShareExclusive);
+    try
+      NullStream.Seek(0, soFromBeginning);
+      OutputStream.CopyFrom(NullStream, NullStream.Size);
+{$IFDEF WINDOWS_FLUSH}
+      FlushOK := FlushFileBuffers(OutputStream.Handle);
+{$ELSE}
+      FlushOK := (fsync(Integer(OutputStream.Handle)) = 0);
+{$ENDIF}
+      if not FlushOK then
+        raise EMemDBException.Create(S_FLUSH_FAILED + FileName);
+    finally
+      OutputStream.Free;
+    end;
+  finally
+    NullStream.Free;
+  end;
+  if not RenameFile(FileName, FinalFileName) then
+    raise EMemDBException.Create(S_FILE_RENAME_FAILED + FileName);
+end;
+
 function TMemDbDefaultJournal.PerformInitialLoad(Action: TMemDbJournalAction;
   var AnyFiles: boolean; var CreateCheckpoint: boolean; var ErrMsg: string): boolean;
 var
@@ -940,6 +1122,8 @@ var
   TotalInitFileSize: UInt64;
   TotalIncrFileSize: UInt64;
   ReadFileCount: integer;
+  GapSeqs: array of UInt64;
+  GapIdx: integer;
 begin
   Assert(Assigned(Action));
   Assert(Action.ActionType = jatInitialLoad);
@@ -968,8 +1152,18 @@ begin
     for Idx := 0 to Pred(RList.Count) do
     begin
       DBInfo := TDBFileInfo(RList[Idx]);
-      //Ignore the temporary files
-      if DBInfo.FileType in [jftInitOrCheckpoint, jftIncremental] then
+      //Abandoned async checkpoint accepted as a gap by GetListAndInitialSeqs:
+      //nothing to replay, its snapshot is in the earlier files.
+      if (DBInfo.FileType = jftInitOrCheckpointTemp)
+        and (DBInfo.FileSeq > InitialSeq) and (DBInfo.FileSeq < FinalSeq)
+        and (DBInfo.FileSeq = ReadSeq) then
+      begin
+        SetLength(GapSeqs, Succ(Length(GapSeqs)));
+        GapSeqs[High(GapSeqs)] := DBInfo.FileSeq;
+        Inc(ReadSeq);
+      end
+      //Ignore the other temporary files
+      else if DBInfo.FileType in [jftInitOrCheckpoint, jftIncremental] then
       begin
         if (DBInfo.FileSeq >= InitialSeq) and (DBInfo.FileSeq < FinalSeq) then
         begin
@@ -1014,15 +1208,34 @@ begin
         end;
       end;
     end;
+    //Replace abandoned async checkpoints with empty incrementals, so the
+    //numbering on disk is contiguous before the temporaries are cleaned up.
+    for GapIdx := 0 to High(GapSeqs) do
+    begin
+      try
+        WriteNullIncremental(GapSeqs[GapIdx]);
+      except
+        on E: Exception do
+        begin
+          ErrMsg := S_GAP_FILL_FAILED + E.Message;
+          exit; //Result = false.
+        end;
+      end;
+    end;
     //Only if everything else has worked do we then clean out unused files.
     FWriteSeq := FinalSeq;
     CleanupUnusedFiles(RList, InitialSeq, FinalSeq);
     CreateCheckpoint :=
-         (not AnyFiles)
+        (not AnyFiles)
       or
-         ((TotalIncrFileSize > (TotalInitFileSize div CHECKPOINT_RATIO))
-         and (TotalIncrFileSize > ONE_MEG))
-      or (ReadFileCount > MAX_INCR_JOURNAL_FILES);
+        ( Action.AutoInitChk
+          and
+          (
+            ((TotalIncrFileSize > (TotalInitFileSize div CHECKPOINT_RATIO))
+              and (TotalIncrFileSize > ONE_MEG))
+            or (ReadFileCount > MAX_INCR_JOURNAL_FILES)
+          )
+        );
     result := true;
   finally
     for Idx := 0 to Pred(RList.Count) do
@@ -1137,6 +1350,7 @@ end;
 
 procedure TMemDbDefaultJournal.PerformCheckpoint(Action: TMemDBJournalAction; JState: TJournalState);
 var
+  Seq: UInt64;
   FileName, FinalFileName: string;
   OutputStream: TStream;
   result: boolean;
@@ -1151,56 +1365,102 @@ begin
       if JState in [jscRunning, jscFinishing] then
       begin
         try
-          FileName := FBaseDirectory + IntToStr(FWriteSeq) + FileExts[jftInitOrCheckpointTemp];
-          FinalFileName := FBaseDirectory + IntToStr(FWriteSeq) + FileExts[jftInitOrCheckpoint];
-      {$IFDEF MSWINDOWS}
-          //Make it slightly less likely ENoMem destroys journal thread.
-          try
-            OutputStream := TWriteCachedFileStream.Create(FileName, FILE_CACHE_SIZE);
-          except
-            //Streams bulk-copied from, performance hit not so bad in the out of
-            //memory case.
-            on E:EOutOfMemory do
-              OutputStream := TFileStream.Create(FileName, fmCreate or fmShareExclusive);
+          Result := false;
+          case Action.CheckpointType of
+            jctReserve: begin
+              AddToTempCheckpoints(Action.ChkGuid, FWriteSeq);
+              try
+                FileName := FBaseDirectory + IntToStr(FWriteSeq) + FileExts[jftInitOrCheckpointTemp];
+                //Create the file - it's now in the numbering system, although it's a temp.
+                //Just so the files on disk roughly mirror the state of things.
+                OutputStream := TFileStream.Create(FileName, fmCreate or fmShareExclusive);
+                OutputStream.Free;
+              except
+                GetFromTempCheckpoints(Action.ChkGuid);
+                raise;
+              end;
+              result := true;
+            end;
+            jctAbort: begin
+              //We have to create *a* file, however we don't have full checkpoint data,
+              //and we don't know what the state of the DB at that point was, so
+              //the best we can do is write an incremental file that is "no changes".
+              Assert(not Assigned(Action.ActionObj));
+              WriteNullIncremental(GetFromTempCheckpoints(Action.ChkGuid));
+              result := true;
+            end;
+            jctCommit, jctComplete:  begin
+              if Action.CheckpointType = jctComplete then
+              begin
+                FileName := FBaseDirectory + IntToStr(FWriteSeq) + FileExts[jftInitOrCheckpointTemp];
+                FinalFileName := FBaseDirectory + IntToStr(FWriteSeq) + FileExts[jftInitOrCheckpoint];
+              end
+              else
+              begin
+                Seq := GetFromTempCheckpoints(Action.ChkGuid);
+                FileName := FBaseDirectory + IntToStr(Seq) + FileExts[jftInitOrCheckpointTemp];
+                FinalFileName := FBaseDirectory + IntToStr(Seq) + FileExts[jftInitOrCheckpoint];
+              end;
+          {$IFDEF MSWINDOWS}
+              //Make it slightly less likely ENoMem destroys journal thread.
+              try
+                OutputStream := TWriteCachedFileStream.Create(FileName, FILE_CACHE_SIZE);
+              except
+                //Streams bulk-copied from, performance hit not so bad in the out of
+                //memory case.
+                on E:EOutOfMemory do
+                  OutputStream := TFileStream.Create(FileName, fmCreate or fmShareExclusive);
+              end;
+          {$ELSE}
+              OutputStream := TWriteCachedFileStream.Create(FileName, fmCreate);
+          {$ENDIF}
+              try
+                Assert(Assigned(Action));
+                Assert(Assigned(Action.ActionObj));
+                Assert(Action.ActionObj is TStream);
+                ActionStream := Action.ActionObj as TStream;
+                ActionStream.Seek(0, soFromBeginning);
+                OutputStream.CopyFrom(ActionStream, ActionStream.Size);
+        {$IFDEF WINDOWS_FLUSH}
+                if OutputStream is TWriteCachedFileStream then
+                begin
+                  (OutputStream as TWriteCachedFileStream).FlushCache;
+                  FlushOK := FlushFileBuffers((OutputStream as TWriteCachedFileStream).Handle);
+                end
+                else
+                  FlushOK := FlushFileBuffers((OutputStream as TFileStream).Handle);
+        {$ELSE}
+                FlushOK := (fsync(Integer((OutputStream as TFileStream).Handle)) = 0);
+        {$ENDIF}
+                if not FlushOK then
+                  raise EMemDBException.Create(S_FLUSH_FAILED + FileName);
+              finally
+                OutputStream.Free;
+              end;
+              if not RenameFile(FileName, FinalFileName) then
+                raise EMemDBException.Create(S_FILE_RENAME_FAILED + FileName);
+
+              result := true; //Errors on this path caught by exceptions.
+            end; //jctComplete.
+          else
+            Assert(false);
           end;
-      {$ELSE}
-          OutputStream := TWriteCachedFileStream.Create(FileName, fmCreate);
-      {$ENDIF}
-          try
-            Assert(Assigned(Action));
-            Assert(Assigned(Action.ActionObj));
-            Assert(Action.ActionObj is TStream);
-            ActionStream := Action.ActionObj as TStream;
-            ActionStream.Seek(0, soFromBeginning);
-            OutputStream.CopyFrom(ActionStream, ActionStream.Size);
-    {$IFDEF WINDOWS_FLUSH}
-            if OutputStream is TWriteCachedFileStream then
-            begin
-              (OutputStream as TWriteCachedFileStream).FlushCache;
-              FlushOK := FlushFileBuffers((OutputStream as TWriteCachedFileStream).Handle);
-            end
-            else
-              FlushOK := FlushFileBuffers((OutputStream as TFileStream).Handle);
-    {$ELSE}
-            FlushOK := (fsync(Integer((OutputStream as TFileStream).Handle)) = 0);
-    {$ENDIF}
-            if not FlushOK then
-              raise EMemDBException.Create(S_FLUSH_FAILED + FileName);
-          finally
-            OutputStream.Free;
-          end;
-          if not RenameFile(FileName, FinalFileName) then
-            raise EMemDBException.Create(S_FILE_RENAME_FAILED + FileName);
-          result := true; //Errors on this path caught by exceptions.
         finally
           //Increment even on failure, because async stop not immediate.
-          Inc(FWriteSeq);
+          //Commit/Abort of prev reserved does not increment our write seq.
+          if not (Action.CheckpointType in [jctCommit, jctAbort]) then
+            Inc(FWriteSeq);
         end;
       end
       else
       begin
         result := false;
         ErrMsg := S_SKIPPED_PREV_JOURNAL_ERROR;
+        //Still drop the reservation a skipped commit / abort refers to,
+        //so FTempCheckpoints is empty at shutdown. Any partial file left
+        //on disk is treated as an empty incremental at the next load.
+        if Action.CheckpointType in [jctCommit, jctAbort] then
+          DiscardTempCheckpoint(Action.ChkGuid);
       end;
     finally
       //Do free changeset data, no associated transaction obj.

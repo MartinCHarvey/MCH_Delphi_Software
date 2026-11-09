@@ -304,6 +304,8 @@ function NotAssignedOrSentinel(X: TMemDBStreamable): boolean; inline;
 
 procedure GetTxionSizeEstimate(JournalEntry: TStream; var TxionSizeEstimate: int64);
 
+function MakeNullIncremental: TStream;
+
 implementation
 
 uses
@@ -1308,5 +1310,13 @@ begin
     end;
   end;
 end;
+
+function MakeNullIncremental: TStream;
+begin
+  result := TMemoryStream.Create;
+  WrTag(result, mstDBStart);
+  WrTag(result, mstDBEnd);
+end;
+
 
 end.
