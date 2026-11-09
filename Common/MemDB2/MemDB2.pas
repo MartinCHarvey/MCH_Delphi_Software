@@ -227,9 +227,17 @@ type
     destructor Destroy; override;
     function InitDB(RootLocation: string;
                     JournalType: TMemDBJournalType = jtV2;
-                    Async: boolean = false): boolean;
+                    Async: boolean = false;
+                    AutoInitialCheckpoint: boolean = true): boolean;
     procedure StopDB(Force: boolean = false);
-    function Checkpoint: boolean;
+
+    //WARNING: Asynchronous checkpoint may change the row order
+    //permanently when iterating not by index.
+    //(same order as iterate with isolation >= snapshot)
+
+    //Asynchronous here means it doesn't block other DB transactions in
+    //sharedReadWrite mode....
+    function Checkpoint(Asynchronous:boolean = false): boolean;
     function StartSession: TMemDBSession;
 
     property DBState: TMemDBPhase read FPhase;
@@ -657,6 +665,10 @@ end;
 
 procedure TMemDB.CommitAPICheckDBErrFlagSynchronous;
 begin
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+  Assert(DbgUnderCommitLock > 0);
+{$ENDIF}
+
   FSessionLock.Acquire;
   try
     Assert(FPhase in [mdbInitCheckpoint,mdbRunning, mdbRunningError,
@@ -699,6 +711,9 @@ procedure TMemDB.CommitAPIJournalTxion(T: TReffed);
 begin
   T.AddRef;
   try
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+  Assert(DbgUnderCommitLock > 0);
+{$ENDIF}
     FJournal.TransactionCommitChangeset(T);
   except
     T.Release;
@@ -1037,7 +1052,8 @@ end;
 
 function TMemDB.InitDB(RootLocation: string;
                        JournalType: TMemDBJournalType;
-                       Async: boolean): boolean;
+                       Async: boolean;
+                       AutoInitialCheckpoint: boolean): boolean;
 
   procedure StartupActions;
   begin
@@ -1048,7 +1064,7 @@ function TMemDB.InitDB(RootLocation: string;
     FSeenLowMem := false;
     FJournal.BaseDirectory := RootLocation;
     FJournal.JournalType := JournalType;
-    FJournal.Initialise;
+    FJournal.Initialise(AutoInitialCheckpoint);
     FPhase := mdbInit;
     FLastError := '';
   end;
@@ -1144,7 +1160,7 @@ begin
 end;
 
 //This is a blocking state machine, and I'm starting to wonder whether
-//I should have coded a nonblocking one ...
+//I should have coded a Asynchronous one ...
 procedure TMemDB.StopDBLocked;
 var
   DBTmp: TMemDbDatabasePersistent;
@@ -1455,41 +1471,48 @@ begin
   end;
 end;
 
-//Claude says: Checkpoint: streams the entire table set while holding each FMasterRowLock,
-//which blocks inserts to that table.
-//My comments: Checkpoint is designed here for simplicity and safety.
-//It *is* possible to not hold those locks, and even to Checkpoint in
-//lrSharedR/W via snapshots, but that is not the point of it.
-//Email the author if you'd like a more concurrent friendly checkpoint.
+//WARNING: Non-blocking checkpoint may change the row order
+//permanently when iterating not by index.
+//(same order as iterate with isolation >= snapshot)
+function TMemDB.Checkpoint(Asynchronous: boolean): boolean;
 
-function TMemDB.Checkpoint: boolean;
 var
   ChangesetStream: TStream;
   PseudoTid: TTransactionId;
   Ctxt: TXTransactionLocalContext;
   EntSnapshot, EntRegistered: TReffedList;
+  ChkGuid: TGUID;
+  ReservedFile: boolean;
 
 begin
   Ctxt := nil;
   EntSnapshot := nil;
   EntRegistered := nil;
   ChangesetStream := nil;
+  ReservedFile := false;
+  CreateGuid(ChkGuid);
+
   FSessionLock.Acquire;
   try
     result := FPhase in [mdbInitCheckpoint, mdbRunning];
     if result then
       Inc(FCheckpointRefs);
+
   finally
     FSessionLock.Release;
   end;
   if result then
   begin
-    FRWWLock.Acquire(lrSharedRead);
+    if Asynchronous then
+      FRWWLock.Acquire(lrSharedWrite)
+    else
+      FRWWLock.Acquire(lrSharedRead);
     //Totally consistent worldview - but will do list atomicity
     //inside DB classes as well.
     try
       Ctxt := TXTransactionLocalContext.Create;
       Ctxt.SetPtrs(@EntSnapshot, @EntRegistered);
+      Ctxt.FAsynchronousCheckpoint := Asynchronous;
       try
         ChangesetStream := MakeStream(tsmDisk); //Most conservative stream making mode.
 
@@ -1497,24 +1520,61 @@ begin
         try
           FDatabase.CommitLock.Acquire;
   {$IFDEF DBG_UNDER_COMMIT_LOCK}
-          DbgUnderCommitLock := true;
+          Inc(DbgUnderCommitLock);
   {$ENDIF}
           try
             CommitAPICheckDBErrFlagSynchronous;
-
             try
               //Serialisable, lrSharedRead - no changes in progress.
-              FDatabase.StartTransaction(PseudoTid, Ctxt);
+              FDatabase.MetaIndexLock.Acquire;
+              try
+                FDatabase.StartTransaction(PseudoTid, Ctxt);
+              finally
+                FDatabase.MetaIndexLock.Release;
+              end;
               //Once started transaction have pins to clear.
               //Before started transaction, no entity lists(!).
-
-              FDatabase.ToScratch(PseudoTid, ChangesetStream, Ctxt);
-              FJournal.Checkpoint(ChangesetStream);
-              ChangesetStream := nil;
-            finally
-              //We probably shouldn't need to to this at all, but keep
-              //it here for safety.
+              if Asynchronous then
+              begin
+      {$IFDEF DBG_UNDER_COMMIT_LOCK}
+                Assert(DbgUnderCommitLock > 0);
+      {$ENDIF}
+                FJournal.Checkpoint(jctReserve, ChkGuid, nil);
+                ReservedFile := true;
+      {$IFDEF DBG_UNDER_COMMIT_LOCK}
+                Assert(DbgUnderCommitLock > 0);
+                Dec(DbgUnderCommitLock);
+      {$ENDIF}
+                FDatabase.CommitLock.Release;
+              end;
               try
+                FDatabase.ToScratch(PseudoTid, ChangesetStream, Ctxt);
+                if Asynchronous then
+                begin
+                  FJournal.Checkpoint(jctCommit, ChkGuid, ChangesetStream);
+                  ReservedFile := false;
+                end
+                else
+                  FJournal.Checkpoint(jctComplete, TGUID.Empty, ChangesetStream);
+
+                ChangesetStream := nil;
+              finally
+                if Asynchronous then
+                begin
+                  FDatabase.CommitLock.Acquire;
+          {$IFDEF DBG_UNDER_COMMIT_LOCK}
+                  Inc(DbgUnderCommitLock);
+          {$ENDIF}
+                end;
+              end;
+            finally
+              try
+                if ReservedFile then
+                begin
+                  FJournal.Checkpoint(jctAbort, ChkGuid, nil);
+                  ReservedFile := false;
+                end;
+
                 FDatabase.MetaIndexLock.Acquire;
                 try
                   FDatabase.Rollback(PseudoTid, rbpIndexRollback, [], Ctxt);
@@ -1533,7 +1593,8 @@ begin
             end;
           finally
   {$IFDEF DBG_UNDER_COMMIT_LOCK}
-            DbgUnderCommitLock := false;
+            Assert(DbgUnderCommitLock > 0);
+            Dec(DbgUnderCommitLock);
   {$ENDIF}
             FDatabase.CommitLock.Release;
           end;
@@ -1558,7 +1619,10 @@ begin
         EntRegistered.Release;
       end;
     finally
-      FRWWLock.Release(lrSharedRead);
+      if Asynchronous then
+        FRWWLock.Release(lrSharedWrite)
+      else
+        FRWWLock.Release(lrSharedRead);
 
       FSessionLock.Acquire;
       try

@@ -1,21 +1,14 @@
 # MCH_Delphi_Software
 GitHub repo for open sourced MCH Software.
 
-Most recent (2026) development is in Common/MemDB2:
+Most recent (2026) development is in Common/MemDB2, an in-memory database engine, now with a C API, Android support and asynchronous checkpoints. See below for details.
 
-- *MemDB now legacy code. Will be removed start of Dec 2026.*
-- *MemDB now has an upgrade tool (to MemDB2 format) on the MemDB_Upgrade_Tool branch.*
-- *MemDB2 now has C API, and pre-built binaries for Visual Studio jockeys*.
-- Now suitable for general use, with many bugfixes from AI reivew. *Significantly more robust*.
-- Docs\ folder contains Claude code review for those of you worried about code quality.
-- MemDB2 now compiles & runs on both **Win32/64 and Android 32/64**
-  - If you want to build for Android (running Delphi > XE4), remove "USE_WINDOWS_LOCKS" from project conditional defines, that bugfix is no longer needed.
-- SQL support for MemDB2 in progress.
+*MemDB (the original) is now legacy code, and will be removed at the start of Dec 2026.*
 
 Also:
 - TP Lex / Yacc port for Delphi now at: https://github.com/MartinCHarvey/MCH-TPLY41
   - Now has an OO mode "-oo" for generating object orientated code.
-  - Support via additional declarations "%classname" "%classdecl" "%classfunc" "%classvar" for OO encapsultated lexers and parsers.
+  - Support via additional declarations "%classname" "%classdecl" "%classfunc" "%classvar" for OO encapsulated lexers and parsers.
 
 If any of you folks get some of this to compile / run under the FPC compiler, I'd be very interested to know.
 
@@ -24,6 +17,16 @@ martin_c_harvey@hotmail.com
 # Summary of contents.
 
 Files / Folders:
+
+- Common/MemDB2: In-memory database engine, successor to MemDB.
+  - Now suitable for general use, with many bugfixes from AI review. *Significantly more robust*.
+  - Asynchronous checkpoints: checkpoint without blocking shared read/write transactions.
+  - C API, and pre-built binaries for Visual Studio jockeys.
+  - Compiles & runs on both **Win32/64 and Android 32/64**.
+    - If you want to build for Android (running Delphi > XE4), remove "USE_WINDOWS_LOCKS" from project conditional defines, that bugfix is no longer needed.
+  - Docs\ folder contains Claude code review for those of you worried about code quality.
+  - Upgrade tool (MemDB to MemDB2 format) on the MemDB_Upgrade_Tool branch.
+  - SQL support in progress.
 
 - KnowComment: A Delphi client for Instagram (and eventually Twitter too, but needs a few fixes). Needs port to MemDB2 in the next month.
 
@@ -63,7 +66,7 @@ Common: Common utility code, including:
 - Combined HTTP fetch and document parse.
 - Indexed store (see http://www.martincharvey.net/ for more info).
 - Logging code.
-- Lightweight in memory database engine. Currently suitable for relatively small (in modern terms) datasets. E-mail me for an explanation of limitations. 
+- MemDB2 in memory database engine (see above), and legacy MemDB.
 - Ordinal set handling.
 - Reconfigurable lexer.
 - Custom object streaming system.
@@ -76,7 +79,9 @@ Common: Common utility code, including:
 Additional testapps and utility code.
 
 - CoWTree testapp: Common/CowTree/Test
-- MemDB testapp: Common/MemDB/Test/
+- MemDB2 testapp: Common/MemDB2/Test/
+- MemDB2 C API example: Common/MemDB2/C_API/example.c
+- MemDB testapp (legacy): Common/MemDB/Test/
 - Lexer testapp: Common/SoftLexer/Test/
 - Streaming system testapp: Common/StreamingSystem/Test/
 - Threadpool testapp: Common/WorkItems/Test/
@@ -84,14 +89,14 @@ Additional testapps and utility code.
 - Threadpool testapp: Common/WorkItems/Test3/
 - Instagram / Twitter importer testapp MMapper/
 - FetchParse library testapp: PageMapper/
-- Sparse Matrix testapp Commmon/SparseMatrix/Test
+- Sparse Matrix testapp Common/SparseMatrix/Test
 - ExactCover testapp Common/ExactCover/Test
 - Batch Sudoku solver (Sudoku/BatchThreadedSolver)
 
 Future development plans:
 
 - Clean up parser error recovery code with a "standard" lexer.
-- MemDB: Query engine.
+- MemDB2: Query engine (SQL).
 - Investigate compilability under FreePascal compiler.
 
 Comments / queries to martin_c_harvey@hotmail.com

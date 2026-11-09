@@ -25,6 +25,7 @@ unit MemDB2CApi;
   * Strings: UTF-8, NUL terminated, in both directions. Output strings and
     blobs use caller supplied buffers: pass a NULL buffer to query the size.
   * Blobs: copied in both directions; no memory ownership crosses the API.
+    Blobs can be read whole or as a leading part, and used in search keys.
 }
 
 interface
@@ -35,7 +36,9 @@ uses
 const
   //memdb2.h calls this MDB_API_VERSION. Pascal is case-insensitive, so that
   //name would clash with the function mdb_api_version.
-  MDB_CAPI_VERSION = 1;
+  //1: first release. 2: mdb_data_read_blob_prefix, mdb_key_add_blob.
+  //3: mdb_db_open_ex, mdb_db_checkpoint_ex.
+  MDB_CAPI_VERSION = 3;
 
   //Status codes.
   MDB_OK = 0;
@@ -106,6 +109,13 @@ const
   MDB_PHASE_CLOSED = 8;
   MDB_PHASE_CLOSED_ERROR = 9;
 
+  //mdb_db_open_ex flags.
+  MDB_OPEN_ASYNC = 1;
+  MDB_OPEN_NO_AUTO_CHECKPOINT = 2;
+
+  //mdb_db_checkpoint_ex flags.
+  MDB_CHECKPOINT_ASYNC = 1;
+
 type
   TMDBHandle = UInt64;
   PMDBHandle = ^TMDBHandle;
@@ -129,8 +139,10 @@ function mdb_shutdown: Integer; cdecl;
 
 { Database }
 function mdb_db_open(path: PAnsiChar; out_db: PMDBHandle): Integer; cdecl;
+function mdb_db_open_ex(path: PAnsiChar; flags: Integer; out_db: PMDBHandle): Integer; cdecl;
 function mdb_db_close(db: TMDBHandle): Integer; cdecl;
 function mdb_db_checkpoint(db: TMDBHandle): Integer; cdecl;
+function mdb_db_checkpoint_ex(db: TMDBHandle; flags: Integer): Integer; cdecl;
 function mdb_db_state(db: TMDBHandle; out_phase: PMDBInt32): Integer; cdecl;
 function mdb_db_last_error(db: TMDBHandle; buf: PAnsiChar; buf_size: TMDBSize; out_len: PMDBSize): Integer; cdecl;
 
@@ -191,6 +203,8 @@ function mdb_data_read_string(data: TMDBHandle; field: PAnsiChar; buf: PAnsiChar
   buf_size: TMDBSize; out_len: PMDBSize): Integer; cdecl;
 function mdb_data_read_blob(data: TMDBHandle; field: PAnsiChar; buf: Pointer;
   buf_size: TMDBSize; out_len: PMDBSize): Integer; cdecl;
+function mdb_data_read_blob_prefix(data: TMDBHandle; field: PAnsiChar; buf: Pointer;
+  buf_size: TMDBSize; out_copied: PMDBSize; out_total: PMDBUInt64): Integer; cdecl;
 function mdb_data_write_int32(data: TMDBHandle; field: PAnsiChar; value: Integer): Integer; cdecl;
 function mdb_data_write_uint32(data: TMDBHandle; field: PAnsiChar; value: Cardinal): Integer; cdecl;
 function mdb_data_write_int64(data: TMDBHandle; field: PAnsiChar; value: Int64): Integer; cdecl;
@@ -211,6 +225,7 @@ function mdb_key_add_uint64(key: TMDBHandle; value: UInt64): Integer; cdecl;
 function mdb_key_add_double(key: TMDBHandle; value: Double): Integer; cdecl;
 function mdb_key_add_guid(key: TMDBHandle; value: PMDBGuid): Integer; cdecl;
 function mdb_key_add_string(key: TMDBHandle; value: PAnsiChar): Integer; cdecl;
+function mdb_key_add_blob(key: TMDBHandle; value: Pointer; len: TMDBSize): Integer; cdecl;
 
 { Foreign keys }
 function mdb_fk_set_referencing_child(fk: TMDBHandle; table_name, index_name: PAnsiChar): Integer; cdecl;
@@ -254,11 +269,15 @@ type
     DBAPI: TMemAPIDatabase;
   end;
 
-  { Search key: field values in index order. }
+  { Search key: field values in index order.
+    Blob values are copies owned by the key, freed by Clear and Destroy. }
   TKeyRec = class
   public
     Recs: TMemDbFieldDataRecs;
+    destructor Destroy; override;
     procedure Add(const Rec: TMemDbFieldDataRec);
+    procedure AddBlob(Value: Pointer; Len: TMDBSize);
+    procedure Clear;
   end;
 
   THandleEntry = record
@@ -312,10 +331,52 @@ end;
 
 { TKeyRec }
 
+destructor TKeyRec.Destroy;
+begin
+  Clear;
+  inherited;
+end;
+
 procedure TKeyRec.Add(const Rec: TMemDbFieldDataRec);
 begin
   SetLength(Recs, Succ(Length(Recs)));
   Recs[High(Recs)] := Rec;
+end;
+
+procedure TKeyRec.AddBlob(Value: Pointer; Len: TMDBSize);
+var
+  Rec: TMemDbFieldDataRec;
+  P: Pointer;
+begin
+  //MemDB2 expects Data = nil exactly when size = 0.
+  P := nil;
+  if Len > 0 then
+    GetMem(P, Len);
+  try
+    if Len > 0 then
+      Move(Value^, P^, Len);
+    Rec.FieldType := ftBlob;
+    Rec.Data := P;
+    Rec.size := Len;
+    Add(Rec);
+  except
+    FreeMem(P);
+    raise;
+  end;
+end;
+
+procedure TKeyRec.Clear;
+var
+  i: integer;
+begin
+  for i := 0 to High(Recs) do
+    if Recs[i].FieldType = ftBlob then
+    begin
+      FreeMem(Recs[i].Data);
+      Recs[i].Data := nil;
+      Recs[i].size := 0;
+    end;
+  SetLength(Recs, 0);
 end;
 
 { THandleTable }
@@ -1003,18 +1064,30 @@ end;
   --------------------------------------------------------------------------- }
 
 function mdb_db_open(path: PAnsiChar; out_db: PMDBHandle): Integer;
+begin
+  result := mdb_db_open_ex(path, 0, out_db);
+end;
+
+function mdb_db_open_ex(path: PAnsiChar; flags: Integer; out_db: PMDBHandle): Integer;
 var
   DB: TMemDB;
   Root: string;
   Msg: string;
+  Async, AutoChk: boolean;
 begin
   try
     CheckOut(out_db, 'out_db');
     out_db^ := 0;
+    if (flags and not (MDB_OPEN_ASYNC or MDB_OPEN_NO_AUTO_CHECKPOINT)) <> 0 then
+      RaiseCApi(MDB_ERR_INVALID_ARG, 'Unknown flags in mdb_db_open_ex.');
+    Async := (flags and MDB_OPEN_ASYNC) <> 0;
+    AutoChk := (flags and MDB_OPEN_NO_AUTO_CHECKPOINT) = 0;
     Root := InStr(path, 'path');
     DB := TMemDB.Create;
     try
-      if not DB.InitDB(Root, jtV2, false) then
+      //Asynchronous InitDB returns false once loading has started: that is
+      //not a failure. The outcome shows up later in the DB phase.
+      if not DB.InitDB(Root, jtV2, Async, AutoChk) and not Async then
       begin
         Msg := DB.LastError;
         if Length(Msg) = 0 then
@@ -1026,7 +1099,7 @@ begin
       raise;
     end;
     out_db^ := Handles.Add(hkDB, DB, 0);
-    if DB.DBState = mdbRunningError then
+    if (not Async) and (DB.DBState = mdbRunningError) then
       //Open, but commits will fail. The handle is valid: read, or close it.
       RaiseCApi(MDB_ERR_DB_STATE, 'Database opened in an error state: ' + DB.LastError);
     result := Ok;
@@ -1047,9 +1120,21 @@ end;
 
 function mdb_db_checkpoint(db: TMDBHandle): Integer;
 begin
+  result := mdb_db_checkpoint_ex(db, 0);
+end;
+
+function mdb_db_checkpoint_ex(db: TMDBHandle; flags: Integer): Integer;
+var
+  MemDB: TMemDB;
+begin
   try
-    if not GetDB(db).Checkpoint then
-      RaiseCApi(MDB_ERR_DB, 'Checkpoint failed.');
+    MemDB := GetDB(db);
+    if (flags and not MDB_CHECKPOINT_ASYNC) <> 0 then
+      RaiseCApi(MDB_ERR_INVALID_ARG, 'Unknown flags in mdb_db_checkpoint_ex.');
+    //False only when the DB is not in a state to checkpoint;
+    //failures while checkpointing raise.
+    if not MemDB.Checkpoint((flags and MDB_CHECKPOINT_ASYNC) <> 0) then
+      RaiseCApi(MDB_ERR_DB_STATE, 'Checkpoint: database not running. ' + MemDB.LastError);
     result := Ok;
   except
     result := Fail(ExceptObject);
@@ -1709,6 +1794,48 @@ begin
   end;
 end;
 
+function mdb_data_read_blob_prefix(data: TMDBHandle; field: PAnsiChar; buf: Pointer;
+  buf_size: TMDBSize; out_copied: PMDBSize; out_total: PMDBUInt64): Integer;
+var
+  D: TMemAPITableData;
+  FieldName: string;
+  Rec: TMemDbFieldDataRec;
+  Total: UInt64;
+begin
+  try
+    CheckOut(out_copied, 'out_copied');
+    out_copied^ := 0;
+    if Assigned(out_total) then
+      out_total^ := 0;
+    if (buf_size > 0) and not Assigned(buf) then
+      RaiseCApi(MDB_ERR_INVALID_ARG, 'buf must not be NULL when buf_size > 0.');
+    D := GetData(data);
+    FieldName := InStr(field, 'field');
+    //Size query (MemDB2 copies nothing when Data is nil).
+    Rec.Data := nil;
+    Rec.size := 0;
+    D.ReadField(FieldName, Rec);
+    if Rec.FieldType <> ftBlob then
+      RaiseCApi(MDB_ERR_TYPE_MISMATCH, 'Field is not a blob.');
+    Total := Rec.size;
+    if Assigned(out_total) then
+      out_total^ := Total;
+    if (buf_size = 0) or (Total = 0) then
+    begin
+      result := Ok;
+      exit;
+    end;
+    //MemDB2 copies min(buf_size, blob size) bytes from the start of the blob.
+    Rec.Data := buf;
+    Rec.size := buf_size;
+    D.ReadField(FieldName, Rec);
+    out_copied^ := TMDBSize(Rec.size);
+    result := Ok;
+  except
+    result := Fail(ExceptObject);
+  end;
+end;
+
 function mdb_data_write_int32(data: TMDBHandle; field: PAnsiChar; value: Integer): Integer;
 var
   Rec: TMemDbFieldDataRec;
@@ -1856,7 +1983,7 @@ end;
 function mdb_key_clear(key: TMDBHandle): Integer;
 begin
   try
-    SetLength(GetKey(key).Recs, 0);
+    GetKey(key).Clear;
     result := Ok;
   except
     result := Fail(ExceptObject);
@@ -1967,6 +2094,19 @@ begin
     Rec.FieldType := ftUnicodeString;
     Rec.sVal := InStr(value, 'value');
     AddKey(key, Rec);
+    result := Ok;
+  except
+    result := Fail(ExceptObject);
+  end;
+end;
+
+function mdb_key_add_blob(key: TMDBHandle; value: Pointer; len: TMDBSize): Integer;
+begin
+  try
+    if (len > 0) and not Assigned(value) then
+      RaiseCApi(MDB_ERR_INVALID_ARG, 'value must not be NULL when len > 0.');
+    //The key keeps its own copy; the caller keeps ownership of value.
+    GetKey(key).AddBlob(value, len);
     result := Ok;
   except
     result := Fail(ExceptObject);

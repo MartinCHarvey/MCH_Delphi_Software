@@ -391,7 +391,8 @@ type
     function ChangedRowCount: Int64;
 
     procedure ToJournal(Stream: TStream);
-    procedure ToScratch(Stream: TStream);
+    procedure ToScratchSynchronous(Stream: TStream; Ctxt: TTXLocalContext);
+    procedure ToScratchAsynchronous(Stream: TStream; Ctxt: TTXLocalContext);
     procedure FromJournal(Stream: TStream);
     procedure FromScratch(Stream: TStream; Opts:TOptimizeSet);
 
@@ -925,7 +926,11 @@ const
   S_API_TABLE_METADATA_NOT_COMMITED = 'No committed metadata for this table (api level)';
   S_INTERNAL_LIST_ERROR_REPLAY = 'Internal error: Master row list / index on journal replay.';
   S_INTERNAL_LIST_ERROR_ROW_HANDLING = 'Internal error adding / removing from master row list during change.';
-
+  S_ASYNC_CHECK_NO_INDEX_ROOT = 'Async checkpoint: No index root.';
+  S_ASYNC_CHECK_NO_FIELD_DEFS = 'Async checkpoint: No field defs for table.';
+  S_ASYNC_CHECK_PIN_FROM_INODE_FAILED = 'Async checkpoint: Pin from INode failed.';
+  S_ASYNC_CHECK_BAD_FORMAT = 'Async checkpoint: Row format check failed.';
+  S_ASYNC_CHECK_NO_DATA = 'Async checkpoint: No row data despite pinning from index.';
 
 { Misc Functions }
 
@@ -2074,9 +2079,6 @@ var
   FieldData: TMemFieldData;
   RowFields: TMemRowFields;
   NxtFieldDef, CurFieldDef: TMemFieldDef;
-{$IFDEF DBG_UNDER_COMMIT_LOCK}
-  OldUnderCommit: boolean;
-{$ENDIF}
 
 begin
   RNxt := FParentTable.FMetadata.GetNext(FTid);
@@ -2093,15 +2095,15 @@ begin
   //possible races - lock is against all changes since previous commit.
   FParentTable.FParentDB.CommitLock.Acquire;
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
-    OldUnderCommit := DbgUnderCommitLock;
-    DbgUnderCommitLock := true;
+    Inc(DbgUnderCommitLock);
 {$ENDIF}
   try
     if not FParentTable.AddAllRowProhibitForTableMod(FTid) then
       exit;
   finally
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
-    DbgUnderCommitLock := OldUnderCommit;
+    Assert(DbgUnderCommitLock > 0);
+    Dec(DbgUnderCommitLock);
 {$ENDIF}
     FParentTable.FParentDB.CommitLock.Release;
   end;
@@ -2305,15 +2307,59 @@ begin
   WrTag(Stream, mstIndexedListEnd);
 end;
 
-procedure TTidLocal.ToScratch(Stream: TStream);
+procedure TTidLocal.ToScratchAsynchronous(Stream: TStream; Ctxt: TTXLocalContext);
+var
+  IRoot: TMemDBIndexGeneric;
+  INode: TMemDbIndexLeafGeneric;
+  Row: TMemDBRow;
+  IRec: TItemRec;
+  FieldDefs: TMemStreamableList;
+  Cur: TMemDbStreamable;
+  IdxDef: TMemIndexDef;
+
+begin
+  WrTag(Stream, mstIndexedListStart);
+  //Transaction local master index.
+  IRoot := GetUserIndexRoot(IdxDef, '');
+  if not Assigned(IRoot) then
+    raise EMemDBInternalException.Create(S_ASYNC_CHECK_NO_INDEX_ROOT);
+  FieldDefs := META_CurFieldDefList;
+  if not Assigned(FieldDefs) then
+    raise EMemDBInternalException.Create(S_ASYNC_CHECK_NO_FIELD_DEFS);
+
+
+  INode := IRoot.Locate(abCurrent, ptFirst, nil);
+  while Assigned(INode) do
+  begin
+    Row := INode.Row as TMemDBRow;
+    IRec := Row.FMasterRec;
+    //Isolation level not a problem - no Nxt (not modified).
+    if not Row.PinForCursorFromInode(FTid, INode, pinEvolve) then
+      raise EMemDBInternalException.Create(S_ASYNC_CHECK_PIN_FROM_INODE_FAILED);
+
+    if not Row.CheckFormatAgainstMetaDefs(FTid, abCurrent, FieldDefs, pinEvolve) then
+      raise EMemDbInternalException.Create(S_ASYNC_CHECK_BAD_FORMAT);
+
+    Cur := Row.PinCurrent(FTid, pinEvolve);
+    //If in internal master index, then we expect data for this txion,
+    //we're not iterating under master row list which is more racy.
+    if not Assigned(Cur) then
+      raise EMemDbInternalException.Create(S_ASYNC_CHECK_NO_DATA);
+
+    Row.ToScratch(FTid, Stream, Ctxt);
+
+    INode := IRoot.Locate(abCurrent, ptNext, INode);
+  end;
+  WrTag(Stream, mstIndexedListEnd);
+end;
+
+procedure TTidLocal.ToScratchSynchronous(Stream: TStream; Ctxt: TTXLocalContext);
 var
   IRec: TItemRec;
   Row: TMemDBRow;
   Cur: TMemDBStreamable;
 begin
   WrTag(Stream, mstIndexedListStart);
-  //TODO - Maybe do this in a way which doesn't lock the master list?
-  //Checkpoints to tend to be pretty rapid ...
   FParentTable.FMasterRowLock.Acquire;
   try
     IRec := FParentTable.FMasterRowList.GetAnItem;
@@ -2322,7 +2368,7 @@ begin
       Row := IRec.Item as TMemDBRow;
       Cur := Row.GetCurUnderCommitLock;
       if Assigned(Cur) then
-        Row.ToScratch(self.FTid, Stream, nil);
+        Row.ToScratch(self.FTid, Stream, Ctxt);
       FParentTable.FMasterRowList.GetAnotherItem(IRec);
     end;
   finally
@@ -4243,7 +4289,7 @@ var
   Lock: PRowChangeLock;
 begin
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
-    Assert(DbgUnderCommitLock);
+    Assert(DbgUnderCommitLock > 0);
 {$ENDIF}
   FMasterRowLock.Acquire;
   try
@@ -4278,7 +4324,7 @@ var
   Lock: PRowChangeLock;
 begin
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
-    Assert(DbgUnderCommitLock);
+    Assert(DbgUnderCommitLock > 0);
 {$ENDIF}
   FMasterRowLock.Acquire;
   try
@@ -4302,7 +4348,7 @@ var
   Lock: PRowChangeLock;
 begin
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
-    Assert(DbgUnderCommitLock);
+    Assert(DbgUnderCommitLock > 0);
 {$ENDIF}
   FMasterRowLock.Acquire;
   try
@@ -4740,12 +4786,16 @@ begin
   TidLocal.UpdateLayout(pinEvolve);
   //In Entity list if CPTids, however does not guarantee has data.
   //Stream only if current metdata indicates not NULL.
-  MCur := FMetadata.GetCurUnderCommitLock;
+  MCur := FMetadata.GetCurForToScratch(PseudoTid, Ctxt);
   if Assigned(MCur) then
   begin
     WrTag(Stream, mstTableStart);
     FMetadata.ToScratch(PseudoTid, Stream, Ctxt);
-    TidLocal.ToScratch(Stream);
+    Assert(TidLocal.FTid = PseudoTid);
+    if (Ctxt as TXTransactionLocalContext).AsynchronousCheckpoint then
+      TidLocal.ToScratchAsynchronous(Stream, Ctxt)
+    else
+      TidLocal.ToScratchSynchronous(Stream, Ctxt);
     WrTag(Stream, mstTableEnd);
   end;
 end;
@@ -5225,7 +5275,7 @@ procedure TMemDBForeignKeyPersistent.ToScratch(const PseudoTid:TTransactionId; S
 var
   CP: TMemDBStreamable;
 begin
-  CP := FMetadata.GetCurUnderCommitLock;
+  CP := FMetadata.GetCurForToScratch(PseudoTid, Ctxt);
   if Assigned(CP) then
   begin
     WrTag(Stream, mstFkStart);
@@ -8033,46 +8083,50 @@ begin
   try
     for FKs := True downto False do
     begin
-      PseudoTid := TTransactionId.NewTransactionId(ilSerialisable);
-      EntSnapshot.Release;
-      EntSnapShot := nil;
-      EntRegistered.Release;
-      EntRegistered := nil;
-
-      StartTransaction(PseudoTid, Ctxt);
-      //Destructor, raw entity list OK.
-      EntityList := AssembleEntityList;
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+      Inc(DbgUnderCommitLock); //Serialised, no commit lock needed.
+{$ENDIF}
       try
-        for i := 0 to Pred(EntityList.Count) do
-        begin
-          Proxy := EntityList.Items[i] as TMemDBEntityProxy;
-          Entity := Proxy.Proxy as TMemDBEntity;
-          if FKs then begin
-            Del := Entity is TMemDBForeignKeyPersistent
-          end else begin
-            Del := Entity is TMemDBTablePersistent;
+        PseudoTid := TTransactionId.NewTransactionId(ilSerialisable);
+        EntSnapshot.Release;
+        EntSnapShot := nil;
+        EntRegistered.Release;
+        EntRegistered := nil;
+
+        StartTransaction(PseudoTid, Ctxt);
+        //Destructor, raw entity list OK.
+        EntityList := AssembleEntityList;
+        try
+          for i := 0 to Pred(EntityList.Count) do
+          begin
+            Proxy := EntityList.Items[i] as TMemDBEntityProxy;
+            Entity := Proxy.Proxy as TMemDBEntity;
+            if FKs then begin
+              Del := Entity is TMemDBForeignKeyPersistent
+            end else begin
+              Del := Entity is TMemDBTablePersistent;
+            end;
+            if Del then
+              Entity.Metadata.Delete(PseudoTid);
+              //Should clear all pins and refs, assuming no oustanding txions.
           end;
-          if Del then
-            Entity.Metadata.Delete(PseudoTid);
-            //Should clear all pins and refs, assuming no oustanding txions.
+        finally
+          EntityList.Release;
         end;
+        Prepare(PseudoTid, CleardownOptSet, false, Ctxt);
+        ToJournal(PseudoTid, NullStream, Ctxt);
+        PreCommit(PseudoTid, pcpEntitySet, CleardownOptSet, Ctxt);
+        PreCommit(PseudoTid, pcpTables, CleardownOptSet, Ctxt);
+        PreCommit(PseudoTid, pcpFKeys, CleardownOptSet, Ctxt);
+        Commit(PseudoTid, ccpData, CleardownOptSet, Ctxt);
+        Commit(PseudoTid, ccpMetaIndex, [], Ctxt);
+        Commit(PseudoTid, ccpCleardown, CleardownOptSet, Ctxt);
       finally
-        EntityList.Release;
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+        Assert(DbgUnderCommitLock > 0);
+        Dec(DbgUnderCommitLock);
+{$ENDIF}
       end;
-{$IFDEF DBG_UNDER_COMMIT_LOCK}
-      DbgUnderCommitLock := true;
-{$ENDIF}
-      Prepare(PseudoTid, CleardownOptSet, false, Ctxt);
-      ToJournal(PseudoTid, NullStream, Ctxt);
-      PreCommit(PseudoTid, pcpEntitySet, CleardownOptSet, Ctxt);
-      PreCommit(PseudoTid, pcpTables, CleardownOptSet, Ctxt);
-      PreCommit(PseudoTid, pcpFKeys, CleardownOptSet, Ctxt);
-      Commit(PseudoTid, ccpData, CleardownOptSet, Ctxt);
-      Commit(PseudoTid, ccpMetaIndex, [], Ctxt);
-      Commit(PseudoTid, ccpCleardown, CleardownOptSet, Ctxt);
-{$IFDEF DBG_UNDER_COMMIT_LOCK}
-      DbgUnderCommitLock := false;
-{$ENDIF}
     end;
   finally
     NullStream.Free;

@@ -70,9 +70,15 @@
  *       is set to the length excluding the NUL.
  *
  * Blobs
- *   Same buffer pattern as strings, but with no NUL: buf == NULL queries the
- *   size; a buffer smaller than the blob gives MDB_ERR_BUFFER_TOO_SMALL.
+ *   mdb_data_read_blob: same buffer pattern as strings, but with no NUL:
+ *   buf == NULL queries the size; a buffer smaller than the blob gives
+ *   MDB_ERR_BUFFER_TOO_SMALL.
+ *   mdb_data_read_blob_prefix: copies as much of the start of the blob as
+ *   fits in buf (useful for headers, or blobs too big to read in one go on
+ *   32 bit), and reports the full size as uint64_t.
  *   Writes copy the bytes; the caller keeps ownership of its buffer.
+ *   An empty blob (size 0) is a valid value, distinct from no row.
+ *   Blobs can be indexed and used in search keys (mdb_key_add_blob).
  *
  * Booleans
  *   Returned as int32_t: 0 = false, 1 = true.
@@ -113,7 +119,8 @@
 extern "C" {
 #endif
 
-#define MDB_API_VERSION 1
+#define MDB_API_VERSION 3   /* 2: mdb_data_read_blob_prefix, mdb_key_add_blob
+                               3: mdb_db_open_ex, mdb_db_checkpoint_ex */
 
 typedef uint64_t mdb_handle;
 
@@ -194,6 +201,13 @@ typedef struct mdb_guid {
 #define MDB_PHASE_CLOSED                      8
 #define MDB_PHASE_CLOSED_ERROR                9
 
+/* mdb_db_open_ex flags (combine with |). */
+#define MDB_OPEN_ASYNC               1   /* return at once; load in background */
+#define MDB_OPEN_NO_AUTO_CHECKPOINT  2   /* no automatic checkpoint on load */
+
+/* mdb_db_checkpoint_ex flags. */
+#define MDB_CHECKPOINT_ASYNC         1   /* see mdb_db_checkpoint_ex */
+
 /* ---------------------------------------------------------------------------
  * General
  * ------------------------------------------------------------------------- */
@@ -220,11 +234,43 @@ MDB_API int32_t MDB_CALL mdb_shutdown(void);
  * ------------------------------------------------------------------------- */
 
 /* Open (or create) the database stored in folder 'path'. Synchronous.
+   Same as mdb_db_open_ex(path, 0, out_db).
    On MDB_ERR_DB_STATE with *out_db != 0, the database opened in an error
    state: it can be read, but commits will fail. Close it when done. */
 MDB_API int32_t MDB_CALL mdb_db_open(const char *path, mdb_handle *out_db);
+
+/* As mdb_db_open, with MDB_OPEN_* flags. Since API version 3.
+     MDB_OPEN_NO_AUTO_CHECKPOINT: on load, MemDB2 normally writes a checkpoint
+       when the incremental journal files have grown large relative to the
+       last checkpoint. This flag turns that off (a new, empty database is
+       still checkpointed). Use mdb_db_checkpoint_ex to checkpoint later.
+     MDB_OPEN_ASYNC: returns MDB_OK and a handle as soon as loading has
+       started. Loading (and any automatic checkpoint) continues on the
+       journal thread. mdb_db_state reports MDB_PHASE_INIT or
+       MDB_PHASE_INIT_CHECKPOINT while loading, then MDB_PHASE_RUNNING (or
+       MDB_PHASE_RUNNING_ERROR); MDB_PHASE_CLOSED_ERROR means the load failed
+       (see mdb_db_last_error, then close the handle). mdb_session_open and
+       mdb_db_close wait for loading to finish, so a session can be opened
+       straight away. Load errors are not reported by this call. */
+MDB_API int32_t MDB_CALL mdb_db_open_ex(const char *path, int32_t flags, mdb_handle *out_db);
+
 MDB_API int32_t MDB_CALL mdb_db_close(mdb_handle db);
+
+/* Write a checkpoint. Same as mdb_db_checkpoint_ex(db, 0).
+   MDB_ERR_DB_STATE if the database is not running (still loading, closing,
+   or in an error state). */
 MDB_API int32_t MDB_CALL mdb_db_checkpoint(mdb_handle db);
+
+/* Write a checkpoint, with MDB_CHECKPOINT_* flags. Since API version 3.
+   Synchronous checkpoint (flags 0): no transaction can commit while it runs.
+   MDB_CHECKPOINT_ASYNC: the call still blocks the caller until the
+   checkpoint has been written (unlike MDB_OPEN_ASYNC), but other
+   transactions can proceed at the same time. Only transactions using
+   MDB_ACCESS_READ_WRITE_SHARED can run while it is written; others wait.
+   WARNING: after an asynchronous checkpoint the order in which rows are
+   visited without an index (mdb_data_locate with no index name, below
+   MDB_ISO_SNAPSHOT) may change permanently. Index order is unaffected. */
+MDB_API int32_t MDB_CALL mdb_db_checkpoint_ex(mdb_handle db, int32_t flags);
 MDB_API int32_t MDB_CALL mdb_db_state(mdb_handle db, int32_t *out_phase);
 /* Reason for the database's most recent move to an error phase ("" if none). */
 MDB_API int32_t MDB_CALL mdb_db_last_error(mdb_handle db, char *buf, size_t buf_size, size_t *out_len);
@@ -295,7 +341,12 @@ MDB_API int32_t MDB_CALL mdb_meta_index_names(mdb_handle meta, mdb_handle *out_l
  * (mdb_data_post) or discarded (mdb_data_discard) before navigating again.
  * ------------------------------------------------------------------------- */
 
-/* index_name NULL or "" walks rows in storage order; otherwise in index order. */
+/* index_name NULL or "" walks rows in storage order; otherwise in index order.
+   Storage order is only kept for transactions below MDB_ISO_SNAPSHOT: at
+   MDB_ISO_SNAPSHOT and MDB_ISO_SERIALISABLE, NULL or "" walks an internal
+   index instead, so rows are not visited in the order they were written.
+   An asynchronous checkpoint (mdb_db_checkpoint_ex) can also permanently
+   change storage order. For a stable order, name an index. */
 MDB_API int32_t MDB_CALL mdb_data_locate(mdb_handle data, int32_t pos, const char *index_name,
                                          int32_t *out_found);
 /* Find a row whose index fields equal the key (one value per indexed field). */
@@ -329,6 +380,12 @@ MDB_API int32_t MDB_CALL mdb_data_read_string(mdb_handle data, const char *field
                                               char *buf, size_t buf_size, size_t *out_len);
 MDB_API int32_t MDB_CALL mdb_data_read_blob(mdb_handle data, const char *field,
                                             void *buf, size_t buf_size, size_t *out_len);
+/* Copies min(buf_size, blob size) bytes from the start of the blob into buf
+   and sets *out_copied. *out_total (may be NULL) gets the full blob size.
+   buf may be NULL only when buf_size == 0 (size query). Since API version 2. */
+MDB_API int32_t MDB_CALL mdb_data_read_blob_prefix(mdb_handle data, const char *field,
+                                                   void *buf, size_t buf_size,
+                                                   size_t *out_copied, uint64_t *out_total);
 
 MDB_API int32_t MDB_CALL mdb_data_write_int32(mdb_handle data, const char *field, int32_t value);
 MDB_API int32_t MDB_CALL mdb_data_write_uint32(mdb_handle data, const char *field, uint32_t value);
@@ -343,7 +400,10 @@ MDB_API int32_t MDB_CALL mdb_data_write_blob(mdb_handle data, const char *field,
 
 /* ---------------------------------------------------------------------------
  * Search keys: one value per indexed field, in index order.
- * Blob values cannot be used in keys.
+ * Blob key values are copied into the key, so the caller's buffer can be
+ * reused at once. Blob indexes order by length first, then by an internal
+ * byte comparison, so they suit exact-match searches (mdb_data_find); edge
+ * searches on a blob index do not follow lexicographic byte order.
  * ------------------------------------------------------------------------- */
 
 MDB_API int32_t MDB_CALL mdb_key_create(mdb_handle *out_key);
@@ -356,6 +416,8 @@ MDB_API int32_t MDB_CALL mdb_key_add_uint64(mdb_handle key, uint64_t value);
 MDB_API int32_t MDB_CALL mdb_key_add_double(mdb_handle key, double value);
 MDB_API int32_t MDB_CALL mdb_key_add_guid(mdb_handle key, const mdb_guid *value);
 MDB_API int32_t MDB_CALL mdb_key_add_string(mdb_handle key, const char *value);
+/* value may be NULL only when len == 0 (empty blob). Since API version 2. */
+MDB_API int32_t MDB_CALL mdb_key_add_blob(mdb_handle key, const void *value, size_t len);
 
 /* ---------------------------------------------------------------------------
  * Foreign keys: the child table's index references the parent table's index.

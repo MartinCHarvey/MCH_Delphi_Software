@@ -90,6 +90,13 @@ type
 {$ELSE}
   TTXLocalContext = class
 {$ENDIF}
+  protected
+    //Set by the checkpoint code (via TXTransactionLocalContext).
+    FAsynchronousCheckpoint: boolean;
+  public
+    //If set, ToScratch is running outside the commit lock, and must
+    //pin current copies rather than use GetCurUnderCommitLock.
+    property AsynchronousCheckpoint: boolean read FAsynchronousCheckpoint;
   end;
 
   //Object which can write changes between current and next version to journal.
@@ -406,6 +413,10 @@ type
     //pinning. Additionally must be sure you want current current, not
     //some possibly old copy (user indexes etc).
     function GetCurUnderCommitLock: TMemDBStreamable;
+
+    //For ToScratch (checkpoint): asynchronous checkpoints are not under
+    //the commit lock, so pin current, otherwise GetCurUnderCommitLock.
+    function GetCurForToScratch(const PseudoTid: TTransactionId; Ctxt: TTXLocalContext): TMemDBStreamable;
 
     function GetNext(const Tid: TTransactionId): TMemDBStreamable;
     function GetPinLatest(const Tid: TTransactionId;
@@ -1878,11 +1889,20 @@ var
   Cur: PMemDBMultiItem;
 begin
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
-  Assert(DbgUnderCommitLock);
+  Assert(DbgUnderCommitLock > 0);
 {$ENDIF}
   Cur := FindCurMultiItem;
   Assert(Assigned(Cur));
   result := Cur.Item;
+end;
+
+function TMemDbMultiBuffered.GetCurForToScratch(const PseudoTid: TTransactionId; Ctxt: TTXLocalContext): TMemDBStreamable;
+begin
+  Assert(Assigned(Ctxt));
+  if Ctxt.AsynchronousCheckpoint then
+    result := PinCurrent(PseudoTid, pinEvolve)
+  else
+    result := GetCurUnderCommitLock;
 end;
 
 function TMemDbMultiBuffered.GetNext(const Tid: TTransactionId): TMemDBStreamable;
@@ -2097,7 +2117,7 @@ var
   Current: TMemDbStreamable;
 begin
   inherited;
-  Current := GetCurUnderCommitLock;
+  Current := GetCurForToScratch(PseudoTid, Ctxt);
   ToScratchPinnedMB(Stream, Current);
 end;
 
