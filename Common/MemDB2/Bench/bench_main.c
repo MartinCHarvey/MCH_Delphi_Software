@@ -938,6 +938,10 @@ static void usage(void)
 "\n"
 "  --engine memdb2|baseline  engine to measure (default memdb2)\n"
 "  --db <folder>             MemDB2 database folder (default .\\mdb2bench_db)\n"
+"                            Its .dbincr/.dbinit files are deleted at start if\n"
+"                            the folder name contains \"mdb2bench\"\n"
+"  --fresh                   delete them whatever the folder is called\n"
+"  --keep-db                 never delete them (the old journal is replayed)\n"
 "  --records N               initial records (default 5M; k/M suffixes ok)\n"
 "  --record-size B           average record size in bytes (default 128)\n"
 "  --readers N --writers N   threads in the mixed phase (default 4 + 4)\n"
@@ -1062,6 +1066,8 @@ static void parse_args(int argc, char **argv)
             else { usage(); exit(2); }
         }
         else if (!strcmp(a, "--ckpt-gap-ms")) c->ckpt_gap_ms = parse_num(NEXT());
+        else if (!strcmp(a, "--fresh")) c->db_clean = 1;
+        else if (!strcmp(a, "--keep-db")) c->db_clean = -1;
         else if (!strcmp(a, "--csv")) c->csv_path = NEXT();
         else if (!strcmp(a, "--label")) c->label = NEXT();
         else if (!strcmp(a, "--seed")) c->seed = (uint64_t)parse_num(NEXT());

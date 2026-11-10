@@ -90,6 +90,9 @@ typedef struct bench_cfg {
     int count_allocs;          /* count allocations in the mixed phase too   */
     int ckpt_mode;             /* mixed phase: 0 none, 1 async, 2 sync loop  */
     double ckpt_gap_ms;        /* pause between checkpoints                  */
+    int db_clean;              /* journal files at start: 0 auto (only if the
+                                  folder name contains "mdb2bench"),
+                                  1 always delete (--fresh), -1 keep          */
     const char *csv_path;
     const char *label;
     uint64_t seed;

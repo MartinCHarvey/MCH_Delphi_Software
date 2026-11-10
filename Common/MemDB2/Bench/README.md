@@ -151,6 +151,21 @@ Allocations are then counted in the micro phase. In the mixed phase, add
 `--count-allocs`: the shared counter adds contention, so take latency
 figures from a run without it.
 
+## The database folder
+
+On startup the benchmark deletes the `*.dbincr` and `*.dbinit` files in the
+`--db` folder, so MemDB2 doesn't spend time replaying the previous run's
+journal. A long run can leave gigabytes of it. Nothing else in the folder
+is touched.
+
+As a safeguard, files are only deleted automatically when the folder's
+name contains `mdb2bench` (the default is `mdb2bench_db`). A mistyped
+`--db` pointing at a real database is left alone, with a message saying so.
+
+- `--fresh` deletes them whatever the folder is called.
+- `--keep-db` never deletes them; the old journal is replayed, then the
+  `Bench` table is dropped and recreated as before.
+
 ## Things to know when reading the results
 
 - **Journalling can't be switched off through the C API.** `InitDB` is

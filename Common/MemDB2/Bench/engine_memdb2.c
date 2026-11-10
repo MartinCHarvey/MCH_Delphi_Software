@@ -64,6 +64,76 @@ static int m2_classify(int32_t rc, const char *what)
 /* ---------------------------------------------------------------------------
  * Open / schema
  * ------------------------------------------------------------------------- */
+
+/* Delete files matching 'pattern' (e.g. "*.dbincr") directly inside 'dir'.
+   Not recursive. Adds to *count and *bytes. Returns 0 if any delete failed. */
+static int delete_matching(const char *dir, const char *pattern,
+                           unsigned *count, uint64_t *bytes)
+{
+    char spec[MAX_PATH], path[MAX_PATH];
+    WIN32_FIND_DATAA fd;
+    HANDLE h;
+    int ok = 1;
+
+    if (_snprintf_s(spec, sizeof spec, _TRUNCATE, "%s\\%s", dir, pattern) < 0)
+        return 0;
+    h = FindFirstFileA(spec, &fd);
+    if (h == INVALID_HANDLE_VALUE)
+        return 1;                      /* nothing there */
+    do {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+            continue;
+        if (_snprintf_s(path, sizeof path, _TRUNCATE, "%s\\%s", dir, fd.cFileName) < 0) {
+            ok = 0;
+            continue;
+        }
+        if (DeleteFileA(path)) {
+            (*count)++;
+            *bytes += ((uint64_t)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
+        } else {
+            fprintf(stderr, "Could not delete %s (error %lu)\n", path, GetLastError());
+            ok = 0;
+        }
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    return ok;
+}
+
+/* Start from an empty database folder, so MemDB2 does not replay the last
+   run's journal on open. Only MemDB2's own files are removed. */
+static int clean_db_folder(const bench_cfg *cfg)
+{
+    const char *p = cfg->db_path, *name = p, *q;
+    char lower[MAX_PATH];
+    size_t i;
+    unsigned count = 0;
+    uint64_t bytes = 0;
+    int ok;
+
+    if (cfg->db_clean < 0)
+        return 1;
+    /* last path component, ignoring a trailing slash */
+    for (q = p; *q; q++)
+        if ((*q == '\\' || *q == '/') && q[1])
+            name = q + 1;
+    for (i = 0; name[i] && name[i] != '\\' && name[i] != '/' && i + 1 < sizeof lower; i++)
+        lower[i] = (char)((name[i] >= 'A' && name[i] <= 'Z') ? name[i] + 32 : name[i]);
+    lower[i] = 0;
+    if (cfg->db_clean == 0 && !strstr(lower, "mdb2bench")) {
+        printf("Keeping existing files in %s (folder name does not contain \"mdb2bench\";\n"
+               "use --fresh to delete its .dbincr/.dbinit files anyway)\n", p);
+        return 1;
+    }
+    if (GetFileAttributesA(p) == INVALID_FILE_ATTRIBUTES)
+        return 1;                      /* no folder yet */
+    ok = delete_matching(p, "*.dbincr", &count, &bytes);
+    ok = delete_matching(p, "*.dbinit", &count, &bytes) && ok;
+    if (count)
+        printf("Deleted %u journal/checkpoint files (%.1f MB) from %s\n",
+               count, (double)bytes / 1048576.0, p);
+    return ok;
+}
+
 static int m2_open(const bench_cfg *cfg, void **out_eng)
 {
     m2_eng *e = (m2_eng *)calloc(1, sizeof *e);
@@ -89,6 +159,12 @@ static int m2_open(const bench_cfg *cfg, void **out_eng)
         e->p_enable = (pfn_alloc_enable)GetProcAddress(dll, "mdb_bench_alloc_enable");
     }
 
+    if (!clean_db_folder(cfg)) {
+        fprintf(stderr, "Could not clear %s; use --keep-db to start without clearing it\n",
+                cfg->db_path);
+        free(e);
+        return R_FAIL;
+    }
     CreateDirectoryA(cfg->db_path, NULL);   /* MemDB2 wants the folder */
     rc = mdb_db_open_ex(cfg->db_path, MDB_OPEN_NO_AUTO_CHECKPOINT, &e->db);
     if (rc != MDB_OK) {
