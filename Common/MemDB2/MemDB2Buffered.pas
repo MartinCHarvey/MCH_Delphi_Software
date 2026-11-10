@@ -125,6 +125,7 @@ type
     procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);override;
     procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet; Ctxt: TTXLocalContext);override;
 
+    procedure RemoveFromLocalIndex(TidLocal: TTidLocal; Index: TMemDbIndexGeneric; var ListTmp: TList);
     procedure RemoveFromLocalIndices(TidLocal: TTidLocal);
     procedure AddToLocalIndices(TidLocal: TTidLocal);
 
@@ -930,7 +931,6 @@ const
   S_ASYNC_CHECK_NO_FIELD_DEFS = 'Async checkpoint: No field defs for table.';
   S_ASYNC_CHECK_PIN_FROM_INODE_FAILED = 'Async checkpoint: Pin from INode failed.';
   S_ASYNC_CHECK_BAD_FORMAT = 'Async checkpoint: Row format check failed.';
-  S_ASYNC_CHECK_NO_DATA = 'Async checkpoint: No row data despite pinning from index.';
 
 { Misc Functions }
 
@@ -2312,9 +2312,7 @@ var
   IRoot: TMemDBIndexGeneric;
   INode: TMemDbIndexLeafGeneric;
   Row: TMemDBRow;
-  IRec: TItemRec;
   FieldDefs: TMemStreamableList;
-  Cur: TMemDbStreamable;
   IdxDef: TMemIndexDef;
 
 begin
@@ -2327,25 +2325,21 @@ begin
   if not Assigned(FieldDefs) then
     raise EMemDBInternalException.Create(S_ASYNC_CHECK_NO_FIELD_DEFS);
 
-
   INode := IRoot.Locate(abCurrent, ptFirst, nil);
   while Assigned(INode) do
   begin
     Row := INode.Row as TMemDBRow;
-    IRec := Row.FMasterRec;
     //Isolation level not a problem - no Nxt (not modified).
+    //Pins the row's data from the INode. In the internal master index, so
+    //we expect data for this txion (not iterating the more racy master row
+    //list): false means no data.
     if not Row.PinForCursorFromInode(FTid, INode, pinEvolve) then
       raise EMemDBInternalException.Create(S_ASYNC_CHECK_PIN_FROM_INODE_FAILED);
 
     if not Row.CheckFormatAgainstMetaDefs(FTid, abCurrent, FieldDefs, pinEvolve) then
       raise EMemDbInternalException.Create(S_ASYNC_CHECK_BAD_FORMAT);
 
-    Cur := Row.PinCurrent(FTid, pinEvolve);
-    //If in internal master index, then we expect data for this txion,
-    //we're not iterating under master row list which is more racy.
-    if not Assigned(Cur) then
-      raise EMemDbInternalException.Create(S_ASYNC_CHECK_NO_DATA);
-
+    //Streams the data pinned above (GetCurForToScratch re-uses the pin).
     Row.ToScratch(FTid, Stream, Ctxt);
 
     INode := IRoot.Locate(abCurrent, ptNext, INode);
@@ -4136,19 +4130,10 @@ begin
         result := nil;
     end;
     try
+      //Unfortunately data is immutable whilst indexed.
       Cursor.Row.RemoveFromLocalIndices(self);
-      try
-        //Unfortunately data is immutable whilst indexed.
-        Cursor.Row.Delete(FTid);
-      except
-        //Even if failed (typically concurrency case unless data totally hosed),
-        //re-add back in to local indices, which improves the situation
-        //where txion local data is used instead of an immediate abort.
-        //This case tested in RowEditDeleteConflict.
-
-        Cursor.Row.AddToLocalIndices(self);
-        raise;
-      end;
+      //If delete fails, do not reinsert - rollback txion.
+      Cursor.Row.Delete(FTid);
     except
       //Unfortunately have to alloc new cursor before delete.
       result.Free;
@@ -4208,22 +4193,15 @@ begin
     if not Assigned(Row) then
       raise EMemDbInternalException.Create(S_CURSOR_HAS_NO_ROW_AT_MODIFY);
 
-    //RequestChange will barf if it tries to undelete.
-    //Caught nicely in isolation >= RepeatableRead.
-    //Caught less nicely in isolation CommittedRead
+    //Exceptions in here, do not try to recover, rely on txion rollback.
+    //(re-add if no Next might pin wrong revision).
     Row.RemoveFromLocalIndices(self);
-    try
-      //Unfortunately, local indices can index "Next" items, which need
-      //to be immutable whilst they are in the index.
-      Row.RequestChange(FTid);
-      Next := Row.GetNext(FTid);
-      Next.DeepAssign(FieldList);
-    finally
-      //Even if failed (typically concurrency case unless data totally hosed),
-      //re-add back in to local indices, which improves the situation
-      //where txion local data is used instead of an immediate abort.
-      Row.AddToLocalIndices(self);
-    end;
+
+    Row.RequestChange(FTid);
+    Next := Row.GetNext(FTid);
+    Next.DeepAssign(FieldList);
+
+    Row.AddToLocalIndices(self);
 
     try
       //Similar to existing cursor, but no INode hint.
@@ -6705,11 +6683,27 @@ begin
   end;
 end;
 
+procedure TMemDBRow.RemoveFromLocalIndex(TidLocal: TTidLocal; Index: TMemDbIndexGeneric; var ListTmp: TList);
+var
+  Pin: PMemDbIndexPin;
+begin
+  Pin := TidLocal.GetIPinForIndex(self, Index, abCurrent, ListTmp);
+  try
+    if not Assigned(Pin) then
+        raise EMemDBException.Create(S_LOCAL_INDEX_DELETION_BAD_1);
+        //Can be deleted by other API object in same transaction ...
+    if not Index.Remove(abCurrent, Pin.INode) then
+        raise EMemDBInternalException.Create(S_LOCAL_INDEX_DELETION_BAD_2);
+  finally
+    if Assigned(Pin) then
+      ReleaseIndexPinOutsideLock(Pin, nil);
+  end;
+end;
+
 procedure TMemDBRow.RemoveFromLocalIndices(TidLocal: TTidLocal);
 var
   Index: TMemDbIndexGeneric;
   i: integer;
-  Pin: PMemDbIndexPin;
   ListTmp: TList;
 begin
   ListTmp := nil;
@@ -6720,18 +6714,8 @@ begin
         Index:= TidLocal.FInternalIndexCopy
       else
         Index := TidLocal.FLocalIndexCopies.Items[i] as TMemDbIndex;
-
-      Pin := TidLocal.GetIPinForIndex(self, Index, abCurrent, ListTmp);
-      try
-        if not Assigned(Pin) then
-            raise EMemDBException.Create(S_LOCAL_INDEX_DELETION_BAD_1);
-            //Can be deleted by other API object in same transaction ...
-        if not Index.Remove(abCurrent, Pin.INode) then
-            raise EMemDBInternalException.Create(S_LOCAL_INDEX_DELETION_BAD_2);
-      finally
-        if Assigned(Pin) then
-          ReleaseIndexPinOutsideLock(Pin, nil);
-      end;
+      //Not rolled back if this fails part way: see note above.
+      RemoveFromLocalIndex(TidLocal, Index, ListTmp);
     end;
   finally
     ListTmp.Free;
@@ -6743,47 +6727,65 @@ var
   Index: TMemDbIndexGeneric;
   Pin: PMemDbIndexPin;
   INode: TMemDbIndexLeafGeneric;
-  i: integer;
+  i, j: integer;
+  LastAdded: integer;
   ListTmp: TList;
 begin
   //Because of index de-duplication, we can't determine duplicate addition via
   //inode. However, because the index is local, we can be sure there
   //should not be any candidate IPins with our local index as the original index.
   ListTmp := nil;
+  LastAdded := -2; //Indices -1 .. LastAdded have had this row added.
   try
-    for i := -1 to Pred(TidLocal.FLocalIndexCopies.Count) do
-    begin
-      if i < 0 then
-        Index:= TidLocal.FInternalIndexCopy
-      else
-        Index := TidLocal.FLocalIndexCopies.Items[i] as TMemDbIndex;
+    try
+      for i := -1 to Pred(TidLocal.FLocalIndexCopies.Count) do
+      begin
+        if i < 0 then
+          Index:= TidLocal.FInternalIndexCopy
+        else
+          Index := TidLocal.FLocalIndexCopies.Items[i] as TMemDbIndex;
 
 {$IFOPT C+}
-      //This pre-check is a bit expensive for a release build.
-      Pin := TidLocal.GetIPinForIndex(self, Index, abCurrent, ListTmp);
-      if Assigned(Pin) then
-      begin
+        //This pre-check is a bit expensive for a release build.
+        Pin := TidLocal.GetIPinForIndex(self, Index, abCurrent, ListTmp);
+        if Assigned(Pin) then
+        begin
+          try
+            Assert(Pin.INode.OriginalIndex = Index);
+            raise EMemDBInternalException.Create(S_LOCAL_INDEX_INSERTION_DUPLICATE);
+          finally
+            ReleaseIndexPinOutsideLock(Pin, nil);
+          end;
+        end;
+{$ENDIF}
+        //OK, we're in with a chance of a good insertion.
+        if i < 0 then
+          INode := TMemDBInternalIndexLeaf.Create
+        else
+          INode := TMemDbIndexLeaf.Create;
         try
-          Assert(Pin.INode.OriginalIndex = Index);
-          raise EMemDBInternalException.Create(S_LOCAL_INDEX_INSERTION_DUPLICATE);
+          if not self.PinForIndex(TidLocal.FTid, TABSelType.abLatest, INode) then
+            raise EMemDbInternalException.Create(S_LOCAL_INDEX_INSERTION_BAD_1);
+          if not Index.Add(abCurrent, INode) then
+            raise EMemDbInternalException.Create(S_LOCAL_INDEX_INSERTION_BAD_2);
+          LastAdded := i;
         finally
-          ReleaseIndexPinOutsideLock(Pin, nil);
+          INode.Release;
         end;
       end;
-{$ENDIF}
-      //OK, we're in with a chance of a good insertion.
-      if i < 0 then
-        INode := TMemDBInternalIndexLeaf.Create
-      else
-        INode := TMemDbIndexLeaf.Create;
-      try
-        if not self.PinForIndex(TidLocal.FTid, TABSelType.abLatest, INode) then
-          raise EMemDbInternalException.Create(S_LOCAL_INDEX_INSERTION_BAD_1);
-        if not Index.Add(abCurrent, INode) then
-          raise EMemDbInternalException.Create(S_LOCAL_INDEX_INSERTION_BAD_2);
-      finally
-        INode.Release;
+    except
+      //Roll back a partial addition by removal.
+      for j := LastAdded downto -1 do
+      begin
+        if j < 0 then
+          Index:= TidLocal.FInternalIndexCopy
+        else
+          Index := TidLocal.FLocalIndexCopies.Items[j] as TMemDbIndex;
+        //No exception handler here, failure is in itself an error,
+        //(this should work), happy for internal exception to mask original.
+        RemoveFromLocalIndex(TidLocal, Index, ListTmp);
       end;
+      raise;
     end;
   finally
     ListTmp.Free;
@@ -7477,6 +7479,8 @@ begin
   Stream.WriteBuffer(i64, sizeof(i64));
   CtxtLocal := Ctxt as TXTransactionLocalContext;
 
+  //There are arguments for making this PseduoTid.Iso,
+  //but it doesn't make any practical difference.
   EList := CTxtLocal.GetEntityList(Low(TMDBIsolationLevel));
   try
     for i := 0 to Pred(EList.Count) do

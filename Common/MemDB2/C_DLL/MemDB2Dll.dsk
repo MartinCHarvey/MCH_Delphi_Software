@@ -1,54 +1,81 @@
 ﻿[Closed Files]
-File_0=TSourceModule,'C:\MCH Stuff\Delphi XE Progs\Common\MemDB\MemDBJournal.pas',0,1,22,24,39,0,0,,
-File_1=TSourceModule,'C:\MCH Stuff\Delphi XE Progs\Common\MemDB\MemDBMisc.pas',0,1,17,47,31,0,0,,
-File_2=TSourceModule,'C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\MemDB2Utils.pas',0,1,346,46,358,0,0,,
-File_3=TSourceModule,'C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\MemDB2Misc.pas',0,1,51,3,67,0,0,,
-File_4=TSourceModule,'c:\program files (x86)\embarcadero\rad studio\11.0\source\Indy10\Protocols\IdSSLOpenSSL.pas',0,1,377,1,391,0,0,,
-File_5=TSourceModule,'C:\MCH Stuff\Delphi XE Progs\Common\CoWTree\CoWTree.pas',0,1,1,23,12,0,0,,
-File_6=TSourceModule,'C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\MemDB2Streamable.pas',0,1,449,30,457,0,0,,
-File_7=TSourceModule,'C:\Users\marti\AppData\Roaming\KnowComment\Knowcomment.prefs',0,1,1,29,11,0,0,,
-File_8=TSourceModule,'C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\MemDB2Api.pas',0,1,2028,40,2039,0,0,,
-File_9=TSourceModule,'C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\MemDB2.pas',0,1,132,26,130,0,0,,
-File_10=TSourceModule,'C:\MCH Stuff\Delphi XE Progs\Common\PatchFreeMem\PatchFreeMem.pas',0,1,1,30,17,0,0,,
-File_11=TSourceModule,'C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\MemDB2Indexing.pas',0,1,20,39,36,0,0,,
-File_12=TSourceModule,'C:\MCH Stuff\Delphi XE Progs\Common\Reffed\Reffed.pas',0,1,1,1,1,0,0,,
-File_13=TSourceModule,'c:\program files (x86)\embarcadero\rad studio\11.0\source\Indy10\Core\IdIOHandler.pas',0,1,409,1,423,0,0,,
-File_14=TSourceModule,'C:\MCH Stuff\Delphi XE Progs\KnowComment\KnowComment\MainForm.pas',0,1,160,37,174,0,0,,
+File_0=TSourceModule,'C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\MemDB2BufBase.pas',0,1,2164,1,1,0,0,,
+File_1=TSourceModule,'C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\MemDB2Api.pas',0,1,2026,3,773,0,0,,
+File_2=TSourceModule,'C:\MCH Stuff\Delphi XE Progs\Common\MemDB\MemDBJournal.pas',0,1,22,24,39,0,0,,
+File_3=TSourceModule,'C:\MCH Stuff\Delphi XE Progs\Common\MemDB\MemDBMisc.pas',0,1,17,47,31,0,0,,
+File_4=TSourceModule,'C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\MemDB2Utils.pas',0,1,346,46,358,0,0,,
+File_5=TSourceModule,'C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\MemDB2Misc.pas',0,1,51,3,67,0,0,,
+File_6=TSourceModule,'c:\program files (x86)\embarcadero\rad studio\11.0\source\Indy10\Protocols\IdSSLOpenSSL.pas',0,1,377,1,391,0,0,,
+File_7=TSourceModule,'C:\MCH Stuff\Delphi XE Progs\Common\CoWTree\CoWTree.pas',0,1,1,23,12,0,0,,
+File_8=TSourceModule,'C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\MemDB2Streamable.pas',0,1,449,30,457,0,0,,
+File_9=TSourceModule,'C:\Users\marti\AppData\Roaming\KnowComment\Knowcomment.prefs',0,1,1,29,11,0,0,,
+File_10=TSourceModule,'C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\MemDB2.pas',0,1,132,26,130,0,0,,
+File_11=TSourceModule,'C:\MCH Stuff\Delphi XE Progs\Common\PatchFreeMem\PatchFreeMem.pas',0,1,1,30,17,0,0,,
+File_12=TSourceModule,'C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\MemDB2Indexing.pas',0,1,20,39,36,0,0,,
+File_13=TSourceModule,'C:\MCH Stuff\Delphi XE Progs\Common\Reffed\Reffed.pas',0,1,1,1,1,0,0,,
 
 [Modules]
-Module0=C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\C_API\MemDB2CApi.pas
-Module1=C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\C_API\MemDB2CApi_Exports.inc
-Module2=C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\C_API\memdb2.h
-Module3=C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\C_DLL\MemDB2Dll.dproj
-Module4=default.htm
-Count=5
+Module0=C:\MCH Stuff\Delphi XE Progs\Common\Indexed Store\IndexedStore.pas
+Module1=default.htm
+Module2=C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\C_DLL\MemDB2Dll.dproj
+Module3=C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\MemDB2Buffered.pas
+Module4=C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\Bench\MemDB2BenchHooks.pas
+Module5=C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\C_API\MemDB2CApi.pas
+Module6=C:\MCH Stuff\Delphi XE Progs\Common\LockAbstractions\LockAbstractions.pas
+Module7=C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\C_API\memdb2.h
+Module8=C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\C_API\MemDB2CApi_Exports.inc
+Count=9
 EditWindowCount=1
+
+[C:\MCH Stuff\Delphi XE Progs\Common\Indexed Store\IndexedStore.pas]
+ModuleType=TSourceModule
+FormState=0
+FormOnTop=0
+
+[default.htm]
+ModuleType=TURLModule
+
+[C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\C_DLL\MemDB2Dll.dproj]
+ModuleType=TBaseProject
+
+[C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\MemDB2Buffered.pas]
+ModuleType=TSourceModule
+FormState=0
+FormOnTop=0
+
+[C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\Bench\MemDB2BenchHooks.pas]
+ModuleType=TSourceModule
+FormState=0
+FormOnTop=0
 
 [C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\C_API\MemDB2CApi.pas]
 ModuleType=TSourceModule
 FormState=0
 FormOnTop=0
 
-[C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\C_API\MemDB2CApi_Exports.inc]
+[C:\MCH Stuff\Delphi XE Progs\Common\LockAbstractions\LockAbstractions.pas]
 ModuleType=TSourceModule
+FormState=0
+FormOnTop=0
 
 [C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\C_API\memdb2.h]
 ModuleType=TSourceModule
 
-[C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\C_DLL\MemDB2Dll.dproj]
-ModuleType=TBaseProject
-
-[default.htm]
-ModuleType=TURLModule
+[C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\C_API\MemDB2CApi_Exports.inc]
+ModuleType=TSourceModule
 
 [EditWindow0]
-ViewCount=5
-CurrentEditView=C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\C_API\MemDB2CApi.pas
+ViewCount=9
+CurrentEditView=C:\MCH Stuff\Delphi XE Progs\Common\Indexed Store\IndexedStore.pas
 View0=0
 View1=1
 View2=2
 View3=3
 View4=4
+View5=5
+View6=6
+View7=7
+View8=8
 PercentageSizes=1
 Create=1
 Visible=1
@@ -85,9 +112,9 @@ WelcomePageURL=bds:/default.htm
 [View1]
 CustomEditViewType=TEditView
 Module=C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\C_DLL\MemDB2Dll.dpr
-CursorX=21
-CursorY=64
-TopLine=49
+CursorX=1
+CursorY=65
+TopLine=1
 LeftCol=1
 Elisions=
 Bookmarks=
@@ -107,9 +134,9 @@ EditViewName=C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\C_API\MemDB2CApi_Exports
 [View3]
 CustomEditViewType=TEditView
 Module=C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\C_API\MemDB2CApi.pas
-CursorX=16
-CursorY=118
-TopLine=2016
+CursorX=35
+CursorY=1125
+TopLine=1111
 LeftCol=1
 Elisions=
 Bookmarks=
@@ -117,10 +144,54 @@ EditViewName=C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\C_API\MemDB2CApi.pas
 
 [View4]
 CustomEditViewType=TEditView
-Module=C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\C_API\memdb2.h
-CursorX=42
-CursorY=23
+Module=C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\MemDB2Buffered.pas
+CursorX=1
+CursorY=1
 TopLine=1
+LeftCol=1
+Elisions=
+Bookmarks=
+EditViewName=C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\MemDB2Buffered.pas
+
+[View5]
+CustomEditViewType=TEditView
+Module=C:\MCH Stuff\Delphi XE Progs\Common\Indexed Store\IndexedStore.pas
+CursorX=21
+CursorY=1107
+TopLine=1551
+LeftCol=1
+Elisions=
+Bookmarks=
+EditViewName=C:\MCH Stuff\Delphi XE Progs\Common\Indexed Store\IndexedStore.pas
+
+[View6]
+CustomEditViewType=TEditView
+Module=C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\Bench\MemDB2BenchHooks.pas
+CursorX=39
+CursorY=85
+TopLine=69
+LeftCol=1
+Elisions=
+Bookmarks=
+EditViewName=C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\Bench\MemDB2BenchHooks.pas
+
+[View7]
+CustomEditViewType=TEditView
+Module=C:\MCH Stuff\Delphi XE Progs\Common\LockAbstractions\LockAbstractions.pas
+CursorX=1
+CursorY=1
+TopLine=57
+LeftCol=1
+Elisions=
+Bookmarks=
+EditViewName=C:\MCH Stuff\Delphi XE Progs\Common\LockAbstractions\LockAbstractions.pas
+
+[View8]
+CustomEditViewType=TEditView
+Module=C:\MCH Stuff\Delphi XE Progs\Common\MemDB2\C_API\memdb2.h
+CursorX=39
+CursorY=213
+TopLine=277
 LeftCol=1
 Elisions=
 Bookmarks=
@@ -168,14 +239,14 @@ Create=1
 Visible=1
 Docked=0
 State=2
-Left=-50
-Top=-93
-Width=10100
-Height=10186
+Left=144
+Top=279
+Width=8931
+Height=8523
 MaxLeft=-6
 MaxTop=-12
-MaxWidth=10100
-MaxHeight=10186
+MaxWidth=8931
+MaxHeight=8523
 ClientWidth=10000
 ClientHeight=9733
 BottomPanelSize=8700
