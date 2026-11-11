@@ -179,6 +179,13 @@ name contains `mdb2bench` (the default is `mdb2bench_db`). A mistyped
   don't run at the same time. Expect this to show up in the p99.9 and
   p99.99 tails of the mixed phase. `--reader-mode rw` puts readers in the
   writers' mode for comparison.
+- **Readers end with a rollback.** They change nothing, so this skips the
+  commit path, which in `READ_WRITE_SHARED` mode runs the full commit
+  cycle and journals an empty changeset. `--reader-end commit` restores
+  the commit, to measure that cost; the CSV `reader_mode` column then
+  reads `rw-commit`. Results in CSVs from before this option was added
+  with `reader_mode` `rw` were taken with commits. At `ser` isolation a
+  rollback also skips the commit-time read validation.
 - **Every C API call takes one global lock.** The handle table in
   `MemDB2CApi.pas` is guarded by a single critical section, and a
   transaction here makes about 6 to 10 API calls. Under 8 threads this

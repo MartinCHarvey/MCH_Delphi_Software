@@ -277,7 +277,8 @@ static void csv_row(const char *phase, const char *op, const hist *h, double sec
             g_cfg.label ? g_cfg.label : "", g_vt->name, g_arch,
             g_cfg.sync_flush ? "flush" : "lazy",
             g_cfg.writer_exclusive ? "exclusive" : "shared",
-            g_cfg.reader_rw ? "rw" : "read",
+            g_cfg.reader_rw ? (g_cfg.reader_commit ? "rw-commit" : "rw")
+                            : (g_cfg.reader_commit ? "read-commit" : "read"),
             iso_name(g_cfg.isolation), g_cfg.readers, g_cfg.writers,
             (unsigned long long)g_cfg.records, phase, op,
             (unsigned long long)h->count, secs > 0 ? (double)h->count / secs : 0.0,
@@ -959,6 +960,7 @@ static void usage(void)
 "  --sync lazy|flush         MemDB2 commit sync mode (default lazy)\n"
 "  --writer-mode shared|exclusive   READ_WRITE_SHARED or WRITE_EXCLUSIVE\n"
 "  --reader-mode read|rw     READ_SHARED (default) or READ_WRITE_SHARED\n"
+"  --reader-end rollback|commit   how readers end a transaction (rollback)\n"
 "  --iso rc|rr|snap|ser      isolation level (default rr)\n"
 "  --batch N                 preload rows per transaction (default 10000)\n"
 "  --no-checkpoint           skip the checkpoint after preload\n"
@@ -1045,6 +1047,12 @@ static void parse_args(int argc, char **argv)
             else if (!strcmp(v, "rw")) c->reader_rw = 1;
             else { usage(); exit(2); }
         }
+        else if (!strcmp(a, "--reader-end")) {
+            const char *v = NEXT();
+            if (!strcmp(v, "rollback")) c->reader_commit = 0;
+            else if (!strcmp(v, "commit")) c->reader_commit = 1;
+            else { usage(); exit(2); }
+        }
         else if (!strcmp(a, "--iso")) {
             const char *v = NEXT();
             if (!strcmp(v, "rc")) c->isolation = MDB_ISO_READ_COMMITTED;
@@ -1122,11 +1130,12 @@ int main(int argc, char **argv)
     printf("TSC %.3f GHz%s\n", g_tsc_hz / 1e9,
            g_tsc_invariant ? " (invariant)" : "  WARNING: TSC not reported invariant; latencies may be unreliable");
     if (g_vt == &g_engine_memdb2)
-        printf("MemDB2 C API version %d, db folder %s, sync %s, writers %s, readers %s, isolation %s\n",
+        printf("MemDB2 C API version %d, db folder %s, sync %s, writers %s, readers %s (end with %s), isolation %s\n",
                (int)mdb_api_version(), g_cfg.db_path,
                g_cfg.sync_flush ? "flush" : "lazy",
                g_cfg.writer_exclusive ? "WRITE_EXCLUSIVE" : "READ_WRITE_SHARED",
                g_cfg.reader_rw ? "READ_WRITE_SHARED" : "READ_SHARED",
+               g_cfg.reader_commit ? "commit" : "rollback",
                iso_name(g_cfg.isolation));
     printf("records %llu x ~%u bytes, %d readers, %d writers, lifetime %llu inserts\n",
            (unsigned long long)g_cfg.records, g_cfg.record_size,

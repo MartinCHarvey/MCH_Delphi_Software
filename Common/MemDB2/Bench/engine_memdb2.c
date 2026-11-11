@@ -323,6 +323,13 @@ static int m2_insert(void *ts, const rec *r)
     return R_OK;
 }
 
+/* Readers change nothing, so they end with a rollback unless --reader-end
+   commit asks for the commit path (to measure its cost). */
+static int32_t end_read(m2_ts *t, mdb_handle txn)
+{
+    return t->e->cfg.reader_commit ? mdb_txn_commit(txn) : mdb_txn_rollback(txn);
+}
+
 static int m2_find_id(void *ts, uint64_t id, rec_out *out)
 {
     m2_ts *t = (m2_ts *)ts;
@@ -335,7 +342,7 @@ static int m2_find_id(void *ts, uint64_t id, rec_out *out)
     M2(mdb_data_find(data, IX_ID, t->key, &found));
     if (found)
         M2(read_rec(data, out));
-    M2(mdb_txn_commit(txn));
+    M2(end_read(t, txn));
     return found ? R_OK : R_MISS;
 }
 
@@ -351,7 +358,7 @@ static int m2_find_earliest(void *ts, rec_out *out)
         M2(mdb_data_read_uint64(data, F_ID, &out->id));
         M2(mdb_data_read_int64(data, F_EXPIRY, &out->expiry));
     }
-    M2(mdb_txn_commit(txn));
+    M2(end_read(t, txn));
     return found ? R_OK : R_MISS;
 }
 
