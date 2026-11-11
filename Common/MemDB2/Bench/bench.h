@@ -82,6 +82,7 @@ typedef struct bench_cfg {
     int sync_flush;            /* 0 lazy write, 1 flush buffers per commit   */
     int writer_exclusive;      /* writers use WRITE_EXCLUSIVE                */
     int reader_rw;             /* readers use READ_WRITE_SHARED              */
+    int reader_commit;         /* readers end with commit, not rollback      */
     int isolation;             /* MDB_ISO_*                                  */
     uint32_t preload_batch;
     int checkpoint;
