@@ -133,11 +133,10 @@ type
     destructor Destroy ;override;
 
     //Use as "First/Next (poss by index)"
-    //WARNING: isolation >= snapshot uses an internal index to determine row ordering
-    //so will not be the order the rows were originally written.
-    //Islation < snapshot reads in row original order, except ....
-    //Nonblocking checkpoints do the same thing and permanently write the new
-    //(by RowID) order.
+    //WARNING: with no index name, isolation >= snapshot iterates an internal
+    //index, so rows are not visited in the order they were written.
+    //Isolation < snapshot uses original row order, but an asynchronous
+    //checkpoint permanently rewrites it to the same (by RowID) order.
     function Locate(Pos: TMemAPIPosition; IdxName: string = ''): boolean;
 
     function FindByIndex(IdxName: string;

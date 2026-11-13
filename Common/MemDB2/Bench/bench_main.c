@@ -1,4 +1,26 @@
 /*
+ * Copyright (c) 2026 Martin Harvey <martin_c_harvey@hotmail.com>
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy of
+ * this software and associated documentation files (the "Software"), to deal in
+ * the Software without restriction, including without limitation the rights to
+ * use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+ * of the Software, and to permit persons to whom the Software is furnished to do
+ * so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ * IN THE SOFTWARE.
+ */
+
+/*
  * bench_main.c - mdb2bench: latency benchmark for the MemDB2 C_DLL.
  *
  * Phases
@@ -322,45 +344,98 @@ static void print_lat(const char *name, const hist *h, double secs)
 /* ---------------------------------------------------------------------------
  * Phase 1: preload
  * ------------------------------------------------------------------------- */
-static void preload(void)
-{
-    tctx *c = tctx_new(1000, 1);
-    rec *batch;
-    uint64_t done = 0, next_report, t0, t1;
-    uint32_t n, i;
-    uint64_t mem0, mem1;
+/* Preload workers claim batches of ids from g_load_next, so with several
+   threads the batches commit in no particular order. */
+static volatile LONG64 g_load_next;   /* ids claimed so far                 */
+static volatile LONG64 g_load_done;   /* rows committed so far              */
+static volatile LONG64 g_load_running;/* preload threads still running      */
+static volatile LONG64 g_load_clashes;/* batches retried after a clash      */
 
-    if (g_vt->thread_init(g_eng, &c->ts) != R_OK)
-        die("thread_init failed");
-    batch = (rec *)calloc(g_cfg.preload_batch, sizeof *batch);
+static unsigned __stdcall preload_main(void *arg)
+{
+    tctx *c = (tctx *)arg;
+    rec *batch = (rec *)calloc(g_cfg.preload_batch, sizeof *batch);
+    uint32_t n, i, tries;
+    uint64_t first;
+    int rc;
+
     if (!batch)
         die("out of memory");
-
-    printf("\nPhase 1: preload %llu records, %u per transaction\n",
-           (unsigned long long)g_cfg.records, g_cfg.preload_batch);
-    mem0 = process_private_bytes();
-    next_report = g_cfg.records / 10;
-    t0 = ticks_now();
-    while (done < g_cfg.records) {
+    if (g_vt->thread_init(g_eng, &c->ts) != R_OK)
+        die("thread_init failed");
+    for (;;) {
+        first = (uint64_t)InterlockedExchangeAdd64(&g_load_next, (LONG64)g_cfg.preload_batch);
+        if (first >= g_cfg.records)
+            break;
         n = g_cfg.preload_batch;
-        if (g_cfg.records - done < n)
-            n = (uint32_t)(g_cfg.records - done);
+        if (g_cfg.records - first < n)
+            n = (uint32_t)(g_cfg.records - first);
         for (i = 0; i < n; i++) {
-            uint64_t id = done + i + 1;
+            uint64_t id = first + i + 1;
             /* expire at logical time N + U[1, lifetime]: nothing expired
                at start, then roughly one per insert. */
             int64_t exp = (int64_t)(g_cfg.records + 1 + rng_below(&c->r, g_lifetime));
             make_rec(c, id, exp, &batch[i]);
         }
-        if (g_vt->preload_batch(c->ts, batch, n) != R_OK)
+        for (tries = 0; ; tries++) {
+            rc = g_vt->preload_batch(c->ts, batch, n);
+            if (rc != R_CONFLICT)
+                break;
+            InterlockedIncrement64(&g_load_clashes);
+            if (tries >= (uint32_t)g_cfg.max_retries)
+                die("preload: too many concurrency clashes");
+        }
+        if (rc != R_OK)
             die("preload failed");
-        done += n;
-        if (done >= next_report && done < g_cfg.records) {
-            printf("  %3.0f%%  %.1f s\n", 100.0 * (double)done / (double)g_cfg.records,
+        InterlockedExchangeAdd64(&g_load_done, (LONG64)n);
+    }
+    g_vt->thread_done(c->ts);
+    free(batch);
+    InterlockedExchangeAdd64(&g_load_running, -1);
+    return 0;
+}
+
+static void preload(void)
+{
+    int nt = g_cfg.load_threads, k;
+    tctx **cs = (tctx **)calloc((size_t)nt, sizeof *cs);
+    uint64_t done, next_report, t0, t1;
+    uint64_t mem0, mem1;
+
+    if (!cs)
+        die("out of memory");
+    printf("\nPhase 1: preload %llu records, %u per transaction, %d thread%s%s\n",
+           (unsigned long long)g_cfg.records, g_cfg.preload_batch, nt,
+           nt == 1 ? "" : "s", nt == 1 ? "" : " (READ_WRITE_SHARED)");
+    mem0 = process_private_bytes();
+    next_report = g_cfg.records / 10;
+    g_load_next = 0;
+    g_load_done = 0;
+    g_load_clashes = 0;
+    g_load_running = nt;
+    t0 = ticks_now();
+    for (k = 0; k < nt; k++) {
+        cs[k] = tctx_new(1000 + k, 1);
+        cs[k]->thread = (HANDLE)_beginthreadex(NULL, 0, preload_main, cs[k], 0, NULL);
+        if (!cs[k]->thread)
+            die("could not start a preload thread");
+    }
+    /* Progress every 10%, from this thread. */
+    while (g_load_running > 0) {
+        Sleep(200);
+        done = (uint64_t)g_load_done;
+        while (done >= next_report && next_report && next_report < g_cfg.records) {
+            printf("  %3.0f%%  %.1f s\n", 100.0 * (double)next_report / (double)g_cfg.records,
                    ticks_to_ns(ticks_now() - t0) / 1e9);
             next_report += g_cfg.records / 10;
         }
     }
+    for (k = 0; k < nt; k++) {
+        WaitForSingleObject(cs[k]->thread, INFINITE);
+        CloseHandle(cs[k]->thread);
+    }
+    if (g_load_clashes)
+        printf("  %lld batches retried after a concurrency clash\n", (long long)g_load_clashes);
     t1 = ticks_now();
     mem1 = process_private_bytes();
     printf("  loaded in %.2f s (%.0f rows/s)\n", ticks_to_ns(t1 - t0) / 1e9,
@@ -378,9 +453,34 @@ static void preload(void)
 
     g_next_id = (LONG64)(g_cfg.records + 1);
     g_live = (int64_t)g_cfg.records;
-    free(batch);
-    g_vt->thread_done(c->ts);
-    free(c);
+    for (k = 0; k < nt; k++)
+        free(cs[k]);
+    free(cs);
+}
+
+/* Phase 1 with --reuse-db: no preload; carry on from the table an earlier
+   run left. Ids are issued from one past the highest id in the table, so
+   logical time (and so expiry) continues where that run stopped. */
+static void attach_existing(void)
+{
+    uint64_t max_id = 0, rows = 0, t0, t1;
+
+    printf("\nPhase 1: using the existing table (--reuse-db), no preload\n");
+    t0 = ticks_now();
+    if (!g_vt->inspect || g_vt->inspect(g_eng, &max_id, &rows) != R_OK)
+        die("could not read the existing table");
+    t1 = ticks_now();
+    printf("  %llu rows, highest id %llu (counted in %.2f s)\n",
+           (unsigned long long)rows, (unsigned long long)max_id,
+           ticks_to_ns(t1 - t0) / 1e9);
+    if (rows == 0)
+        die("the existing table is empty: load it first (--load-only)");
+    if (rows < g_cfg.records / 2 || rows > g_cfg.records * 2)
+        printf("  note: --records is %llu. Give the value the table was loaded with,\n"
+               "  so that ids picked for reads and deletes match the rows present.\n",
+               (unsigned long long)g_cfg.records);
+    g_next_id = (LONG64)(max_id + 1);
+    g_live = (int64_t)rows;
 }
 
 /* ---------------------------------------------------------------------------
@@ -679,19 +779,27 @@ static void mixed(void)
 
     printf("\nPhase 3: mixed workload, %d readers + %d writers, %.0f s (+%.0f s warm-up)\n",
            g_cfg.readers, g_cfg.writers, g_cfg.duration_s, g_cfg.warmup_s);
-    printf("  writers: insert; delete-by-id p=%.2f; transition p=%.2f; recycle p=%.2f;\n"
-           "           expiry sweep every %.0f us (max %u rows)\n",
-           g_cfg.p_delete_id, g_cfg.p_transition, g_cfg.p_recycle,
-           g_cfg.sweep_us, g_cfg.sweep_cap);
-    printf("  readers: find-by-id, find-earliest every %u reads\n", g_cfg.earliest_every);
-    if (g_cfg.insert_rate > 0)
-        printf("  paced: %.0f inserts/s total", g_cfg.insert_rate);
+    if (g_cfg.writers)
+        printf("  writers: insert; delete-by-id p=%.2f; transition p=%.2f; recycle p=%.2f;\n"
+               "           expiry sweep every %.0f us (max %u rows)\n",
+               g_cfg.p_delete_id, g_cfg.p_transition, g_cfg.p_recycle,
+               g_cfg.sweep_us, g_cfg.sweep_cap);
     else
-        printf("  writers unpaced (closed loop)");
+        printf("  writers: none (read-only)\n");
+    if (g_cfg.readers)
+        printf("  readers: find-by-id, find-earliest every %u reads\n", g_cfg.earliest_every);
+    else
+        printf("  readers: none\n");
+    if (!g_cfg.writers)
+        printf("  ");
+    else if (g_cfg.insert_rate > 0)
+        printf("  paced: %.0f inserts/s total, ", g_cfg.insert_rate);
+    else
+        printf("  writers unpaced (closed loop), ");
     if (g_cfg.read_rate > 0)
-        printf(", %.0f reads/s total\n", g_cfg.read_rate);
+        printf("%.0f reads/s total\n", g_cfg.read_rate);
     else
-        printf(", readers unpaced\n");
+        printf("readers unpaced\n");
     if (g_cfg.ckpt_mode) {
         printf("  checkpoints: %s, back to back", g_cfg.ckpt_mode == 1 ? "asynchronous" : "synchronous");
         if (g_cfg.ckpt_gap_ms > 0)
@@ -943,9 +1051,18 @@ static void usage(void)
 "                            the folder name contains \"mdb2bench\"\n"
 "  --fresh                   delete them whatever the folder is called\n"
 "  --keep-db                 never delete them (the old journal is replayed)\n"
+"  --load-only               preload (and checkpoint) only, then exit, leaving\n"
+"                            the database for later --reuse-db runs\n"
+"  --reuse-db                skip the preload and use the table an earlier run\n"
+"                            left in --db (implies --keep-db). Give the same\n"
+"                            --records as the run that loaded it\n"
+"  --read-only               mixed phase with readers only (--writers 0,\n"
+"                            8 readers unless --readers is given), no isolated\n"
+"                            phase\n"
 "  --records N               initial records (default 5M; k/M suffixes ok)\n"
 "  --record-size B           average record size in bytes (default 128)\n"
-"  --readers N --writers N   threads in the mixed phase (default 4 + 4)\n"
+"  --readers N --writers N   threads in the mixed phase (default 4 + 4;\n"
+"                            either may be 0, not both)\n"
 "  --duration S --warmup S   mixed phase length (default 30 s + 5 s)\n"
 "  --micro-ops N             transactions per op in the isolated phase (200k)\n"
 "  --no-micro / --no-mixed   skip a phase\n"
@@ -963,6 +1080,8 @@ static void usage(void)
 "  --reader-end rollback|commit   how readers end a transaction (rollback)\n"
 "  --iso rc|rr|snap|ser      isolation level (default rr)\n"
 "  --batch N                 preload rows per transaction (default 10000)\n"
+"  --load-threads N          preload threads (default 1, WRITE_EXCLUSIVE); with\n"
+"                            more, each loads batches READ_WRITE_SHARED\n"
 "  --no-checkpoint           skip the checkpoint after preload\n"
 "  --max-retries N           retries on a concurrency clash (default 1000)\n"
 "  --pin                     pin threads to CPUs 0..n-1\n"
@@ -980,7 +1099,7 @@ static void usage(void)
 
 static void parse_args(int argc, char **argv)
 {
-    int i;
+    int i, readers_given = 0, read_only = 0;
     bench_cfg *c = &g_cfg;
     memset(c, 0, sizeof *c);
     c->engine = "memdb2";
@@ -1002,6 +1121,7 @@ static void parse_args(int argc, char **argv)
     c->earliest_every = 10;
     c->isolation = MDB_ISO_REPEATABLE_READ;
     c->preload_batch = 10000;
+    c->load_threads = 1;
     c->checkpoint = 1;
     c->max_retries = 1000;
     c->seed = 1;
@@ -1014,7 +1134,7 @@ static void parse_args(int argc, char **argv)
         else if (!strcmp(a, "--db")) c->db_path = NEXT();
         else if (!strcmp(a, "--records")) c->records = (uint64_t)parse_num(NEXT());
         else if (!strcmp(a, "--record-size")) c->record_size = (uint32_t)parse_num(NEXT());
-        else if (!strcmp(a, "--readers")) c->readers = (int)parse_num(NEXT());
+        else if (!strcmp(a, "--readers")) { c->readers = (int)parse_num(NEXT()); readers_given = 1; }
         else if (!strcmp(a, "--writers")) c->writers = (int)parse_num(NEXT());
         else if (!strcmp(a, "--duration")) c->duration_s = parse_num(NEXT());
         else if (!strcmp(a, "--warmup")) c->warmup_s = parse_num(NEXT());
@@ -1062,6 +1182,7 @@ static void parse_args(int argc, char **argv)
             else { usage(); exit(2); }
         }
         else if (!strcmp(a, "--batch")) c->preload_batch = (uint32_t)parse_num(NEXT());
+        else if (!strcmp(a, "--load-threads")) c->load_threads = (int)parse_num(NEXT());
         else if (!strcmp(a, "--no-checkpoint")) c->checkpoint = 0;
         else if (!strcmp(a, "--max-retries")) c->max_retries = (uint32_t)parse_num(NEXT());
         else if (!strcmp(a, "--pin")) c->pin = 1;
@@ -1076,6 +1197,9 @@ static void parse_args(int argc, char **argv)
         else if (!strcmp(a, "--ckpt-gap-ms")) c->ckpt_gap_ms = parse_num(NEXT());
         else if (!strcmp(a, "--fresh")) c->db_clean = 1;
         else if (!strcmp(a, "--keep-db")) c->db_clean = -1;
+        else if (!strcmp(a, "--reuse-db")) c->reuse_db = 1;
+        else if (!strcmp(a, "--load-only")) { c->load_only = 1; c->run_micro = 0; c->run_mixed = 0; }
+        else if (!strcmp(a, "--read-only")) read_only = 1;
         else if (!strcmp(a, "--csv")) c->csv_path = NEXT();
         else if (!strcmp(a, "--label")) c->label = NEXT();
         else if (!strcmp(a, "--seed")) c->seed = (uint64_t)parse_num(NEXT());
@@ -1086,7 +1210,25 @@ static void parse_args(int argc, char **argv)
 #undef NEXT
     if (c->records < 1000) die("--records must be at least 1000");
     if (c->preload_batch < 1) c->preload_batch = 1;
-    if (c->readers < 0 || c->writers < 1) die("need at least one writer");
+    if (c->load_threads < 1 || c->load_threads > 64)
+        die("--load-threads must be 1 to 64");
+    if (read_only) {
+        c->writers = 0;
+        c->run_micro = 0;
+        if (!readers_given)
+            c->readers = 8;
+    }
+    if (c->readers < 0 || c->writers < 0 || c->readers + c->writers < 1)
+        die("need at least one reader or writer");
+    if (c->reuse_db) {
+        if (c->db_clean > 0)
+            die("--reuse-db and --fresh conflict");
+        if (c->load_only)
+            die("--reuse-db and --load-only conflict");
+        if (strcmp(c->engine, "memdb2") != 0)
+            die("--reuse-db needs --engine memdb2");
+        c->db_clean = -1;
+    }
     if (c->micro_ops < 1) c->micro_ops = 1;
     if (c->ckpt_mode && strcmp(c->engine, "memdb2") != 0)
         die("--ckpt needs --engine memdb2");
@@ -1103,11 +1245,17 @@ static void parse_args(int argc, char **argv)
     } else {
         g_lifetime = c->lifetime;
     }
-    if (c->micro_ops > c->records / 4) {
+    if (c->run_micro && c->micro_ops > c->records / 4) {
         c->micro_ops = c->records / 4;
         fprintf(stderr, "--micro-ops reduced to %llu (records / 4)\n",
                 (unsigned long long)c->micro_ops);
     }
+}
+
+/* LOADED_MARKER in the --db folder. */
+static void loaded_marker_path(char *buf, size_t n)
+{
+    snprintf(buf, n, "%s\\" LOADED_MARKER, g_cfg.db_path);
 }
 
 int main(int argc, char **argv)
@@ -1115,7 +1263,11 @@ int main(int argc, char **argv)
     char brand[64];
     SYSTEM_INFO si;
     uint64_t mem_start;
+    char marker[1024];
 
+    /* Piped into a log, stdout would be fully buffered and progress would
+       only appear at exit. Line-at-a-time output is cheap here. */
+    setvbuf(stdout, NULL, _IONBF, 0);
     parse_args(argc, argv);
     if (!strcmp(g_cfg.engine, "memdb2")) g_vt = &g_engine_memdb2;
     else if (!strcmp(g_cfg.engine, "baseline")) g_vt = &g_engine_baseline;
@@ -1145,13 +1297,30 @@ int main(int argc, char **argv)
     mem_start = process_private_bytes();
     (void)mem_start;
 
-    if (g_vt->open(&g_cfg, &g_eng) != R_OK) {
-        if (g_eng)
-            g_vt->close(g_eng);
-        die("could not open engine");
+    /* --load-only: the marker file is only written once the load and its
+       checkpoint have succeeded, so scripts can check for it (the exit code
+       is often lost in a pipe). */
+    if (g_cfg.load_only) {
+        loaded_marker_path(marker, sizeof marker);
+        remove(marker);
     }
 
-    preload();
+    {
+        uint64_t t0 = ticks_now();
+        if (g_vt->open(&g_cfg, &g_eng) != R_OK) {
+            if (g_eng)
+                g_vt->close(g_eng);
+            die("could not open engine");
+        }
+        if (g_cfg.reuse_db)
+            printf("Opened existing database in %.2f s (journal replayed)\n",
+                   ticks_to_ns(ticks_now() - t0) / 1e9);
+    }
+
+    if (g_cfg.reuse_db)
+        attach_existing();
+    else
+        preload();
     if (g_cfg.run_micro && !g_failed)
         micro();
     if (g_cfg.run_mixed && !g_failed)
@@ -1163,6 +1332,15 @@ int main(int argc, char **argv)
     if (g_failed) {
         fprintf(stderr, "\nBenchmark stopped on an error (see above).\n");
         return 1;
+    }
+    if (g_cfg.load_only) {
+        FILE *f = fopen(marker, "w");
+        if (!f || fprintf(f, "records %llu\n", (unsigned long long)g_cfg.records) < 0
+               || fclose(f) != 0) {
+            fprintf(stderr, "could not write %s\n", marker);
+            return 1;
+        }
+        printf("Wrote %s\n", marker);
     }
     printf("\nDone.\n");
     return 0;

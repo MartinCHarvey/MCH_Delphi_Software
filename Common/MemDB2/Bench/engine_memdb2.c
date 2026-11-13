@@ -1,4 +1,26 @@
 /*
+ * Copyright (c) 2026 Martin Harvey <martin_c_harvey@hotmail.com>
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy of
+ * this software and associated documentation files (the "Software"), to deal in
+ * the Software without restriction, including without limitation the rights to
+ * use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+ * of the Software, and to permit persons to whom the Software is furnished to do
+ * so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ * IN THE SOFTWARE.
+ */
+
+/*
  * engine_memdb2.c - mdb2bench engine over the MemDB2 C API (memdb2.h).
  *
  * Every benchmark operation is one complete MemDB2 transaction:
@@ -179,6 +201,23 @@ static int m2_open(const bench_cfg *cfg, void **out_eng)
     if (rc != MDB_OK)
         return m2_classify(rc, "mdb_session_open");
 
+    if (cfg->reuse_db) {
+        /* Use the table an earlier run left: it must exist. */
+        M2(mdb_txn_begin(session, MDB_ACCESS_READ_SHARED, MDB_SYNC_LAZY_WRITE,
+                         MDB_ISO_REPEATABLE_READ, &txn));
+        rc = mdb_txn_open_table_meta(txn, TBL, &meta);
+        mdb_txn_rollback(txn);
+        txn = 0;
+        mdb_session_close(session);
+        if (rc != MDB_OK) {
+            fprintf(stderr, "--reuse-db: no %s table in %s. Load one first, e.g.\n"
+                    "  mdb2bench --db %s --records N --load-only\n",
+                    TBL, cfg->db_path, cfg->db_path);
+            return R_FAIL;
+        }
+        return R_OK;
+    }
+
     /* Drop any table left by an earlier run. */
     M2(mdb_txn_begin(session, MDB_ACCESS_WRITE_EXCLUSIVE, MDB_SYNC_LAZY_WRITE,
                      MDB_ISO_REPEATABLE_READ, &txn));
@@ -288,7 +327,11 @@ static int m2_preload_batch(void *ts, const rec *recs, uint32_t n)
     m2_ts *t = (m2_ts *)ts;
     mdb_handle txn = 0, data = 0;
     uint32_t i;
-    M2(mdb_txn_begin(t->session, MDB_ACCESS_WRITE_EXCLUSIVE, MDB_SYNC_LAZY_WRITE,
+    /* One loading thread: exclusive, as before. Several: shared, so their
+       appends and posts overlap and only the commits are serialised. */
+    int32_t mode = t->e->cfg.load_threads > 1 ? MDB_ACCESS_READ_WRITE_SHARED
+                                              : MDB_ACCESS_WRITE_EXCLUSIVE;
+    M2(mdb_txn_begin(t->session, mode, MDB_SYNC_LAZY_WRITE,
                      MDB_ISO_REPEATABLE_READ, &txn));
     M2(mdb_txn_open_table_data(txn, TBL, &data));
     for (i = 0; i < n; i++) {
@@ -470,6 +513,46 @@ static int m2_checkpoint(void *eng, int async)
     return rc == MDB_OK ? R_OK : m2_classify(rc, "mdb_db_checkpoint_ex");
 }
 
+/* --reuse-db: highest id (by the id index) and row count of the table. */
+static int m2_inspect(void *eng, uint64_t *max_id, uint64_t *rows)
+{
+    m2_eng *e = (m2_eng *)eng;
+    mdb_handle session = 0, txn = 0, data = 0;
+    int32_t found = 0, rc;
+    uint64_t n = 0;
+
+    *max_id = 0;
+    *rows = 0;
+    rc = mdb_session_open(e->db, &session);
+    if (rc != MDB_OK)
+        return m2_classify(rc, "mdb_session_open");
+    rc = mdb_txn_begin(session, MDB_ACCESS_READ_SHARED, MDB_SYNC_LAZY_WRITE,
+                       MDB_ISO_REPEATABLE_READ, &txn);
+    if (rc == MDB_OK)
+        rc = mdb_txn_open_table_data(txn, TBL, &data);
+    if (rc == MDB_OK)
+        rc = mdb_data_locate(data, MDB_POS_LAST, IX_ID, &found);
+    if (rc == MDB_OK && found)
+        rc = mdb_data_read_uint64(data, F_ID, max_id);
+    /* Count in storage order: no index walk needed. */
+    if (rc == MDB_OK)
+        rc = mdb_data_locate(data, MDB_POS_FIRST, NULL, &found);
+    while (rc == MDB_OK && found) {
+        n++;
+        rc = mdb_data_locate(data, MDB_POS_NEXT, NULL, &found);
+    }
+    if (rc != MDB_OK) {
+        int res = m2_classify(rc, "inspecting the existing table");
+        if (txn) mdb_txn_rollback(txn);
+        mdb_session_close(session);
+        return res;
+    }
+    mdb_txn_rollback(txn);
+    mdb_session_close(session);
+    *rows = n;
+    return R_OK;
+}
+
 const engine_vt g_engine_memdb2 = {
     "memdb2",
     m2_open, m2_close, m2_thread_init, m2_thread_done,
@@ -478,4 +561,5 @@ const engine_vt g_engine_memdb2 = {
     m2_delete_expired, m2_transition, m2_recycle,
     m2_alloc_stats, m2_alloc_enable,
     m2_checkpoint,
+    m2_inspect,
 };
