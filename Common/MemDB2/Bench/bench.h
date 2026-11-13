@@ -1,4 +1,26 @@
 /*
+ * Copyright (c) 2026 Martin Harvey <martin_c_harvey@hotmail.com>
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy of
+ * this software and associated documentation files (the "Software"), to deal in
+ * the Software without restriction, including without limitation the rights to
+ * use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+ * of the Software, and to permit persons to whom the Software is furnished to do
+ * so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ * IN THE SOFTWARE.
+ */
+
+/*
  * bench.h - shared declarations for mdb2bench, the MemDB2 C_DLL latency
  * benchmark. See README.md.
  */
@@ -43,6 +65,9 @@ extern const char *const g_op_names[OP_COUNT];
 
 #define MAX_PAYLOAD  4096
 
+/* Written in the --db folder when --load-only succeeds. */
+#define LOADED_MARKER "mdb2bench_loaded.txt"
+
 /* One logical record. Payload points at caller memory. */
 typedef struct rec {
     uint64_t id;
@@ -85,6 +110,7 @@ typedef struct bench_cfg {
     int reader_commit;         /* readers end with commit, not rollback      */
     int isolation;             /* MDB_ISO_*                                  */
     uint32_t preload_batch;
+    int load_threads;          /* preload threads; > 1 loads with READ_WRITE_SHARED */
     int checkpoint;
     uint32_t max_retries;
     int pin;
@@ -94,6 +120,8 @@ typedef struct bench_cfg {
     int db_clean;              /* journal files at start: 0 auto (only if the
                                   folder name contains "mdb2bench"),
                                   1 always delete (--fresh), -1 keep          */
+    int reuse_db;              /* use the table an earlier run left, no preload */
+    int load_only;             /* preload, then write LOADED_MARKER and exit */
     const char *csv_path;
     const char *label;
     uint64_t seed;
@@ -126,6 +154,9 @@ typedef struct engine_vt {
     /* Write a checkpoint (async != 0: MDB_CHECKPOINT_ASYNC). Called from a
        thread of its own while the workload runs. */
     int  (*checkpoint)(void *eng, int async);
+    /* For --reuse-db: highest id and number of rows in the existing table.
+       NULL if the engine cannot keep data between runs. */
+    int  (*inspect)(void *eng, uint64_t *max_id, uint64_t *rows);
 } engine_vt;
 
 extern const engine_vt g_engine_memdb2;

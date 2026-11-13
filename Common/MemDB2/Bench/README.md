@@ -166,6 +166,42 @@ name contains `mdb2bench` (the default is `mdb2bench_db`). A mistyped
 - `--keep-db` never deletes them; the old journal is replayed, then the
   `Bench` table is dropped and recreated as before.
 
+## Read-only runs and reusing a loaded database
+
+- `--read-only` runs the mixed phase with readers only: `--writers 0`,
+  8 readers unless `--readers` is given, and no isolated-operations phase.
+  It measures the maximum read TPS. `--writers 0` or `--readers 0` can also
+  be given on their own; at least one thread is needed.
+- `--load-only` preloads (and checkpoints) the table, then exits. On
+  success it writes `mdb2bench_loaded.txt` in the `--db` folder, which the
+  batch files check for, since a pipe loses the exit code.
+- `--load-threads N` preloads with N threads. With 1 (the default) each
+  batch is a `WRITE_EXCLUSIVE` transaction, as before. With more, each
+  thread claims batches of ids and loads them `READ_WRITE_SHARED`, retrying
+  a batch after a concurrency clash, so appends and posts (and the page
+  faults they take) overlap, and only the commits are serialised. The
+  batch files load with 8 threads (`LOAD_THREADS`).
+- `--reuse-db` skips the preload and uses the `Bench` table left by an
+  earlier run. The journal is never deleted in this mode (it implies
+  `--keep-db`, and `--fresh` is refused). Startup prints the time taken to
+  open the database, which includes replaying the journal, then counts the
+  rows and finds the highest id. Give the same `--records` as the load:
+  readers pick ids from a span of recent ids sized from `--records`, and the run
+  warns if the row count is far from `--records`.
+
+Runs with writers can reuse a table too, but they change it, so later runs
+start from different data. Load again for a clean starting point.
+
+`plain_tests.bat` (1M records) and `big_test.bat` (8.44M) load once
+into a `..._load` folder. Before each of their three runs (`read`, `rws`,
+`rws-ckpt`) they copy it to a `..._run` folder with `robocopy /MIR`, so every
+run starts from the same data. `NOLOAD=1` skips the load in these too.
+
+`read_only_tests.bat [records]` loads once into `mdb2bench_ro_db`, then
+runs 8, 1, 2 and 4 `READ_SHARED` readers and 8 `READ_WRITE_SHARED` readers
+against the same data. It writes to `results_readonly.csv` and
+`results_readonly_execution.log`. Set `NOLOAD=1` to skip the load.
+
 ## Things to know when reading the results
 
 - **Journalling can't be switched off through the C API.** `InitDB` is

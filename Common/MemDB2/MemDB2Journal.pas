@@ -134,6 +134,10 @@ type
     FState: TJournalState;
     FHighPriorityActionCount: integer;
     FHighPriorityEvent: TEvent;
+    //Changeset bytes of commits still in the pending queue (queue lock).
+    //Checkpoints are not counted, their state tends to be on disk (temp file)
+    //and hence not worth blocking writers for.
+    FPendingChangesetBytes: Int64;
     FOnUIStateChange: TNotifyEvent;
 
     FOnJournalInitialized: TJournalInitializedEvent;
@@ -146,7 +150,9 @@ type
 
     procedure DoJournalInitialized(OK: boolean; AnyFiles: boolean; CreateCheckpoint: boolean; ErrMsg: string);
     procedure DoJournalFinished(Signal: boolean = true);
-    procedure ErrorDropTransaction(T: TReffed);
+    procedure TransactionDone(T: TReffed);
+    procedure AddActionBufferCount(Action: TMemDbJournalAction);
+    procedure RemoveActionBufferCount(Action: TMemDBJournalAction);
   protected
     procedure DoJournalReplay(Changesets: TObject; Initial: boolean);
     procedure DoJournalWriteFlush(Transaction: TObject);
@@ -164,6 +170,9 @@ type
     procedure DoUIStateChange;
 
     procedure AddToTempCheckpoints(const ChkGuid: TGuid; Seq: UInt64);
+    //Removes the reservation for ChkGuid, returning its sequence number.
+    //False if there is none.
+    function TryGetFromTempCheckpoints(const ChkGuid: TGuid; out Seq: UInt64): boolean;
     function GetFromTempCheckpoints(const ChkGuid: TGuid): UInt64;
     //As GetFromTempCheckpoints, but silently does nothing if not found.
     procedure DiscardTempCheckpoint(const ChkGuid: TGuid);
@@ -239,7 +248,6 @@ uses MemDB2,
      ;
 
 const
-  JOURNAL_PENDING_QUEUE_LIMIT = 4096;
   MAX_INCR_JOURNAL_FILES = 10 * 1024;
   S_COULDNT_CREATE_DIR = 'Couldn''t create or open directory: ';
   S_COULDNT_FIND_EXPECTED_DB_FILES = 'Couldn''t find sequentially numbered db files.';
@@ -302,7 +310,7 @@ end;
 
 { TMemDBJournal }
 
-procedure TMemDBJournal.ErrorDropTransaction(T: TReffed);
+procedure TMemDBJournal.TransactionDone(T: TReffed);
 var
   Tr: TMemDBTransaction;
 begin
@@ -386,9 +394,11 @@ begin
 //Since at restart time, many small file reads are slow, don't enable this
 //option unless the write speed of the FS is much much slower than the read speed.
 {$IFDEF JOURNAL_WRITE_FLOW_CONTROL}
+  //Flow control on the size of the changesets waiting in the queue,
+  //not the number of transactions.
   FActionsPendingQueue.AcquireLock;
   try
-   result := FActionsPendingQueue.Count > JOURNAL_PENDING_QUEUE_LIMIT;
+   result := FPendingChangesetBytes > JOURNAL_PENDING_BYTES_LIMIT;
   finally
     FActionsPendingQueue.ReleaseLock;
   end;
@@ -483,7 +493,7 @@ var
       try
         result.Add(LT);
       except
-        ErrorDropTransaction(LT);
+        TransactionDone(LT);
         raise;
       end;
 
@@ -502,12 +512,13 @@ var
             and ((LAction.ActionObj as TMemDbTransaction).Sync = amLazyWrite) do
           begin
             LAction := FActionsPendingQueue.RemoveHeadObj as TMemDBJournalAction;
+            RemoveActionBufferCount(LAction);
             try
               LT := LAction.ActionObj as TMemDBTransaction;
               try
                 result.Add(LT);
               except
-                ErrorDropTransaction(LT);
+                TransactionDone(LT);
                 raise;
               end;
             finally
@@ -529,7 +540,7 @@ var
           for i := 0 to Pred(result.Count) do
           begin
             LT := TMemDBTransaction(result[i]);
-            ErrorDropTransaction(LT);
+            TransactionDone(LT);
           end;
           result.Free;
         end
@@ -537,7 +548,7 @@ var
         begin
           //List never created: first transaction not yet owned by it.
           LT := TMemDBTransaction(Action.ActionObj);
-          ErrorDropTransaction(LT);
+          TransactionDone(LT);
         end;
         raise;
       end;
@@ -562,6 +573,8 @@ begin
       FActionsPendingQueue.AcquireLock;
       try
         Action := FActionsPendingQueue.RemoveHeadObj as TMemDbJournalAction;
+        if Assigned(Action) then
+          RemoveActionBufferCount(Action);
         Assert(Assigned(Action) or (FHighPriorityActionCount = 0));
         ActionState := FState;
       finally
@@ -726,6 +739,56 @@ begin
   end;
 end;
 
+//Called with the queue lock held for every transaction delat added to the queue.
+procedure TMemDBJournal.AddActionBufferCount(Action: TMemDBJournalAction);
+var
+  T: TMemDBTransaction;
+  OK: boolean;
+begin
+  OK := false;
+  Assert(Assigned(Action));
+  if Action.ActionType = jatCommitTransaction then
+  begin
+    if Assigned(Action.ActionObj) and (Action.ActionObj is TMemDBTransaction) then
+    begin
+      T := TMemDBTransaction(Action.ActionObj);
+      if Assigned(T.Changeset) then
+      begin
+        Inc(FPendingChangesetBytes, T.Changeset.Size);
+        OK := true;
+      end;
+    end;
+  end;
+  Assert(OK);
+end;
+
+//Called with the queue lock held, for every action taken off the queue.
+procedure TMemDBJournal.RemoveActionBufferCount(Action: TMemDBJournalAction);
+var
+  T: TMemDBTransaction;
+  OK: boolean;
+begin
+  Assert(Assigned(Action));
+  if Action.ActionType = jatCommitTransaction then
+  begin
+    OK := false;
+    if Assigned(Action.ActionObj) and (Action.ActionObj is TMemDBTransaction) then
+    begin
+      T := TMemDBTransaction(Action.ActionObj);
+      if Assigned(T.Changeset) then
+      begin
+        Dec(FPendingChangesetBytes, T.Changeset.Size);
+        OK := true;
+      end;
+    end;
+    Assert(OK);
+  end;
+  //Else OK to ignore.
+  if FActionsPendingQueue.Count = 0 then
+    Assert(FPendingChangesetBytes = 0);
+end;
+
+
 procedure TMemDBJournal.TransactionCommitChangeset(Transaction: TObject);
 var
   Action: TMemDbJournalAction;
@@ -741,6 +804,7 @@ begin
     Action.ActionType := jatCommitTransaction;
     Action.ActionObj := T;
     FActionsPendingQueue.AddTailObj(Action);
+    AddActionBufferCount(Action);
     Assert(T.Mode in [amWriteExclusive, amReadWriteShared]); //No read-only transactions here plz!
     if T.Sync = amFlushBuffers then
     begin
@@ -822,10 +886,12 @@ begin
   end;
 end;
 
-function TMemDBJournal.GetFromTempCheckpoints(const ChkGuid: TGuid): UInt64;
+function TMemDBJournal.TryGetFromTempCheckpoints(const ChkGuid: TGuid; out Seq: UInt64): boolean;
 var
   R: TMemDBCheckpointReservation;
 begin
+  result := false;
+  Seq := 0;
   FActionsPendingQueue.AcquireLock;
   try
     R := FTempCheckpoints.FLink.Owner as TMemDBCheckpointReservation;
@@ -833,9 +899,10 @@ begin
     begin
       if R.FGuid = ChkGuid then
       begin
-        result := R.FSeq;
+        Seq := R.FSeq;
         DLListRemoveObj(@R.FSiblingListEntry);
         R.Free;
+        result := true;
         exit;
       end;
       R := R.FSiblingListEntry.FLink.Owner as TMemDBCheckpointReservation;
@@ -843,29 +910,19 @@ begin
   finally
     FActionsPendingQueue.ReleaseLock;
   end;
-  raise EMemDBException.Create(S_CHECKPOINT_RESERVATION_NOT_FOUND);
+end;
+
+function TMemDBJournal.GetFromTempCheckpoints(const ChkGuid: TGuid): UInt64;
+begin
+  if not TryGetFromTempCheckpoints(ChkGuid, result) then
+    raise EMemDBException.Create(S_CHECKPOINT_RESERVATION_NOT_FOUND);
 end;
 
 procedure TMemDBJournal.DiscardTempCheckpoint(const ChkGuid: TGuid);
 var
-  R: TMemDBCheckpointReservation;
+  Seq: UInt64;
 begin
-  FActionsPendingQueue.AcquireLock;
-  try
-    R := FTempCheckpoints.FLink.Owner as TMemDBCheckpointReservation;
-    while Assigned(R) do
-    begin
-      if R.FGuid = ChkGuid then
-      begin
-        DLListRemoveObj(@R.FSiblingListEntry);
-        R.Free;
-        exit;
-      end;
-      R := R.FSiblingListEntry.FLink.Owner as TMemDBCheckpointReservation;
-    end;
-  finally
-    FActionsPendingQueue.ReleaseLock;
-  end;
+  TryGetFromTempCheckpoints(ChkGuid, Seq);
 end;
 
 { TMemDbDefaultJournal }
@@ -1334,7 +1391,7 @@ begin
       for Idx := 0 to Pred(Transactions.Count) do
       begin
         Transaction := TMemDbTransaction(Transactions[idx]);
-        ErrorDropTransaction(Transaction);
+        TransactionDone(Transaction);
       end;
     end;
   except
