@@ -111,10 +111,13 @@ typedef struct bench_cfg {
     int isolation;             /* MDB_ISO_*                                  */
     uint32_t preload_batch;
     int load_threads;          /* preload threads; > 1 loads with READ_WRITE_SHARED */
+    uint32_t row_bytes;        /* baseline only: pad each record's block to about
+                                  this many bytes (0 = no padding) */
     int checkpoint;
     uint32_t max_retries;
     int pin;
     int count_allocs;          /* count allocations in the mixed phase too   */
+    int profile;               /* VTune: collect only between load and close */
     int ckpt_mode;             /* mixed phase: 0 none, 1 async, 2 sync loop  */
     double ckpt_gap_ms;        /* pause between checkpoints                  */
     int db_clean;              /* journal files at start: 0 auto (only if the

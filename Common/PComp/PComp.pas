@@ -26,41 +26,41 @@ IN THE SOFTWARE.
 
 interface
 
-function ComparePointers(Own, Other: Pointer): integer;
+function ComparePointers(Own, Other: Pointer): integer; inline;
+
+{$IF Defined(CPUX86) or Defined(CPUX64)}
+procedure CpuRelax;
+{$ELSE}
+procedure CpuRelax; inline;
+{$ENDIF}
 
 implementation
 
-{$HINTS OFF}
-function ComparePointers(Own, Other: Pointer): integer;
-var
-  OwnInt, OtherInt: Cardinal;
-  Own64, Other64: UInt64;
-begin
-  if sizeof(Pointer) = sizeof(Cardinal) then
-  begin
-    OwnInt := Cardinal(Own);
-    OtherInt := Cardinal(Other);
-    if OtherInt > OwnInt then
-      result := 1
-    else if OtherInt < OwnInt then
-      result := -1
-    else
-      result := 0;
-  end
-  else if sizeof(Pointer) = sizeof(UInt64) then
-  begin
-    Own64 := UInt64(Own);
-    Other64 := UInt64(Other);
-    if Other64 > Own64 then
-      result := 1
-    else if Other64 < Own64 then
-      result := -1
-    else
-      result := 0;
-  end
-  else
-    Assert(false);
+{$IF Defined(CPUX86) or Defined(CPUX64)}
+procedure CpuRelax;
+asm
+  pause
 end;
-{$HINTS ON}
+{$ELSE}
+procedure CpuRelax; inline;
+begin
+  // ARM: no inline asm in Delphi; a plain read loop is fine here
+end;
+{$IFEND}
+
+function ComparePointers(Own, Other: Pointer): integer; inline;
+var
+  OwnInt, OtherInt: NativeUInt;
+begin
+  Assert(sizeof(NativeUint) = sizeof(Pointer));
+  OwnInt := NativeUInt(Own);
+  OtherInt := NativeUInt(Other);
+  if OtherInt > OwnInt then
+    result := 1
+  else if OtherInt < OwnInt then
+    result := -1
+  else
+    result := 0;
+end;
 
 end.

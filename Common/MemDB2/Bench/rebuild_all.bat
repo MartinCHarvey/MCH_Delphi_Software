@@ -1,8 +1,9 @@
 @echo off
 rem ==========================================================================
 rem  rebuild_all.bat - rebuild the MemDB2 C DLL (Debug and Release, Win32 and
-rem  Win64), make its MSVC import libraries, then build mdb2bench for x64 and
-rem  x86. mdb2bench always builds against the Release DLLs.
+rem  Win64), make its MSVC import libraries and (with map2pdb) the Win64
+rem  Release PDB for VTune, then build mdb2bench for x64 and x86. mdb2bench
+rem  always builds against the Release DLLs.
 rem  Output goes to the console and to rebuild_all.log.
 rem ==========================================================================
 setlocal
@@ -14,7 +15,8 @@ set "RC=%ERRORLEVEL%"
 type "%LOG%"
 if "%RC%"=="0" (echo ALL OK) else (echo FAILED, see %LOG%)
 >>"%LOG%" echo EXIT %RC%
-pause
+rem Set NOPAUSE=1 when calling from another script.
+if not defined NOPAUSE pause
 exit /b %RC%
 
 :main
@@ -43,6 +45,28 @@ echo ==== make_importlib
 call make_importlib.bat
 if errorlevel 1 (popd & echo IMPORTLIB FAILED & exit /b 1)
 popd
+
+rem VTune symbols for the Win64 Release DLL. Needs map2pdb; skipped if it
+rem is not found (set MAP2PDB or MAP2PDB_DIR as for vtune_prep.bat).
+echo.
+echo ==== map2pdb (Win64 Release)
+if not defined MAP2PDB_DIR set "MAP2PDB_DIR=C:\MCH Stuff\github\map2pdb"
+if defined MAP2PDB goto :have_map2pdb
+for /r "%MAP2PDB_DIR%" %%f in (map2pdb.exe) do if exist "%%f" set "MAP2PDB=%%f"
+:have_map2pdb
+set "W64R=%~dp0..\C_DLL\Win64\Release"
+if exist "%W64R%\MemDB2Dll.pdb" del "%W64R%\MemDB2Dll.pdb"
+if not defined MAP2PDB goto :no_map2pdb
+if not exist "%W64R%\MemDB2Dll.map" goto :no_map
+"%MAP2PDB%" -bind:"%W64R%\MemDB2Dll.dll" "%W64R%\MemDB2Dll.map"
+if errorlevel 1 (echo MAP2PDB FAILED & exit /b 1)
+goto :map2pdb_done
+:no_map2pdb
+echo map2pdb.exe not found: skipped, no VTune symbols for the DLL.
+goto :map2pdb_done
+:no_map
+echo No MemDB2Dll.map: skipped, no VTune symbols for the DLL.
+:map2pdb_done
 
 echo.
 echo ==== Bench build (against the Release DLLs)

@@ -166,7 +166,7 @@ name contains `mdb2bench` (the default is `mdb2bench_db`). A mistyped
 - `--keep-db` never deletes them; the old journal is replayed, then the
   `Bench` table is dropped and recreated as before.
 
-## Read-only runs and reusing a loaded database
+## Read-only runs and reusing a loaded database (options)
 
 - `--read-only` runs the mixed phase with readers only: `--writers 0`,
   8 readers unless `--readers` is given, and no isolated-operations phase.
@@ -192,15 +192,33 @@ name contains `mdb2bench` (the default is `mdb2bench_db`). A mistyped
 Runs with writers can reuse a table too, but they change it, so later runs
 start from different data. Load again for a clean starting point.
 
-`plain_tests.bat` (1M records) and `big_test.bat` (8.44M) load once
-into a `..._load` folder. Before each of their three runs (`read`, `rws`,
-`rws-ckpt`) they copy it to a `..._run` folder with `robocopy /MIR`, so every
-run starts from the same data. `NOLOAD=1` skips the load in these too.
+## Test scripts
 
-`read_only_tests.bat [records]` loads once into `mdb2bench_ro_db`, then
-runs 8, 1, 2 and 4 `READ_SHARED` readers and 8 `READ_WRITE_SHARED` readers
-against the same data. It writes to `results_readonly.csv` and
-`results_readonly_execution.log`. Set `NOLOAD=1` to skip the load.
+Two scripts, both on a 1M-row table, for comparing builds before and after a
+change. Each takes a tag that starts every CSV label, so runs of different
+builds share one CSV:
+
+```
+read_scaling.bat before            rem read-only, 1 2 4 6 8 readers
+read_scaling.bat after "1 2 4 8"   rem pick the reader counts
+mixed_tests.bat before             rem single ops, then 2+2 and 4+4 threads
+```
+
+| Script | Runs | Output |
+|---|---|---|
+| `read_scaling.bat` | `READ_SHARED` readers only, one run per reader count; `RWS=1` adds `READ_WRITE_SHARED` | `results_read.csv`, `results_read_execution.log` |
+| `mixed_tests.bat` | the seven single operations (50,000 each; `NOMICRO=1` skips), then 2 readers + 2 writers and 4 + 4, each with `READ_SHARED` readers, `READ_WRITE_SHARED` readers, and `READ_WRITE_SHARED` with back-to-back async checkpoints | `results_mixed.csv`, `results_mixed_execution.log` |
+
+Every run loads a fresh table (8 load threads, then a checkpoint, about a
+minute) into the single folder `mdb2bench_db`. Writers grow and change the
+table, so reloading means each run starts from identical data, and the
+journal from the previous run is deleted at startup. The load isn't measured.
+Timed phases are 30 s after a 5 s warm-up (`DURATION`, `WARMUP` in the
+scripts).
+
+`big_test.bat` (8.44M rows, slightly bigger than RAM, 30 minute runs) is
+kept for the paging case. It still loads once and copies the loaded
+folder before each run.
 
 ## Things to know when reading the results
 
@@ -251,3 +269,33 @@ against the same data. It writes to `results_readonly.csv` and
 | `build.bat` | MSVC build, x64 / x86 |
 
 Run `mdb2bench --help` for every option.
+
+## Profiling with VTune
+
+1. Build the Win64 Release DLL with **Map file = Detailed** and **Debug
+   information** on (line numbers come from the map).
+2. Run `vtune_prep.bat`. It runs map2pdb (looked for under
+   `C:\MCH Stuff\github\map2pdb`, or set `MAP2PDB`) to write and bind
+   `MemDB2Dll.pdb`, then runs `build.bat x64`. Re-run it after every DLL build.
+3. `build.bat` now always writes `mdb2bench.pdb`. If it finds the VTune SDK
+   (`ITT_DIR`, `VTUNE_PROFILER_DIR\sdk`, or the default oneAPI folder) it
+   says "with VTune markers" and builds with `USE_ITT`.
+4. In VTune: application `Bench\x64\mdb2bench.exe`, working directory
+   `Bench`, and the usual arguments plus `--profile`. With markers,
+   collection is paused at startup, resumed once the database is loaded or
+   reopened ("--profile: collection resumed"), and paused again before the
+   close ("--profile: collection paused"). Pick the tests with the other
+   options. Without markers `--profile` only prints a warning.
+
+   Use a sampling analysis (Hotspots, Threading, Microarchitecture
+   Exploration). Performance Snapshot in hardware mode only counts events
+   over the whole run and ignores pause/resume.
+
+Examples (reusing the database from `plain_tests.bat`):
+
+    --db mdb2bench_plain_run --reuse-db --records 1000000 --read-only --readers 8 --profile
+    --db mdb2bench_plain_run --reuse-db --records 1000000 --micro-ops 200000 --no-mixed --profile
+
+Hotspots (user-mode sampling) and Threading need no driver and work with
+Hyper-V / Memory Integrity on. Only hardware event-based sampling and the
+microarchitecture analyses need VTune's sampling driver.

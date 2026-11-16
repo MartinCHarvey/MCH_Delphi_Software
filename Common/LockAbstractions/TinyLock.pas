@@ -26,6 +26,9 @@ IN THE SOFTWARE.
 
 interface
 
+uses
+  PComp;
+
 type
   TTinyLock = type integer;
 
@@ -51,7 +54,7 @@ begin
       if LockAbstractions.InterlockedCompareExchange(Integer(Lock), 1, 0) = 0 then
         exit;
       Dec(Tries);
-      YieldProcessor;
+      CpuRelax;
     end;
     Sleep(0); //A bigger yield.
   end;
