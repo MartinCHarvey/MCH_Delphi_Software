@@ -105,6 +105,11 @@ type
     FApiObjectLock: TCriticalSection;
     FCRInterface: TMemAPIDatabaseInternal;
     FLocalContext: TXTransactionLocalContext;
+
+    //Checking for membership in lists without having to enumerate those lists.
+    //Speed up things under the session lock.
+    FInTransactionListOf: TMemDB;
+    FInSessionTransactionListOf: TMemDBSession;
   protected
     //Could make this public if needed later by MemDB2 API.
   public
@@ -146,9 +151,6 @@ type
     FSessionTransactions: TList;
     FTempStorageMode: TTempStorageMode;
     FClosing: boolean;
-  protected
-    function GetTempStorageMode: TTempStorageMode;
-    procedure SetTempStorageMode(NewMode: TTempStorageMode);
   public
     function StartTransaction(Mode: TMDBAccessMode;
                               Sync: TMDBSyncMode = amLazyWrite;
@@ -156,8 +158,9 @@ type
     constructor Create;
     destructor Destroy; override;
     property ParentDB: TMemDB read FDB;
-    property TempStorageMode:TTempStorageMode read
-      GetTempStorageMode write SetTempStorageMode;
+    //No locking for this, does not need to be critically in step.
+    property TempStorageMode:TTempStorageMode
+      read FTempStorageMode write FTempStorageMode;
   end;
 
   TMemDbAPICallbacks = class(TMemDBAPICallbackInt)
@@ -283,11 +286,16 @@ end;
 destructor TXTransactionLocalContext.Destroy;
 var
   i: integer;
+  O: TObject;
 begin
   //Expect transaction synchronous cleanup to have already cleaned most of this
   //up, but just in case...
-  for i := 0 to Pred(FCacheList.Count) do
-    TObject(FCacheList[i]).Free;
+  for i := Pred(FCacheList.Count) downto 0 do
+  begin
+    O := TObject(FCacheList[i]);
+    FCacheList.Delete(i);
+    O.Free;
+  end;
   FCacheList.Free;
   FCacheListLock.Free;
   FRegisteredListLock.Free;
@@ -524,26 +532,6 @@ end;
 
 { TMemDBSession }
 
-function TMemDBSession.GetTempStorageMode: TTempStorageMode;
-begin
-  FDB.FSessionLock.Acquire;
-  try
-    result := FTempStorageMode;
-  finally
-    FDB.FSessionLock.Release;
-  end;
-end;
-
-procedure TMemDBSession.SetTempStorageMode(NewMode: TTempStorageMode);
-begin
-  FDB.FSessionLock.Acquire;
-  try
-  FTempStorageMode := NewMode;
-  finally
-    FDB.FSessionLock.Release;
-  end;
-end;
-
 function TMemDBSession.StartTransaction(Mode: TMDBAccessMode; Sync: TMDBSyncMode; Iso: TMDBIsolationLevel)
   : TMemDBTransaction;
 begin
@@ -724,7 +712,6 @@ end;
 
 procedure TMemDB.RemoveTransaction(Transaction: TMemDBTransaction; Commit: boolean; LowMemory: boolean);
 var
-  idx: integer;
   WaitJournalDone: boolean;
   AsyncError: boolean;
 
@@ -739,8 +726,7 @@ begin
       exit;
     if (Transaction.FCommitRollbackInProgress <> tiptNone) then
       raise EMemDBException.Create(S_COMMIT_ROLLBACK_IN_PROGRESS);
-    idx := FTransactionList.IndexOf(Transaction);
-    if idx < 0 then
+    if Transaction.FInTransactionListOf <> self then
       raise EMemDBException.Create(S_DB_TRANSACTION_NOT_FOUND);
     Assert(FPhase in [mdbRunning, mdbRunningError,
                       mdbClosingWaitClients, mdbClosingWaitClientsError]);
@@ -809,12 +795,8 @@ begin
       end;
     end;
   except
-    FSessionLock.Acquire;
-    try
-      Transaction.FCommitRollbackInProgress := tiptNone;
-    finally
-      FSessionLock.Release;
-    end;
+    System.MemoryBarrier;
+    Transaction.FCommitRollbackInProgress := tiptNone;
     raise;
   end;
   //If failed commit, hold the R/W lock.
@@ -839,14 +821,13 @@ txion_remove:
 
   FSessionLock.Acquire;
   try
-    idx := Transaction.FSession.FSessionTransactions.IndexOf(Transaction);
-    Assert(idx >= 0);
+    Assert(Transaction.FInSessionTransactionListOf = Transaction.FSession);
     Transaction.FCommitedOrRolledBack := true;
     Transaction.FCommitRollbackInProgress := tiptNone;
-    Transaction.FSession.FSessionTransactions.Delete(idx);
-    idx := FTransactionList.IndexOf(Transaction);
-    Assert(idx >= 0);
-    FTransactionList.Delete(idx);
+    Transaction.FSession.FSessionTransactions.Remove(Transaction);
+    Transaction.FInSessionTransactionListOf := nil;
+    FTransactionList.Remove(Transaction);
+    Transaction.FInTransactionListOf := nil;
   finally
     FSessionLock.Release;
   end;
@@ -858,11 +839,29 @@ function TMemDB.StartTransaction(Mode: TMDBAccessMode;
                                  Sync: TMDBSyncMode;
                                  Iso: TMDBIsolationLevel;Session: TMemDBSession)
   : TMemDBTransaction;
+
+const
+  ExceptClearBasic = 0;
+  ExceptClearSessTrans = 1;
+  ExceptClearTransList = 2;
+  ExceptFullCleardown = 3;
 var
   idx: integer;
+  ExceptCleardownPhase: integer;
 begin
   result := nil;
+  ExceptCleardownPhase := ExceptClearBasic;
   try
+    //Do expensive operations outside session lock.
+    result := TMemDBTransaction.Create;
+    result.FTid := TTransactionId.NewTransactionID(Iso);
+
+    result.FDB := self;
+    result.FSession := Session;
+    result.FMode := Mode;
+    result.FSync := Sync;
+    result.FCommitRollbackInProgress := tiptStart;
+
     FSessionLock.Acquire;
     try
       idx := FSessionList.IndexOf(Session);
@@ -876,34 +875,26 @@ begin
         else
           raise EMemDBException.Create(S_BADPHASE_ERROR + FLastError)
       end;
-      try
-        result := TMemDBTransaction.Create;
-        result.FDB := self;
-        result.FSession := Session;
-        result.FMode := Mode;
-        result.FSync := Sync;
-        result.FTid := TTransactionId.NewTransactionID(Iso);
-        result.FCommitRollbackInProgress := tiptStart;
-      except
-        if Assigned(result) then
-        begin
-          result.FCommitedOrRolledBack := true; //just got make dtor OK.
-          result.FCommitRollbackInProgress := tiptNone;
-          result.Release;
-          result := nil;
-        end;
-        raise;
-      end;
+
       //FRWWLocked flag only necessary for exceptions here, which
       //we expect to be vanishingly rare.
+      //Exception cleanup handling across threads.
       Session.FSessionTransactions.Add(result);
+      result.FInSessionTransactionListOf := Session;
+      ExceptCleardownPhase := ExceptClearSessTrans;
+
       FTransactionList.Add(result);
+      result.FInTransactionListOf := self;
+      ExceptCleardownPhase := ExceptClearTransList;
+      //Exception handling cleanup within threads.
     finally
       FSessionLock.Release;
     end;
+
     Assert(Mode in [amReadShared, amWriteExclusive, amReadWriteShared]);
     FRWWLock.Acquire(DBAccessModeToLockReason(Mode));
     result.FRWWLocked := Ord(true);
+    ExceptCleardownPhase := ExceptFullCleardown;
 
     result.FCRInterface := FDatabase.Interfaced.GetAPIObject(result, APIInternalCommitRollback)
       as TMemAPIDatabaseInternal;
@@ -911,18 +902,51 @@ begin
 
     result.FCRInterface.TransactionStartCycle;
 
-    FSessionLock.Acquire; //Really just a fence...
-    try
-      result.FCommitRollbackInProgress := tiptNone;
-    finally
-      FSessionLock.Release;
-    end;
+    System.MemoryBarrier;
+    result.FCommitRollbackInProgress := tiptNone;
+
   except
     if Assigned(result) then
     begin
-      //Just set the flag here to let the rollback proceed.
-      result.FCommitRollbackInProgress := tiptNone;
-      result.RollbackAndFree;
+      if ExceptCleardownPhase = ExceptFullCleardown then
+      begin
+        //Added to shared structures, prob done some
+        //of a TStart, have FLock, go thru the whole rigamarole.
+        System.MemoryBarrier;
+        //Just set the flag here to let the rollback proceed.
+        result.FCommitRollbackInProgress := tiptNone;
+        result.RollbackAndFree;
+      end
+      else
+      begin
+        //Can do this because still in tipStart,
+        //so atomic from other ops even tho released and
+        //re-acquired session lock.
+        FSessionLock.Acquire;
+        try
+          if ExceptCleardownPhase = ExceptClearTransList then
+          begin
+            FTransactionList.Remove(result);
+            result.FInTransactionListOf := nil;
+            Dec(ExceptCleardownPhase);
+          end;
+          if ExceptCleardownPhase = ExceptClearSessTrans then
+          begin
+            Session.FSessionTransactions.Remove(result);
+            result.FInSessionTransactionListOf := nil;
+            Dec(ExceptCleardownPhase);
+          end;
+          if ExceptCleardownPhase = ExceptClearBasic then
+          begin
+            //Not added to shared structures, function local.
+            result.FCommitedOrRolledBack := true; //just got make dtor OK.
+            result.FCommitRollbackInProgress := tiptNone;
+          end;
+        finally
+          FSessionLock.Release;
+        end;
+        result.Release;
+      end;
     end;
     raise;
   end;

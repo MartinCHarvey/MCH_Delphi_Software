@@ -287,9 +287,11 @@ type
   public
     constructor Create;
     destructor Destroy; override;
+    //Ordinary cached stuff.
     function GetFromCache: PMemDBIndexPin;
     function PutToCache(Pin: PMemDBIndexPin): boolean;
-    procedure TakeNodesFrom(Cache: TMemDBIPinCache);
+    //Caching the caches.
+    procedure TrimForCacheCache;
     property Capacity: integer read GetCapacity write SetCapacity;
   end;
 
@@ -592,12 +594,16 @@ end;
 destructor TMemDBIPinCache.Destroy;
 var
   i: integer;
+  P: PMemDBIndexPin;
 begin
   if Assigned(FPtrs) then
   begin
-    FPtrs.Sort(ComparePointers);
-    for i := 0 to Pred(FPtrs.Count) do
-      DisposeIndexPin(PMemDBIndexPin(FPtrs[i]));
+    for i := Pred(FPtrs.Count) downto 0 do
+    begin
+      P := PMemDBIndexPin(FPtrs[i]);
+      FPtrs.Delete(i);
+      DisposeIndexPin(P);
+    end;
   end;
   FPtrs.Free;
   inherited;
@@ -638,13 +644,25 @@ begin
     result := true;
 end;
 
-procedure TMemDBIPinCache.TakeNodesFrom(Cache: TMemDBIPinCache);
+procedure TMemDBIPinCache.TrimForCacheCache;
 var
   i: integer;
+  P: PMemDbIndexPin;
 begin
-  for i := 0 to Pred(Cache.FPtrs.Count) do
-    FPtrs.Add(Cache.FPtrs[i]);
-  Cache.FPtrs.Clear;
+  if Assigned(FPtrs) then
+  begin
+    if FPtrs.Count > SMALL_NODE_PIN_CACHE_SIZE then
+    begin
+      for i := Pred(FPtrs.Count) downto SMALL_NODE_PIN_CACHE_SIZE do
+      begin
+        P := PMemDBIndexPin(FPtrs[i]);
+        FPtrs.Delete(i);
+        DisposeIndexPin(P);
+      end;
+      Assert(FPtrs.Count = SMALL_NODE_PIN_CACHE_SIZE);
+      FPtrs.Capacity := FPtrs.Count;
+    end;
+  end;
 end;
 
 function TMemDBIPinCache.GetCapacity: integer;

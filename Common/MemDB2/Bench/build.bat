@@ -13,6 +13,12 @@ rem  (make the .lib files with ..\C_DLL\make_importlib.bat).
 rem
 rem  Finds Visual Studio 2017 or later with vswhere. Without vswhere, run it
 rem  from a Developer Command Prompt; it then builds that prompt's target only.
+rem
+rem  Always writes mdb2bench.pdb (debug info, still fully optimised) and copies
+rem  MemDB2Dll.pdb next to the DLL if one exists (see vtune_prep.bat).
+rem  If the VTune SDK is found (set ITT_DIR to its "sdk" folder, or it is looked
+rem  for under VTUNE_PROFILER_DIR and the default oneAPI install), the bench is
+rem  built with USE_ITT so --profile can pause and resume collection.
 rem ==========================================================================
 setlocal
 set "HERE=%~dp0"
@@ -24,6 +30,10 @@ set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
 if not exist "%VSWHERE%" goto :no_vswhere
 for /f "usebackq delims=" %%i in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSDIR=%%i"
 :no_vswhere
+
+if not defined ITT_DIR if defined VTUNE_PROFILER_DIR set "ITT_DIR=%VTUNE_PROFILER_DIR%\sdk"
+if not defined ITT_DIR if exist "%ProgramFiles(x86)%\Intel\oneAPI\vtune\latest\sdk\include\ittnotify.h" set "ITT_DIR=%ProgramFiles(x86)%\Intel\oneAPI\vtune\latest\sdk"
+if defined ITT_DIR if not exist "%ITT_DIR%\include\ittnotify.h" set "ITT_DIR="
 
 set "FAILED=0"
 if /i "%WHICH%"=="all" (
@@ -73,18 +83,30 @@ if not exist "%OUT%" mkdir "%OUT%"
 set "LAA="
 if /i "%ARCH%"=="x86" set "LAA=/LARGEADDRESSAWARE"
 
-echo Building %ARCH% ...
-cl /nologo /O2 /Oi /GS- /W3 /MT /DNDEBUG /D_CRT_SECURE_NO_WARNINGS ^
-   /I"%HERE%..\C_API" /Fo"%OUT%\\" /Fe"%OUT%\mdb2bench.exe" ^
+set "ITTC="
+set "ITTL="
+set "ITTLIB=lib64"
+if /i "%ARCH%"=="x86" set "ITTLIB=lib32"
+rem No ( ) block here: the SDK path usually contains "(x86)".
+if not defined ITT_DIR goto :no_itt
+if not exist "%ITT_DIR%\%ITTLIB%\libittnotify.lib" goto :no_itt
+set ITTC=/DUSE_ITT /I"%ITT_DIR%\include"
+set ITTL="%ITT_DIR%\%ITTLIB%\libittnotify.lib"
+:no_itt
+
+if defined ITTC (echo Building %ARCH% with VTune markers ...) else echo Building %ARCH% ...
+cl /nologo /O2 /Oi /GS- /W3 /MT /Zi /DNDEBUG /D_CRT_SECURE_NO_WARNINGS %ITTC% ^
+   /I"%HERE%..\C_API" /Fo"%OUT%\\" /Fd"%OUT%\vc_bench.pdb" /Fe"%OUT%\mdb2bench.exe" ^
    "%HERE%bench_main.c" "%HERE%bench_util.c" "%HERE%engine_memdb2.c" "%HERE%engine_baseline.c" ^
-   /link /DELAYLOAD:MemDB2Dll.dll %LAA% ^
-   "%DLLDIR%\MemDB2Dll.lib" delayimp.lib psapi.lib
+   /link /DEBUG /OPT:REF /OPT:ICF /PDB:"%OUT%\mdb2bench.pdb" /DELAYLOAD:MemDB2Dll.dll %LAA% ^
+   "%DLLDIR%\MemDB2Dll.lib" delayimp.lib psapi.lib %ITTL%
 if errorlevel 1 (
     echo FAILED: %ARCH%
     endlocal & set "FAILED=1"
     goto :eof
 )
 copy /y "%DLLDIR%\MemDB2Dll.dll" "%OUT%\" >nul
+if exist "%DLLDIR%\MemDB2Dll.pdb" copy /y "%DLLDIR%\MemDB2Dll.pdb" "%OUT%\" >nul
 echo Made %OUT%\mdb2bench.exe
 endlocal
 goto :eof

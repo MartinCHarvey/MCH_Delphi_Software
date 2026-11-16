@@ -36,7 +36,7 @@ uses
   Trackables,
 {$ENDIF}
   IndexedStore, MemDB2Streamable, Classes, MemDB2Misc, DLList, LockAbstractions,
-  TinyLock, MemDB2BufBase, MemDB2Indexing, Reffed;
+  TinyLock, MemDB2BufBase, MemDB2Indexing, Reffed, LSLCache;
 
 type
   TMemDBAPIInterfacedObject = class;
@@ -335,12 +335,7 @@ type
     property DataPinned: boolean read FPinned;
   end;
 
-
-{$IFDEF USE_TRACKABLES}
-  TTidLocal = class(TTrackable)
-{$ELSE}
-  TTidLocal = class
-{$ENDIF}
+  TTidLocal = class(TLSLObject)
   private
     FTidLocalLinks: TDLEntry;
     FParentTable: TMemDBTablePersistent;
@@ -421,9 +416,14 @@ type
     procedure RowCPTidHandle(Sender: TObject; const Update: TTidUpdate);
 
     function GetIPinForIndex(Row: TMemDBRow; Index: TMemDbIndexGeneric; IndexSel: TAbSelType; var IPinListTmp: TList): PMemDbIndexPin;
+
+    procedure DestroyCommon; //Called by both destructor and reset.
   public
     constructor Create;
+    procedure CreateCachedInternals(const Tid: TTransactionId);
     destructor Destroy; override;
+    procedure CreateFromCache(Cache: TLSLCache); override;
+    procedure Reset(Cache: TLSLCache); override;
 
     procedure UpdateLayout(PinReason: TPinReason);
 
@@ -648,7 +648,6 @@ type
     //Use with care: entities actually registered to a transaction may be more
     //sensible / useful.
     function AssembleEntityList: TReffedList;
-    procedure ConsolidateAndFreeCaches(Ctxt: TTXLocalContext);
   public
     function EntitiesByName(const AB:TBufSelector; Name: string; PinReason: TPinReason; Ctxt: TTXLocalContext; IsoOverride: boolean): TMemDBEntity;
 
@@ -785,7 +784,7 @@ const
 implementation
 
 uses
-  SysUtils, MemDB2, NullStream, MemDB2Api, Parallelizer;
+  SysUtils, MemDB2, NullStream, MemDB2Api, Parallelizer, MemDB2ObjectCaches;
 
 const
   S_COMMMIT_CONSISTENCY_OBJS = 'Commit consistency check failed: Duplicate table or foreign key names.';
@@ -1693,14 +1692,7 @@ var
   i: integer;
   MasterIndex: TMemDBIndex;
   CC: TMemTableMetadataItem;
-
 begin
-  FIndexHelper :=  TMemDblBufListHelper.Create;
-  FIndexHelper.OnChangeRequest := HandleHelperChangeRequest;
-  FFieldHelper := TMemDblBufListHelper.Create;
-  FFieldHelper.OnChangeRequest := HandleHelperChangeRequest;
-  FEmptyList := TMemStreamableList.Create;
-
   M := FParentTable.FMetadata.PinCurrent(FTid, pinEvolve);
   if Assigned(M) then
   begin
@@ -1709,10 +1701,10 @@ begin
     begin
       MasterIndex := FParentTable.FMasterIndexes.Items[i] as TMemDBIndex;
       Assert(Assigned(MasterIndex));
-      FLocalIndexCopies.AddNoRef(MasterIndex.Clone);
+      FLocalIndexCopies.AddNoRef(MasterIndex.Clone(FTid));
     end;
     if Assigned(FParentTable.FMasterInternalIndex) then
-      FInternalIndexCopy := FParentTable.FMasterInternalIndex.Clone as TMemDBIndexInternal
+      FInternalIndexCopy := FParentTable.FMasterInternalIndex.Clone(FTid) as TMemDBIndexInternal
     else
       FInternalIndexCopy := nil;
   end;
@@ -2214,8 +2206,29 @@ constructor TTidLocal.Create;
 begin
   inherited;
   DLItemInitObj(self, @FTidLocalLinks);
-  FCPRows := TIndexedStoreO.Create;
+  Assert(not Assigned(MyCache));
   FLocalIndexCopies := TReffedList.Create;
+  FCPRows := TIndexedStoreO.Create;
+
+  FIndexHelper := TMemDblBufListHelper.Create;
+  FFieldHelper := TMemDblBufListHelper.Create;
+  FEmptyList := TMemStreamableList.Create;
+  FIndexHelper.OnChangeRequest := HandleHelperChangeRequest;
+  FFieldHelper.OnChangeRequest := HandleHelperChangeRequest;
+end;
+
+procedure TTidLocal.CreateCachedInternals(const Tid: TTransactionId);
+begin
+  FMyCache := GetCacheBlockForTid(Tid).TidLocalCache;
+end;
+
+procedure TTidLocal.CreateFromCache(Cache: TLSLCache);
+begin
+  Assert(MyCache = Cache);
+  DLItemInitObj(self, @FTidLocalLinks);
+  Assert(Cache = MyCache);
+  FLocalIndexCopies := TReffedList.Create;
+  inherited;
 end;
 
 procedure TTidLocal.Init(Parent: TMemDBTablePersistent; const Tid: TTransactionId);
@@ -2247,12 +2260,11 @@ begin
     FParentTable.HandleAddRefForTidLocal(self);
 end;
 
-destructor TTidLocal.Destroy;
+
+procedure TTidLocal.DestroyCommon;
 var
   Release: boolean;
 begin
-  Assert((not Assigned(FCPRows)) or (FCPRows.Count = 0));
-  FCPRows.Free;
   if Assigned(FParentTable) then
   begin
     FParentTable.FTidLocalLock.Acquire;
@@ -2265,7 +2277,9 @@ begin
     if Release then
       FParentTable.HandleReleaseForTidLocal(self);
   end;
+  FParentTable := nil;
 
+  //Cached metadata, not cached local objects.
   FCachedCur.Release;
   FCachedNxt.Release;
   FCachedCur := nil;
@@ -2273,13 +2287,69 @@ begin
   FCachedCurValid := false;
   FCachedNxtValid := false;
 
-  FIndexHelper.Free;
-  FFieldHelper.Free;
-  FEmptyList.Release;
   FLocalIndexCopies.Release; //With contained indexes.
   FNewBuildIndices.Release;
   FInternalIndexCopy.Release;
   FTmpDeleting.Release;
+
+  FLocalIndexCopies := nil;
+  FNewBuildIndices := nil;
+  FInternalIndexCopy := nil;
+  FTmpDeleting := nil;
+end;
+
+
+procedure TTidLocal.Reset(Cache: TLSLCache);
+var
+  Tag: Pointer;
+  IRec: TItemRec;
+  IndNodeClassType: TIndexNodeClass;
+
+begin
+  Assert(Cache = MyCache);
+  Assert(Assigned(FCPRows));
+
+  Assert(FCPRows.IndexCount = 0);
+  while FCPRows.IndexCount > 0 do
+  begin
+    FCPRows.IndexInfoByOrdinal(0, Tag, IndNodeClassType);
+    FCPRows.DeleteIndex(Tag, false);
+  end;
+  IRec := FCPRows.GetAnItem;
+  Assert(not Assigned(IRec));
+  while Assigned(IRec) do
+  begin
+    FCPRows.RemoveItem(IRec);
+    IRec := FCPRows.GetAnItem;
+  end;
+
+  DestroyCommon;
+
+  FIndexHelper.ClearLists;
+  FFieldHelper.ClearLists;
+  Assert(FEmptyList.Count = 0);
+
+  FDataChanged := false;
+  FDataChangePrePrepare := false;
+  FIndexingChangeRequired := false;
+  FLayoutChangeRequired := false;
+  FInternalIndexChangeset := [];
+  SetLength(FIndexChangesets, 0);
+  SetLength(FFieldChangesets, 0);
+  FCacheReenter := false;
+  inherited;
+end;
+
+destructor TTidLocal.Destroy;
+begin
+  Assert((not Assigned(FCPRows)) or (FCPRows.Count = 0));
+  FCProws.Free;
+
+  DestroyCommon;
+
+  FIndexHelper.Free;
+  FFieldHelper.Free;
+  FEmptyList.Release;
   inherited;
 end;
 
@@ -2671,6 +2741,7 @@ begin
       CompactOffsets[j] := FieldDefs[j].FieldIndex;
 
     NewIndex := TMemDBIndex.Create;
+    NewIndex.CreateCachedInternals(FTid, false);
 
     with NewIndex as TMemDBIndex do
     begin
@@ -2870,6 +2941,7 @@ begin
   try
     Context := PBuildValidateIdxParallelContext(Ref1);
     NewIndex := TMemDBIndexInternal.Create;
+    NewIndex.CreateCachedInternals(FTid, true);
 
     try
       if Context.LocalIter then
@@ -4883,7 +4955,16 @@ begin
       TidLocal := TidLocal.FTidLocalLinks.FLink.Owner as TTidLocal;
     end;
 {$ENDIF}
-    TidLocal := TTidLocal.Create;
+{$IFOPT C+}
+    TidLocal := GetCacheBlockForTid(Tid).TidLocalCache.GetFromCache as TTidLocal;
+{$ELSE}
+    TidLocal := TTidLocal(GetCacheBlockForTid(Tid).TidLocalCache.GetFromCache);
+{$ENDIF}
+    if not Assigned(TidLocal) then
+    begin
+      TidLocal := TTidLocal.Create;
+      TidLocal.CreateCachedInternals(Tid);
+    end;
     TidLocal.Init(self, Tid);
   finally
     FTidLocalLock.Release;
@@ -4982,7 +5063,8 @@ begin
       FindRmRowProhibitLocks(Tid);
     end;
     ccpCleardown: begin
-      TidLocal.Free;
+      Assert(Assigned(TidLocal.MyCache));
+      (TidLocal.MyCache as TTidLocalCache).PutToCache(TidLocal)
     end;
   end;
 end;
@@ -5009,7 +5091,8 @@ begin
         rbpIndexRollback: TidLocal.IndexRollback(Ctxt);
         rbpDelayedRollback: begin
           TidLocal.Rollback;
-          TidLocal.Free;
+          Assert(Assigned(TidLocal.MyCache));
+          (TidLocal.MyCache as TTidLocalCache).PutToCache(TidLocal);
           //Not particularly harmful if we remove table mod locks late.
           FindRmRowProhibitLocks(Tid);
         end;
@@ -7753,6 +7836,7 @@ var
   Rets: TPHRefs;
   PCount: integer;
   TPOComm: TPOCommitContext;
+  NCache: TMemDbNodeCache;
 
 begin
   inherited;
@@ -7783,8 +7867,16 @@ begin
     end;
     if OptApplies(optEntitiesParallel, Opts) and (PCount > 0) then
       ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
+
     if Phase = ccpCleardown then
-      ConsolidateAndFreeCaches(Ctxt);
+    begin
+      for i := Pred(CTxtLocal.FCacheList.Count) downto 0 do
+      begin
+        NCache := TMemDBNodeCache(CTxtLocal.FCacheList[i]);
+        CTxtLocal.FCacheList.Delete(i);
+        NCache.Free;
+      end;
+    end;
   finally
     CtxtLocal.PutEntityList(EList);
   end;
@@ -7832,6 +7924,7 @@ var
   PCount: integer;
   TPORoll: TPORollbackContext;
   Parallel: boolean;
+  NCache: TMemDBNodeCache;
 
 begin
   inherited;
@@ -7871,42 +7964,20 @@ begin
         ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
 
       if Phase = rbpDelayedRollback then
-        ConsolidateAndFreeCaches(Ctxt);
+      begin
+        for i := Pred(CTxtLocal.FCacheList.Count) downto 0 do
+        begin
+          NCache := TMemDBNodeCache(CTxtLocal.FCacheList[i]);
+          CTxtLocal.FCacheList.Delete(i);
+          NCache.Free;
+        end;
+      end;
     finally
       CtxtLocal.PutEntityList(EList);
     end;
   end;
 end;
 
-procedure TMemDBDatabasePersistent.ConsolidateAndFreeCaches(Ctxt: TTXLocalContext);
-var
-  MCache: TMemDbNodeCache;
-  CETxt: TXTransactionLocalContext;
-  i, TSize: integer;
-begin
-  //This does not *have* to work, things will just run faster when it does.
-  //Put all the caches together, put into one big sorted list,
-  //And then free the whole lot sequentially.
-  CETxt := Ctxt as TXTransactionLocalContext;
-  MCache := nil;
-  TSize := 0;
-  try
-    for i := 0 to Pred(CETxt.FCacheList.Count) do
-      Inc(TSize, TMemDBNodeCache(CETxt.FCacheList[i]).Count);
-    MCache := TMemDBNodeCache.Create;
-    //All mem-alloc is done up front here.
-    MCache.Capacity := TSize;
-    //Copying and freeing from here on in
-    for i := 0 to Pred(CETxt.FCacheList.Count) do
-      MCache.TakeNodesFrom(TMemDBNodeCache(CETxt.FCacheList[i]));
-    for i := 0 to Pred(CETxt.FCacheList.Count) do
-      TMemDBNodeCache(CETxt.FCacheList[i]).Free;
-    CETxt.FCacheList.Clear;
-  except
-    on EOutOfMemory do
-  end;
-  MCache.Free;
-end;
 
 procedure TMemDBDatabasePersistent.SizeHint(const Tid: TTransactionID; var SizeHint: TDBSizeHint; Ctxt: TTXLocalContext);
 var
@@ -8633,6 +8704,7 @@ end;
 destructor TMemDblBufListHelper.Destroy;
 begin
   ClearLists;
+  FOnChangeRequest := nil;
   inherited;
 end;
 

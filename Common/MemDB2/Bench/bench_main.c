@@ -47,6 +47,21 @@
 #include <string.h>
 #include <math.h>
 
+/* Optional VTune markers (build.bat adds USE_ITT when it finds the VTune
+   SDK). With --profile, collection is paused at startup, resumed once the
+   database is loaded or reopened, and paused again before it is closed, so
+   only the test phases are profiled. */
+#ifdef USE_ITT
+#include <ittnotify.h>
+#define PROF_PAUSE()  __itt_pause()
+#define PROF_RESUME() __itt_resume()
+#define PROF_BUILT    1
+#else
+#define PROF_PAUSE()  ((void)0)
+#define PROF_RESUME() ((void)0)
+#define PROF_BUILT    0
+#endif
+
 /* ---------------------------------------------------------------------------
  * Globals shared with worker threads
  * ------------------------------------------------------------------------- */
@@ -346,6 +361,7 @@ static void print_lat(const char *name, const hist *h, double secs)
  * ------------------------------------------------------------------------- */
 /* Preload workers claim batches of ids from g_load_next, so with several
    threads the batches commit in no particular order. */
+static double g_bytes_per_rec;         /* measured by preload, for the marker */
 static volatile LONG64 g_load_next;   /* ids claimed so far                 */
 static volatile LONG64 g_load_done;   /* rows committed so far              */
 static volatile LONG64 g_load_running;/* preload threads still running      */
@@ -440,9 +456,11 @@ static void preload(void)
     mem1 = process_private_bytes();
     printf("  loaded in %.2f s (%.0f rows/s)\n", ticks_to_ns(t1 - t0) / 1e9,
            (double)g_cfg.records / (ticks_to_ns(t1 - t0) / 1e9));
+    g_bytes_per_rec = (double)(mem1 - mem0) / (double)g_cfg.records;
     printf("  private memory: +%.1f MB, %.0f bytes per record (logical record ~%u bytes)\n",
-           (double)(mem1 - mem0) / 1048576.0,
-           (double)(mem1 - mem0) / (double)g_cfg.records, g_cfg.record_size);
+           (double)(mem1 - mem0) / 1048576.0, g_bytes_per_rec, g_cfg.record_size);
+    if (g_cfg.row_bytes)
+        printf("  (records padded to about %u bytes, --row-bytes)\n", g_cfg.row_bytes);
 
     t0 = ticks_now();
     if (g_vt->after_preload(g_eng) != R_OK)
@@ -1080,12 +1098,18 @@ static void usage(void)
 "  --reader-end rollback|commit   how readers end a transaction (rollback)\n"
 "  --iso rc|rr|snap|ser      isolation level (default rr)\n"
 "  --batch N                 preload rows per transaction (default 10000)\n"
+"  --row-bytes N             baseline only: pad each record to about N bytes\n"
+"                            of memory, e.g. to match MemDB2's bytes per record\n"
 "  --load-threads N          preload threads (default 1, WRITE_EXCLUSIVE); with\n"
 "                            more, each loads batches READ_WRITE_SHARED\n"
 "  --no-checkpoint           skip the checkpoint after preload\n"
 "  --max-retries N           retries on a concurrency clash (default 1000)\n"
 "  --pin                     pin threads to CPUs 0..n-1\n"
 "  --count-allocs            also count allocations in the mixed phase\n"
+"  --profile                 VTune: collect only from the end of the load or\n"
+"                            reopen to the start of the close; choose the\n"
+"                            tests with the other options. Needs a build with\n"
+"                            the VTune SDK (USE_ITT)\n"
 "  --ckpt async|sync|off     mixed phase: checkpoint back to back from another\n"
 "                            thread, and report transactions that overlapped a\n"
 "                            checkpoint separately (default off)\n"
@@ -1182,11 +1206,18 @@ static void parse_args(int argc, char **argv)
             else { usage(); exit(2); }
         }
         else if (!strcmp(a, "--batch")) c->preload_batch = (uint32_t)parse_num(NEXT());
+        else if (!strcmp(a, "--row-bytes")) c->row_bytes = (uint32_t)parse_num(NEXT());
         else if (!strcmp(a, "--load-threads")) c->load_threads = (int)parse_num(NEXT());
         else if (!strcmp(a, "--no-checkpoint")) c->checkpoint = 0;
         else if (!strcmp(a, "--max-retries")) c->max_retries = (uint32_t)parse_num(NEXT());
         else if (!strcmp(a, "--pin")) c->pin = 1;
         else if (!strcmp(a, "--count-allocs")) c->count_allocs = 1;
+        else if (!strcmp(a, "--profile")) {
+            c->profile = 1;
+            /* Older form took a phase or operation argument: skip it. */
+            if (i + 1 < argc && argv[i + 1][0] != '-')
+                i++;
+        }
         else if (!strcmp(a, "--ckpt")) {
             const char *v = NEXT();
             if (!strcmp(v, "off")) c->ckpt_mode = 0;
@@ -1229,6 +1260,8 @@ static void parse_args(int argc, char **argv)
             die("--reuse-db needs --engine memdb2");
         c->db_clean = -1;
     }
+    if (c->row_bytes && strcmp(c->engine, "baseline") != 0)
+        die("--row-bytes is for --engine baseline only");
     if (c->micro_ops < 1) c->micro_ops = 1;
     if (c->ckpt_mode && strcmp(c->engine, "memdb2") != 0)
         die("--ckpt needs --engine memdb2");
@@ -1269,6 +1302,12 @@ int main(int argc, char **argv)
        only appear at exit. Line-at-a-time output is cheap here. */
     setvbuf(stdout, NULL, _IONBF, 0);
     parse_args(argc, argv);
+    if (g_cfg.profile) {
+        if (!PROF_BUILT)
+            fprintf(stderr, "--profile: built without the VTune SDK, so collection "
+                            "covers the whole run.\n");
+        PROF_PAUSE();
+    }
     if (!strcmp(g_cfg.engine, "memdb2")) g_vt = &g_engine_memdb2;
     else if (!strcmp(g_cfg.engine, "baseline")) g_vt = &g_engine_baseline;
     else die("--engine must be memdb2 or baseline");
@@ -1321,10 +1360,18 @@ int main(int argc, char **argv)
         attach_existing();
     else
         preload();
+    if (g_cfg.profile && !g_failed) {
+        printf("--profile: collection resumed\n");
+        PROF_RESUME();
+    }
     if (g_cfg.run_micro && !g_failed)
         micro();
     if (g_cfg.run_mixed && !g_failed)
         mixed();
+    if (g_cfg.profile) {
+        PROF_PAUSE();
+        printf("--profile: collection paused, closing the database\n");
+    }
 
     g_vt->close(g_eng);
     if (g_csv)
@@ -1335,7 +1382,8 @@ int main(int argc, char **argv)
     }
     if (g_cfg.load_only) {
         FILE *f = fopen(marker, "w");
-        if (!f || fprintf(f, "records %llu\n", (unsigned long long)g_cfg.records) < 0
+        if (!f || fprintf(f, "records %llu\nbytes_per_record %.0f\n",
+                          (unsigned long long)g_cfg.records, g_bytes_per_rec) < 0
                || fclose(f) != 0) {
             fprintf(stderr, "could not write %s\n", marker);
             return 1;

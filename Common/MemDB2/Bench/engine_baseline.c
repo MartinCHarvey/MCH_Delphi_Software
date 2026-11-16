@@ -65,6 +65,7 @@ typedef struct base_eng {
     avl_node *exp_root;
     volatile LONG64 allocs, frees;
     volatile LONG count_allocs;
+    uint32_t row_bytes;       /* --row-bytes: pad blocks to about this size */
 } base_eng;
 
 typedef struct base_ts {
@@ -201,9 +202,21 @@ static int cmp_exp(const avl_node *a, const avl_node *b)
 /* ---------------------------------------------------------------------------
  * Records
  * ------------------------------------------------------------------------- */
+/* Rough per-block cost of the CRT heap, so that --row-bytes N gives about N
+   bytes of private memory per record. */
+#define HEAP_OVERHEAD 16
+
 static brec *rec_alloc(base_eng *e, const rec *r)
 {
-    brec *b = (brec *)malloc(offsetof(brec, payload) + (r->payload_len ? r->payload_len : 1));
+    size_t size = offsetof(brec, payload) + (r->payload_len ? r->payload_len : 1);
+    brec *b;
+    /* --row-bytes: make every block about as big as a MemDB2 row, so that
+       both engines spread their data over the same amount of memory. The
+       padding sits after the payload and is never read, but is written
+       once so that it is really committed. */
+    if (e->row_bytes > HEAP_OVERHEAD && size < e->row_bytes - HEAP_OVERHEAD)
+        size = e->row_bytes - HEAP_OVERHEAD;
+    b = (brec *)malloc(size);
     if (!b)
         return NULL;
     if (e->count_allocs)
@@ -211,8 +224,11 @@ static brec *rec_alloc(base_eng *e, const rec *r)
     b->id = r->id;
     b->expiry = r->expiry;
     b->state = r->state;
-    b->len = b->cap = r->payload_len;
+    b->len = r->payload_len;
+    b->cap = (uint32_t)(size - offsetof(brec, payload));
     memcpy(b->payload, r->payload, r->payload_len);
+    if (b->cap > b->len)
+        memset(b->payload + b->len, 0, b->cap - b->len);
     return b;
 }
 
@@ -259,9 +275,9 @@ static void copy_out(const brec *b, rec_out *o)
 static int b_open(const bench_cfg *cfg, void **out_eng)
 {
     base_eng *e = (base_eng *)calloc(1, sizeof *e);
-    (void)cfg;
     if (!e)
         return R_FAIL;
+    e->row_bytes = cfg->row_bytes;
     InitializeSRWLock(&e->lock);
     *out_eng = e;
     return R_OK;

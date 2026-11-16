@@ -81,7 +81,10 @@ uses
   StripedLock in '..\..\LockAbstractions\StripedLock.pas',
   CRC32 in '..\..\CRC\CRC32.pas',
   PatchFreeMem in '..\..\PatchFreeMem\PatchFreeMem.pas',
-  PComp in '..\..\PComp\PComp.pas';
+  PComp in '..\..\PComp\PComp.pas',
+  MemDB2ObjectCaches in '..\MemDB2ObjectCaches.pas',
+  LockedSList in '..\..\LockedSList\LockedSList.pas',
+  LSLCache in '..\..\LockedSList\LSLCache.pas';
 
 {$R *.res}
 
