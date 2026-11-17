@@ -243,9 +243,15 @@ const
     'Closed',
     'Closed (Error)');
 
-  THIRTY_TWO_K = 32 * 1024;
-  TWO_FIFTY_SIX_K = 256 * 1024;
-  ONE_MEG = 1024*1024;
+  ONE_K = 1024;
+  THIRTY_TWO_K = 32 * ONE_K;
+{$IFOPT C+}
+  PARALLEL_COMMIT_ROW_COUNT = THIRTY_TWO_K;
+{$ELSE}
+  PARALLEL_COMMIT_ROW_COUNT = ONE_K;
+{$ENDIF}
+  TWO_FIFTY_SIX_K = 256 * ONE_K;
+  ONE_MEG = ONE_K * ONE_K;
   ONE_TWO_EIGHT_MEG = 128 * ONE_MEG;
   FILE_CACHE_SIZE = ONE_MEG;
   JOURNAL_PENDING_BYTES_LIMIT = ONE_TWO_EIGHT_MEG;
@@ -399,7 +405,7 @@ begin
   with result.P[TOptimization.optEntitiesParallel] do
   begin
     PolicyType := optTxionSize;
-    EnabledRowChangeCount := THIRTY_TWO_K;
+    EnabledRowChangeCount := PARALLEL_COMMIT_ROW_COUNT;
     EnabledTxionBufSize := TWO_FIFTY_SIX_K;
     EnabledFKRowsTotal := TWO_FIFTY_SIX_K;
   end;
@@ -411,7 +417,7 @@ begin
   with result.P[TOptimization.optIndexEvolveParallel] do
   begin
     PolicyType := optTxionSize;
-    EnabledRowChangeCount := THIRTY_TWO_K;
+    EnabledRowChangeCount := PARALLEL_COMMIT_ROW_COUNT;
     EnabledTxionBufSize := TWO_FIFTY_SIX_K;
     EnabledFKRowsTotal := TWO_FIFTY_SIX_K;
   end;
