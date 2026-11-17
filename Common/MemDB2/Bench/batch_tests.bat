@@ -14,9 +14,10 @@ rem  combination, so every combination starts from the same table.
 rem
 rem  Set THREADS, SIZES, DURATION or WARMUP first to change the defaults:
 rem    THREADS  "1 2 3 4 5 6 8"
-rem    SIZES    "0 1 2 5 10 20 50 100 200 500 1000 2000"
+rem    SIZES    "0 1 2 5 10 20 50 100 200 500 1000 2000 4000"
 rem    DURATION 10 s and WARMUP 2 s per combination
-rem  With the defaults, finds take about 20 minutes and inserts about 35.
+rem  With the defaults, finds take about 25 minutes and inserts about 40.
+rem  Inserts above 1,024 rows per transaction commit in parallel.
 rem
 rem  Labels <tag>-batch-find and <tag>-batch-insert; results in
 rem  results_batch.csv, console output also in results_batch_execution.log.
@@ -28,7 +29,7 @@ set "TAG=%~1"
 set "WHICH=%~2"
 if "%WHICH%"=="" set "WHICH=both"
 if not defined THREADS set "THREADS=1 2 3 4 5 6 8"
-if not defined SIZES set "SIZES=0 1 2 5 10 20 50 100 200 500 1000 2000"
+if not defined SIZES set "SIZES=0 1 2 5 10 20 50 100 200 500 1000 2000 4000"
 if not defined DURATION set "DURATION=10"
 if not defined WARMUP set "WARMUP=2"
 set "CSV=results_batch.csv"

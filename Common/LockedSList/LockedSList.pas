@@ -66,6 +66,9 @@ function SLListLockedPopItem(List: PSLListHead): PSLEntry;
 function SLItemIsList(Item:PSLEntry): boolean;
 function SlItemIsObj(Item:PSLEntry): boolean;
 
+const
+  DEFAULT_SPIN_COUNT = 3000; //Normal-ish windows spin value.
+
 implementation
 
 uses
@@ -107,36 +110,48 @@ end;
 
 
 function SLListLockedPopItem(List: PSLListHead): PSLEntry;
+
+label
+  done_spin, done_spin_2;
+
 var
   Next: PSLEntry;
-  GoodExchange: boolean;
+  SpinCount: integer;
 begin
   Assert(Assigned(List));
   Assert(SLItemIsList(@List.Entry));
-  repeat
-    //Only take cache line exclusively if it looks like we're going to
-    //succeed.
-    GoodExchange := (List.PopLock = 0) and
-      (LockAbstractions.InterlockedCompareExchange(List.PopLock, 1, 0) = 0);
-    //Only pause after a failed attempt: the uncontended pop pays nothing.
-    if not GoodExchange then
+  while True do
+  begin
+    SpinCount := DEFAULT_SPIN_COUNT;
+    while (SpinCount > 0) do
+    begin
+      if LockAbstractions.InterlockedCompareExchange(List.PopLock, 1, 0) = 0 then
+        goto done_spin;
+      Dec(SpinCount);
       CpuRelax;
-  until GoodExchange;
+    end;
+    Sleep(0);
+  end;
+done_spin:
   try
-    repeat
+    while True do
+    begin
       result := List.Entry.FLink;
       if Assigned(result) then
       begin
         Next := result.FLink;
-        GoodExchange := LockAbstractions.InterlockedCompareExchangePointer
-          (PSLEntryAlias(@List.Entry).FLink, Next, result) = result;
+        if LockAbstractions.InterlockedCompareExchangePointer
+          (PSLEntryAlias(@List.Entry).FLink, Next, result) = result then
+          goto done_spin_2;
+        CpuRelax;
       end
       else
       begin
         result := nil;
-        GoodExchange := true;
+        goto done_spin_2;
       end;
-    until GoodExchange;
+    end;
+done_spin_2:
     if Assigned(result) then
     begin
       Assert(SLItemIsObj(result));

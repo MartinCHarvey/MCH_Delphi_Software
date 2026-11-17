@@ -24,7 +24,7 @@ Output: `x64\mdb2bench.exe` and `x86\mdb2bench.exe`, each with its matching
 
 | Phase | What |
 |---|---|
-| 1. Preload | 5M records (~128 bytes each: `Id` uint64, `Expiry` int64, `State` int32, `Payload` blob of 54–162 bytes), 100 per transaction from 4 threads, then a checkpoint. Reports load rate and process memory per record. |
+| 1. Preload | 5M records (~128 bytes each: `Id` uint64, `Expiry` int64, `State` int32, `Payload` blob of 54–162 bytes), 2,000 per transaction from 4 threads, then a checkpoint. Reports load rate and process memory per record. |
 | 2. Micro | Each of the seven operations alone on one thread (200k transactions each), so latency, CPU cycles and allocations can be attributed to one kind of transaction. |
 | 3. Mixed | 4 writers and 4 readers for 30 s after a 5 s warm-up, with an expiry sweep every 500 µs. Writers and readers can optionally be rate-paced. |
 
@@ -176,15 +176,15 @@ name contains `mdb2bench` (the default is `mdb2bench_db`). A mistyped
   success it writes `mdb2bench_loaded.txt` in the `--db` folder, which the
   batch files check for, since a pipe loses the exit code.
 - `--load-threads N` preloads with N threads (default 4), and `--batch N`
-  sets the rows per preload transaction (default 100). Each thread claims
+  sets the rows per preload transaction (default 2,000). Each thread claims
   batches of ids and loads them `READ_WRITE_SHARED`, retrying a batch after
   a concurrency clash. With `--load-threads 1` each batch is a
-  `WRITE_EXCLUSIVE` transaction. The defaults come from the batch-size
-  runs (`Docs/MemDB2_Batch_Size_and_Threads_2026-11-16.pdf`): inserts are
-  fastest with 3-4 threads and 20-100 rows per transaction, more threads
-  only wait, and batches over a few hundred rows are slightly slower per
-  row. Runs before 17 November 2026 loaded with `--load-threads 8 --batch
-  10000`; give those options to reproduce them exactly.
+  `WRITE_EXCLUSIVE` transaction. 2,000 rows is above the 1,024-row limit at
+  which MemDB2 commits in parallel, which lifts inserts from 4 threads to
+  about 28k rows/s, against about 21k for the best batch below the limit
+  (`Docs/MemDB2_Parallel_Commit_Limit_2026-11-17.pdf`). Runs before
+  17 November 2026 loaded with `--load-threads 8 --batch 10000`, and runs
+  on 17 November with `--batch 100`; give those options to reproduce them.
 - `--reuse-db` skips the preload and uses the `Bench` table left by an
   earlier run. The journal is never deleted in this mode (it implies
   `--keep-db`, and `--fresh` is refused). Startup prints the time taken to
