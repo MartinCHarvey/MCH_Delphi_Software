@@ -37,16 +37,26 @@ procedure ReleaseTinyLock(var Lock: TTinyLock);
 
 implementation
 
-uses LockAbstractions;
+uses LockAbstractions, SysUtils;
+
+const
+  SPIN_COUNT = 3000; //Same as LockedSList DEFAULT_SPIN_COUNT.
 
 procedure AcquireTinyLock(var Lock: TTinyLock);
+var
+  Tries: integer;
 begin
   while True do
   begin
-    if (Lock = 0) and
-      (LockAbstractions.InterlockedCompareExchange(Integer(Lock), 1, 0) = 0) then
-      exit;
-    CpuRelax;
+    Tries := SPIN_COUNT;
+    while Tries > 0 do
+    begin
+      if LockAbstractions.InterlockedCompareExchange(Integer(Lock), 1, 0) = 0 then
+        exit;
+      Dec(Tries);
+      CpuRelax;
+    end;
+    Sleep(0); //A bigger yield.
   end;
 end;
 

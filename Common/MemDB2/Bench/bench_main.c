@@ -1418,7 +1418,7 @@ static void usage(void)
 "  --reader-mode read|rw     READ_SHARED (default) or READ_WRITE_SHARED\n"
 "  --reader-end rollback|commit   how readers end a transaction (rollback)\n"
 "  --iso rc|rr|snap|ser      isolation level (default rr)\n"
-"  --batch N                 preload rows per transaction (default 100)\n"
+"  --batch N                 preload rows per transaction (default 2000)\n"
 "  --row-bytes N             baseline only: pad each record to about N bytes\n"
 "                            of memory, e.g. to match MemDB2's bytes per record\n"
 "  --load-threads N          preload threads (default 4), each loading batches\n"
@@ -1477,10 +1477,10 @@ static void parse_args(int argc, char **argv)
     c->p_recycle = 0.1;
     c->earliest_every = 10;
     c->isolation = MDB_ISO_REPEATABLE_READ;
-    /* 4 threads x 100 rows per transaction: about the fastest way to insert
-       (MemDB2_Batch_Size_and_Threads_2026-11-16.pdf: inserts level off at
-       3-4 threads and 20-100 rows per transaction). */
-    c->preload_batch = 100;
+    /* 4 threads x 2,000 rows per transaction: above the 1,024-row limit at
+       which commits go parallel, so about 28k rows/s against 21k for the
+       best batch below it (MemDB2_Parallel_Commit_Limit_2026-11-17.pdf). */
+    c->preload_batch = 2000;
     c->load_threads = 4;
     c->checkpoint = 1;
     c->max_retries = 1000;
