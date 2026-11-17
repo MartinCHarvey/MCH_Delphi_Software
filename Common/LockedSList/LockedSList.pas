@@ -66,9 +66,6 @@ function SLListLockedPopItem(List: PSLListHead): PSLEntry;
 function SLItemIsList(Item:PSLEntry): boolean;
 function SlItemIsObj(Item:PSLEntry): boolean;
 
-const
-  DEFAULT_SPIN_COUNT = 3000; //Normal-ish windows spin value.
-
 implementation
 
 uses
@@ -113,29 +110,17 @@ function SLListLockedPopItem(List: PSLListHead): PSLEntry;
 var
   Next: PSLEntry;
   GoodExchange: boolean;
-  SpinCount: integer;
 begin
   Assert(Assigned(List));
   Assert(SLItemIsList(@List.Entry));
-  SpinCount := 0;
   repeat
-    repeat
-      //Only take cache line exclusively if it looks like we're going to
-      //succeed.
-      GoodExchange := (List.PopLock = 0) and
-        (LockAbstractions.InterlockedCompareExchange(List.PopLock, 1, 0) = 0);
-      //Only pause after a failed attempt: the uncontended pop pays nothing.
-      if not GoodExchange then
-      begin
-        Inc(SpinCount);
-        CpuRelax;
-      end;
-    until GoodExchange or (SpinCount > DEFAULT_SPIN_COUNT);
+    //Only take cache line exclusively if it looks like we're going to
+    //succeed.
+    GoodExchange := (List.PopLock = 0) and
+      (LockAbstractions.InterlockedCompareExchange(List.PopLock, 1, 0) = 0);
+    //Only pause after a failed attempt: the uncontended pop pays nothing.
     if not GoodExchange then
-    begin
-      Sleep(1);
-      SpinCount := 0;
-    end;
+      CpuRelax;
   until GoodExchange;
   try
     repeat
