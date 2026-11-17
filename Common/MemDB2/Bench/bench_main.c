@@ -111,6 +111,9 @@ typedef struct tctx {
     uint64_t gave_up_c[OP_COUNT];
     uint64_t inserted, deleted;        /* rows, measured or not              */
     uint64_t cyc0, cyc1;               /* thread cycles at measure start/end */
+    uint64_t *bids;                    /* batch phase: ids for one batch     */
+    rec *brecs;                        /* batch phase: rows for one batch    */
+    uint64_t brows;                    /* batch phase: rows measured         */
     volatile uint64_t sink;
 } tctx;
 
@@ -286,7 +289,11 @@ static void csv_open(void)
     }
     fseek(g_csv, 0, SEEK_END);
     size = ftell(g_csv);
-    if (size == 0)
+    if (size == 0 && g_cfg.run_batch)
+        fprintf(g_csv, "label,engine,arch,op,mode,threads,batch,txns,secs,txn_per_s,rows_per_s,"
+                       "mean_ns,p50_ns,p99_ns,p999_ns,max_ns,thread_cycles_per_txn,"
+                       "process_cycles_per_txn,misses,conflicts,gave_up\n");
+    else if (size == 0)
         fprintf(g_csv, "label,engine,arch,sync,writer_mode,reader_mode,isolation,readers,writers,"
                        "records,phase,op,ops,ops_per_s,mean_ns,p50_ns,p99_ns,p999_ns,p9999_ns,max_ns,"
                        "thread_cycles_per_op,process_cycles_per_op,allocs_per_op,misses,conflicts,gave_up\n");
@@ -1042,6 +1049,296 @@ static void mixed(void)
     free(ck);
 }
 
+
+/* ---------------------------------------------------------------------------
+ * Phase 4: batches. For each batch size N and thread count T, T threads run
+ * transactions of N finds (or N inserts) back to back. Reports transactions
+ * and rows per second, and per-transaction latency. N = 0 is an empty
+ * transaction: begin, open the table, then rollback (finds) or commit
+ * (inserts), which is the fixed cost every transaction pays.
+ *
+ * Finds pick ids from the preloaded rows (1..records), so they always hit.
+ * Inserts add new rows; after each combination the rows it added are deleted
+ * again (unmeasured) and, unless --no-checkpoint, a checkpoint is taken, so
+ * every combination starts from the same table.
+ * ------------------------------------------------------------------------- */
+static uint32_t g_bsize;              /* batch size of the current run      */
+static volatile LONG64 g_batch_rows;  /* measured rows so far (insert cap)  */
+static volatile LONG64 g_batch_stop;  /* ticks when the insert cap was hit  */
+
+static unsigned __stdcall batch_main(void *p)
+{
+    tctx *c = (tctx *)p;
+    int op = g_cfg.batch_op == BATCH_FIND ? OP_FIND_ID : OP_INSERT;
+    uint32_t n = g_bsize, i, attempt, found = 0;
+    uint64_t t0, t1;
+    int rc = R_OK;
+
+    while (!g_go)
+        YieldProcessor();
+    while (g_phase != PHASE_STOP) {
+        int record = g_phase == PHASE_MEASURE;
+        uint32_t clashes = 0, gave_up = 0;
+        if (op == OP_FIND_ID) {
+            for (i = 0; i < n; i++)
+                c->bids[i] = 1 + rng_below(&c->r, g_cfg.records);
+        } else {
+            for (i = 0; i < n; i++) {
+                uint64_t id = new_id();
+                make_rec(c, id, (int64_t)(id + g_lifetime), &c->brecs[i]);
+            }
+        }
+        t0 = ticks_now();
+        for (attempt = 0;; attempt++) {
+            if (op == OP_FIND_ID)
+                rc = g_vt->find_batch(c->ts, c->bids, n, &c->out, &found);
+            else
+                rc = g_vt->insert_batch(c->ts, c->brecs, n);
+            if (rc != R_CONFLICT)
+                break;
+            clashes++;
+            if (attempt >= g_cfg.max_retries) {
+                gave_up = 1;
+                break;
+            }
+            if (attempt > 2)
+                SwitchToThread();
+        }
+        t1 = ticks_now();
+        if (rc == R_FAIL) {
+            InterlockedExchange(&g_failed, 1);
+            InterlockedExchange(&g_phase, PHASE_STOP);
+            break;
+        }
+        if (record) {
+            hist_add(&c->h[op], t1 - t0);
+            c->conflicts[op] += clashes;
+            c->gave_up[op] += gave_up;
+            if (op == OP_FIND_ID)
+                c->misses[op] += n - found;
+            if (rc == R_OK) {
+                c->brows += n;
+                if (op == OP_INSERT && g_cfg.batch_rows && n &&
+                    (uint64_t)InterlockedExchangeAdd64(&g_batch_rows, (LONG64)n) + n
+                        >= g_cfg.batch_rows) {
+                    InterlockedCompareExchange64(&g_batch_stop, (LONG64)ticks_now(), 0);
+                    InterlockedExchange(&g_phase, PHASE_STOP);
+                }
+            }
+        }
+        c->sink += c->out.id;
+    }
+    return 0;
+}
+
+/* Delete ids [g_clean_next, g_clean_end) in batches of 1000, unmeasured. */
+static volatile LONG64 g_clean_next, g_clean_end;
+
+static unsigned __stdcall cleanup_main(void *p)
+{
+    tctx *c = (tctx *)p;
+    uint64_t ids[1000];
+    uint32_t n, i, tries;
+    int rc;
+    for (;;) {
+        uint64_t first = (uint64_t)InterlockedExchangeAdd64(&g_clean_next, 1000);
+        if (first >= (uint64_t)g_clean_end)
+            break;
+        n = (uint32_t)((uint64_t)g_clean_end - first < 1000 ? (uint64_t)g_clean_end - first : 1000);
+        for (i = 0; i < n; i++)
+            ids[i] = first + i;
+        for (tries = 0;; tries++) {
+            rc = g_vt->delete_batch(c->ts, ids, n);
+            if (rc != R_CONFLICT || tries >= g_cfg.max_retries)
+                break;
+            SwitchToThread();
+        }
+        if (rc != R_OK) {
+            InterlockedExchange(&g_failed, 1);
+            break;
+        }
+    }
+    return 0;
+}
+
+static void batch_cleanup(uint64_t first_id, uint64_t end_id)
+{
+    int nt = g_cfg.load_threads > 1 ? g_cfg.load_threads : 4, k;
+    tctx *cs[64];
+    uint64_t t0 = ticks_now();
+    if (end_id <= first_id)
+        return;
+    if (nt > 64) nt = 64;
+    g_clean_next = (LONG64)first_id;
+    g_clean_end = (LONG64)end_id;
+    for (k = 0; k < nt; k++) {
+        cs[k] = tctx_new(3000 + k, 1);
+        if (g_vt->thread_init(g_eng, &cs[k]->ts) != R_OK)
+            die("thread_init failed");
+        cs[k]->thread = (HANDLE)_beginthreadex(NULL, 0, cleanup_main, cs[k], 0, NULL);
+        if (!cs[k]->thread)
+            die("cannot start thread");
+    }
+    for (k = 0; k < nt; k++) {
+        WaitForSingleObject(cs[k]->thread, INFINITE);
+        CloseHandle(cs[k]->thread);
+        g_vt->thread_done(cs[k]->ts);
+        free(cs[k]);
+    }
+    if (g_failed)
+        die("batch cleanup: deleting the inserted rows failed");
+    if (g_cfg.checkpoint && g_vt->checkpoint(g_eng, 0) != R_OK)
+        die("batch cleanup: checkpoint failed");
+    printf("      (removed %llu inserted rows%s in %.1f s)\n",
+           (unsigned long long)(end_id - first_id),
+           g_cfg.checkpoint ? " and checkpointed" : "",
+           ticks_to_ns(ticks_now() - t0) / 1e9);
+}
+
+static void batch_combo(int nt, uint32_t n)
+{
+    int op = g_cfg.batch_op == BATCH_FIND ? OP_FIND_ID : OP_INSERT, i;
+    tctx **cs = (tctx **)calloc((size_t)nt, sizeof *cs);
+    uint32_t alloc_n = n ? n : 1;
+    uint64_t pc0, pc1, w0, w1, cyc = 0, rows = 0, first_id;
+    uint64_t misses = 0, confl = 0, gaveup = 0;
+    hist h;
+    double secs, us = g_ns_per_tick / 1000.0;
+
+    if (!cs)
+        die("out of memory");
+    g_go = 0;
+    g_phase = PHASE_WARMUP;
+    g_bsize = n;
+    g_batch_rows = 0;
+    g_batch_stop = 0;
+    first_id = (uint64_t)g_next_id;
+    for (i = 0; i < nt; i++) {
+        tctx *c = tctx_new(4000 + i, op == OP_INSERT);
+        c->bids = (uint64_t *)malloc(alloc_n * sizeof *c->bids);
+        c->brecs = (rec *)malloc(alloc_n * sizeof *c->brecs);
+        if (!c->bids || !c->brecs)
+            die("out of memory");
+        if (g_vt->thread_init(g_eng, &c->ts) != R_OK)
+            die("thread_init failed");
+        c->thread = (HANDLE)_beginthreadex(NULL, 0, batch_main, c, 0, NULL);
+        if (!c->thread)
+            die("cannot start thread");
+        if (g_cfg.pin)
+            pin_thread(c->thread, i);
+        cs[i] = c;
+    }
+    InterlockedExchange(&g_go, 1);
+    Sleep((DWORD)(g_cfg.warmup_s * 1000.0));
+    for (i = 0; i < nt; i++)
+        cs[i]->cyc0 = thread_cycles(cs[i]->thread);
+    pc0 = process_cycles();
+    w0 = ticks_now();
+    InterlockedExchange(&g_phase, PHASE_MEASURE);
+    {
+        double left = g_cfg.duration_s * 1000.0;
+        while (left > 0 && g_phase != PHASE_STOP && !g_failed) {
+            DWORD slice = left > 50 ? 50 : (DWORD)left;
+            Sleep(slice);
+            left -= slice;
+        }
+    }
+    w1 = ticks_now();
+    pc1 = process_cycles();
+    for (i = 0; i < nt; i++)
+        cs[i]->cyc1 = thread_cycles(cs[i]->thread);
+    InterlockedExchange(&g_phase, PHASE_STOP);
+    /* Insert cap reached: the window ends when it was hit, not when this
+       thread next woke up. */
+    if (g_batch_stop && (uint64_t)g_batch_stop < w1)
+        w1 = (uint64_t)g_batch_stop;
+    for (i = 0; i < nt; i++) {
+        WaitForSingleObject(cs[i]->thread, INFINITE);
+        CloseHandle(cs[i]->thread);
+    }
+    if (g_failed)
+        die("batch run failed (see above)");
+
+    secs = ticks_to_ns(w1 - w0) / 1e9;
+    hist_reset(&h);
+    for (i = 0; i < nt; i++) {
+        tctx *c = cs[i];
+        hist_merge(&h, &c->h[op]);
+        cyc += c->cyc1 - c->cyc0;
+        rows += c->brows;
+        misses += c->misses[op];
+        confl += c->conflicts[op];
+        gaveup += c->gave_up[op];
+    }
+    if (!h.count) {
+        printf("  %4d %6u   (no transaction finished in the measured window)\n", nt, n);
+    } else {
+        double tps = (double)h.count / secs;
+        printf("  %4d %6u %9.0f %10.0f %9.1f %8.1f %8.1f %8.1f %9.1f %8.2f %6llu %6llu\n",
+               nt, n, tps, (double)rows / secs,
+               (double)h.sum / (double)h.count * us,
+               (double)hist_percentile(&h, 0.50) * us,
+               (double)hist_percentile(&h, 0.99) * us,
+               (double)hist_percentile(&h, 0.999) * us,
+               (double)cyc / (double)h.count / g_tsc_hz * 1e6,
+               rows ? (double)cyc / (double)rows / g_tsc_hz * 1e6 : 0.0,
+               (unsigned long long)confl, (unsigned long long)misses);
+        if (g_csv) {
+            fprintf(g_csv, "%s,%s,%s,%s,%s,%d,%u,%llu,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%llu,%llu,%llu\n",
+                    g_cfg.label ? g_cfg.label : "", g_vt->name, g_arch,
+                    op == OP_FIND_ID ? "find" : "insert",
+                    op == OP_FIND_ID ? (g_cfg.reader_rw ? "rw" : "read")
+                                     : (g_cfg.writer_exclusive ? "exclusive" : "shared"),
+                    nt, n, (unsigned long long)h.count, secs, tps, (double)rows / secs,
+                    ticks_to_ns(h.sum) / (double)h.count,
+                    ticks_to_ns(hist_percentile(&h, 0.50)),
+                    ticks_to_ns(hist_percentile(&h, 0.99)),
+                    ticks_to_ns(hist_percentile(&h, 0.999)),
+                    ticks_to_ns(h.max),
+                    (double)cyc / (double)h.count,
+                    (double)(pc1 - pc0) / (double)h.count,
+                    (unsigned long long)misses, (unsigned long long)confl,
+                    (unsigned long long)gaveup);
+            fflush(g_csv);
+        }
+    }
+    for (i = 0; i < nt; i++) {
+        g_vt->thread_done(cs[i]->ts);
+        free(cs[i]->bids);
+        free(cs[i]->brecs);
+        free(cs[i]);
+    }
+    free(cs);
+    if (op == OP_INSERT)
+        batch_cleanup(first_id, (uint64_t)g_next_id);
+}
+
+static void batch(void)
+{
+    int si, ti;
+    if (!g_vt->find_batch || !g_vt->insert_batch || !g_vt->delete_batch)
+        die("--batch-op: this engine has no batch support");
+    printf("\nPhase 4: batches of %s, %.0f s each (+%.0f s warm-up), %s\n",
+           g_cfg.batch_op == BATCH_FIND ? "finds by id" : "inserts",
+           g_cfg.duration_s, g_cfg.warmup_s,
+           g_cfg.batch_op == BATCH_FIND
+               ? (g_cfg.reader_rw ? "READ_WRITE_SHARED" : "READ_SHARED")
+               : (g_cfg.writer_exclusive ? "WRITE_EXCLUSIVE" : "READ_WRITE_SHARED"));
+    if (g_cfg.batch_op == BATCH_INSERT && g_cfg.batch_rows)
+        printf("  each combination stops early after %llu measured rows\n",
+               (unsigned long long)g_cfg.batch_rows);
+    printf("  batch 0 = empty transaction (begin, open table, %s)\n",
+           g_cfg.batch_op == BATCH_FIND ? (g_cfg.reader_commit ? "commit" : "rollback") : "commit");
+    printf("  %4s %6s %9s %10s %9s %8s %8s %8s %9s %8s %6s %6s\n",
+           "thr", "batch", "txn/s", "rows/s", "mean us", "p50", "p99", "p99.9",
+           "cpu/txn", "cpu/row", "clash", "miss");
+    for (si = 0; si < g_cfg.n_batch_sizes && !g_failed; si++)
+        for (ti = 0; ti < g_cfg.n_batch_threads && !g_failed; ti++)
+            batch_combo(g_cfg.batch_threads[ti], g_cfg.batch_sizes[si]);
+    printf("  cpu/txn, cpu/row = CPU time (us) of the batch threads, per transaction\n"
+           "  and per row.\n");
+}
+
 /* ---------------------------------------------------------------------------
  * Command line
  * ------------------------------------------------------------------------- */
@@ -1056,6 +1353,30 @@ static double parse_num(const char *s)
     default: break;
     }
     return v;
+}
+
+/* "1,2,4" or "1 2 4" -> up to 32 values; returns the count. */
+static int parse_list(const char *s, uint32_t *out)
+{
+    int n = 0;
+    while (*s && n < 32) {
+        char *end;
+        double v;
+        while (*s == ',' || *s == ' ')
+            s++;
+        if (!*s)
+            break;
+        v = strtod(s, &end);
+        if (end == s)
+            break;
+        switch (*end) {
+        case 'k': case 'K': v *= 1e3; end++; break;
+        default: break;
+        }
+        out[n++] = (uint32_t)v;
+        s = end;
+    }
+    return n;
 }
 
 static void usage(void)
@@ -1097,11 +1418,11 @@ static void usage(void)
 "  --reader-mode read|rw     READ_SHARED (default) or READ_WRITE_SHARED\n"
 "  --reader-end rollback|commit   how readers end a transaction (rollback)\n"
 "  --iso rc|rr|snap|ser      isolation level (default rr)\n"
-"  --batch N                 preload rows per transaction (default 10000)\n"
+"  --batch N                 preload rows per transaction (default 100)\n"
 "  --row-bytes N             baseline only: pad each record to about N bytes\n"
 "                            of memory, e.g. to match MemDB2's bytes per record\n"
-"  --load-threads N          preload threads (default 1, WRITE_EXCLUSIVE); with\n"
-"                            more, each loads batches READ_WRITE_SHARED\n"
+"  --load-threads N          preload threads (default 4), each loading batches\n"
+"                            READ_WRITE_SHARED; 1 = one WRITE_EXCLUSIVE thread\n"
 "  --no-checkpoint           skip the checkpoint after preload\n"
 "  --max-retries N           retries on a concurrency clash (default 1000)\n"
 "  --pin                     pin threads to CPUs 0..n-1\n"
@@ -1118,7 +1439,19 @@ static void usage(void)
 "  --label <text>            label for the CSV rows\n"
 "  --seed N                  random seed (default 1)\n"
 "  --lifetime N              inserts from insert to expiry (default: chosen\n"
-"                            so that about --records rows stay live)\n");
+"                            so that about --records rows stay live)\n"
+"\n"
+"  Batch phase (instead of the isolated and mixed phases):\n"
+"  --batch-op find|insert    run transactions of N finds by id (READ_SHARED,\n"
+"                            or --reader-mode rw) or N inserts (--writer-mode)\n"
+"  --batch-sizes LIST        values of N, e.g. \"0,1,10,100\" (default\n"
+"                            0,1,2,5,10,20,50,100,200,500,1000); 0 = an empty\n"
+"                            transaction, the fixed cost per transaction\n"
+"  --batch-threads LIST      thread counts, e.g. \"1,2,4,8\" (default 1,2,4)\n"
+"  --batch-rows N            inserts: end a combination after N measured rows\n"
+"                            (default 300k); inserted rows are deleted again\n"
+"                            after each combination\n"
+"  Each combination runs for --duration after --warmup.\n");
 }
 
 static void parse_args(int argc, char **argv)
@@ -1144,12 +1477,16 @@ static void parse_args(int argc, char **argv)
     c->p_recycle = 0.1;
     c->earliest_every = 10;
     c->isolation = MDB_ISO_REPEATABLE_READ;
-    c->preload_batch = 10000;
-    c->load_threads = 1;
+    /* 4 threads x 100 rows per transaction: about the fastest way to insert
+       (MemDB2_Batch_Size_and_Threads_2026-11-16.pdf: inserts level off at
+       3-4 threads and 20-100 rows per transaction). */
+    c->preload_batch = 100;
+    c->load_threads = 4;
     c->checkpoint = 1;
     c->max_retries = 1000;
     c->seed = 1;
     c->lifetime = 0;
+    c->batch_rows = 300000;
 
 #define NEXT() (i + 1 < argc ? argv[++i] : (usage(), exit(2), (char *)0))
     for (i = 1; i < argc; i++) {
@@ -1235,6 +1572,24 @@ static void parse_args(int argc, char **argv)
         else if (!strcmp(a, "--label")) c->label = NEXT();
         else if (!strcmp(a, "--seed")) c->seed = (uint64_t)parse_num(NEXT());
         else if (!strcmp(a, "--lifetime")) c->lifetime = (uint64_t)parse_num(NEXT());
+        else if (!strcmp(a, "--batch-op")) {
+            const char *v = NEXT();
+            if (!strcmp(v, "find")) c->batch_op = BATCH_FIND;
+            else if (!strcmp(v, "insert")) c->batch_op = BATCH_INSERT;
+            else { usage(); exit(2); }
+            c->run_batch = 1;
+            c->run_micro = 0;
+            c->run_mixed = 0;
+        }
+        else if (!strcmp(a, "--batch-sizes")) c->n_batch_sizes = parse_list(NEXT(), c->batch_sizes);
+        else if (!strcmp(a, "--batch-threads")) {
+            uint32_t tmp[32];
+            int k;
+            c->n_batch_threads = parse_list(NEXT(), tmp);
+            for (k = 0; k < c->n_batch_threads; k++)
+                c->batch_threads[k] = (int)tmp[k];
+        }
+        else if (!strcmp(a, "--batch-rows")) c->batch_rows = (uint64_t)parse_num(NEXT());
         else if (!strcmp(a, "-h") || !strcmp(a, "--help") || !strcmp(a, "/?")) { usage(); exit(0); }
         else { fprintf(stderr, "Unknown option %s\n\n", a); usage(); exit(2); }
     }
@@ -1263,6 +1618,25 @@ static void parse_args(int argc, char **argv)
     if (c->row_bytes && strcmp(c->engine, "baseline") != 0)
         die("--row-bytes is for --engine baseline only");
     if (c->micro_ops < 1) c->micro_ops = 1;
+    if (c->run_batch) {
+        int k;
+        static const uint32_t def_sizes[] = { 0, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000 };
+        if (c->n_batch_sizes == 0) {
+            c->n_batch_sizes = (int)(sizeof def_sizes / sizeof def_sizes[0]);
+            for (k = 0; k < c->n_batch_sizes; k++)
+                c->batch_sizes[k] = def_sizes[k];
+        }
+        if (c->n_batch_threads == 0) {
+            c->n_batch_threads = 3;
+            c->batch_threads[0] = 1; c->batch_threads[1] = 2; c->batch_threads[2] = 4;
+        }
+        for (k = 0; k < c->n_batch_threads; k++)
+            if (c->batch_threads[k] < 1 || c->batch_threads[k] > 64)
+                die("--batch-threads: each value must be 1 to 64");
+        for (k = 0; k < c->n_batch_sizes; k++)
+            if (c->batch_sizes[k] > 1000000)
+                die("--batch-sizes: each value must be at most 1M");
+    }
     if (c->ckpt_mode && strcmp(c->engine, "memdb2") != 0)
         die("--ckpt needs --engine memdb2");
     /* Lifetime that keeps ~records rows live when a fraction d of inserts is
@@ -1368,6 +1742,8 @@ int main(int argc, char **argv)
         micro();
     if (g_cfg.run_mixed && !g_failed)
         mixed();
+    if (g_cfg.run_batch && !g_failed && !g_cfg.load_only)
+        batch();
     if (g_cfg.profile) {
         PROF_PAUSE();
         printf("--profile: collection paused, closing the database\n");

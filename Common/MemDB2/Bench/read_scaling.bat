@@ -31,7 +31,7 @@ set "DURATION=30"
 set "WARMUP=5"
 set "CSV=results_read.csv"
 set "LOG=results_read_execution.log"
-set "BASE=--db mdb2bench_db --fresh --records 1M --load-threads 8 --csv %CSV% --read-only --duration %DURATION% --warmup %WARMUP%"
+set "BASE=--db mdb2bench_db --fresh --records 1M --csv %CSV% --read-only --duration %DURATION% --warmup %WARMUP%"
 if not exist x64\mdb2bench.exe (
     echo x64\mdb2bench.exe not found: run rebuild_all.bat first.
     exit /b 1
