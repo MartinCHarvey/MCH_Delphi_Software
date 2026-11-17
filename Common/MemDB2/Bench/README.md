@@ -24,7 +24,7 @@ Output: `x64\mdb2bench.exe` and `x86\mdb2bench.exe`, each with its matching
 
 | Phase | What |
 |---|---|
-| 1. Preload | 5M records (~128 bytes each: `Id` uint64, `Expiry` int64, `State` int32, `Payload` blob of 54–162 bytes), 10,000 per transaction, then a checkpoint. Reports load rate and process memory per record. |
+| 1. Preload | 5M records (~128 bytes each: `Id` uint64, `Expiry` int64, `State` int32, `Payload` blob of 54–162 bytes), 100 per transaction from 4 threads, then a checkpoint. Reports load rate and process memory per record. |
 | 2. Micro | Each of the seven operations alone on one thread (200k transactions each), so latency, CPU cycles and allocations can be attributed to one kind of transaction. |
 | 3. Mixed | 4 writers and 4 readers for 30 s after a 5 s warm-up, with an expiry sweep every 500 µs. Writers and readers can optionally be rate-paced. |
 
@@ -175,12 +175,16 @@ name contains `mdb2bench` (the default is `mdb2bench_db`). A mistyped
 - `--load-only` preloads (and checkpoints) the table, then exits. On
   success it writes `mdb2bench_loaded.txt` in the `--db` folder, which the
   batch files check for, since a pipe loses the exit code.
-- `--load-threads N` preloads with N threads. With 1 (the default) each
-  batch is a `WRITE_EXCLUSIVE` transaction, as before. With more, each
-  thread claims batches of ids and loads them `READ_WRITE_SHARED`, retrying
-  a batch after a concurrency clash, so appends and posts (and the page
-  faults they take) overlap, and only the commits are serialised. The
-  batch files load with 8 threads (`LOAD_THREADS`).
+- `--load-threads N` preloads with N threads (default 4), and `--batch N`
+  sets the rows per preload transaction (default 100). Each thread claims
+  batches of ids and loads them `READ_WRITE_SHARED`, retrying a batch after
+  a concurrency clash. With `--load-threads 1` each batch is a
+  `WRITE_EXCLUSIVE` transaction. The defaults come from the batch-size
+  runs (`Docs/MemDB2_Batch_Size_and_Threads_2026-11-16.pdf`): inserts are
+  fastest with 3-4 threads and 20-100 rows per transaction, more threads
+  only wait, and batches over a few hundred rows are slightly slower per
+  row. Runs before 17 November 2026 loaded with `--load-threads 8 --batch
+  10000`; give those options to reproduce them exactly.
 - `--reuse-db` skips the preload and uses the `Bench` table left by an
   earlier run. The journal is never deleted in this mode (it implies
   `--keep-db`, and `--fresh` is refused). Startup prints the time taken to
@@ -216,9 +220,39 @@ journal from the previous run is deleted at startup. The load isn't measured.
 Timed phases are 30 s after a 5 s warm-up (`DURATION`, `WARMUP` in the
 scripts).
 
-`big_test.bat` (8.44M rows, slightly bigger than RAM, 30 minute runs) is
-kept for the paging case. It still loads once and copies the loaded
-folder before each run.
+For a build whose DLLs were made elsewhere (for example with a newer
+Delphi), and a final comparison with every earlier run:
+
+```
+rebuild_bench.bat                  rem import libraries + bench only, DLLs untouched
+final_run.bat final                rem both scripts above, then compare_runs.ps1
+```
+
+| Script | Does | Output |
+|---|---|---|
+| `rebuild_bench.bat` | `make_importlib.bat` for the DLLs already in `..\C_DLL\Win*\*`, then `build.bat`. map2pdb only with `PDB=1`, because it writes into the DLL | `rebuild_bench.log` |
+| `final_run.bat` | `read_scaling.bat` with 1-8 readers and `mixed_tests.bat` under one tag (`RUNS=2` repeats them as `<tag>b`), then `compare_runs.ps1` | the CSVs and logs above, `final_compare.txt` |
+| `compare_runs.ps1` | tables of throughput, CPU cycles per transaction and change against `before_vt` for every tag in the CSVs (`-Base`, `-Tags` to choose) | console |
+
+Batch sizes: how rows per second depend on the number of rows per
+transaction and the number of threads, for finds by id and for inserts:
+
+```
+batch_tests.bat after              rem finds, then inserts
+batch_tests.bat after find         rem one of them
+```
+
+`batch_tests.bat` loads 1M rows once per operation and then runs every
+combination of `THREADS` (default 1 2 3 4 5 6 8) and `SIZES` (default 0 1 2
+5 10 20 50 100 200 500 1000 2000), 10 s each after a 2 s warm-up. Batch size
+0 is an empty transaction (begin, open the table, rollback or commit): the
+fixed cost every transaction pays. Insert runs delete the rows they added
+after each combination and checkpoint, so each combination starts from the
+same table, and stop early after `--batch-rows` (300k) measured rows.
+Results go to `results_batch.csv`, which has its own columns (`threads`,
+`batch`, `txn_per_s`, `rows_per_s`, latencies per transaction, CPU cycles
+per transaction). The bench options are `--batch-op find|insert`,
+`--batch-sizes`, `--batch-threads` and `--batch-rows`.
 
 ## Things to know when reading the results
 

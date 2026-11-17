@@ -68,6 +68,9 @@ extern const char *const g_op_names[OP_COUNT];
 /* Written in the --db folder when --load-only succeeds. */
 #define LOADED_MARKER "mdb2bench_loaded.txt"
 
+#define BATCH_FIND    0
+#define BATCH_INSERT  1
+
 /* One logical record. Payload points at caller memory. */
 typedef struct rec {
     uint64_t id;
@@ -125,6 +128,16 @@ typedef struct bench_cfg {
                                   1 always delete (--fresh), -1 keep          */
     int reuse_db;              /* use the table an earlier run left, no preload */
     int load_only;             /* preload, then write LOADED_MARKER and exit */
+    /* Batch phase (--batch-op): T threads, each running transactions of N
+       finds or N inserts, for every T in batch_threads and N in batch_sizes.
+       N = 0 measures an empty transaction (begin, open table, end). */
+    int run_batch;
+    int batch_op;              /* BATCH_FIND or BATCH_INSERT                 */
+    int batch_threads[32], n_batch_threads;
+    uint32_t batch_sizes[32];
+    int n_batch_sizes;
+    uint64_t batch_rows;       /* inserts: stop a combination after this many
+                                  measured rows (0 = duration only)          */
     const char *csv_path;
     const char *label;
     uint64_t seed;
@@ -160,6 +173,13 @@ typedef struct engine_vt {
     /* For --reuse-db: highest id and number of rows in the existing table.
        NULL if the engine cannot keep data between runs. */
     int  (*inspect)(void *eng, uint64_t *max_id, uint64_t *rows);
+    /* Batch phase: one transaction for all n rows. n may be 0 (an empty
+       transaction). find_batch sets *found to the rows found. NULL if the
+       engine has no batch support. */
+    int  (*find_batch)(void *ts, const uint64_t *ids, uint32_t n, rec_out *out,
+                       uint32_t *found);
+    int  (*insert_batch)(void *ts, const rec *recs, uint32_t n);
+    int  (*delete_batch)(void *ts, const uint64_t *ids, uint32_t n);
 } engine_vt;
 
 extern const engine_vt g_engine_memdb2;

@@ -490,6 +490,69 @@ static int m2_recycle(void *ts, int64_t now, const rec *r)
     return R_OK;
 }
 
+/* ---------------------------------------------------------------------------
+ * Batch phase: n rows in one transaction. n = 0 gives an empty transaction,
+ * which measures the fixed cost of begin, open table and commit/rollback.
+ * ------------------------------------------------------------------------- */
+static int m2_find_batch(void *ts, const uint64_t *ids, uint32_t n, rec_out *out,
+                         uint32_t *found_out)
+{
+    m2_ts *t = (m2_ts *)ts;
+    mdb_handle txn = 0, data = 0;
+    int32_t found = 0;
+    uint32_t i, hits = 0;
+    M2(mdb_txn_begin(t->session, t->e->rmode, MDB_SYNC_LAZY_WRITE, t->e->iso, &txn));
+    M2(mdb_txn_open_table_data(txn, TBL, &data));
+    for (i = 0; i < n; i++) {
+        M2(mdb_key_clear(t->key));
+        M2(mdb_key_add_uint64(t->key, ids[i]));
+        M2(mdb_data_find(data, IX_ID, t->key, &found));
+        if (found) {
+            M2(read_rec(data, out));
+            hits++;
+        }
+    }
+    M2(end_read(t, txn));
+    *found_out = hits;
+    return R_OK;
+}
+
+static int m2_insert_batch(void *ts, const rec *recs, uint32_t n)
+{
+    m2_ts *t = (m2_ts *)ts;
+    mdb_handle txn = 0, data = 0;
+    uint32_t i;
+    M2(mdb_txn_begin(t->session, t->e->wmode, t->e->sync, t->e->iso, &txn));
+    M2(mdb_txn_open_table_data(txn, TBL, &data));
+    for (i = 0; i < n; i++) {
+        M2(mdb_data_append(data));
+        M2(write_rec(data, &recs[i]));
+        M2(mdb_data_post(data));
+    }
+    M2(mdb_txn_commit(txn));
+    return R_OK;
+}
+
+static int m2_delete_batch(void *ts, const uint64_t *ids, uint32_t n)
+{
+    m2_ts *t = (m2_ts *)ts;
+    mdb_handle txn = 0, data = 0;
+    int32_t found = 0;
+    uint32_t i;
+    M2(mdb_txn_begin(t->session, MDB_ACCESS_READ_WRITE_SHARED, MDB_SYNC_LAZY_WRITE,
+                     MDB_ISO_REPEATABLE_READ, &txn));
+    M2(mdb_txn_open_table_data(txn, TBL, &data));
+    for (i = 0; i < n; i++) {
+        M2(mdb_key_clear(t->key));
+        M2(mdb_key_add_uint64(t->key, ids[i]));
+        M2(mdb_data_find(data, IX_ID, t->key, &found));
+        if (found)
+            M2(mdb_data_delete(data, 0));
+    }
+    M2(mdb_txn_commit(txn));
+    return R_OK;
+}
+
 static int m2_alloc_stats(void *eng, uint64_t *allocs, uint64_t *frees)
 {
     m2_eng *e = (m2_eng *)eng;
@@ -562,4 +625,5 @@ const engine_vt g_engine_memdb2 = {
     m2_alloc_stats, m2_alloc_enable,
     m2_checkpoint,
     m2_inspect,
+    m2_find_batch, m2_insert_batch, m2_delete_batch,
 };
