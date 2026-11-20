@@ -427,7 +427,11 @@ end;
 
 function TMemStreamableList.GetItem(Idx: integer): TMemDBStreamable;
 begin
+{$IFOPT C+}
   result := FList.Items[idx];
+{$ELSE}
+  result := FList.List[idx];
+{$ENDIF}
 end;
 
 procedure TMemStreamableList.SetItem(Idx: integer; Item: TMemDBStreamable);

@@ -80,7 +80,7 @@
     <PropertyGroup Condition="'$(Cfg_1_Win32)'!=''">
         <VerInfo_Locale>1033</VerInfo_Locale>
         <Manifest_File>None</Manifest_File>
-        <Debugger_RunParams>&quot;c:\MCH Stuff\Delphi XE Progs\Common\MemDB2\SQL92Grammar\ParserTest\SQL92ParserTest.dpr&quot; c:\temp\parsertest -l</Debugger_RunParams>
+        <Debugger_RunParams>&quot;c:\MCH Stuff\Delphi XE Progs\Common\MemDB2\C_DLL\MemDB2Dll.dpr&quot; &quot;C:\MCH Stuff\github\MCH_Delphi_Software\Common&quot;</Debugger_RunParams>
         <DCC_RemoteDebug>false</DCC_RemoteDebug>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_2)'!=''">

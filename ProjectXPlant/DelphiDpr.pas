@@ -6,7 +6,7 @@ unit DelphiDpr;
 {==============================================================================
 DelphiDpr
 0.0.0.0
-Date of Generation: 05/11/2026 18:06
+Date of Generation: 20/11/2026 20:57
 Comment: Parses Delphi DPR files.
 Author: Martin Harvey
 Copyright: (c) Martin Harvey
@@ -22,7 +22,7 @@ uses  SysUtils,Classes,CocoBase;
 
 
 const
-maxT = 16;
+maxT = 17;
 type
   SymbolSet = array[0..maxT div setsize] of TBitSet;
 
@@ -125,9 +125,9 @@ implementation
 const
 
   EOFSYMB = 0;  identifierSym = 1;  stringSym = 2;  dotSym = 3;  semiSym = 4;
-  commaSym = 5;  programSym = 6;  librarySym = 7;  usesSym = 8;  inSym = 9;
-  constSym = 10;  typeSym = 11;  varSym = 12;  beginSym = 13;
-  procedureSym = 14;  functionSym = 15;  NOSYMB = 16;  _noSym = NOSYMB;   {error token code}
+  commaSym = 5;  ByteOrderMarkSym = 6;  programSym = 7;  librarySym = 8;
+  usesSym = 9;  inSym = 10;  constSym = 11;  typeSym = 12;  varSym = 13;
+  beginSym = 14;  procedureSym = 15;  functionSym = 16;  NOSYMB = 17;  _noSym = NOSYMB;   {error token code}
 
 { --------------------------------------------------------------------------- }
 { Arbitrary Code from ATG file }
@@ -494,7 +494,29 @@ end;
 sym := commaSym;
 exit;
 end;
-   7: begin
+   7: if ((CurrInputCh = AnsiChar(187))) then
+begin
+state := 8; 
+end
+else
+begin
+  sym := _noSym;
+exit;
+end;
+   8: if ((CurrInputCh = AnsiChar(191))) then
+begin
+state := 9; 
+end
+else
+begin
+  sym := _noSym;
+exit;
+end;
+   9: begin
+sym := ByteOrderMarkSym;
+exit;
+end;
+  10: begin
 sym := EOFSYMB;
 CurrInputCh := chNull;
 BufferPosition := BufferPosition - 1;
@@ -513,70 +535,70 @@ constructor TDelphiDprScanner.Create;
 begin
   inherited;
 CurrentCh := CharAt;
-fStartState[  0] :=  7; fStartState[  1] :=  8; fStartState[  2] :=  8; fStartState[  3] :=  8; 
-fStartState[  4] :=  8; fStartState[  5] :=  8; fStartState[  6] :=  8; fStartState[  7] :=  8; 
-fStartState[  8] :=  8; fStartState[  9] :=  8; fStartState[ 10] :=  8; fStartState[ 11] :=  8; 
-fStartState[ 12] :=  8; fStartState[ 13] :=  8; fStartState[ 14] :=  8; fStartState[ 15] :=  8; 
-fStartState[ 16] :=  8; fStartState[ 17] :=  8; fStartState[ 18] :=  8; fStartState[ 19] :=  8; 
-fStartState[ 20] :=  8; fStartState[ 21] :=  8; fStartState[ 22] :=  8; fStartState[ 23] :=  8; 
-fStartState[ 24] :=  8; fStartState[ 25] :=  8; fStartState[ 26] :=  8; fStartState[ 27] :=  8; 
-fStartState[ 28] :=  8; fStartState[ 29] :=  8; fStartState[ 30] :=  8; fStartState[ 31] :=  8; 
-fStartState[ 32] :=  8; fStartState[ 33] :=  8; fStartState[ 34] :=  8; fStartState[ 35] :=  8; 
-fStartState[ 36] :=  8; fStartState[ 37] :=  8; fStartState[ 38] :=  8; fStartState[ 39] :=  2; 
-fStartState[ 40] :=  8; fStartState[ 41] :=  8; fStartState[ 42] :=  8; fStartState[ 43] :=  8; 
-fStartState[ 44] :=  6; fStartState[ 45] :=  8; fStartState[ 46] :=  4; fStartState[ 47] :=  8; 
-fStartState[ 48] :=  8; fStartState[ 49] :=  8; fStartState[ 50] :=  8; fStartState[ 51] :=  8; 
-fStartState[ 52] :=  8; fStartState[ 53] :=  8; fStartState[ 54] :=  8; fStartState[ 55] :=  8; 
-fStartState[ 56] :=  8; fStartState[ 57] :=  8; fStartState[ 58] :=  8; fStartState[ 59] :=  5; 
-fStartState[ 60] :=  8; fStartState[ 61] :=  8; fStartState[ 62] :=  8; fStartState[ 63] :=  8; 
-fStartState[ 64] :=  8; fStartState[ 65] :=  1; fStartState[ 66] :=  1; fStartState[ 67] :=  1; 
+fStartState[  0] := 10; fStartState[  1] := 11; fStartState[  2] := 11; fStartState[  3] := 11; 
+fStartState[  4] := 11; fStartState[  5] := 11; fStartState[  6] := 11; fStartState[  7] := 11; 
+fStartState[  8] := 11; fStartState[  9] := 11; fStartState[ 10] := 11; fStartState[ 11] := 11; 
+fStartState[ 12] := 11; fStartState[ 13] := 11; fStartState[ 14] := 11; fStartState[ 15] := 11; 
+fStartState[ 16] := 11; fStartState[ 17] := 11; fStartState[ 18] := 11; fStartState[ 19] := 11; 
+fStartState[ 20] := 11; fStartState[ 21] := 11; fStartState[ 22] := 11; fStartState[ 23] := 11; 
+fStartState[ 24] := 11; fStartState[ 25] := 11; fStartState[ 26] := 11; fStartState[ 27] := 11; 
+fStartState[ 28] := 11; fStartState[ 29] := 11; fStartState[ 30] := 11; fStartState[ 31] := 11; 
+fStartState[ 32] := 11; fStartState[ 33] := 11; fStartState[ 34] := 11; fStartState[ 35] := 11; 
+fStartState[ 36] := 11; fStartState[ 37] := 11; fStartState[ 38] := 11; fStartState[ 39] :=  2; 
+fStartState[ 40] := 11; fStartState[ 41] := 11; fStartState[ 42] := 11; fStartState[ 43] := 11; 
+fStartState[ 44] :=  6; fStartState[ 45] := 11; fStartState[ 46] :=  4; fStartState[ 47] := 11; 
+fStartState[ 48] := 11; fStartState[ 49] := 11; fStartState[ 50] := 11; fStartState[ 51] := 11; 
+fStartState[ 52] := 11; fStartState[ 53] := 11; fStartState[ 54] := 11; fStartState[ 55] := 11; 
+fStartState[ 56] := 11; fStartState[ 57] := 11; fStartState[ 58] := 11; fStartState[ 59] :=  5; 
+fStartState[ 60] := 11; fStartState[ 61] := 11; fStartState[ 62] := 11; fStartState[ 63] := 11; 
+fStartState[ 64] := 11; fStartState[ 65] :=  1; fStartState[ 66] :=  1; fStartState[ 67] :=  1; 
 fStartState[ 68] :=  1; fStartState[ 69] :=  1; fStartState[ 70] :=  1; fStartState[ 71] :=  1; 
 fStartState[ 72] :=  1; fStartState[ 73] :=  1; fStartState[ 74] :=  1; fStartState[ 75] :=  1; 
 fStartState[ 76] :=  1; fStartState[ 77] :=  1; fStartState[ 78] :=  1; fStartState[ 79] :=  1; 
 fStartState[ 80] :=  1; fStartState[ 81] :=  1; fStartState[ 82] :=  1; fStartState[ 83] :=  1; 
 fStartState[ 84] :=  1; fStartState[ 85] :=  1; fStartState[ 86] :=  1; fStartState[ 87] :=  1; 
-fStartState[ 88] :=  1; fStartState[ 89] :=  1; fStartState[ 90] :=  1; fStartState[ 91] :=  8; 
-fStartState[ 92] :=  8; fStartState[ 93] :=  8; fStartState[ 94] :=  8; fStartState[ 95] :=  8; 
-fStartState[ 96] :=  8; fStartState[ 97] :=  1; fStartState[ 98] :=  1; fStartState[ 99] :=  1; 
+fStartState[ 88] :=  1; fStartState[ 89] :=  1; fStartState[ 90] :=  1; fStartState[ 91] := 11; 
+fStartState[ 92] := 11; fStartState[ 93] := 11; fStartState[ 94] := 11; fStartState[ 95] := 11; 
+fStartState[ 96] := 11; fStartState[ 97] :=  1; fStartState[ 98] :=  1; fStartState[ 99] :=  1; 
 fStartState[100] :=  1; fStartState[101] :=  1; fStartState[102] :=  1; fStartState[103] :=  1; 
 fStartState[104] :=  1; fStartState[105] :=  1; fStartState[106] :=  1; fStartState[107] :=  1; 
 fStartState[108] :=  1; fStartState[109] :=  1; fStartState[110] :=  1; fStartState[111] :=  1; 
 fStartState[112] :=  1; fStartState[113] :=  1; fStartState[114] :=  1; fStartState[115] :=  1; 
 fStartState[116] :=  1; fStartState[117] :=  1; fStartState[118] :=  1; fStartState[119] :=  1; 
-fStartState[120] :=  1; fStartState[121] :=  1; fStartState[122] :=  1; fStartState[123] :=  8; 
-fStartState[124] :=  8; fStartState[125] :=  8; fStartState[126] :=  8; fStartState[127] :=  8; 
-fStartState[128] :=  8; fStartState[129] :=  8; fStartState[130] :=  8; fStartState[131] :=  8; 
-fStartState[132] :=  8; fStartState[133] :=  8; fStartState[134] :=  8; fStartState[135] :=  8; 
-fStartState[136] :=  8; fStartState[137] :=  8; fStartState[138] :=  8; fStartState[139] :=  8; 
-fStartState[140] :=  8; fStartState[141] :=  8; fStartState[142] :=  8; fStartState[143] :=  8; 
-fStartState[144] :=  8; fStartState[145] :=  8; fStartState[146] :=  8; fStartState[147] :=  8; 
-fStartState[148] :=  8; fStartState[149] :=  8; fStartState[150] :=  8; fStartState[151] :=  8; 
-fStartState[152] :=  8; fStartState[153] :=  8; fStartState[154] :=  8; fStartState[155] :=  8; 
-fStartState[156] :=  8; fStartState[157] :=  8; fStartState[158] :=  8; fStartState[159] :=  8; 
-fStartState[160] :=  8; fStartState[161] :=  8; fStartState[162] :=  8; fStartState[163] :=  8; 
-fStartState[164] :=  8; fStartState[165] :=  8; fStartState[166] :=  8; fStartState[167] :=  8; 
-fStartState[168] :=  8; fStartState[169] :=  8; fStartState[170] :=  8; fStartState[171] :=  8; 
-fStartState[172] :=  8; fStartState[173] :=  8; fStartState[174] :=  8; fStartState[175] :=  8; 
-fStartState[176] :=  8; fStartState[177] :=  8; fStartState[178] :=  8; fStartState[179] :=  8; 
-fStartState[180] :=  8; fStartState[181] :=  8; fStartState[182] :=  8; fStartState[183] :=  8; 
-fStartState[184] :=  8; fStartState[185] :=  8; fStartState[186] :=  8; fStartState[187] :=  8; 
-fStartState[188] :=  8; fStartState[189] :=  8; fStartState[190] :=  8; fStartState[191] :=  8; 
-fStartState[192] :=  8; fStartState[193] :=  8; fStartState[194] :=  8; fStartState[195] :=  8; 
-fStartState[196] :=  8; fStartState[197] :=  8; fStartState[198] :=  8; fStartState[199] :=  8; 
-fStartState[200] :=  8; fStartState[201] :=  8; fStartState[202] :=  8; fStartState[203] :=  8; 
-fStartState[204] :=  8; fStartState[205] :=  8; fStartState[206] :=  8; fStartState[207] :=  8; 
-fStartState[208] :=  8; fStartState[209] :=  8; fStartState[210] :=  8; fStartState[211] :=  8; 
-fStartState[212] :=  8; fStartState[213] :=  8; fStartState[214] :=  8; fStartState[215] :=  8; 
-fStartState[216] :=  8; fStartState[217] :=  8; fStartState[218] :=  8; fStartState[219] :=  8; 
-fStartState[220] :=  8; fStartState[221] :=  8; fStartState[222] :=  8; fStartState[223] :=  8; 
-fStartState[224] :=  8; fStartState[225] :=  8; fStartState[226] :=  8; fStartState[227] :=  8; 
-fStartState[228] :=  8; fStartState[229] :=  8; fStartState[230] :=  8; fStartState[231] :=  8; 
-fStartState[232] :=  8; fStartState[233] :=  8; fStartState[234] :=  8; fStartState[235] :=  8; 
-fStartState[236] :=  8; fStartState[237] :=  8; fStartState[238] :=  8; fStartState[239] :=  8; 
-fStartState[240] :=  8; fStartState[241] :=  8; fStartState[242] :=  8; fStartState[243] :=  8; 
-fStartState[244] :=  8; fStartState[245] :=  8; fStartState[246] :=  8; fStartState[247] :=  8; 
-fStartState[248] :=  8; fStartState[249] :=  8; fStartState[250] :=  8; fStartState[251] :=  8; 
-fStartState[252] :=  8; fStartState[253] :=  8; fStartState[254] :=  8; fStartState[255] :=  8; 
+fStartState[120] :=  1; fStartState[121] :=  1; fStartState[122] :=  1; fStartState[123] := 11; 
+fStartState[124] := 11; fStartState[125] := 11; fStartState[126] := 11; fStartState[127] := 11; 
+fStartState[128] := 11; fStartState[129] := 11; fStartState[130] := 11; fStartState[131] := 11; 
+fStartState[132] := 11; fStartState[133] := 11; fStartState[134] := 11; fStartState[135] := 11; 
+fStartState[136] := 11; fStartState[137] := 11; fStartState[138] := 11; fStartState[139] := 11; 
+fStartState[140] := 11; fStartState[141] := 11; fStartState[142] := 11; fStartState[143] := 11; 
+fStartState[144] := 11; fStartState[145] := 11; fStartState[146] := 11; fStartState[147] := 11; 
+fStartState[148] := 11; fStartState[149] := 11; fStartState[150] := 11; fStartState[151] := 11; 
+fStartState[152] := 11; fStartState[153] := 11; fStartState[154] := 11; fStartState[155] := 11; 
+fStartState[156] := 11; fStartState[157] := 11; fStartState[158] := 11; fStartState[159] := 11; 
+fStartState[160] := 11; fStartState[161] := 11; fStartState[162] := 11; fStartState[163] := 11; 
+fStartState[164] := 11; fStartState[165] := 11; fStartState[166] := 11; fStartState[167] := 11; 
+fStartState[168] := 11; fStartState[169] := 11; fStartState[170] := 11; fStartState[171] := 11; 
+fStartState[172] := 11; fStartState[173] := 11; fStartState[174] := 11; fStartState[175] := 11; 
+fStartState[176] := 11; fStartState[177] := 11; fStartState[178] := 11; fStartState[179] := 11; 
+fStartState[180] := 11; fStartState[181] := 11; fStartState[182] := 11; fStartState[183] := 11; 
+fStartState[184] := 11; fStartState[185] := 11; fStartState[186] := 11; fStartState[187] := 11; 
+fStartState[188] := 11; fStartState[189] := 11; fStartState[190] := 11; fStartState[191] := 11; 
+fStartState[192] := 11; fStartState[193] := 11; fStartState[194] := 11; fStartState[195] := 11; 
+fStartState[196] := 11; fStartState[197] := 11; fStartState[198] := 11; fStartState[199] := 11; 
+fStartState[200] := 11; fStartState[201] := 11; fStartState[202] := 11; fStartState[203] := 11; 
+fStartState[204] := 11; fStartState[205] := 11; fStartState[206] := 11; fStartState[207] := 11; 
+fStartState[208] := 11; fStartState[209] := 11; fStartState[210] := 11; fStartState[211] := 11; 
+fStartState[212] := 11; fStartState[213] := 11; fStartState[214] := 11; fStartState[215] := 11; 
+fStartState[216] := 11; fStartState[217] := 11; fStartState[218] := 11; fStartState[219] := 11; 
+fStartState[220] := 11; fStartState[221] := 11; fStartState[222] := 11; fStartState[223] := 11; 
+fStartState[224] := 11; fStartState[225] := 11; fStartState[226] := 11; fStartState[227] := 11; 
+fStartState[228] := 11; fStartState[229] := 11; fStartState[230] := 11; fStartState[231] := 11; 
+fStartState[232] := 11; fStartState[233] := 11; fStartState[234] := 11; fStartState[235] := 11; 
+fStartState[236] := 11; fStartState[237] := 11; fStartState[238] := 11; fStartState[239] :=  7; 
+fStartState[240] := 11; fStartState[241] := 11; fStartState[242] := 11; fStartState[243] := 11; 
+fStartState[244] := 11; fStartState[245] := 11; fStartState[246] := 11; fStartState[247] := 11; 
+fStartState[248] := 11; fStartState[249] := 11; fStartState[250] := 11; fStartState[251] := 11; 
+fStartState[252] := 11; fStartState[253] := 11; fStartState[254] := 11; fStartState[255] := 11; 
 end; {Create}
 
 
@@ -610,19 +632,20 @@ begin
    3 : Result := 'dot expected';
    4 : Result := 'semi expected';
    5 : Result := 'comma expected';
-   6 : Result := '"program" expected';
-   7 : Result := '"library" expected';
-   8 : Result := '"uses" expected';
-   9 : Result := '"in" expected';
-  10 : Result := '"const" expected';
-  11 : Result := '"type" expected';
-  12 : Result := '"var" expected';
-  13 : Result := '"begin" expected';
-  14 : Result := '"procedure" expected';
-  15 : Result := '"function" expected';
-  16 : Result := 'not expected';
-  17 : Result := 'invalid next declaration';
-  18 : Result := 'invalid DprFile';
+   6 : Result := 'ByteOrderMark expected';
+   7 : Result := '"program" expected';
+   8 : Result := '"library" expected';
+   9 : Result := '"uses" expected';
+  10 : Result := '"in" expected';
+  11 : Result := '"const" expected';
+  12 : Result := '"type" expected';
+  13 : Result := '"var" expected';
+  14 : Result := '"begin" expected';
+  15 : Result := '"procedure" expected';
+  16 : Result := '"function" expected';
+  17 : Result := 'not expected';
+  18 : Result := 'invalid next declaration';
+  19 : Result := 'invalid DprFile';
 
 
   else
@@ -737,7 +760,7 @@ Get;
   functionSym : begin
 Get;
     end;
-else begin SynError(17);
+else begin SynError(18);
     end;
 end;
 end;
@@ -753,11 +776,14 @@ Expect(semiSym);
 end;
 
 procedure TDelphiDpr._DelphiDpr;begin
+if (fCurrentInputSymbol = ByteOrderMarkSym) then begin
+Get;
+end;
 if (fCurrentInputSymbol = programSym) then begin
 Get;
 end else if (fCurrentInputSymbol = librarySym) then begin
 Get;
-end else begin SynError(18);
+end else begin SynError(19);
 end;
 Expect(identifierSym);
 Expect(semiSym);

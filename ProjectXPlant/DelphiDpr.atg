@@ -53,6 +53,9 @@ CHARACTERS
     stringchar = ANY - squot.
     comma = ",".
     underscore = "_".
+    BOM1 = CHR(239) .
+    BOM2 = CHR(187) .
+    BOM3 = CHR(191) .
 
 TOKENS
   identifier = letter { (letter | underscore | digit ) }.
@@ -60,6 +63,7 @@ TOKENS
   dot = dot.
   semi = semi.
   comma = comma .
+  ByteOrderMark = BOM1 BOM2 BOM3 .
 
 COMMENTS FROM "{" TO "}"
 COMMENTS FROM "(*" TO "*)"
@@ -70,6 +74,7 @@ IGNORE  cr + lf + tab + space
 PRODUCTIONS
   DelphiDpr DESCRIPTION "DprFile"
   =
+        [ ByteOrderMark ]
         ("program" | "library") identifier semi UseClauses NextDecl
   .
 

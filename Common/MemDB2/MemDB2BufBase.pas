@@ -617,7 +617,7 @@ begin
   if Count > 0 then
   begin
     Dec(Count);
-    result := PMemDBIndexPin(FPtrs[Count]);
+    result := PMemDBIndexPin(FPtrs.List[Count]);
     FPtrs.Delete(Count);
   end
   else
