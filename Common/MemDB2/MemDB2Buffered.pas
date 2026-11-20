@@ -399,6 +399,7 @@ type
     procedure IndexCommit(Ctxt: TTXLocalContext);
     procedure IndexRollback(Ctxt: TTXLocalContext);
 
+    function CalcLargeCacheSize: integer;
     function ThrottleBuildCheckPartialIndexParallel(Ref1, Ref2: pointer): pointer;
     function ThrottleBuildCheckPartialInternalIndexParallel(Ref1, Ref2: pointer): pointer;
     function BuildCheckPartialIndexParallel(Ref1, Ref2: pointer): pointer;
@@ -784,7 +785,7 @@ const
 implementation
 
 uses
-  SysUtils, MemDB2, NullStream, MemDB2Api, Parallelizer, MemDB2ObjectCaches;
+  SysUtils, MemDB2, NullStream, MemDB2Api, Parallelizer, MemDB2ObjectCaches, Math;
 
 const
   S_COMMMIT_CONSISTENCY_OBJS = 'Commit consistency check failed: Duplicate table or foreign key names.';
@@ -3250,6 +3251,43 @@ begin
   end;
 end;
 
+function TTidLocal.CalcLargeCacheSize: integer;
+var
+  MasterRowCount: double;
+  ChangeCount: double;
+  CacheSize: double;
+begin
+  FParentTable.FMasterRowLock.Acquire;
+  try
+    MasterRowCount := FParentTable.FMasterRowList.Count;
+  finally
+    FParentTable.FMasterRowLock.Release;
+  end;
+  ChangeCount := 2* FCPRows.Count; //Edit is worst case.
+  { Claude says, with more mathematical knowledge than me:
+    U ≈ K × (log₂(M/K) + 1), capped at M.
+    K = Number of changes, call it 2 for each FCPRow.
+    M = Number of nodes in the old tree.
+  }
+  if (ChangeCount <= MasterRowCount) and (ChangeCount > 0) then
+  begin
+    CacheSize := ChangeCount
+      * (Math.Log2(MasterRowCount / ChangeCount) + 1);
+    if CacheSize > MasterRowCount then
+      CacheSize := MasterRowCount;
+  end
+  else
+    if ChangeCount > 0 then
+      CacheSize := MasterRowCount
+    else
+      CacheSize := 0;
+
+  Assert(CacheSize >= 0);
+
+  CacheSize := CacheSize + SMALL_NODE_PIN_CACHE_SIZE;
+  result := Trunc(CacheSize);
+end;
+
 function TTidLocal.BuildCheckPartialIndexParallel(Ref1, Ref2: pointer): pointer;
 var
   C: TMemDBStreamable;
@@ -3288,9 +3326,7 @@ begin
 
   ListTmp := nil;
   try
-    //This is not big enough for small changes,
-    //but is big enough for entire tree. TODO - tune this.
-    Index.PushLargeCache(((3* FCPRows.Count) div 2) + SMALL_NODE_PIN_CACHE_SIZE);
+    Index.PushLargeCache(CalcLargeCacheSize);
 
     //TidLocal row set will not change under commit lock.
     IRec := FCPRows.GetAnItem;
@@ -3483,9 +3519,7 @@ begin
   //TidLocal row set will not change under commit lock.
   ListTmp := nil;
   try
-    //This is not big enough for small changes,
-    //but is big enough for entire tree. TODO - tune this.
-    Index.PushLargeCache(((3* FCPRows.Count) div 2) + SMALL_NODE_PIN_CACHE_SIZE);
+    Index.PushLargeCache(CalcLargeCacheSize);
 
     IRec := FCPRows.GetAnItem;
     while Assigned(IRec) do
@@ -4296,8 +4330,13 @@ function TRowIndexNode.CompareItems(OwnItem: TObject; OtherItem: TObject; IndexT
 var
    Own, Other: TMemDBRow;
 begin
+{$IFOPT C+}
   Own := OwnItem as TMemDBRow;
   Other := OtherItem as TMemDBRow;
+{$ELSE}
+  Own := TMemDBRow(OwnItem);
+  Other := TMemDBRow(OtherItem);
+{$ENDIF}
   result := CompareGuids(Other.FRowID, Own.FRowID);
 end;
 
@@ -4309,7 +4348,11 @@ var
 begin
   Assert(not Assigned(OwnItem));
   Assert(Assigned(OtherItem));
+{$IFOPT C+}
   Other := OtherItem as TMemDBRow;
+{$ELSE}
+  Other := TMemDBROw(OtherItem);
+{$ENDIF}
   result := CompareGuids(Other.FRowID, FGuid);
 end;
 

@@ -466,7 +466,7 @@ begin
   if Count > 0 then
   begin
     Dec(Count);
-    result := TReffed(FPtrs[Count]);
+    result := TReffed(FPtrs.List[Count]);
     FPtrs.Delete(Count);
   end
   else
@@ -946,8 +946,13 @@ end;
 destructor TMemDBIndexLeafGeneric.Destroy;
 begin
   Assert(Assigned(self.FPin) = Assigned(self.FRow));
+{$IFOPT C+}
   if Assigned(FPin) then
     (FRow as TMemDBRow).UnpinFromIndex(self, nil);
+{$ELSE}
+  if Assigned(FPin) then
+    TMemDBRow(FRow).UnpinFromIndex(self, nil);
+{$ENDIF}
   inherited;
 end;
 
@@ -965,8 +970,13 @@ begin
   NCache := TMemDBNodeCache(Cache);
   PCache := TMemDBIPinCache(NCache.PinCache);
 {$ENDIF}
+{$IFOPT C+}
   if Assigned(FPin) then
     (FRow as TMemDBRow).UnpinFromIndex(self, PCache);
+{$ELSE}
+  if Assigned(FPin) then
+    TMemDBRow(FRow).UnpinFromIndex(self, PCache);
+{$ENDIF}
   FOriginalIndex := nil;
   FPin := nil;
   FRow := nil;
@@ -1040,6 +1050,7 @@ begin
     PCache := NCache.PinCache as TMemDBIPinCache
   else
     PCache := nil;
+  (SL.Row as TMemDBRow).DupIndexPin(SL, self, PCache);
 {$ELSE}
   IndexCheck := TMemDbIndexGeneric(SrcTree);
   NCache := TMemDBNodeCache(IndexCheck.FCache);
@@ -1047,8 +1058,8 @@ begin
     PCache := TMemDBIPinCache(NCache.PinCache)
   else
     PCache := nil;
+  TMemDBRow(SL.Row).DupIndexPin(SL, self, PCache);
 {$ENDIF}
-  (SL.Row as TMemDBRow).DupIndexPin(SL, self, PCache);
   //Now we need a key de-dupe which is invariant even when we copy nodes,
   //otherwise very bad things happen...
   Assert(PMemDBIndexPin(self.FPin).PinnedItem = PMemDBIndexPin(SL.FPin).PinnedItem);
