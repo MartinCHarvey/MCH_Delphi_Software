@@ -137,7 +137,7 @@ begin
   if TPath.IsDriveRooted(NewPath) then
   begin
     FPathType := cptDriveRooted;
-    FPrefix := NewPath[1];
+    FPrefix := UpperCase(NewPath[1]);
     NewPath := NewPath.Substring(3);
   end
   else if TPath.IsUNCRooted(NewPath) then
