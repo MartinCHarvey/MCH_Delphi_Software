@@ -42,6 +42,7 @@ type
 var
   DprFileExts: TFileExtSet;
   PasFileExts: TFileExtSet;
+  SupplementaryExts: TFileExtSet;
 
 function ExtensionMatches(Extension: string; ExtSet: TFileExtSet): boolean;
 var
@@ -83,6 +84,75 @@ begin
     end;
   finally
     DirPath.Free;
+  end;
+end;
+
+procedure AddSupplementaryFiles(CanonicalList: TList);
+var
+  i, j: Integer;
+  TmpDir, TmpSrch, TmpFile, NewFile: TCanonicalPath;
+  TmpFiles: TStringList;
+  SrcF: TCanonicalPath;
+  SR: TSearchRec;
+  SRet: integer;
+begin
+  TmpDir := TCanonicalPath.Create;
+  TmpSrch := TCanonicalPath.Create;
+  TmpFile := TCanonicalPath.Create;
+  TmpFiles := TStringList.Create;
+  try
+    for i := 0 to Pred(CanonicalList.Count) do
+    begin
+      //Should be an absolute path.
+      SrcF := TObject(CanonicalList.Items[i]) as TCanonicalPath;
+      TmpDir.Assign(SrcF);
+      TmpDir.ComponentCount := Pred(TmpDir.ComponentCount);
+      if DirectoryExists(TmpDir.Path) then
+      begin
+        for j := 0 to Pred(Length(SupplementaryExts)) do
+        begin
+          TmpSrch.Assign(TmpDir);
+          TmpSrch.AddComponent('*' +SupplementaryExts[j]);
+          SRet := FindFirst(TmpSrch.Path, faNormal, SR);
+          if SRet = 0 then
+          begin
+            try
+              while SRet = 0 do
+              begin
+                TmpFile.Assign(TmpDir);
+                TmpFile.AddComponent(SR.Name);
+                TmpFiles.Add(TmpFile.Path);
+                SRet := FindNext(SR);
+              end;
+            finally
+              System.SysUtils.FindClose(SR);
+            end;
+          end;
+        end;
+      end
+      else
+        WriteLn('WARNING: Skipping dir (supplementary files): ' + TmpDir.Path);
+    end;
+    //Remove duplicates.
+    TmpFiles.Sort;
+    i := 0;
+    while i < TmpFiles.Count do
+    begin
+      while (i < Pred(TmpFiles.Count)) and (TmpFiles[i] = TmpFiles[Succ(i)]) do
+        TmpFiles.Delete(Succ(i));
+      Inc(i);
+    end;
+    for i := 0 to Pred(TmpFiles.Count) do
+    begin
+      NewFile := TCanonicalPath.Create;
+      NewFile.Path := TmpFiles[i];
+      CanonicalList.Add(NewFile);
+    end;
+  finally
+    TmpFiles.Free;
+    TmpDir.Free;
+    TmpSrch.Free;
+    TmpFile.Free;
   end;
 end;
 
@@ -140,6 +210,11 @@ begin
       exit;
     end;
 
+    //Now go on a quick trawl for other associated files which may differ by more
+    //than just file extension, in all folders which have one of our
+    //source files in.
+    AddSupplementaryFiles(CanonSrcPaths);
+
     for Idx := 0 to Pred(CanonSrcPaths.Count) do
     begin
       CanonPath := TCanonicalPath(CanonSrcPaths.Items[idx]);
@@ -189,15 +264,15 @@ begin
       DestPathStr := CanonDestPath.Path;
       IsPasFile := ExtensionMatches(TPath.GetExtension(SrcPathStr), PasFileExts);
       IsDprFile := ExtensionMatches(TPath.GetExtension(SrcPathStr), DprFileExts);
-      if IsPasFile = IsDprFile then
-      begin
-        WriteLn('WARNING: Unknown file type, skipping: ' + SrcPathStr);
-        continue;
-      end;
       if IsPasFile then
         Exts := PasFileExts
+      else if IsDprFile then
+        Exts := DprFileExts
       else
-        Exts := DprFileExts;
+      begin
+        SetLength(Exts, 1);
+        Exts[0] := TPath.GetExtension(SrcPathStr);
+      end;
       for Idx2 := 0 to Pred(Length(Exts)) do
       begin
         SrcPathStr := TPath.ChangeExtension(SrcPathStr, Exts[idx2]);
@@ -293,12 +368,18 @@ begin
   DprFileExts[1] := '.dproj';
   DprFileExts[2] := '.res';
 
-  SetLength(PasFileExts, 5);
+  SetLength(PasFileExts, 3);
   PasFileExts[0] := '.pas';
   PasFileExts[1] := '.dfm';
-  PasFileExts[2] := '.agi';
-  PasFileExts[3] := '.atg';
   PasFileExts[4] := '.fmx';
+
+  SetLength(SupplementaryExts, 6);
+  SupplementaryExts[0] := '.agi';
+  SupplementaryExts[1] := '.atg';
+  SupplementaryExts[2] := '.l';
+  SupplementaryExts[3] := '.y';
+  SupplementaryExts[4] := '.cod';
+  SupplementaryExts[5] := '.inc';
 
   try
     if (ParamCount <  2) or (ParamCount > 3 )then
