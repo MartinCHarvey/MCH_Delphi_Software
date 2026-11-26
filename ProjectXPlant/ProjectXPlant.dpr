@@ -38,11 +38,17 @@ uses
 
 type
   TFileExtSet = array of string;
+  TCmdOpts = record
+    Listing: boolean;
+    Src, Dest: string;
+    IgnorePaths: TStringList;
+  end;
 
 var
   DprFileExts: TFileExtSet;
   PasFileExts: TFileExtSet;
   SupplementaryExts: TFileExtSet;
+  Opts: TCmdOpts;
 
 function ExtensionMatches(Extension: string; ExtSet: TFileExtSet): boolean;
 var
@@ -162,10 +168,11 @@ var
   CanonSrcPaths, CanonDestPaths: TList;
   OutDir: TCanonicalPath;
   TopSrcDir: TCanonicalPath;
-  CanonPath, CanonDestPath: TCanonicalPath;
+  CanonPath, CanonDestPath, Tmp1, Tmp2: TCanonicalPath;
   SrcPathStr, DestPathStr, Prompt: string;
   IsPasFile, IsDprFile: boolean;
   Exts: TFileExtSet;
+  Del: boolean;
 begin
   CanonSrcPaths := TList.Create;
   CanonDestPaths := TList.Create;
@@ -210,10 +217,65 @@ begin
       exit;
     end;
 
+    //Check ignore paths exist, warn if they don't.
+    CanonPath := TCanonicalPath.Create;
+    try
+      Idx := 0;
+      while Idx < Opts.IgnorePaths.Count do
+      begin
+        CanonPath.Path := Opts.IgnorePaths[Idx];
+        CanonPath.MakeAbsolute;
+        if not DirectoryExists(CanonPath.Path) then
+        begin
+          WriteLn('WARNING: Skipping ignore directory: ' + CanonPath.Path);
+          Opts.IgnorePaths.Delete(idx);
+        end
+        else
+        begin
+          Opts.IgnorePaths[idx] := CanonPath.Path;
+          Inc(Idx);
+        end;
+      end;
+    finally
+      CanonPath.Free;
+    end;
+
     //Now go on a quick trawl for other associated files which may differ by more
     //than just file extension, in all folders which have one of our
     //source files in.
     AddSupplementaryFiles(CanonSrcPaths);
+
+    //And now remove all those files which are in some ignore directory path.
+    Tmp1 := TCanonicalPath.Create;
+    Tmp2 := TCanonicalPath.Create;
+    try
+      //OK, now remove those paths which are in the --ignore
+      Idx := 0;
+      while Idx < CanonSrcPaths.Count do
+      begin
+        Del := false;
+        CanonPath := TCanonicalPath(CanonSrcPaths.Items[Idx]);
+        for Idx2 := 0 to Pred(Opts.IgnorePaths.Count) do
+        begin
+          Tmp1.Path := CanonPath.Path;
+          Tmp2.Path := Opts.IgnorePaths[Idx2];
+          Tmp1.FindCommonRoot(Tmp2);
+          if Tmp1.Path = Tmp2.Path then
+          begin
+            WriteLn('INFO: File in ignore path, skipping: ' + CanonPath.Path);
+            CanonPath.Free;
+            CanonSrcPaths.Delete(Idx);
+            Del := true;
+            break;
+          end;
+        end;
+        if not Del then
+          Inc(Idx);
+      end;
+    finally
+      Tmp1.Free;
+      Tmp2.Free;
+    end;
 
     for Idx := 0 to Pred(CanonSrcPaths.Count) do
     begin
@@ -304,7 +366,7 @@ begin
   end;
 end;
 
-procedure Process(DprName: string; OutDirectory: string; GenListing: boolean = false);
+procedure Process;
 var
   FS: TFileStream;
   MS: TMemoryStream;
@@ -316,15 +378,15 @@ var
 begin
   FileList := TStringList.Create;
   try
-    FS := TFileStream.Create(DprName, fmOpenRead);
+    FS := TFileStream.Create(Opts.Src, fmOpenRead);
     try
       MS := TMemoryStream.Create;
       MS.CopyFrom(FS, FS.Size);
       DPRG := TDelphiDpr.Create(nil);
       try
-        if GenListing then
+        if Opts.Listing then
         begin
-          ListName := DprName + '.lst';
+          ListName := Opts.Src + '.lst';
           DPRG.GenListWhen := glAlways;
         end;
         DPRG.SourceStream := MS;
@@ -338,7 +400,7 @@ begin
             CocoError := TCocoError(DPRG.ErrorList.Items[Idx]);
             WriteLn('Error: ' + DPRG.ErrorStr(CocoError.ErrorCode, ''));
           end;
-          if GenListing then
+          if Opts.Listing then
             DPRG.ListStream.SaveToFile(ListName);
         end;
       finally
@@ -349,7 +411,7 @@ begin
     end;
 
     if FileList.Count > 0 then
-      ProcessFileList(DprName, FileList, OutDirectory)
+      ProcessFileList(Opts.Src, FileList, Opts.Dest)
     else
       WriteLn('No files found in DPR, aborting.');
   finally
@@ -360,51 +422,87 @@ end;
 procedure PrintUsage;
 begin
   WriteLn('Usage: ProjectXPlant <.dpr file> <output directory> [-l generate parser listing]');
+  WriteLn('Opts: ''-l'', ''--list'': Generate parser listing');
+  WriteLn('Opts: ''-i'', ''--ignore'': Ignore source paths.');
 end;
 
+function ParseOpts: boolean;
+var
+  i: integer;
 begin
-  SetLength(DprFileExts, 3);
-  DprFileExts[0] := '.dpr';
-  DprFileExts[1] := '.dproj';
-  DprFileExts[2] := '.res';
-
-  SetLength(PasFileExts, 3);
-  PasFileExts[0] := '.pas';
-  PasFileExts[1] := '.dfm';
-  PasFileExts[4] := '.fmx';
-
-  SetLength(SupplementaryExts, 6);
-  SupplementaryExts[0] := '.agi';
-  SupplementaryExts[1] := '.atg';
-  SupplementaryExts[2] := '.l';
-  SupplementaryExts[3] := '.y';
-  SupplementaryExts[4] := '.cod';
-  SupplementaryExts[5] := '.inc';
-
-  try
-    if (ParamCount <  2) or (ParamCount > 3 )then
+  result := false;
+  if (ParamCount <  2) then
+  begin
+    PrintUsage;
+    Exit;
+  end;
+  Opts.Src := ParamStr(1);
+  Opts.Dest := ParamStr(2);
+  i := 3;
+  while i <= ParamCount do
+  begin
+    if (ParamStr(i) = '-l') or (ParamStr(i) = '--list') then
     begin
-      PrintUsage;
-      Exit;
-    end;
-
-    if ParamCount = 2 then
-    begin
-      Process(ParamStr(1), ParamStr(2));
+      Opts.Listing := true;
+      Inc(i)
     end
-    else if (ParamCount = 3) and (ParamStr(3) = '-l') then
+    else if (ParamStr(i) = '-i') or (ParamStr(i) = '--ignore') then
     begin
-      Process(ParamStr(1), ParamStr(2), true);
+      Inc(i);
+      if i <= ParamCount then
+      begin
+        Opts.IgnorePaths.Add(ParamStr(i));
+        Inc(i);
+      end
+      else
+      begin
+        WriteLn('Ignore parameter requires a directory');
+        PrintUsage;
+        Exit;
+      end;
     end
     else
     begin
-      Assert(false);
+      WriteLn('Unrecognised parameter: ' + ParamStr(i));
       PrintUsage;
-      Exit;
+      exit;
     end;
+  end;
+  result := true;
+end;
 
-  except
-    on E: Exception do
-      Writeln('Exception: ' + E.ClassName, ': ', E.Message);
+begin
+  Opts.IgnorePaths := TStringList.Create;
+  try
+    SetLength(DprFileExts, 3);
+    DprFileExts[0] := '.dpr';
+    DprFileExts[1] := '.dproj';
+    DprFileExts[2] := '.res';
+
+    SetLength(PasFileExts, 3);
+    PasFileExts[0] := '.pas';
+    PasFileExts[1] := '.dfm';
+    PasFileExts[4] := '.fmx';
+
+    SetLength(SupplementaryExts, 6);
+    SupplementaryExts[0] := '.agi';
+    SupplementaryExts[1] := '.atg';
+    SupplementaryExts[2] := '.l';
+    SupplementaryExts[3] := '.y';
+    SupplementaryExts[4] := '.cod';
+    SupplementaryExts[5] := '.inc';
+
+    try
+      if not ParseOpts then
+        exit;
+
+      Process;
+    except
+      on E: Exception do
+        Writeln('Exception: ' + E.ClassName, ': ', E.Message);
+
+    end;
+  finally
+    Opts.IgnorePaths.Free;
   end;
 end.
