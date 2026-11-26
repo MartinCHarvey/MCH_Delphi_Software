@@ -34,7 +34,13 @@ IN THE SOFTWARE.
 interface
 
 uses
-  BinaryTree, Classes, LockAbstractions;
+  BinaryTree, Classes,
+{$IFNDEF TRACKABLE_NO_DEPS}
+  LockAbstractions
+{$ELSE}
+  SyncObjs
+{$ENDIF}
+  ;
 
 const
   S_EMPTY = '';
