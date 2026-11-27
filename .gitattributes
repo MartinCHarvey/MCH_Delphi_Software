@@ -1,0 +1,58 @@
+# Line-ending policy for MCH_Delphi_Software
+# Text files are stored normalised (LF) in the repository and checked out
+# with CRLF in the working tree, so Delphi / Windows tools always see CRLF.
+* text=auto eol=crlf
+
+# Delphi / Pascal source
+*.pas     text eol=crlf
+*.dpr     text eol=crlf
+*.dpk     text eol=crlf
+*.inc     text eol=crlf
+*.fmx     text eol=crlf
+*.dproj   text eol=crlf
+*.groupproj text eol=crlf
+
+# Form files: most are text, but some older ones are binary, so let git
+# detect which is which rather than forcing them to text.
+*.dfm     text=auto eol=crlf
+
+# Grammars / parser generator input
+*.atg     text eol=crlf
+*.atgd    text eol=crlf
+*.frm     text eol=crlf
+*.l       text eol=crlf
+*.y       text eol=crlf
+*.bnf     text eol=crlf
+
+# C / C++
+*.c       text eol=crlf
+*.h       text eol=crlf
+*.cpp     text eol=crlf
+*.def     text eol=crlf
+
+# Scripts and installers
+*.bat     text eol=crlf
+*.cmd     text eol=crlf
+*.ps1     text eol=crlf
+*.iss     text eol=crlf
+
+# Docs
+*.txt     text eol=crlf
+*.md      text eol=crlf
+
+# Binaries - never touch
+*.res     binary
+*.dcu     binary
+*.exe     binary
+*.dll     binary
+*.lib     binary
+*.so      binary
+*.exp     binary
+*.bmp     binary
+*.ico     binary
+*.png     binary
+*.jpg     binary
+*.pdf     binary
+*.msi     binary
+*.cab     binary
+*.rsm     binary

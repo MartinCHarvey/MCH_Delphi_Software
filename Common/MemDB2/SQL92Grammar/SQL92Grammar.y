@@ -2336,44 +2336,44 @@ uses
       |         primary_expression postfix_op
     ;
 
-  postfix_op :
-                time_zone
-                                                { $$.Text := ''; $$.Obj := nil;
-                                                  yyerror('Time zones not supported');
-                                                  $1.Obj.Free; }
-        |       interval_qualifier
-                                                { $$.Text := '';
-                                                  $$.Obj := MakeClass(TSqlSynUnaryOperator);
-                                                  with $$.Obj as TSqlSynUnaryOperator do
-                                                  begin
-                                                    ExprType := setUnaryPostfixIntervalQualifier;
-                                                    InsertTailChild($1.Obj);
-                                                    Expr := $1.Obj as TSqlSynExpr;
-                                                  end; }
-        |       collate_clause
-                                                { $$.Text := ''; $$.Obj := nil;
-                                                  yyerror('Collations not supported');
-                                                  $1.Obj.Free; }        ;
-
+  postfix_op :
+                time_zone
+                                                { $$.Text := ''; $$.Obj := nil;
+                                                  yyerror('Time zones not supported');
+                                                  $1.Obj.Free; }
+        |       interval_qualifier
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynUnaryOperator);
+                                                  with $$.Obj as TSqlSynUnaryOperator do
+                                                  begin
+                                                    ExprType := setUnaryPostfixIntervalQualifier;
+                                                    InsertTailChild($1.Obj);
+                                                    Expr := $1.Obj as TSqlSynExpr;
+                                                  end; }
+        |       collate_clause
+                                                { $$.Text := ''; $$.Obj := nil;
+                                                  yyerror('Collations not supported');
+                                                  $1.Obj.Free; }        ;
+
   unary_expression :
         plus_sign postfix_expression
                                                 { $$.Text := '';
                                                   $$.Obj := MakeClass(TSqlSynUnaryOperator);
-                                                  with $$.Obj as TSqlSynUnaryOperator do
-                                                  begin
-                                                    ExprType := setUnaryPlus;
-                                                    InsertTailChild($2.Obj);
-                                                    Expr := $2.Obj as TSqlSynExpr;
-                                                  end; }
+                                                  with $$.Obj as TSqlSynUnaryOperator do
+                                                  begin
+                                                    ExprType := setUnaryPlus;
+                                                    InsertTailChild($2.Obj);
+                                                    Expr := $2.Obj as TSqlSynExpr;
+                                                  end; }
     |   minus_sign postfix_expression
                                                 { $$.Text := '';
                                                   $$.Obj := MakeClass(TSqlSynUnaryOperator);
-                                                  with $$.Obj as TSqlSynUnaryOperator do
-                                                  begin
-                                                    ExprType := setUnaryMinus;
-                                                    InsertTailChild($2.Obj);
-                                                    Expr := $2.Obj as TSqlSynExpr;
-                                                  end; }
+                                                  with $$.Obj as TSqlSynUnaryOperator do
+                                                  begin
+                                                    ExprType := setUnaryMinus;
+                                                    InsertTailChild($2.Obj);
+                                                    Expr := $2.Obj as TSqlSynExpr;
+                                                  end; }
     |   postfix_expression
                                                 { $$ := $1; }
     ;
@@ -6198,11 +6198,11 @@ sql_script :
                                                     InsertTailChild($1.Obj);
                                                   end; }
     |           sql_script sql_statement        { $$ := $1;
-                                                  with $$.Obj as TTempTpl do
+                                                  with $$.Obj as TTempTpl do
                                                   begin
                                                     InsertTailChild($1.Obj);
                                                   end; }
-    ;
+    ;
 
 sql_input :
       sql_script                                { $$ := $1; }
