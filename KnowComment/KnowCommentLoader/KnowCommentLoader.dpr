@@ -66,7 +66,11 @@ uses
   TinyLock in '..\..\Common\LockAbstractions\TinyLock.pas',
   Reffed in '..\..\Common\Reffed\Reffed.pas',
   CoWTree in '..\..\Common\CoWTree\CoWTree.pas',
-  PatchFreeMem in '..\..\Common\PatchFreeMem\PatchFreeMem.pas';
+  PatchFreeMem in '..\..\Common\PatchFreeMem\PatchFreeMem.pas',
+  SRWLockWrapper in '..\..\Common\SRWLockWrapper\SRWLockWrapper.pas',
+  LockedSList in '..\..\Common\LockedSList\LockedSList.pas',
+  LSLCache in '..\..\Common\LockedSList\LSLCache.pas',
+  MemDB2ObjectCaches in '..\..\Common\MemDB2\MemDB2ObjectCaches.pas';
 
 {$R *.res}
 
