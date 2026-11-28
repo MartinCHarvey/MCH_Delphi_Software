@@ -1,11 +1,11 @@
-unit SQL92Nodes;
+Ôªøunit SQL92Nodes;
 
 {
 
-Copyright © 2026 Martin Harvey <martin_c_harvey@hotmail.com>
+Copyright ¬© 2026 Martin Harvey <martin_c_harvey@hotmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the ìSoftwareî), to deal in
+this software and associated documentation files (the ‚ÄúSoftware‚Äù), to deal in
 the Software without restriction, including without limitation the rights to
 use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
 of the Software, and to permit persons to whom the Software is furnished to do
@@ -14,7 +14,7 @@ so, subject to the following conditions:
 The above copyright notice and this permission notice shall be included in
 all copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED ìAS ISî, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+THE SOFTWARE IS PROVIDED ‚ÄúAS IS‚Äù, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
@@ -53,11 +53,48 @@ type
      whether necessary, perhaps we could use enumerators in the containing
      classes.
 
-   TODO - For things which are not TempTpl, Ident, Expr
+   TODO - For things which are not List, Ident, Expr
      - Put them under TSqlSynStructural, and have fields init.
+
+For the semantic phase. The parser currently accepts all of these, and they
+should be rejected:
+
+(7) NULL and DEFAULT anywhere in an expression.
+(8) * in any set function, e.g. SUM(*). COUNT() also parses, because
+    set_quantifier_args still begins with |, which gives it an empty first
+    alternative. Deleting that | is a one-line fix if you want it now.
+(9) COALESCE with only one argument.
+(10) Four-part table names.
+(11) A row value such as (a, b) on the left of LIKE.
+(12) Row subqueries. These parse as scalar subqueries, so a subquery in a
+     row position needs to be treated as a row subquery.
+
+  New: attributes written after an ignored CHECK constraint attach to the
+  constraint before it. That goes away once CHECK builds a node, as part
+  of your nil TODO.
 }
 
+  //TODO - We have expr types,
+  // structural types etc - also need a node base type.
+
+  //Which direct descendant of TSQLSynNode a node is: set by the constructor,
+  //from the class. Each of those classes has its own type field telling its
+  //descendants apart (ExprType, StructuralType, then LitType, PredicateType
+  //etc. further down), so a node's class can be found by following the
+  //type fields down from here.
+  TSQLSynNodeType = (
+    sntNode,              //TSQLSynNode itself. Should not occur.
+    sntList,              //TSqlSynList
+    sntExpr,              //TSQLSynExpr
+    sntIdent,             //TSQLSynIdent
+    sntType,              //TSQLSynType
+    sntStructural         //TSQLSynStructural
+  );
+
   TSQLSynNode = class(TCommonNode)
+  private
+    FNodeType: TSQLSynNodeType;
+    procedure InitNodeType;
   public
     constructor Create; virtual;
     constructor CreateWithTracker(Tracker: TTracker); virtual;
@@ -80,15 +117,17 @@ type
     procedure ValidateSelf; virtual;
 
     function Clone: TSQLSynNode; virtual; //TODO - Write and override this.
+
+    property NodeType: TSQLSynNodeType read FNodeType;
   end;
 
   TSQLSynNodeClass = class of TSQLSynNode;
 
-  //Just a temporary thing for the parser where ordering is required.
+  //An ordered list of child nodes.
   //Rely on tracking and assertions to make sure this is not misused.
-  TTempTpl = class(TSqlSynNode)
+  TSqlSynList = class(TSqlSynNode)
   public
-    T1, T2, T3, T4: TSQLSynNode;
+    //TODO.
   end;
 
   ESQLSynException = class(Exception)
@@ -106,6 +145,7 @@ type
   //semantic classifications.
   TSqlSynExprType = (
     setLiteral,
+    setIdentWrapper,
     setUnaryNot,
     setUnaryPostfixIntervalQualifier,
     //todo Unary postfix timezones, and Unary postfix collations.
@@ -145,6 +185,15 @@ type
     FExprType: TSqlSynExprType;
   public
     property ExprType: TSqlSynExprType read FExprType write FExprType;
+  end;
+
+  TSqlSynIdent = class;
+
+  TSqlSynIdentWrapper = class(TSqlSynExpr)
+  private
+    FIdent: TSqlSynIdent;
+  public
+    property Ident: TSqlSynIdent read FIdent write FIdent;
   end;
 
   TSQLSynLiteralType = (
@@ -264,14 +313,6 @@ type
     sqfYear
   );
 
-  TSQLSynIntervalQualifier = class(TSQLSynNode)
-  private
-    FStart, FEnd: TSQLSynQualField;
-  public
-    property Start: TSQLSynQualField read FStart write FStart;
-    property _End: TSQLSynQualField read FEnd write FEnd;
-  end;
-
   { Built in functions / constants which are effectively exprs. }
   TSQLSynBuiltInType = (
     sftCurrentDate,
@@ -296,6 +337,7 @@ type
   //and namespaces a bit later, because there are many and varied ways of introducing them.
   TSQLSynStructuralType = (
     sstModule,
+    sstModuleAuth,
     sstTopLevel,
     sstCreateOrDecl,
     sstAlter,
@@ -323,7 +365,11 @@ type
     sstDmlNoCursor,
     sstFetchOrientation,
     sstSetClause,
-    sstTransactionMode
+    sstTransactionMode,
+    sstSimpleCaseWhen,
+    sstTrimSpecification,
+    sstIntervalQualifier,
+    sstSelectList
   );
 
   TSQLSynStructural = class(TSQLSynNode)
@@ -331,6 +377,14 @@ type
     FStructuralType: TSQLSynStructuralType;
   public
     property StructuralType:TSQLSynStructuralType read FStructuralType write FStructuralType;
+  end;
+
+  TSQLSynIntervalQualifier = class(TSQLSynStructural)
+  private
+    FStart, FEnd: TSQLSynQualField;
+  public
+    property Start: TSQLSynQualField read FStart write FStart;
+    property _End: TSQLSynQualField read FEnd write FEnd;
   end;
 
   TSQLSynNamedStructural = class(TSQLSynStructural)
@@ -347,22 +401,28 @@ type
   TSqlSynTopLevel = class(TSQLSynStructural)
   end;
 
+  TSqlSynModuleAuth = class;
+
   TSQLSynModule = class(TSQLSynNamedStructural)
   private
-    FLanguage, FSchema, FAuthorization: TSQLSynIdent;
-    FFirstTempTbl: TSqlSynCreateOrDeclTable;
-    FFirstProcedure: TSqlSynNode; //TODO - Class type;
-    FFirstCursor: TSqlSynNode; //TODO - Class type;
+    FLanguage: TSQLSynIdent;
+    FAuthClause: TSqlSynModuleAuth;
+    FTempTables: TSqlSynList;
+    FContents: TSqlSynList;
   public
-    procedure FlattenModuleContents(ContentList: TTempTpl);
-
     property Language: TSqlSynIdent read FLanguage write FLanguage;
-    property Schema: TSqlSynIdent read FSchema write FSchema;
-    property Authorization: TSqlSynIdent read FAuthorization write FAuthorization;
-    //Includes both temp tbl decls and contents.
-    property FirstTempTbl: TSqlSynCreateOrDeclTable read FFirstTempTbl write FFirstTempTbl;
-    property FirstProcedure: TSqlSynNode read FFirstProcedure write FFirstProcedure;
-    property FirstCursor: TSqlSynNode read FFirstCursor write FFirstCursor;
+    property AuthClause: TSqlSynModuleAuth read FAuthClause write FAuthClause;
+    property TempTables: TSqlSynList read FTempTables write FTempTables;
+    property Contents: TSqlSynList read FContents write FContents;
+  end;
+
+  TSqlSynModuleAuth = class(TSqlSynNamedStructural)
+  private
+    FSchema: TSQLSynIdent;
+    FAuth: TSQLSynIdent;
+  public
+    property Schema: TSQLSynIdent read FSchema write FSchema;
+    property Auth: TSQLSynIdent read FAuth write FAuth;
   end;
 
   TSQLSynCreateOrDeclType = (
@@ -396,31 +456,27 @@ type
   TSqlSynColDef = class;
   TSqlSynConstraint = class;
 
-  //Possibly view as well ...
   TSqlSynCreateOrDeclTable = class(TSQLSynCreateOrDecl)
   private
     FTempOpts: TSqlSynCreateOrDeclTableOpts;
+    FElementList: TSqlSynList;
     FRowCommitAction: TSqlSynRowCommitAction;
-    FFirstColDef: TSqlSynColDef;
-    FFirstConstraint: TSqlSynConstraint;
   public
-    procedure FlattenColDefsConstraints(ContentList: TTempTpl);
     property TempOpts: TSqlSynCreateOrDeclTableOpts read FTempOpts write FTempOpts;
+    property ElementList: TSqlSynList read FElementList write FElementList;
     property RowCommitAction: TSqlSynRowCommitAction
       read FRowCommitAction write FRowCommitAction;
-    property FirstColDef: TSqlSynColDef read FFirstColDef write FFirstColDef;
-    property FirstConstraint: TSqlSynConstraint read FFirstConstraint write FFirstConstraint;
   end;
 
   TSqlSynColDef = class(TSQLSynNamedStructural)
   private
     FDataType: TSqlSynNode; //Might be datatype or domain ...
     FDefault: TSqlSynLiteral;
-    FConstraint: TSqlSynConstraint;
+    FConstraints: TSqlSynList;
   public
     property Datatype: TSqlSynNode read FDataType write FDataType;
     property _Default: TSqlSynLiteral read FDefault write FDefault;
-    property Constraint: TSqlSynConstraint read FConstraint write FConstraint;
+    property Constraints: TSqlSynList read FConstraints write FConstraints;
   end;
 
   { The idea here is we'll post process column constraints into table
@@ -436,15 +492,19 @@ type
   TSqlSynConstraint = class(TSQLSynNamedStructural)
   private
     FConstraintType: TSqlSynConstraintType;
-    FFirstReffingCol: TSqlSynIdent;
     FDetail: TSqlSynConstraintDetail;
     FAttributes: TSqlSynConstraintAttributes;
   public
-    procedure FlattenReffingCols(ColumnList: TTempTpl);
     property ConstraintType: TSqlSynConstraintType read FConstraintType write FConstraintType;
-    property FirstReffingCol: TSqlSynIdent read FFirstReffingCol write FFirstReffingCol;
     property Detail: TSqlSynConstraintDetail read FDetail write FDetail;
     property Attributes: TSqlSynConstraintAttributes read FAttributes write FAttributes;
+  end;
+
+  TSqlSynTableConstraint = class(TSqlSynConstraint)
+  private
+    FColumns: TSqlSynList;
+  public
+    property Columns: TSqlSynList read FColumns write FColumns;
   end;
 
   TSqlSynConstraintDetailType = (
@@ -473,15 +533,14 @@ type
   //This detail used for foreign keys.
   TSqlSynReferencesConstraintDetail = class(TSqlSynConstraintDetail)
   private
-    FRefTab: TSqlSynIdent;
+    FReferencesTable: TSqlSynIdent;
+    FReferencesColumns: TSqlSynList;
     FMatchType: TSqlSynMatchType;
-    FFirstReffedCol: TSqlSynIdent;
     FRefAction: TSqlSynRefAction;
   public
-    procedure FlattenReffedDetails(ReffedDefs: TTempTpl);
     property MatchType: TSqlSynMatchType read FMatchType write FMatchType;
-    property RefTab: TSqlSynIdent read FRefTab write FRefTab;
-    property FirstReffedCol: TSqlSynIdent read FFirstReffedCol write FFirstReffedCol;
+    property ReferencesTable: TSqlSynIdent read FReferencesTable write FReferencesTable;
+    property ReferencesColumns: TSqlSynList read FReferencesColumns write FReferencesColumns;
     property RefAction: TSqlSynRefAction read FRefAction write FRefAction;
   end;
 
@@ -528,6 +587,15 @@ type
     FExpr: TSqlSynExpr;
   public
     property Expr: TSqlSynExpr read FExpr write FExpr;
+  end;
+
+  //Postfix interval qualifier, e.g. (a - b) DAY TO SECOND.
+  //Expr is the operand.
+  TSqlSynIntervalQualifierOperator = class(TSqlSynUnaryOperator)
+  private
+    FQualifier: TSQLSynIntervalQualifier;
+  public
+    property Qualifier: TSQLSynIntervalQualifier read FQualifier write FQualifier;
   end;
 
   //Only takes one expr, needs other class for type info
@@ -605,15 +673,15 @@ type
     FAll: boolean;
     FLeft: TSqlSynExpr; //TODO - Diff class type for query exprs?
     FRight: TSqlSynExpr;
-    FCorresponding: TSqlSynNode; //TODO - Class types.
+    FCorresponding: TSqlSynList;
   public
     property Left: TSqlSynExpr read FLeft write FLeft;
     property Right: TSqlSynExpr read FRight write FRight;
     property All: boolean read FAll write FAll;
-    property Corresponding: TSqlSynNode read FCorresponding write FCorresponding;
+    property Corresponding: TSqlSynList read FCorresponding write FCorresponding;
   end;
 
-  TSqlSynSelectList = class(TSqlSynNode)
+  TSqlSynSelectList = class(TSqlSynStructural)
   private
     FWildcard: boolean;
   public
@@ -625,26 +693,26 @@ type
     FQuantifier: TSqlSynSetFunctionQuantifier;
     FSelectList: TSqlSynSelectList;
     //TODO - Class types for these??
-    FFrom: TSqlSynNode;
+    FFrom: TSqlSynList;
     FWhere: TSqlSynExpr;
-    FGroupBy: TSqlSynNode;
+    FGroupBy: TSqlSynList;
     FHaving: TSqlSynExpr;
   public
     property Quantifier: TSqlSynSetFunctionQuantifier read FQuantifier write FQuantifier;
     property SelectList: TSqlSynSelectList read FSelectList write FSelectList;
-    property From: TSqlSynNode read FFrom write FFrom;
+    property From: TSqlSynList read FFrom write FFrom;
     property Where: TSqlSynExpr read FWhere write FWhere;
-    property GroupBy: TSqlSynNode read FGroupBy write FGroupBy;
+    property GroupBy: TSqlSynList read FGroupBy write FGroupBy;
     property Having: TSqlSynExpr read FHaving write FHaving;
   end;
 
   TSqlSynDirectQueryWrapper = class(TSqlSynExpr)
   private
     FQuery: TSqlSynExpr;
-    FOrderBy: TSqlSynNode;
+    FOrderBy: TSqlSynList;
   public
     property Query: TSqlSynExpr read FQuery write FQuery;
-    property OrderBy: TSqlSynNode read FOrderBy write FOrderBy;
+    property OrderBy: TSqlSynList read FOrderBy write FOrderBy;
   end;
 
   TSqlSynDerivedColumn = class(TSqlSynStructural)
@@ -660,12 +728,11 @@ type
   private
     FTableLike: TSqlSynExpr;
     FCorrelationName: TSqlSynIdent;
-    FFirstColName: TSqlSynIdent;
+    FColumns: TSqlSynList;
   public
-    procedure FlattenDerivedColList(ColumnList: TTempTpl);
     property TableLike: TSqlSynExpr read FTableLike write FTableLike;
     property CorrelationName: TSqlSynIdent read FCorrelationName write FCorrelationName;
-    property FirstColName: TSqlSynIdent read FFirstColName write FFirstColName;
+    property Columns: TSqlSynList read FColumns write FColumns;
   end;
 
   TSqlSynJoinType = (
@@ -673,7 +740,8 @@ type
     jtLeft,
     jtRight,
     jtFull,
-    jtCross );
+    jtCross,
+    jtUnion );
 
   TSqlSynJoinSpecType = (
     stJoinCond,
@@ -684,10 +752,11 @@ type
   private
     FSpecType: TSqlSynJoinSpecType;
     FJoinCondition: TSqlSynExpr;
+    FColList: TSqlSynList;
   public
-    procedure FlattenColList(ColumnList: TTempTpl);
     property SpecType: TSqlSynJoinSpecType read FSpecType write FSpecType;
     property JoinCondition: TSqlSynExpr read FJoinCondition write FJoinCondition;
+    property ColList: TSqlSynList read FColList write FColList;
   end;
 
   TSqlSynJoinBinary = class(TSqlSynExpr)
@@ -722,12 +791,12 @@ type
   private
     FCaseType: TSqlSynCaseAbbrType;
     FFirstExpr, FLastExpr: TSqlSynExpr;
-    FList: TSqlSynNode;
+    FList: TSqlSynList;
   public
     property CaseType: TSqlSynCaseAbbrType read FCaseType write FCaseType;
     property FirstExpr: TSqlSynExpr read FFirstExpr write FFirstExpr;
     property LastExpr: TSqlSynExpr read FLastExpr write FLastExpr;
-    property List: TSqlSynNode read Flist write FList;
+    property List: TSqlSynList read Flist write FList;
   end;
 
   TSqlSynSimpleSearchedCaseType = (
@@ -739,16 +808,25 @@ type
   private
     FSSCaseType: TSqlSynSimpleSearchedCaseType;
     FOperand: TSqlSynExpr;
-    FComparator: TSqlSynExpr;
-    F_When: TSqlSynExpr;
+    FWhenClauses: TSqlSynList;
     F_Else: TSqlSynExpr;
   public
     property SSCaseType: TSqlSynSimpleSearchedCaseType read FSSCaseType write FSSCaseType;
     property Operand: TSqlSynExpr read FOperand write FOperand;
-    property Comparator: TSqlSynExpr read FComparator write FComparator;
-    property _When: TSqlSynExpr read F_When write F_When;
+    property WhenClauses: TSqlSynList read FWhenClauses write FWhenClauses;
     property _Else: TSqlSynExpr read F_Else write F_Else;
   end;
+
+  TSqlSynSimpleCaseWhen = class(TSqlSynStructural)
+  private
+    FComparatorOrSearched: TSqlSynExpr;
+    F_When: TSqlSynExpr;
+  public
+    property ComparatorOrSearched: TSqlSynExpr
+      read FComparatorOrSearched write FComparatorOrSearched;
+    property _When: TSqlSynExpr read F_When write F_When;
+  end;
+
 
   TSqlSynNumericFunctionType = (
     nfPosition,
@@ -958,19 +1036,21 @@ type
   end;
 
 
+  TSqlSynUpdatability = class;
+
   TSqlSynDeclCursor = class(TSQLSynCreateOrDecl)
   private
     FInsensitive: boolean;
     FScroll: boolean;
     FQuery: TSqlSynExpr;
-    FOrderBy: TSqlSynNode;
-    FUpdatability: TSqlSynNode;
+    FOrderBy: TSqlSynList;
+    FUpdatability: TSqlSynUpdatability;
   public
     property Insensitive: boolean read FInsensitive write FInsensitive;
     property Scroll: boolean read FScroll write FScroll;
     property Query: TSqlSynExpr read FQuery write FQuery;
-    property OrderBy: TSqlSynNode read FOrderBy write FOrderBy;
-    property Updatability: TSqlSynNode read FUpdatability write FUpdatability;
+    property OrderBy: TSqlSynList read FOrderBy write FOrderBy;
+    property Updatability: TSqlSynUpdatability read FUpdatability write FUpdatability;
   end;
 
   TSqlSynOrderingSpecType = (
@@ -990,20 +1070,20 @@ type
 
   TSqlSynUpdatability = class(TSqlSynStructural)
   private
-    FColumns: TSqlSynNode;
+    FColumns: TSqlSynList;
     FForUpdate: boolean;
   public
-    property Columns: TSqlSynNode read FColumns write FColumns;
+    property Columns: TSqlSynList read FColumns write FColumns;
     property ForUpdate: boolean read FForUpdate write FForUpdate;
   end;
 
   TSqlSynProcedure = class(TSqlSynNamedStructural)
   private
-    FParamDecls: TSqlSynNode;
-    FStatement: TSqlSynNode;
+    FParamDecls: TSqlSynList;
+    FStatement: TSQLSynStructural;
   public
-    property ParamDecls: TSqlSynNode read FParamDecls write FParamDecls;
-    property Statement: TSqlSynNode read FStatement write FStatement;
+    property ParamDecls: TSqlSynList read FParamDecls write FParamDecls;
+    property Statement: TSQLSynStructural read FStatement write FStatement;
   end;
 
   //Separate from parameter specification or any other sort ...
@@ -1025,22 +1105,22 @@ type
 
   TSqlSynSchema = class(TSqlSynCreateOrDecl)
   private
-    FAuthorization: TSqlSynNode;
-    FElements: TSqlSynNode;
+    FAuthorization: TSQLSynIdent;
+    FElements: TSqlSynList;
   public
-    property Authorization: TSqlSynNode read FAuthorization write FAuthorization;
-    property Elements: TSqlSynNode read FElements write FElements;
+    property Authorization: TSQLSynIdent read FAuthorization write FAuthorization;
+    property Elements: TSqlSynList read FElements write FElements;
   end;
 
   TSqlSynDomain = class(TSqlSynCreateOrDecl)
   private
-    FDataType: TSqlSynNode;
-    F_Default: TSqlSynNode;
-    FConstraint: TSqlSynNode;
+    FDataType: TSQLSynType;
+    F_Default: TSQLSynLiteral;
+    FConstraint: TSqlSynConstraint;
   public
-    property DataType: TSqlSynNode read FDataType write FDataType;
-    property _Default: TSqlSynNode read F_Default write F_Default;
-    property Constraint: TSqlSynNode read FConstraint write FConstraint; //TODO - Allowable constraints?
+    property DataType: TSQLSynType read FDataType write FDataType;
+    property _Default: TSQLSynLiteral read F_Default write F_Default;
+    property Constraint: TSqlSynConstraint read FConstraint write FConstraint; //TODO - Allowable constraints?
   end;
 
   TSqlSynViewCheckOption = (
@@ -1052,11 +1132,11 @@ type
 
   TSqlSynView = class(TSqlSynCreateOrDecl)
   private
-    FColumnList: TSqlSynNode;
+    FColumnList: TSqlSynList;
     FQueryExpr: TSqlSynExpr;
     FViewCheck: TSqlSynViewCheckOption;
   public
-    property ColumnList: TSqlSynNode read FColumnList write FColumnList;
+    property ColumnList: TSqlSynList read FColumnList write FColumnList;
     property QueryExpr: TSqlSynExpr read FQueryExpr write FQueryExpr;
     property ViewCheck: TSqlSynViewCheckOption read FViewcheck write FViewCheck;
   end;
@@ -1085,12 +1165,12 @@ type
   private
     FPrivs: TSqlSynNode;
     FObjectName: TSqlSynIdent;
-    FGranteeList: TSqlSynNode;
+    FGranteeList: TSqlSynList;
     FGrantOption: boolean;
   public
     property Privs: TSqlSynNode read FPrivs write FPrivs;
     property ObjectName: TSqlSynIdent read FObjectName write FObjectName;
-    property GranteeList: TSqlSynNode read FGranteeList write FGranteeList;
+    property GranteeList: TSqlSynList read FGranteeList write FGranteeList;
     property GrantOption: boolean read FGrantOption write FGrantOption;
   end;
 
@@ -1108,10 +1188,10 @@ type
   TSqlSynPriv = class(TSqlSynStructural)
   private
     FPriv: TSqlSynPrivType;
-    FColList: TSqlSynNode;
+    FColList: TSqlSynList;
   public
     property Priv: TSqlSynPrivType read FPriv write FPriv;
-    property ColumnList: TSqlSynNode read FColList write FColList;
+    property ColumnList: TSqlSynList read FColList write FColList;
   end;
 
   TSqlSynAssertion = class(TSQLSynCreateOrDecl)
@@ -1275,13 +1355,15 @@ type
     property CursorName: TSqlSynIdent read FCursorName write FCursorName;
   end;
 
+  TSqlSynFetchOrientation = class;
+
   TSqlSynDmlCursorFetch = class(TSqlSynDmlCursor)
   private
-    FOrientation: TSqlSynNode; //TODO. Class type?
-    FFetchTarget: TSqlSynNode; //TODO. Class type?
+    FOrientation: TSqlSynFetchOrientation;
+    FFetchTarget: TSqlSynList;
   public
-    property Orientation: TSqlSynNode read FOrientation write FOrientation;
-    property FetchTarget: TSqlSynNode read FFetchTarget write FFetchTarget;
+    property Orientation: TSqlSynFetchOrientation read FOrientation write FOrientation;
+    property FetchTarget: TSqlSynList read FFetchTarget write FFetchTarget;
   end;
 
   TSqlSynFetchOrientDir = (
@@ -1319,10 +1401,10 @@ type
   TSqlSynDmlSelectToTarget = class(TSqlSynDmlNoCursor)
   private
     FSelectExpr: TSqlSynExpr;
-    FTargetList: TSqlSynNode;
+    FTargetList: TSqlSynList;
   public
     property SelectExpr: TSQLSynExpr read FSelectExpr write FSelectExpr;
-    property TargetList: TSqlSynNode read FTargetList write FTargetList;
+    property TargetList: TSqlSynList read FTargetList write FTargetList;
   end;
 
   TSqlSynDmlDeletePositioned = class(TSqlSynDmlCursor)
@@ -1344,21 +1426,21 @@ type
   TSqlSynDmlInsert = class(TSqlSynDmlNoCursor)
   private
     FTable: TSqlSynIdent;
-    FColList: TSqlSynNode;
+    FColList: TSqlSynList;
     FQuery: TSqlSynExpr;
   public
     property Table: TSqlSynIdent read FTable write FTable;
-    property ColList: TSqlSynNode read FColList write FColList;
+    property ColList: TSqlSynList read FColList write FColList;
     property Query: TSqlSynExpr read FQuery write FQuery;
   end;
 
   TSqlSynDmlCursorUpdate = class(TSqlSynDmlCursor)
   private
     FTable: TSqlSynIdent;
-    FSetClauseList: TSqlSynNode;
+    FSetClauseList: TSqlSynList;
   public
     property Table: TSqlSynIdent read FTable write FTable;
-    property SetClauseList: TSqlSynNode read FSetClauseList write FSetClauseList;
+    property SetClauseList: TSqlSynList read FSetClauseList write FSetClauseList;
   end;
 
   TSqlSynDmlSetClause = class(TSqlSynStructural)
@@ -1373,19 +1455,19 @@ type
   TSqlSymDmlUpdateSearched = class(TSqlSynDmlNoCursor)
   private
     FTable: TSqlSynIdent;
-    FSetClauseList: TSqlSynNode;
+    FSetClauseList: TSqlSynList;
     FWhereClause: TSqlSynExpr;
   public
     property Table: TSqlSynIdent read FTable write FTable;
-    property SetClauseList: TSqlSynNode read FSetClauseList write FSetClauseList;
+    property SetClauseList: TSqlSynList read FSetClauseList write FSetClauseList;
     property WhereClause: TSqlSynExpr read FWhereClause write FWhereClause;
   end;
 
   TSqlSynSetTransactionStatement = class(TSqlSynMiscStatement)
   private
-    FModeList: TSqlSynNode;
+    FModeList: TSqlSynList;
   public
-    property ModeList: TSqlSynNode read FModeList write FModeList;
+    property ModeList: TSqlSynList read FModeList write FModeList;
   end;
 
   TTransactionModeType = (
@@ -1423,10 +1505,10 @@ type
   TSqlSynSetConstraintsModeStatement = class(TSqlSynMiscStatement)
   private
     FImmediate: boolean;
-    FConstraintNameList: TSqlSynNode;
+    FConstraintNameList: TSqlSynList;
   public
     property Immediate: boolean read FImmediate write FImmediate;
-    property ConstraintNameList: TSqlSynNode read FConstraintNameList write FConstraintNameList;
+    property ConstraintNameList: TSqlSynList read FConstraintNameList write FConstraintNameList;
   end;
 
   TSqlSynCommitRollbackStatement = class(TSqlSynMiscStatement)
@@ -1475,10 +1557,10 @@ type
   TSqlSynSessionSetStatement = class(TSqlSynMiscStatement)
   private
     FSessionSetType: TSqlSynSessionSetType;
-    FValueSpec: TSqlSynNode;
+    FValueSpec: TSQLSynExpr;
   public
     property SessionSetType: TSqlSynSessionSetType read FSessionSetType write FSessionSetType;
-    property ValueSpec: TSQLSynNode read FValueSpec write FValueSpec;
+    property ValueSpec: TSQLSynExpr read FValueSpec write FValueSpec;
   end;
 
 implementation
@@ -1505,11 +1587,29 @@ end;
 constructor TSQLSynNode.Create;
 begin
   inherited;
+  InitNodeType;
 end;
 
 constructor TSQLSynNode.CreateWithTracker(Tracker: TTracker);
 begin
   inherited;
+  InitNodeType;
+end;
+
+procedure TSQLSynNode.InitNodeType;
+begin
+  if Self is TSqlSynList then
+    FNodeType := sntList
+  else if Self is TSQLSynExpr then
+    FNodeType := sntExpr
+  else if Self is TSQLSynIdent then
+    FNodeType := sntIdent
+  else if Self is TSQLSynType then
+    FNodeType := sntType
+  else if Self is TSQLSynStructural then
+    FNodeType := sntStructural
+  else
+    FNodeType := sntNode;
 end;
 
 destructor TSQLSynNode.Destroy;
@@ -1613,57 +1713,9 @@ begin
   //TODO - write this.
 end;
 
-{ TSQLSynModule }
-
-procedure TSqlSynModule.FlattenModuleContents(ContentList: TTempTpl);
-begin
-  Assert(false);
-  //TODO - write this.
-end;
-
-{ TSqlSynCreateOrDeclTable }
-
-procedure TSqlSynCreateOrDeclTable.FlattenColDefsConstraints(ContentList: TTempTpl);
-begin
-  Assert(false);
-  //TODO - write this.
-end;
-
-{ TSqlSynConstraint }
-
-procedure TSqlSynConstraint.FlattenReffingCols(ColumnList: TTempTpl);
-begin
-  Assert(false);
-  //TODO - write this.
-end;
-
-{ TSqlSynReferencesConstraintDetail }
-
-procedure TSqlSynReferencesConstraintDetail.FlattenReffedDetails(ReffedDefs: TTempTpl);
-begin
-  Assert(false);
-  //TODO - write this.
-end;
-
 { TSqlSynRefAction }
 
 procedure TSqlSynRefAction.MergeWith(Other: TSqlSynRefAction);
-begin
-  Assert(false);
-  //TODO - write this.
-end;
-
-{ TSQLSynCorrelation }
-
-procedure TSqlSynCorrelation.FlattenDerivedColList(ColumnList: TTempTpl);
-begin
-  Assert(false);
-  //TODO - write this.
-end;
-
-{ TSqlSynJoinSpec }
-
-procedure TSqlSynJoinSpec.FlattenColList(ColumnList: TTempTpl);
 begin
   Assert(false);
   //TODO - write this.

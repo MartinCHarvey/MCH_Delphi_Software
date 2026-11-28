@@ -44,10 +44,23 @@ uses
 %classfunc  procedure yyerror ( msg : String ); override;
 %classfunc  procedure yyaction_debug(State: integer; Action: integer); override;
 %classfunc  function MakeClass(ClassType: TSQLSynNodeClass): TSQLSynNode;
+%classfunc  function WrapJoinAsQuery(Join: TSqlSynNode): TSqlSynNode;
 %classfunc  function CheckContinuation(S: string; T: TSQLSynLiteralType): boolean;
 %classfunc function HandleContinuation(S: string; T: TSQlSynLiteralType): string;
 %classfunc  function CheckDelimIdent(S: string): boolean;
 %classfunc function HandleDelimIdent(S: string): string;
+%classfunc  function UnquoteStringToken(S: string): string;
+%classfunc  function LiteralShape(S: string): string;
+%classfunc  function SplitTimeZone(S: string; out Base, TZ: string): boolean;
+%classfunc  function IsDateString(S: string): boolean;
+%classfunc  function IsTimeString(S: string): boolean;
+%classfunc  function IsTimestampString(S: string): boolean;
+%classfunc  function GetIntervalStringType(S: string; out IST: TSQLSynIntervalStringType): boolean;
+%classfunc  function IsQualifiedNameText(S: string): boolean;
+
+%{
+// space tab carriage_return line_feed no longer tokens.
+%}
 
 %token
 
@@ -63,10 +76,6 @@ uses
                 less_than_or_equals_operator
                 concatenation_operator
                 double_period
-                space
-                tab
-                carriage_return
-                line_feed
                 double_quote
                 percent
                 ampersand
@@ -297,6 +306,7 @@ uses
 		_TRIM
 		_TRUE
 		_UNION
+		_UNION_JOIN
 		_UNIQUE
 		_UNKNOWN
 		_UPDATE
@@ -391,6 +401,8 @@ uses
   //TODO - Remove tmp decls if not required.
   var
     TmpInt: integer;
+    TmpStr, TmpStr2: string;
+    TmpIST: TSQLSynIntervalStringType;
     TmpClass, TmpClass2: TSqlSynNode;
 %}
 
@@ -546,7 +558,10 @@ uses
                                                   if CheckContinuation(UTF8ToString(Lexer.yytext), sltNatString) then
                                                     $$.Text := $1.Text + HandleContinuation(UTF8ToString(Lexer.yytext), sltNatString)
                                                   else
-                                                    yyerror('String continuation not a national character string'); }
+                                                  begin
+                                                    $$.Text := '';
+                                                    yyerror('String continuation not a national character string');
+                                                  end; }
 
         ;
 
@@ -582,7 +597,10 @@ uses
                                                   if CheckContinuation(UTF8ToString(Lexer.yytext), sltBitString) then
                                                     $$.Text := $1.Text + HandleContinuation(UTF8ToString(Lexer.yytext), sltBitString)
                                                   else
-                                                    yyerror('String continuation not a bit string'); }
+                                                  begin
+                                                    $$.Text := '';
+                                                    yyerror('String continuation not a bit string');
+                                                  end; }
         ;
 
   _hex_string_literal_start :
@@ -617,7 +635,10 @@ uses
                                                   if CheckContinuation(UTF8ToString(Lexer.yytext), sltHexString) then
                                                     $$.Text := $1.Text + HandleContinuation(UTF8ToString(Lexer.yytext), sltHexString)
                                                   else
-                                                    yyerror('String continuation not a hex string'); }
+                                                  begin
+                                                    $$.Text := '';
+                                                    yyerror('String continuation not a hex string');
+                                                  end; }
         ;
 
   character_string_literal :
@@ -632,18 +653,21 @@ uses
 
   character_string_literal_main :
                 string_literal_continuation     { if CheckContinuation(UTF8ToString(Lexer.yytext), sltString) then
-                                                  begin
-                                                    $$.Text := HandleContinuation(UTF8ToString(Lexer.yyText), sltString);
-                                                    $$.Obj := MakeClass(TSqlSynLiteral);
-                                                    with $$.Obj as TSqlSynLiteral do
-                                                    begin
-                                                      Text := $$.Text;
-                                                      ExprType := setLiteral;
-                                                      LitType := sltString;
-                                                    end;
-                                                  end
+                                                    $$.Text := HandleContinuation(UTF8ToString(Lexer.yyText), sltString)
                                                   else
-                                                    yyerror('Not a valid character string'); }
+                                                  begin
+                                                    //Still build the literal (empty): a NIL here would reach every
+                                                    //expression that can hold a literal.
+                                                    $$.Text := '';
+                                                    yyerror('Not a valid character string');
+                                                  end;
+                                                  $$.Obj := MakeClass(TSqlSynLiteral);
+                                                  with $$.Obj as TSqlSynLiteral do
+                                                  begin
+                                                    Text := $$.Text;
+                                                    ExprType := setLiteral;
+                                                    LitType := sltString;
+                                                  end; }
         |       character_string_literal_main
                 string_literal_continuation     { if CheckContinuation(UTF8ToString(Lexer.yytext), sltString) then
                                                   begin
@@ -655,7 +679,10 @@ uses
                                                     ($$.Obj as TSQLSynLiteral).Text := $$.Text;
                                                   end
                                                   else
-                                                    yyerror('Not a valid character string'); }
+                                                  begin
+                                                    $$ := $1; //Keep the literal so far.
+                                                    yyerror('Not a valid character string');
+                                                  end; }
         ;
 
   introducer : underscore                       { $$.Obj := nil;
@@ -709,188 +736,75 @@ uses
   actual_identifier :
                 regular_identifier              { $$ := $1; }
         |       delimited_identifier            { if CheckDelimIdent(UTF8ToString(Lexer.yytext)) then
-                                                  begin
-                                                    $$.Text := HandleDelimIdent(UTF8ToString(Lexer.yytext));
-                                                    $$.Obj := MakeClass(TSQLSynIdent);
-                                                    with $$.Obj as TSQLSynIdent do
-                                                      IdentName := $$.Text;
-                                                  end
+                                                    $$.Text := HandleDelimIdent(UTF8ToString(Lexer.yytext))
                                                   else
-                                                    yyerror('Not a valid delimited identifier.'); }
+                                                  begin
+                                                    //Still build the identifier (empty): a NIL here would reach every
+                                                    //rule that takes a name.
+                                                    $$.Text := '';
+                                                    yyerror('Not a valid delimited identifier.');
+                                                  end;
+                                                  $$.Obj := MakeClass(TSQLSynIdent);
+                                                  with $$.Obj as TSQLSynIdent do
+                                                    IdentName := $$.Text; }
         ;
 
   SQL_language_identifier :
                 regular_identifier              { $$ := $1; }
         ;
 
+  /* Datetime and interval strings.
+     The BNF describes these at character level (<quote> <date value> <quote>
+     etc.), but the lexer returns the whole quoted string as a single
+     string_literal_continuation token, so the contents are checked in Pascal
+     (IsDateString etc., at the end of this file) rather than in the grammar.
+     Each rule is a single token so it reduces before the next token is read,
+     and Lexer.yytext is still the string. */
   date_string :
-                quote date_value quote          { $$ := $2 }
-        ;
-
-  date_value :
-                unsigned_integer minus_sign unsigned_integer minus_sign unsigned_integer
-                                                { $$.Text := $1.Text + '-' +
-                                                             $3.Text + '-' +
-                                                             $5.Text;
+                string_literal_continuation
+                                                { $$.Text := UnquoteStringToken(UTF8ToString(Lexer.yytext));
                                                   $$.Obj := nil;
-                                                  $1.Obj.Free;
-                                                  $3.Obj.Free;
-                                                  $5.Obj.Free; }
+                                                  if not IsDateString($$.Text) then
+                                                    yyerror('Not a valid date string: ''' + $$.Text + ''''); }
         ;
 
   time_string :
-                quote time_value quote          { $$ := $2; }
-        |       quote time_value time_zone_interval quote
-                                                { $$.Text := $2.Text + $3.Text;
-                                                  $$.Obj := nil; }
-        ;
-
-  time_value :
-                unsigned_integer colon unsigned_integer colon seconds_value
-                                                { $$.Text := $1.Text + ':'
-                                                  + $3.Text + ':' + $5.Text;
+                string_literal_continuation
+                                                { $$.Text := UnquoteStringToken(UTF8ToString(Lexer.yytext));
                                                   $$.Obj := nil;
-                                                  $1.Obj.Free;
-                                                  $3.Obj.Free;
-                                                  $5.Obj.Free; }
-        ;
-
-  seconds_value :
-                unsigned_integer                { $$ := $1; }
-        |       unsigned_integer period unsigned_integer
-                                                { $$.Obj := nil;
-                                                  $$.Text := $1.Text + '.' + $3.Text;
-                                                  $1.Obj.Free;
-                                                  $3.Obj.Free; }
-        ;
-
-  time_zone_interval : sign unsigned_integer colon unsigned_integer
-                                                { $$.Obj := nil;
-                                                  $$.Text := $1.Text + $2.Text +
-                                                  ':' + $4.Text;
-                                                  $2.Obj.Free;
-                                                  $4.Obj.Free; }
+                                                  if not IsTimeString($$.Text) then
+                                                    yyerror('Not a valid time string: ''' + $$.Text + ''''); }
         ;
 
   timestamp_string :
-                quote date_value space time_value quote
-                                                { $$.Obj := nil;
-                                                  $$.Text := $2.Text + ' ' + $4.Text }
-        |       quote date_value space time_value time_zone_interval quote
-                                                { $$.Obj := nil;
-                                                  $$.Text := $2.Text + ' ' + $4.Text;
-                                                  yyinfo('Time zone ignored in in timestamp string.'); }
+                string_literal_continuation
+                                                { $$.Text := UnquoteStringToken(UTF8ToString(Lexer.yytext));
+                                                  $$.Obj := nil;
+                                                  if not IsTimestampString($$.Text) then
+                                                    yyerror('Not a valid timestamp string: ''' + $$.Text + '''')
+                                                  else if SplitTimeZone($$.Text, TmpStr, TmpStr2) then
+                                                  begin
+                                                    $$.Text := TmpStr;
+                                                    yyinfo('Time zone ignored in timestamp string.');
+                                                  end; }
         ;
 
   interval_string :
-                quote interval_string_literal quote { $$ := $2; }
-        ;
-
-  interval_string_literal :
-                unsigned_integer                { $$ := $1;
-                                                  $$.Obj.Free;
+                string_literal_continuation
+                                                { $$.Text := UnquoteStringToken(UTF8ToString(Lexer.yytext));
+                                                  if not GetIntervalStringType($$.Text, TmpIST) then
+                                                  begin
+                                                    yyerror('Not a valid interval string: ''' + $$.Text + '''');
+                                                    TmpIST := istPlainInt;
+                                                  end;
                                                   $$.Obj := MakeClass(TSQLSynIntervalStringLiteral);
                                                   with $$.Obj as TSQLSynIntervalStringLiteral do
                                                   begin
                                                     ExprType := setLiteral;
                                                     LitType := sltIntervalString;
-                                                    IntervalStringType := istPlainInt;
+                                                    IntervalStringType := TmpIST;
                                                     Text := $$.Text;
                                                   end; }
-                /* Year month interval */
-        |       unsigned_integer minus_sign unsigned_integer
-                                                { $$.Text := $1.Text + '-' + $3.Text;
-                                                  $$.Obj := MakeClass(TSQLSynIntervalStringLiteral);
-                                                  with $$.Obj as TSQLSynIntervalStringLiteral do
-                                                  begin
-                                                    ExprType := setLiteral;
-                                                    LitType := sltIntervalString;
-                                                    IntervalStringType := istYearMonth;
-                                                    Text := $$.Text;
-                                                  end;
-                                                  $1.Obj.Free;
-                                                  $3.Obj.Free; }
-                /* Day time intervals */
-        |       unsigned_integer space unsigned_integer
-                                                { $$.Text := $1.Text + ' ' + $3.Text;
-                                                  $$.Obj := MakeClass(TSQLSynIntervalStringLiteral);
-                                                  with $$.Obj as TSQLSynIntervalStringLiteral do
-                                                  begin
-                                                    ExprType := setLiteral;
-                                                    LitType := sltIntervalString;
-                                                    IntervalStringType := istDayTime1;
-                                                    Text := $$.Text;
-                                                  end;
-                                                  $1.Obj.Free;
-                                                  $3.Obj.Free; }
-        |       unsigned_integer space unsigned_integer colon unsigned_integer
-                                                { $$.Text := $1.Text + ' ' + $3.Text
-                                                  + ':' + $5.Text;
-                                                  $$.Obj := MakeClass(TSQLSynIntervalStringLiteral);
-                                                  with $$.Obj as TSQLSynIntervalStringLiteral do
-                                                  begin
-                                                    ExprType := setLiteral;
-                                                    LitType := sltIntervalString;
-                                                    IntervalStringType := istDayTime2;
-                                                    Text := $$.Text;
-                                                  end;
-                                                  $1.Obj.Free;
-                                                  $3.Obj.Free;
-                                                  $5.Obj.Free; }
-        |       unsigned_integer space unsigned_integer colon unsigned_integer colon seconds_value
-                                                { $$.Text := $1.Text + ' ' + $3.Text
-                                                  + ':' + $5.Text + ':' + $7.Text;
-                                                  $$.Obj := MakeClass(TSQLSynIntervalStringLiteral);
-                                                  with $$.Obj as TSQLSynIntervalStringLiteral do
-                                                  begin
-                                                    ExprType := setLiteral;
-                                                    LitType := sltIntervalString;
-                                                    IntervalStringType := istDayTime3;
-                                                    Text := $$.Text;
-                                                  end;
-                                                  $1.Obj.Free;
-                                                  $3.Obj.Free;
-                                                  $5.Obj.Free;
-                                                  $7.Obj.Free; }
-                /* Time intervals */
-	|	unsigned_integer period unsigned_integer
-                                                { $$.Text := $1.Text + '.' + $3.Text;
-                                                  $$.Obj := MakeClass(TSQLSynIntervalStringLiteral);
-                                                  with $$.Obj as TSQLSynIntervalStringLiteral do
-                                                  begin
-                                                    ExprType := setLiteral;
-                                                    LitType := sltIntervalString;
-                                                    IntervalStringType := istTime1;
-                                                    Text := $$.Text;
-                                                  end;
-                                                  $1.Obj.Free;
-                                                  $3.Obj.Free; }
-        |       unsigned_integer colon seconds_value
-                                                { $$.Text := $1.Text + ':' + $3.Text;
-                                                  $$.Obj := MakeClass(TSQLSynIntervalStringLiteral);
-                                                  with $$.Obj as TSQLSynIntervalStringLiteral do
-                                                  begin
-                                                    ExprType := setLiteral;
-                                                    LitType := sltIntervalString;
-                                                    IntervalStringType := istTime2;
-                                                    Text := $$.Text;
-                                                  end;
-                                                  $1.Obj.Free;
-                                                  $3.Obj.Free; }
-        |       unsigned_integer colon unsigned_integer colon seconds_value
-                                                { $$.Text := $1.Text + ':' + $3.Text
-                                                  + ':' + $5.Text;
-                                                  $$.Obj := MakeClass(TSQLSynIntervalStringLiteral);
-                                                  with $$.Obj as TSQLSynIntervalStringLiteral do
-                                                  begin
-                                                    ExprType := setLiteral;
-                                                    LitType := sltIntervalString;
-                                                    IntervalStringType := istTime3;
-                                                    Text := $$.Text;
-                                                  end;
-                                                  $1.Obj.Free;
-                                                  $3.Obj.Free;
-                                                  $5.Obj.Free; }
         ;
 
 /*
@@ -904,37 +818,24 @@ uses
 		module_name_clause
                 language_clause
                 module_authorization_clause
+                temp_table_decls
                 module_contents
-                                                {
-                                                  $$ := $1; //Module and name
+                                                { $$ := $1; //Module and name
                                                   with $$.Obj as TSqlSynModule do
                                                   begin
                                                     // Language clause
                                                     InsertTailChild($2.Obj);
                                                     Language := $2.Obj as TSQLSynIdent;
-                                                    // Module auth clause
-                                                      //Schema.
-                                                    if Assigned(($3.Obj as TTempTpl).T1) then
-                                                    begin
-                                                      ($3.Obj as TTempTpl).T1.RemoveFromTree;
-                                                      InsertTailChild(($3.Obj as TTempTpl).T1);
-                                                      Schema := ($3.Obj as TTempTpl).T1 as TSqlSynIdent;
-                                                    end;
-                                                      //Authorization
-                                                    if Assigned(($3.Obj as TTempTpl).T2) then
-                                                    begin
-                                                      ($3.Obj as TTempTpl).T2.RemoveFromTree;
-                                                      InsertTailChild(($3.Obj as TTempTpl).T2);
-                                                      Authorization := ($3.Obj as TTempTpl).T2 as TSqlSynIdent;
-                                                    end;
-                                                    $3.Obj.Free;
-                                                    // Module opt.
-                                                    // Flatten tree, and keep a cpl of pointers as to
-                                                    // locations of things.
-                                                    FlattenModuleContents(($4.Obj) as TTempTpl);
-                                                    $4.Obj.Free;
-                                                  end;
-                                                }
+                                                    //Auth clause.
+                                                    InsertTailChild($3.Obj);
+                                                    AuthClause := $3.Obj as TSqlSynModuleAuth;
+                                                    //Temp table decls.
+                                                    InsertTailChild($4.Obj);
+                                                    TempTables := $4.Obj as TSqlSynList;
+                                                    //Contents
+                                                    InsertTailChild($5.Obj);
+                                                    Contents := $5.Obj as TSqlSynList;
+                                                  end; }
         ;
 
 
@@ -1011,29 +912,32 @@ uses
   module_authorization_clause :
 		_SCHEMA schema_name
                                                 { $$.Text := '';
-                                                  $$.Obj := MakeClass(TTempTpl);
-                                                  with $$.Obj as TTempTpl do
+                                                  $$.Obj := MakeClass(TSqlSynModuleAuth);
+                                                  with $$.Obj as TSqlSynModuleAuth do
                                                   begin
+                                                    StructuralType := sstModuleAuth;
                                                     InsertTailChild($2.Obj);
-                                                    T1 := $2.Obj;
+                                                    Schema := $2.Obj as TSQLSynIdent;
                                                   end; }
 	|	_AUTHORIZATION module_authorization_identifier
                                                 { $$.Text := '';
-                                                  $$.Obj := MakeClass(TTempTpl);
-                                                  with $$.Obj as TTempTpl do
+                                                  $$.Obj := MakeClass(TSqlSynModuleAuth);
+                                                  with $$.Obj as TSqlSynModuleAuth do
                                                   begin
+                                                    StructuralType := sstModuleAuth;
                                                     InsertTailChild($2.Obj);
-                                                    T2 := $2.Obj;
+                                                    Auth := $2.Obj as TSQLSynIdent;
                                                   end; }
 	|	_SCHEMA schema_name _AUTHORIZATION module_authorization_identifier
                                                 { $$.Text := '';
-                                                  $$.Obj := MakeClass(TTempTpl);
-                                                  with $$.Obj as TTempTpl do
+                                                  $$.Obj := MakeClass(TSqlSynModuleAuth);
+                                                  with $$.Obj as TSqlSynModuleAuth do
                                                   begin
+                                                    StructuralType := sstModuleAuth;
                                                     InsertTailChild($2.Obj);
-                                                    T1 := $2.Obj;
+                                                    Schema := $2.Obj as TSQLSynIdent;
                                                     InsertTailChild($4.Obj);
-                                                    T2 := $4.Obj;
+                                                    Auth := $4.Obj as TSQLSynIdent;
                                                   end; }
         ;
 
@@ -1063,8 +967,8 @@ uses
                                                     TempOpts := dtoLocalTemporary;
                                                     InsertTailChild($5.Obj);
                                                     Name := $5.Obj as TSqlSynIdent;
-                                                    FlattenColDefsConstraints($6.Obj as TTempTpl);
-                                                    $6.Obj.Free;
+                                                    InsertTailChild($6.Obj);
+                                                    ElementList := $6.Obj as TSqlSynList;
                                                     RowCommitAction := TSqlSynRowCommitAction($7.Obj);
                                                   end;}
         ;
@@ -1097,20 +1001,21 @@ uses
   table_element_list :
         left_paren table_element table_element_list_opt right_paren
                                                 { $$ := $3;
-                                                  with $$.Obj as TTempTpl do
-                                                    InsertHeadChild($2.Obj); }
+                                                  if Assigned($2.Obj) then //NIL if check constraint ignored.
+                                                    with $$.Obj as TSqlSynList do
+                                                      InsertHeadChild($2.Obj); }
         ;
 
   table_element_list_opt :
         /* Empty */
                                                 { $$.Text := '';
-                                                  $$.Obj := MakeClass(TTempTpl); }
+                                                  $$.Obj := MakeClass(TSqlSynList); }
         |       table_element_list_opt comma table_element
                                                 { $$ := $1;
                                                   if Assigned($3.Obj) then
                                                   begin
                                                     //Check constraints may be omitted / NIL.
-                                                    with $$.Obj as TTempTpl do
+                                                    with $$.Obj as TSqlSynList do
                                                       InsertTailChild($3.Obj);
                                                   end;}
         ;
@@ -1126,7 +1031,7 @@ uses
                 column_name
                 column_definition_sel
                 default_clause_opt
-                column_constraint_definition_opt
+                column_constraint_definition_opts
                 collate_clause_opt
                                                 { $$.Text := '';
                                                   $$.Obj := MakeClass(TSqlSynColDef);
@@ -1145,7 +1050,7 @@ uses
                                                     if Assigned($4.Obj) then
                                                     begin
                                                       InsertTailChild($4.Obj);
-                                                      Constraint := $4.Obj as TSqlSynConstraint;
+                                                      Constraints := $4.Obj as TSqlSynList;
                                                     end;
                                                     Assert(not Assigned($5.Obj)); //No collations yet.
                                                   end; }
@@ -1165,12 +1070,56 @@ uses
                                                 { $$ := $1; }
         ;
 
-  column_constraint_definition_opt :
+  column_constraint_definition_opts :
         /* Empty */
-                                                { $$.Text := ''; $$.Obj := nil; }
-        |       column_constraint_definition
-                                                { $$ := $1; }
+                                                { $$.Text := ''; $$.Obj := MakeClass(TSqlSynList); }
+        |       column_constraint_definition_opts column_constraint_definition
+                                                { $$ := $1;
+                                                  //Text IGNORED marks that the last constraint was an ignored (NIL)
+                                                  //check constraint, so attributes after it are dropped rather than
+                                                  //attached to the constraint before it.
+                                                  if Assigned($2.Obj) then
+                                                  begin
+                                                    $$.Obj.InsertTailChild($2.Obj);
+                                                    $$.Text := '';
+                                                  end
+                                                  else
+                                                    $$.Text := 'IGNORED'; }
+        |       column_constraint_definition_opts column_constraint_attribute
+                                                { $$ := $1;
+                                                  //Attributes apply to the constraint immediately before them.
+                                                  if $$.Text = 'IGNORED' then
+                                                    $2.Obj.Free //That constraint was ignored, so are its attributes.
+                                                  else if not ($$.Obj.LastChild is TSqlSynConstraint) then
+                                                  begin
+                                                    $2.Obj.Free;
+                                                    yyerror('Constraint attributes must follow a column constraint.');
+                                                  end
+                                                  else
+                                                  with $$.Obj.LastChild as TSqlSynConstraint do
+                                                  begin
+                                                    if not Assigned(Attributes) then
+                                                    begin
+                                                      InsertTailChild($2.Obj);
+                                                      Attributes := $2.Obj as TSqlSynConstraintAttributes;
+                                                    end
+                                                    else
+                                                    begin
+                                                      with $2.Obj as TSqlSynConstraintAttributes do
+                                                      begin
+                                                        if (InitDeferred <> sidUnspec) and (Attributes.InitDeferred <> sidUnspec)
+                                                          or (Deferrable <> ssdUnspec) and (Attributes.Deferrable <> ssdUnspec) then
+                                                          yyerror('Duplicate constraint attribute.');
+                                                        if InitDeferred <> sidUnspec then
+                                                          Attributes.InitDeferred := InitDeferred;
+                                                        if Deferrable <> ssdUnspec then
+                                                          Attributes.Deferrable := Deferrable;
+                                                      end;
+                                                      $2.Obj.Free;
+                                                    end;
+                                                  end; }
         ;
+
 
   collate_clause_opt :
         /* Empty */
@@ -1419,7 +1368,9 @@ uses
         /* Empty */                             { $$.Text := ''; $$.Obj := nil; }
         |       left_paren precision comma scale right_paren
                                                 { $$.Text := ''; $$.Obj := nil;
-                                                  yyerror('Integer scaling not supported at the moment. E-mail the author.'); }
+                                                  yyerror('Integer scaling not supported at the moment. E-mail the author.');
+                                                  $2.Obj.Free;
+                                                  $4.Obj.Free; }
         |       left_paren precision right_paren
                                                 { $$.Text := ''; $$.Obj := nil;
                                                   yyinfo('Integer precision ignored in type.');
@@ -1518,6 +1469,7 @@ uses
                                                   $$.Obj := MakeClass(TSQLSynIntervalType);
                                                   with $$.Obj as TSQLSynIntervalType do
                                                   begin
+                                                    GeneralType := sgtInterval;
                                                     InsertTailChild($2.Obj);
                                                     Qualifier := $2.Obj as TSQLSynIntervalQualifier;
                                                   end; }
@@ -1529,6 +1481,7 @@ uses
                                                   $$.Obj := MakeClass(TSQLSynIntervalQualifier);
                                                   with $$.Obj as TSQlSynIntervalQualifier do
                                                   begin
+                                                    StructuralType := sstIntervalQualifier;
                                                     Start := TSQLSynQualField($1.Obj);
                                                     _End := TSQLSynQualField($1.Obj);
                                                   end; }
@@ -1537,6 +1490,7 @@ uses
                                                   $$.Obj := MakeClass(TSQLSynIntervalQualifier);
                                                   with $$.Obj as TSQlSynIntervalQualifier do
                                                   begin
+                                                    StructuralType := sstIntervalQualifier;
                                                     Start := TSQLSynQualField($1.Obj);
                                                     _End := TSQLSynQualField($3.Obj);
                                                   end; }
@@ -1545,6 +1499,7 @@ uses
                                                   $$.Obj := MakeClass(TSQLSynIntervalQualifier);
                                                   with $$.Obj as TSQlSynIntervalQualifier do
                                                   begin
+                                                    StructuralType := sstIntervalQualifier;
                                                     Start := sqfSecond;
                                                     _End := sqfSecond;
                                                   end; }
@@ -1629,6 +1584,13 @@ uses
                                                   ($$.Obj as TSqlSynIdent).IdentName := $$.Text;
                                                   $3.Obj.Free;
                                                   $5.Obj.Free; }
+        |       identifier period identifier period identifier period identifier
+                                                { $$ := $1;
+                                                  $$.Text := $$.Text + '.' + $3.Text + '.' + $5.Text + '.' + $7.Text;
+                                                  ($$.Obj as TSqlSynIdent).IdentName := $$.Text;
+                                                  $3.Obj.Free;
+                                                  $5.Obj.Free;
+                                                  $7.Obj.Free; }
         ;
 
   qualified_name_trail_asterisk :
@@ -1917,46 +1879,80 @@ uses
 */
 
   column_constraint_definition :
-		constraint_name_definition_opt
                 column_constraint
-                constraint_attributes_opt
                                                 { //NB. Arbitary check constraints not supported
                                                   //at this time, so building this part of the tree is
                                                   //optional...
-
-                                                  //TODO - Always create relational constraint so we can
-                                                  //fix up columns later.
-                                                  if Assigned($2.Obj) then
+                                                  //No constraint_name_definition_opt or constraint_attributes_opt
+                                                  //here: empty optionals before/after each list element make
+                                                  //NOT NULL / NOT DEFERRABLE ambiguous. Attributes are separate
+                                                  //list elements, see column_constraint_definition_opts.
+                                                  $$.Text := '';
+                                                  if Assigned($1.Obj) then
                                                   begin
-                                                    $$.Text := '';
                                                     $$.Obj := MakeClass(TSqlSynConstraint);
                                                     with $$.Obj as TSqlSynConstraint do
                                                     begin
                                                       StructuralType := sstConstraint;
                                                       ConstraintType := sctColumn;
-                                                      if Assigned($1.Obj) then
-                                                      begin
-                                                        InsertTailChild($1.Obj);
-                                                        Name := $1.Obj as TSqlSynIdent;
-                                                      end;
                                                       //For relational column constraints, reffing rows fixed up
                                                       //later.
-                                                      InsertTailChild($2.Obj);
+                                                      InsertTailChild($1.Obj);
                                                       Detail := $1.Obj as TSqlSynConstraintDetail;
-                                                      if Assigned($3.Obj) then
-                                                      begin
-                                                        InsertTailChild($3.Obj);
-                                                        Attributes := $3.Obj as TSqlSynConstraintAttributes;
-                                                      end;
+                                                    end;
+                                                  end
+                                                  else
+                                                    $$.Obj := nil; }
+        |       constraint_name_definition column_constraint
+                                                { $$.Text := '';
+                                                  if Assigned($2.Obj) then
+                                                  begin
+                                                    $$.Obj := MakeClass(TSqlSynConstraint);
+                                                    with $$.Obj as TSqlSynConstraint do
+                                                    begin
+                                                      StructuralType := sstConstraint;
+                                                      ConstraintType := sctColumn;
+                                                      InsertTailChild($1.Obj);
+                                                      Name := $1.Obj as TSqlSynIdent;
+                                                      InsertTailChild($2.Obj);
+                                                      Detail := $2.Obj as TSqlSynConstraintDetail;
                                                     end;
                                                   end
                                                   else
                                                   begin
-                                                    $$.Text := '';
                                                     $$.Obj := nil;
                                                     $1.Obj.Free;
-                                                    $3.Obj.Free;
-                                                  end;}
+                                                  end; }
+        ;
+
+  column_constraint_attribute :
+                constraint_check_time
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynConstraintAttributes);
+                                                  with ($$.Obj as TSqlSynConstraintAttributes) do
+                                                  begin
+                                                    StructuralType := sstConstraintAttributes;
+                                                    InitDeferred := TSqlSynInitDeferred($1.Obj);
+                                                    Deferrable := ssdUnspec;
+                                                  end; }
+        |       _DEFERRABLE
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynConstraintAttributes);
+                                                  with ($$.Obj as TSqlSynConstraintAttributes) do
+                                                  begin
+                                                    StructuralType := sstConstraintAttributes;
+                                                    InitDeferred := sidUnspec;
+                                                    Deferrable := ssdDeferrable;
+                                                  end; }
+        |       _NOT _DEFERRABLE
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynConstraintAttributes);
+                                                  with ($$.Obj as TSqlSynConstraintAttributes) do
+                                                  begin
+                                                    StructuralType := sstConstraintAttributes;
+                                                    InitDeferred := sidUnspec;
+                                                    Deferrable := ssdNotDeferrable;
+                                                  end; }
         ;
 
   constraint_name_definition :
@@ -2015,13 +2011,10 @@ uses
 		_REFERENCES referenced_table_and_columns
                 match_type_opt
                 referential_triggered_action_opt
-                                                { $$.Obj := MakeClass(TSqlSynReferencesConstraintDetail);
+                                                { $$ := $2;
                                                   with $$.Obj as TSqlSynReferencesConstraintDetail do
                                                   begin
-                                                    StructuralType := sstConstraintDetail;
-                                                    DetailType := cdtReferences;
                                                     MatchType := TSqlSynMatchType($3.Obj);
-                                                    FlattenReffedDetails($2.Obj as TTempTpl);
                                                     if Assigned($4.Obj) then
                                                     begin
                                                       InsertTailChild($4.Obj);
@@ -2048,11 +2041,19 @@ uses
   referenced_table_and_columns :
                 table_name reference_column_list_opt
                                                 { $$.Text := '';
-                                                  if Assigned($2.Obj) then
-                                                    $$.Obj := $2.Obj
-                                                  else
-                                                    $$.Obj := MakeClass(TTempTpl);
-                                                  ($$.Obj as TTempTpl).InsertHeadChild($1.Obj); }
+                                                  $$.Obj := MakeClass(TSqlSynReferencesConstraintDetail);
+                                                  with $$.Obj as TSqlSynReferencesConstraintDetail do
+                                                  begin
+                                                    StructuralType := sstConstraintDetail;
+                                                    DetailType := cdtReferences;
+                                                    InsertTailChild($1.Obj);
+                                                    ReferencesTable := $1.Obj as TSqlSynIdent;
+                                                    if Assigned($2.Obj) then
+                                                    begin
+                                                      InsertTailChild($2.Obj);
+                                                      ReferencesColumns := $2.Obj as TSqlSynList;
+                                                    end;
+                                                  end; }
         ;
 
   reference_column_list_opt :
@@ -2077,11 +2078,11 @@ uses
   column_name_list :
                 column_name
                                                 { $$.Text := '';
-                                                  $$.Obj := MakeClass(TTempTpl);
-                                                  ($$.Obj as TTempTpl).InsertTailChild($1.Obj); }
+                                                  $$.Obj := MakeClass(TSqlSynList);
+                                                  ($$.Obj as TSqlSynList).InsertTailChild($1.Obj); }
         |       column_name_list comma column_name
                                                 { $$ := $1;
-                                                  ($$.Obj as TTempTpl).InsertTailChild($3.Obj); }
+                                                  ($$.Obj as TSqlSynList).InsertTailChild($3.Obj); }
         ;
 
   match_type :
@@ -2306,7 +2307,7 @@ uses
   primary_expression :
                 unsigned_value_specification
                                                 { $$ := $1; }
-    |           column_reference
+    |           column_reference_as_expr
                                                 { $$ := $1; }
     |           set_function_specification
                                                 { $$ := $1; }
@@ -2334,6 +2335,19 @@ uses
                 primary_expression
                                                 { $$ := $1; }
       |         primary_expression postfix_op
+                                                { if Assigned($2.Obj) then
+                                                  begin
+                                                    //Interval qualifier: the operator node wraps the operand.
+                                                    $$ := $2;
+                                                    with $$.Obj as TSqlSynIntervalQualifierOperator do
+                                                    begin
+                                                      InsertHeadChild($1.Obj);
+                                                      Expr := $1.Obj as TSqlSynExpr;
+                                                    end;
+                                                  end
+                                                  else
+                                                    $$ := $1; //Postfix op ignored (time zone, collation).
+                                                }
     ;
 
   postfix_op :
@@ -2342,13 +2356,14 @@ uses
                                                   yyerror('Time zones not supported');
                                                   $1.Obj.Free; }
         |       interval_qualifier
-                                                { $$.Text := '';
-                                                  $$.Obj := MakeClass(TSqlSynUnaryOperator);
-                                                  with $$.Obj as TSqlSynUnaryOperator do
+                                                { //The operand (Expr) is filled in by postfix_expression.
+                                                  $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynIntervalQualifierOperator);
+                                                  with $$.Obj as TSqlSynIntervalQualifierOperator do
                                                   begin
                                                     ExprType := setUnaryPostfixIntervalQualifier;
                                                     InsertTailChild($1.Obj);
-                                                    Expr := $1.Obj as TSqlSynExpr;
+                                                    Qualifier := $1.Obj as TSQLSynIntervalQualifier;
                                                   end; }
         |       collate_clause
                                                 { $$.Text := ''; $$.Obj := nil;
@@ -2449,14 +2464,24 @@ uses
                                                 { $$ := $1 }
         ;
 
+  /* As per the BNF, scalar, table (and row) subqueries are all the same
+     syntax: <subquery> ::= ( <query expression> ), distinguished by context.
+     table_subquery MUST precede scalar_subquery: the remaining reduce/reduce
+     conflict on ((query)) is resolved in favour of the first rule, giving the
+     standard's bracketed-query reading. */
+  table_subquery :
+                subquery
+                                                { $$ := $1; }
+        ;
+
   scalar_subquery :
-        left_paren subquery right_paren
-                                                { $$ := $2; }
+                subquery
+                                                { $$ := $1; }
         ;
 
   subquery :
-        query_expression
-                                                { $$ := $1; }
+        left_paren query_expression right_paren
+                                                { $$ := $2; }
         ;
 
   unsigned_value_specification :
@@ -2554,6 +2579,18 @@ uses
                                                 { $$ := $1; }
         ;
 
+  column_reference_as_expr :
+                column_reference
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynIdentWrapper);
+                                                  with $$.Obj as TSqlSynIdentWrapper do
+                                                  begin
+                                                    ExprType := setIdentWrapper;
+                                                    InsertTailChild($1.Obj);
+                                                    Ident := $1.Obj as TSqlSynIdent;
+                                                  end; }
+        ;
+
   column_reference :
                 /* Table Name or Correlation name qualified
                    or just bare column name */
@@ -2581,7 +2618,7 @@ uses
         ;
 
   set_quantifier_args :
-        |       asterisk
+                asterisk
                                                 { $$.Text := '';
                                                   $$.Obj := MakeClass(TSqlSynSetFunction);
                                                   with $$.Obj as TSqlSynSetFunction do
@@ -2655,6 +2692,8 @@ uses
   query_expression :
 		non_join_query_term
                                                 { $$ := $1; }
+	|	joined_table_as_query
+                                                { $$ := $1; }
 	|	query_expression _UNION all_opt corresponding_spec_opt query_term
                                                 { $$.Text := '';
                                                   $$.Obj := MakeClass(TSqlSynQueryBinary);
@@ -2667,7 +2706,7 @@ uses
                                                     if Assigned($4.Obj) then
                                                     begin
                                                       InsertTailChild($4.Obj);
-                                                      Corresponding := $4.Obj;
+                                                      Corresponding := $4.Obj as TSqlSynList;
                                                     end;
                                                     InsertTailChild($5.Obj);
                                                     Right := $5.Obj as TSqlSynExpr;
@@ -2684,7 +2723,7 @@ uses
                                                     if Assigned($4.Obj) then
                                                     begin
                                                       InsertTailChild($4.Obj);
-                                                      Corresponding := $4.Obj;
+                                                      Corresponding := $4.Obj as TSqlSynList;
                                                     end;
                                                     InsertTailChild($5.Obj);
                                                     Right := $5.Obj as TSqlSynExpr;
@@ -2706,7 +2745,7 @@ uses
                                                     if Assigned($4.Obj) then
                                                     begin
                                                       InsertTailChild($4.Obj);
-                                                      Corresponding := $4.Obj;
+                                                      Corresponding := $4.Obj as TSqlSynList;
                                                     end;
                                                     InsertTailChild($5.Obj);
                                                     Right := $5.Obj as TSqlSynExpr;
@@ -2758,7 +2797,11 @@ uses
 		asterisk
                                                 { $$.Text := '';
                                                   $$.Obj := MakeClass(TSqlSynSelectList);
-                                                  ($$.Obj as TSqlSynSelectList).Wildcard := true; }
+                                                  with $$.Obj as TSqlSynSelectList do
+                                                  begin
+                                                    StructuralType := sstSelectList;
+                                                    Wildcard := true;
+                                                  end; }
 	|	select_list_opt
                                                 { $$ := $1; }
         ;
@@ -2767,7 +2810,8 @@ uses
                 select_sublist
                                                 { $$.Text := '';
                                                   $$.Obj := MakeClass(TSqlSynSelectList);
-                                                  $$.Obj.InsertTailChild($1.Obj);}
+                                                  ($$.Obj as TSqlSynSelectList).StructuralType := sstSelectList;
+                                                  $$.Obj.InsertTailChild($1.Obj); }
         |       select_list_opt comma select_sublist
                                                 { $$ := $1;
                                                   $$.Obj.InsertTailChild($3.Obj); }
@@ -2821,8 +2865,9 @@ uses
                                           $$.Obj := MakeClass(TSqlSynQuerySelect);
                                           with $$.Obj as TSqlSynQuerySelect do
                                           begin
+                                            ExprType := setQuerySelect;
                                             InsertTailChild($1.Obj);
-                                            From := $1.Obj;
+                                            From := $1.Obj as TSqlSynList;
                                             if Assigned($2.Obj) then
                                             begin
                                               InsertTailChild($2.Obj);
@@ -2831,7 +2876,7 @@ uses
                                             if Assigned($3.Obj) then
                                             begin
                                               InsertTailChild($3.Obj);
-                                              GroupBy := $3.Obj;
+                                              GroupBy := $3.Obj as TSqlSynList;
                                             end;
                                             if Assigned($4.Obj) then
                                             begin
@@ -2868,7 +2913,7 @@ uses
 
   from_clause_list :
                 table_reference
-                                        { $$.Obj := MakeClass(TTempTpl);
+                                        { $$.Obj := MakeClass(TSqlSynList);
                                           $$.Text := '';
                                           $$.Obj.InsertTailChild($1.Obj); }
 
@@ -2894,9 +2939,9 @@ The notation is written out longhand several times, instead;
         ;
 
   table_factor :
-                table_name
+                table_name_as_expr
                                         { $$ := $1; }
-        |       table_name correlation_specification
+        |       table_name_as_expr correlation_specification
                                         { $$ := $2;
                                           $$.Obj.InsertHeadChild($1.Obj);
                                           ($$.Obj as TSqlSynCorrelation).TableLike := $1.Obj as TSqlSynExpr };
@@ -2904,7 +2949,7 @@ The notation is written out longhand several times, instead;
                                         { $$ := $2;
                                           $$.Obj.InsertHeadChild($1.Obj);
                                           ($$.Obj as TSqlSynCorrelation).TableLike := $1.Obj as TSqlSynExpr };
-        |       table_name _AS correlation_specification
+        |       table_name_as_expr _AS correlation_specification
                                         { $$ := $3;
                                           $$.Obj.InsertHeadChild($1.Obj);
                                           ($$.Obj as TSqlSynCorrelation).TableLike := $1.Obj as TSqlSynExpr };
@@ -2912,6 +2957,33 @@ The notation is written out longhand several times, instead;
                                         { $$ := $3;
                                           $$.Obj.InsertHeadChild($1.Obj);
                                           ($$.Obj as TSqlSynCorrelation).TableLike := $1.Obj as TSqlSynExpr };
+        /* A bracketed join with a correlation name is a derived table whose
+           query is the join, i.e. (SELECT * FROM <join>) AS x. It can't go
+           through derived_table: at the right paren the parser has already
+           shifted it as a bracketed joined_table (see joined_table_as_query). */
+        |       left_paren joined_table right_paren correlation_specification
+                                        { $$ := $4;
+                                          TmpClass := WrapJoinAsQuery($2.Obj);
+                                          $$.Obj.InsertHeadChild(TmpClass);
+                                          ($$.Obj as TSqlSynCorrelation).TableLike := TmpClass as TSqlSynExpr; }
+        |       left_paren joined_table right_paren _AS correlation_specification
+                                        { $$ := $5;
+                                          TmpClass := WrapJoinAsQuery($2.Obj);
+                                          $$.Obj.InsertHeadChild(TmpClass);
+                                          ($$.Obj as TSqlSynCorrelation).TableLike := TmpClass as TSqlSynExpr; }
+        ;
+
+  /* Table names are TSqlSynIdent; wrap them so joins / correlations get a TSqlSynExpr. */
+  table_name_as_expr :
+                table_name
+                                        { $$.Text := '';
+                                          $$.Obj := MakeClass(TSqlSynIdentWrapper);
+                                          with $$.Obj as TSqlSynIdentWrapper do
+                                          begin
+                                            ExprType := setIdentWrapper;
+                                            InsertTailChild($1.Obj);
+                                            Ident := $1.Obj as TSqlSynIdent;
+                                          end; }
         ;
 
   correlation_specification :
@@ -2924,7 +2996,10 @@ The notation is written out longhand several times, instead;
                                             InsertHeadChild($1.Obj);
                                             CorrelationName := $1.Obj as TSqlSynIdent;
                                             if Assigned($2.Obj) then
-                                              FlattenDerivedColList($2.Obj as TTempTpl);
+                                            begin
+                                              InsertTailChild($2.Obj);
+                                              Columns := $2.Obj as TSqlSynList;
+                                            end;
                                           end; }
         ;
 
@@ -2953,11 +3028,6 @@ The notation is written out longhand several times, instead;
                                         { $$ := $1; }
         ;
 
-  table_subquery :
-                left_paren query_expression right_paren
-                                        { $$ := $2; }
-        ;
-
   joined_table :
 		cross_join
                                         { $$ := $1; }
@@ -2967,8 +3037,17 @@ The notation is written out longhand several times, instead;
                                         { $$ := $2; }
         ;
 
+  /* SQL-92: a <joined table> used as a query expression / term / primary
+     means SELECT * FROM <joined table>. Build exactly that tree, so nothing
+     downstream sees a bare join. */
+  joined_table_as_query :
+                joined_table
+                                        { $$.Text := '';
+                                          $$.Obj := WrapJoinAsQuery($1.Obj); }
+        ;
+
   cross_join :
-        table_reference _CROSS _JOIN table_factor
+        table_reference _CROSS _JOIN join_right_operand
                                         { $$.Text := '';
                                           $$.Obj := MakeClass(TSqlSynJoinBinary);
                                           with $$.Obj as TSqlSynJoinBinary do
@@ -2983,7 +3062,7 @@ The notation is written out longhand several times, instead;
         ;
 
   qualified_join :
-                table_reference _JOIN table_factor join_specification
+                table_reference _JOIN join_right_operand join_specification
                                         { $$.Text := '';
                                           $$.Obj := MakeClass(TSqlSynJoinBinary);
                                           with $$.Obj as TSqlSynJoinBinary do
@@ -2997,7 +3076,7 @@ The notation is written out longhand several times, instead;
                                             InsertTailChild($4.Obj);
                                             Spec := $4.Obj as TSqlSynJoinSpec;
                                           end; }
-        |       table_reference _INNER _JOIN table_factor join_specification
+        |       table_reference _INNER _JOIN join_right_operand join_specification
                                         { $$.Text := '';
                                           $$.Obj := MakeClass(TSqlSynJoinBinary);
                                           with $$.Obj as TSqlSynJoinBinary do
@@ -3011,7 +3090,7 @@ The notation is written out longhand several times, instead;
                                             InsertTailChild($5.Obj);
                                             Spec := $5.Obj as TSqlSynJoinSpec;
                                           end; }
-        |       table_reference _LEFT outer_opt _JOIN table_factor join_specification
+        |       table_reference _LEFT outer_opt _JOIN join_right_operand join_specification
                                         { $$.Text := '';
                                           $$.Obj := MakeClass(TSqlSynJoinBinary);
                                           with $$.Obj as TSqlSynJoinBinary do
@@ -3026,7 +3105,7 @@ The notation is written out longhand several times, instead;
                                             Spec := $6.Obj as TSqlSynJoinSpec;
                                             Outer := Boolean($3.Obj);
                                           end; }
-        |       table_reference _RIGHT outer_opt _JOIN table_factor join_specification
+        |       table_reference _RIGHT outer_opt _JOIN join_right_operand join_specification
                                         { $$.Text := '';
                                           $$.Obj := MakeClass(TSqlSynJoinBinary);
                                           with $$.Obj as TSqlSynJoinBinary do
@@ -3041,7 +3120,7 @@ The notation is written out longhand several times, instead;
                                             Spec := $6.Obj as TSqlSynJoinSpec;
                                             Outer := Boolean($3.Obj);
                                           end; }
-        |       table_reference _FULL outer_opt _JOIN table_factor join_specification
+        |       table_reference _FULL outer_opt _JOIN join_right_operand join_specification
                                         { $$.Text := '';
                                           $$.Obj := MakeClass(TSqlSynJoinBinary);
                                           with $$.Obj as TSqlSynJoinBinary do
@@ -3056,10 +3135,22 @@ The notation is written out longhand several times, instead;
                                             Spec := $6.Obj as TSqlSynJoinSpec;
                                             Outer := Boolean($3.Obj);
                                           end; }
-        /* TODO |       table_reference _UNION _JOIN table_factor
-           without adding any more conflicts.
-        */
-        |       table_reference _NATURAL _JOIN table_factor
+        /* UNION JOIN is lexed as the single token _UNION_JOIN: after a table
+           reference, a plain _UNION can't tell UNION JOIN from a query UNION
+           (FROM a UNION SELECT ..) with one token of lookahead. */
+        |       table_reference _UNION_JOIN join_right_operand
+                                        { $$.Text := '';
+                                          $$.Obj := MakeClass(TSqlSynJoinBinary);
+                                          with $$.Obj as TSqlSynJoinBinary do
+                                          begin
+                                            ExprType := setJoin;
+                                            JoinType := jtUnion;
+                                            InsertHeadChild($1.Obj);
+                                            Left := $1.Obj as TSqlSynExpr;
+                                            InsertTailChild($3.Obj);
+                                            Right := $3.Obj as TSqlSynExpr;
+                                          end; }
+        |       table_reference _NATURAL _JOIN join_right_operand
                                         { $$.Text := '';
                                           $$.Obj := MakeClass(TSqlSynJoinBinary);
                                           with $$.Obj as TSqlSynJoinBinary do
@@ -3072,7 +3163,7 @@ The notation is written out longhand several times, instead;
                                             Right := $4.Obj as TSqlSynExpr;
                                             Natural := true;
                                           end; }
-        |       table_reference _NATURAL _INNER _JOIN table_factor
+        |       table_reference _NATURAL _INNER _JOIN join_right_operand
                                         { $$.Text := '';
                                           $$.Obj := MakeClass(TSqlSynJoinBinary);
                                           with $$.Obj as TSqlSynJoinBinary do
@@ -3085,7 +3176,7 @@ The notation is written out longhand several times, instead;
                                             Right := $5.Obj as TSqlSynExpr;
                                             Natural := true;
                                           end; }
-        |       table_reference _NATURAL _LEFT outer_opt _JOIN table_factor
+        |       table_reference _NATURAL _LEFT outer_opt _JOIN join_right_operand
                                         { $$.Text := '';
                                           $$.Obj := MakeClass(TSqlSynJoinBinary);
                                           with $$.Obj as TSqlSynJoinBinary do
@@ -3099,7 +3190,7 @@ The notation is written out longhand several times, instead;
                                             Natural := true;
                                             Outer := Boolean($4.Obj);
                                           end; }
-        |       table_reference _NATURAL _RIGHT outer_opt _JOIN table_factor
+        |       table_reference _NATURAL _RIGHT outer_opt _JOIN join_right_operand
                                         { $$.Text := '';
                                           $$.Obj := MakeClass(TSqlSynJoinBinary);
                                           with $$.Obj as TSqlSynJoinBinary do
@@ -3113,7 +3204,7 @@ The notation is written out longhand several times, instead;
                                             Natural := true;
                                             Outer := Boolean($4.Obj);
                                           end; }
-        |       table_reference _NATURAL _FULL outer_opt _JOIN table_factor
+        |       table_reference _NATURAL _FULL outer_opt _JOIN join_right_operand
                                         { $$.Text := '';
                                           $$.Obj := MakeClass(TSqlSynJoinBinary);
                                           with $$.Obj as TSqlSynJoinBinary do
@@ -3127,8 +3218,19 @@ The notation is written out longhand several times, instead;
                                             Natural := true;
                                             Outer := Boolean($4.Obj);
                                           end; }
-        /* TODO |       table_reference _NATURAL _UNION _JOIN table_factor
-           without adding any more conflicts.  */
+        /* No NATURAL UNION JOIN: the SQL-92 syntax rules for <joined table>
+           forbid NATURAL and a <join specification> with UNION. */
+        ;
+
+  /* Right-hand operand of a join. The BNF allows any <table reference> here,
+     but an unbracketed right-nested join (a JOIN b JOIN c ON .. ON ..) makes
+     join chains ambiguous (~40 extra conflicts). So a joined table on the
+     right must be bracketed: a JOIN (b JOIN c ON ..) ON .. */
+  join_right_operand :
+                table_factor
+                                        { $$ := $1; }
+        |       left_paren joined_table right_paren
+                                        { $$ := $2; }
         ;
 
   outer_opt:
@@ -3166,7 +3268,8 @@ The notation is written out longhand several times, instead;
                                           begin
                                             StructuralType := sstJoinSpec;
                                             SpecType := stNamedColsJoin;
-                                            FlattenColList($3.Obj as TTempTpl);
+                                            InsertTailChild($3.Obj);
+                                            ColList := $3.Obj as TSqlSynList;
                                           end; }
         ;
 
@@ -3188,7 +3291,7 @@ The notation is written out longhand several times, instead;
   grouping_column_reference_list :
                 grouping_column_reference
                                         { $$.Text := '';
-                                          $$.Obj := MakeClass(TTempTpl);
+                                          $$.Obj := MakeClass(TSqlSynList);
                                           $$.Obj.InsertTailChild($1.Obj); }
         |       grouping_column_reference_list comma grouping_column_reference
                                         { $$ := $1;
@@ -3204,7 +3307,8 @@ The notation is written out longhand several times, instead;
   collate_clause :
                 _COLLATE collation_name
                                         { $$.Text := ''; $$.Obj := nil;
-                                          yyerror('Collations not supported'); }
+                                          yyerror('Collations not supported');
+                                          $2.Obj.Free; }
         ;
 
   collation_name :
@@ -3253,6 +3357,8 @@ The notation is written out longhand several times, instead;
   query_term :
                 non_join_query_term
                                         { $$ := $1; }
+        |       joined_table_as_query
+                                        { $$ := $1; }
         ;
 
   corresponding_spec : _CORRESPONDING corresponding_column_list_opt
@@ -3273,6 +3379,8 @@ The notation is written out longhand several times, instead;
 
   query_primary :
                 non_join_query_primary
+                                        { $$ := $1; }
+        |       joined_table_as_query
                                         { $$ := $1; }
         ;
 
@@ -3310,18 +3418,18 @@ The notation is written out longhand several times, instead;
                                             ExprType := setCaseAbbr;
                                             CaseType := scetCoalesce;
                                             InsertTailChild($3.Obj);
-                                            List := $3.Obj;
+                                            List := $3.Obj as TSqlSynList;
                                           end; }
         ;
 
   expression_list :
                 expression
                                                 { $$.Text := '';
-                                                  $$.Obj := MakeClass(TTempTpl);
-                                                  ($$.Obj as TTempTpl).InsertTailChild($1.Obj); }
+                                                  $$.Obj := MakeClass(TSqlSynList);
+                                                  ($$.Obj as TSqlSynList).InsertTailChild($1.Obj); }
         |       expression_list comma expression
                                                 { $$ := $1;
-                                                  ($$.Obj as TTempTpl).InsertTailChild($3.Obj); }
+                                                  ($$.Obj as TSqlSynList).InsertTailChild($3.Obj); }
         ;
 
   case_specification :
@@ -3332,12 +3440,17 @@ The notation is written out longhand several times, instead;
         ;
 
   simple_case :
-		_CASE case_operand simple_when_clause else_clause_opt _END
-                                                { $$ := $3;
+		_CASE case_operand simple_when_clauses else_clause_opt _END
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynSimpleSearchedCase);
                                                   with $$.Obj as TSqlSynSimpleSearchedCase do
                                                   begin
+                                                    ExprType := setSimpleSearchedCase;
+                                                    SSCaseType := sscetSimple;
                                                     InsertHeadChild($2.Obj);
                                                     Operand := $2.Obj as TSqlSynExpr;
+                                                    InsertHeadChild($3.Obj);
+                                                    WhenClauses := $3.Obj as TSqlSynList;
                                                     if Assigned($4.Obj) then
                                                     begin
                                                       InsertTailChild($4.Obj);
@@ -3356,16 +3469,22 @@ The notation is written out longhand several times, instead;
                 expression                      { $$ := $1; }
         ;
 
+  simple_when_clauses :
+                simple_when_clause              { $$.Text := ''; $$.Obj := MakeClass(TSqlSynList);
+                                                  $$.Obj.InsertTailChild($1.Obj); }
+        |       simple_when_clauses simple_when_clause
+                                                { $$ := $1; $$.Obj.InsertTailChild($2.Obj); }
+        ;
+
   simple_when_clause :
                 _WHEN when_operand _THEN result
                                                 { $$.Text := '';
-                                                  $$.Obj := MakeClass(TSqlSynSimpleSearchedCase);
-                                                  with $$.Obj as TSqlSynSimpleSearchedCase do
+                                                  $$.Obj := MakeClass(TSqlSynSimpleCaseWhen);
+                                                  with $$.Obj as TSqlSynSimpleCaseWhen do
                                                   begin
-                                                    ExprType := setSimpleSearchedCase;
-                                                    SSCaseType := sscetSimple;
-                                                    InsertHeadChild($2.Obj);
-                                                    Comparator := $2.Obj as TSqlSynExpr;
+                                                    StructuralType := sstSimpleCaseWhen;
+                                                    InsertTailChild($2.Obj);
+                                                    ComparatorOrSearched := $2.Obj as TSqlSynExpr;
                                                     InsertTailChild($4.Obj);
                                                     _When := $4.Obj as TSqlSynExpr;
                                                   end; }
@@ -3387,28 +3506,39 @@ The notation is written out longhand several times, instead;
         ;
 
   searched_case :
-		_CASE searched_when_clause else_clause_opt _END
-                                                { $$ := $2;
+		_CASE searched_when_clauses else_clause_opt _END
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynSimpleSearchedCase);
                                                   with $$.Obj as TSqlSynSimpleSearchedCase do
                                                   begin
                                                     if Assigned($3.Obj) then
                                                     begin
+                                                      ExprType := setSimpleSearchedCase;
+                                                      SSCaseType := sscetSearched;
+                                                      InsertTailChild($2.Obj);
+                                                      WhenClauses := $2.Obj as TSqlSynList;
                                                       InsertTailChild($3.Obj);
                                                       _Else := $3.Obj as TSqlSynExpr;
                                                     end;
                                                   end; }
         ;
 
+  searched_when_clauses :
+                searched_when_clause            { $$.Text := ''; $$.Obj := MakeClass(TSqlSynList);
+                                                  $$.Obj.InsertTailChild($1.Obj); }
+        |       searched_when_clauses searched_when_clause
+                                                { $$ := $1; $$.Obj.InsertTailChild($2.Obj); }
+        ;
+
   searched_when_clause :
                 _WHEN search_condition _THEN result
                                                 { $$.Text := '';
-                                                  $$.Obj := MakeClass(TSqlSynSimpleSearchedCase);
-                                                  with $$.Obj as TSqlSynSimpleSearchedCase do
+                                                  $$.Obj := MakeClass(TSqlSynSimpleCaseWhen);
+                                                  with $$.Obj as TSqlSynSimpleCaseWhen do
                                                   begin
-                                                    ExprType := setSimpleSearchedCase;
-                                                    SSCaseType := sscetSearched;
-                                                    InsertHeadChild($2.Obj);
-                                                    Comparator := $2.Obj as TSqlSynExpr;
+                                                    StructuralType := sstSimpleCaseWhen;
+                                                    InsertTailChild($2.Obj);
+                                                    ComparatorOrSearched := $2.Obj as TSqlSynExpr;
                                                     InsertTailChild($4.Obj);
                                                     _When := $4.Obj as TSqlSynExpr;
                                                   end; }
@@ -3540,8 +3670,11 @@ The notation is written out longhand several times, instead;
   form_of_use_conversion :
 		_CONVERT left_paren expression
                 _USING form_of_use_conversion_name right_paren
-                                                { $$.Text := ''; $$.Obj := nil;
-                                                  yyerror('Form of use conversions not supported.'); }
+                                                { //Pass the operand through rather than NIL: this is an expression,
+                                                  //and a NIL would reach every rule that takes one.
+                                                  $$ := $3;
+                                                  yyerror('Form of use conversions not supported.');
+                                                  $5.Obj.Free; }
         ;
 
   form_of_use_conversion_name : qualified_name
@@ -3550,8 +3683,10 @@ The notation is written out longhand several times, instead;
 
   character_translation :
 		_TRANSLATE left_paren expression _USING translation_name right_paren
-                                                { $$.Text := ''; $$.Obj := nil;
-                                                  yyerror('Character translations not supported.'); }
+                                                { //Pass the operand through, as form_of_use_conversion.
+                                                  $$ := $3;
+                                                  yyerror('Character translations not supported.');
+                                                  $5.Obj.Free; }
         ;
 
   translation_name : qualified_name
@@ -3612,6 +3747,16 @@ The notation is written out longhand several times, instead;
                                                      InsertTailChild($4.Obj);
                                                      Third := $4.Obj as TSqlSynExpr;
                                                   end; }
+        |       _FROM trim_source
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynCharacterFunction);
+                                                  with $$.Obj as TSqlSynCharacterFunction do
+                                                  begin
+                                                     ExprType := setCharacterFunction;
+                                                     FuncType := cfsTrim;
+                                                     InsertTailChild($2.Obj);
+                                                     First := $2.Obj as TSqlSynExpr;
+                                                  end; }
   ;
 
   trim_specification :
@@ -3620,6 +3765,7 @@ The notation is written out longhand several times, instead;
                                                   $$.Obj := MakeClass(TSqlSynTrimSpecification);
                                                   with $$.Obj as TSqlSynTrimSpecification do
                                                   begin
+                                                    StructuralType := sstTrimSpecification;
                                                     SpecType := sttLeading;
                                                   end; }
         |       _TRAILING
@@ -3627,6 +3773,7 @@ The notation is written out longhand several times, instead;
                                                   $$.Obj := MakeClass(TSqlSynTrimSpecification);
                                                   with $$.Obj as TSqlSynTrimSpecification do
                                                   begin
+                                                    StructuralType := sstTrimSpecification;
                                                     SpecType := sttTrailing;
                                                   end; }
         |       _BOTH
@@ -3634,6 +3781,7 @@ The notation is written out longhand several times, instead;
                                                   $$.Obj := MakeClass(TSqlSynTrimSpecification);
                                                   with $$.Obj as TSqlSynTrimSpecification do
                                                   begin
+                                                    StructuralType := sstTrimSpecification;
                                                     SpecType := sttBoth;
                                                   end; }
   ;
@@ -3694,7 +3842,7 @@ The notation is written out longhand several times, instead;
   time_zone_specifier :
                 _LOCAL
                                                 { $$.Text := ''; $$.Obj := nil; //Not impl. }
-        |       _TIME _ZONE expression
+        |       _TIME _ZONE primary_expression
                                                 { $$ := $3; //Not impl. }
         ;
 
@@ -3879,18 +4027,21 @@ The notation is written out longhand several times, instead;
         ;
 
   in_value_list :
-                expression                      { $$.Text := '';
-                                                  $$.Obj := MakeClass(TTempTpl);
-                                                  with $$.Obj as TTempTpl do
-                                                        InsertTailChild($1.Obj); }
+                expression comma expression     { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynList);
+                                                  with $$.Obj as TSqlSynList do
+                                                  begin
+                                                    InsertTailChild($1.Obj);
+                                                    InsertTailChild($3.Obj);
+                                                  end; }
         |       in_value_list comma expression
                                                 { $$ := $1;
-                                                  with $$.Obj as TTempTpl do
+                                                  with $$.Obj as TSqlSynList do
                                                         InsertTailChild($3.Obj); }
         ;
 
   like_predicate : /* Check char-bit expressions */
-                expression _LIKE pattern like_predicate_escape_opt
+                row_value_constructor _LIKE pattern like_predicate_escape_opt
                                                 { $$.Text := '';
                                                   $$.Obj := MakeClass(TSqlSyn3VPredicate);
                                                   with $$.Obj as TSqlSyn3VPredicate do
@@ -3907,7 +4058,7 @@ The notation is written out longhand several times, instead;
                                                       Right := $4.Obj as TSqlSynExpr;
                                                     end;
                                                   end; }
-        |       expression _NOT _LIKE pattern like_predicate_escape_opt
+        |       row_value_constructor _NOT _LIKE pattern like_predicate_escape_opt
                                                 { $$.Text := '';
                                                   $$.Obj := MakeClass(TSqlSyn3VPredicate);
                                                   with $$.Obj as TSqlSyn3VPredicate do
@@ -4127,6 +4278,15 @@ The notation is written out longhand several times, instead;
                                              Deferrable := ssdDeferrable;
                                              InitDeferred := TSqlSynInitDeferred($2.Obj);
                                            end; }
+	|	_NOT _DEFERRABLE constraint_check_time_opt
+                                        {  $$.Text := '';
+                                           $$.Obj := MakeClass(TSqlSynConstraintAttributes);
+                                           with ($$.Obj as TSqlSynConstraintAttributes) do
+                                           begin
+                                             StructuralType := sstConstraintAttributes;
+                                             Deferrable := ssdNotDeferrable;
+                                             InitDeferred := TSqlSynInitDeferred($3.Obj);
+                                           end; }
         ;
 
   deferrable_opt :
@@ -4157,46 +4317,27 @@ The notation is written out longhand several times, instead;
                 constraint_name_definition_opt
                 table_constraint
                 table_constraint_attributes_opt
-                                                { //NB. Arbitary check constraints not supported
-                                                  //at this time, so building this part of the tree is
-                                                  //optional...
-                                                  if Assigned($2.Obj) then
+                                                { $$ := $2;
+                                                  if not Assigned($$.Obj) then
                                                   begin
+                                                    //Check constraint ignored: so are its name and attributes.
                                                     $$.Text := '';
-                                                    //Always relational constraint, always provided column list.
-                                                    $$.Obj := MakeClass(TSqlSynConstraint);
-                                                    with $$.Obj as TSqlSynConstraint do
-                                                    begin
-                                                      StructuralType := sstConstraint;
-                                                      ConstraintType := sctTable;
-                                                      if Assigned($1.Obj) then
-                                                      begin
-                                                        InsertTailChild($1.Obj);
-                                                        Name := $1.Obj as TSqlSynIdent;
-                                                      end;
-                                                      //This is a table constraint so at this point,
-                                                      //can take columns from column list, instead of later
-                                                      //fixup.
-                                                      TmpClass := $2.Obj.FirstChild; // Column list.
-                                                      FlattenReffingCols(TmpClass as TTempTpl);
-                                                      TmpClass := $2.Obj.LastChild; // Constraint details.
-                                                      TmpClass.RemoveFromTree;
-                                                      InsertTailChild(TmpClass);
-                                                      Detail := TmpClass as TSqlSynConstraintDetail;
-                                                      if Assigned($3.Obj) then
-                                                      begin
-                                                        InsertTailChild($3.Obj);
-                                                        Attributes := $3.Obj as TSqlSynConstraintAttributes;
-                                                      end;
-                                                    end;
-                                                    $2.Obj.Free;
-                                                  end
-                                                  else
-                                                  begin
-                                                    $$.Text := '';
-                                                    $$.Obj := nil;
                                                     $1.Obj.Free;
                                                     $3.Obj.Free;
+                                                  end
+                                                  else
+                                                  with $$.Obj as TSqlSynTableConstraint do
+                                                  begin
+                                                    if Assigned($1.Obj) then
+                                                    begin
+                                                      InsertTailChild($1.Obj);
+                                                      Name := $1.Obj as TSqlSynIdent;
+                                                    end;
+                                                    if Assigned($3.Obj) then
+                                                    begin
+                                                      InsertTailChild($3.Obj);
+                                                      Attributes := $3.Obj as TSqlSynConstraintAttributes;
+                                                    end;
                                                   end; }
         ;
 
@@ -4213,7 +4354,7 @@ The notation is written out longhand several times, instead;
                                              end;
                                            end
                                            else
-                                             $1.Obj := nil; }
+                                             $$.Obj := nil; }
         ;
 
   table_constraint :
@@ -4222,18 +4363,22 @@ The notation is written out longhand several times, instead;
 	|	check_constraint_definition
                                                 { $$.Text := '';
                                                   $$.Obj := nil;
-                                                  yyinfo('Arbitrary check constraints not supported at thhis time');
+                                                  yyinfo('Arbitrary check constraints not supported at this time');
                                                   $1.Obj.Free;}
         ;
 
   unique_constraint_definition :
                 unique_specification left_paren unique_column_list right_paren
                                                 { $$.Text := '';
-                                                  $$.Obj := MakeClass(TTempTpl);
-                                                  with $$.Obj as TTempTpl do
+                                                  $$.Obj := MakeClass(TSqlSynTableConstraint);
+                                                  with $$.Obj as TSqlSynTableConstraint do
                                                   begin
-                                                    InsertTailChild($3.Obj); //Column list.
-                                                    InsertTailChild($1.Obj); //Unique specification.
+                                                    StructuralType := sstConstraint;
+                                                    ConstraintType := sctTable;
+                                                    InsertTailChild($1.Obj);
+                                                    Detail := $1.Obj as TSqlSynConstraintDetail;
+                                                    InsertTailChild($3.Obj);
+                                                    Columns := $3.Obj as TSqlSynList;
                                                   end; }
         ;
 
@@ -4245,11 +4390,15 @@ The notation is written out longhand several times, instead;
   referential_constraint_definition :
 		_FOREIGN _KEY left_paren referencing_columns right_paren references_specification
                                                 { $$.Text := '';
-                                                  $$.Obj := MakeClass(TTempTpl);
-                                                  with $$.Obj as TTempTpl do
+                                                  $$.Obj := MakeClass(TSqlSynTableConstraint);
+                                                  with $$.Obj as TSqlSynTableConstraint do
                                                   begin
-                                                    InsertTailChild($4.Obj); //Column list.
-                                                    InsertTailChild($6.Obj); //References specification.
+                                                    StructuralType := sstConstraint;
+                                                    ConstraintType := sctTable;
+                                                    InsertTailChild($6.Obj);
+                                                    Detail := $6.Obj as TSqlSynConstraintDetail;
+                                                    InsertTailChild($4.Obj);
+                                                    Columns := $4.Obj as TSqlSynList;
                                                   end; }
         ;
 
@@ -4264,8 +4413,17 @@ The notation is written out longhand several times, instead;
 --/h2
 */
 
+  temp_table_decls :
+        /* Empty */                             { $$.Obj := MakeClass(TSqlSynList); $$.Text := ''; }
+        |       temp_table_decls temporary_table_declaration
+                                                { $$ := $1;
+                                                  $$.Obj.InsertTailChild($2.Obj); }
+        ;
+
   module_contents :
-        /* Empty */                             { $$.Obj := MakeClass(TTempTpl); $$.Text := ''; }
+                module_content
+                                                { $$.Obj := MakeClass(TSqlSynList); $$.Text := '';
+                                                  $$.Obj.InsertTailChild($1.Obj); }
         |       module_contents module_content
                                                 { $$ := $1;
                                                   $$.Obj.InsertTailChild($2.Obj); }
@@ -4275,8 +4433,6 @@ The notation is written out longhand several times, instead;
 		declare_cursor
                                                 { $$ := $1; }
 	|	procedure
-                                                { $$ := $1; }
-        |       temporary_table_declaration
                                                 { $$ := $1; }
         ;
 
@@ -4318,12 +4474,12 @@ The notation is written out longhand several times, instead;
                                                     if Assigned($2.Obj) then
                                                     begin
                                                       InsertTailChild($2.Obj);
-                                                      OrderBy := $2.Obj;
+                                                      OrderBy := $2.Obj as TSqlSynList;
                                                     end;
                                                     if Assigned($3.Obj) then
                                                     begin
                                                       InsertTailChild($3.Obj);
-                                                      Updatability := $3.Obj;
+                                                      Updatability := $3.Obj as TSqlSynUpdatability;
                                                     end;
                                                   end; }
         ;
@@ -4336,14 +4492,14 @@ The notation is written out longhand several times, instead;
 
   sort_specification_list :
                 sort_specification              { $$.Text := '';
-                                                  $$.Obj := MakeClass(TTempTpl);
-                                                  with $$.Obj as TTempTpl do
+                                                  $$.Obj := MakeClass(TSqlSynList);
+                                                  with $$.Obj as TSqlSynList do
                                                   begin
                                                     InsertTailChild($1.Obj);
                                                   end; }
         |       sort_specification_list comma sort_specification
                                                 { $$ := $1;
-                                                  with $$.Obj as TTempTpl do
+                                                  with $$.Obj as TSqlSynList do
                                                   begin
                                                     InsertTailChild($3.Obj);
                                                   end; }
@@ -4354,6 +4510,7 @@ The notation is written out longhand several times, instead;
                                                   $$.Obj := MakeClass(TSqlSynSortSpecification);
                                                   with $$.Obj as TSqlSynSortSpecification do
                                                   begin
+                                                    StructuralType := sstSortSpecification;
                                                     InsertTailChild($1.Obj);
                                                     SortKey := $1.Obj;
                                                     Assert(not Assigned($2.Obj));
@@ -4393,7 +4550,7 @@ The notation is written out longhand several times, instead;
                                                     if Assigned($3.Obj) then
                                                     begin
                                                       InsertTailChild($3.Obj);
-                                                      Columns := $3.Obj;
+                                                      Columns := $3.Obj as TSqlSynList;
                                                     end;
                                                   end; }
         ;
@@ -4412,18 +4569,21 @@ The notation is written out longhand several times, instead;
   procedure :
 	_PROCEDURE procedure_name parameter_declaration_list
         semicolon SQL_procedure_statement semicolon
-                                                {  $$.Text := '';
-                                                   $$.Obj := MakeClass(TSqlSynProcedure);
-                                                   with $$.Obj as TSqlSynProcedure do
-                                                   begin
-                                                     StructuralType := sstProcedure;
-                                                     InsertHeadChild($2.Obj);
-                                                     Name := $2.Obj as TSqlSynIdent;
-                                                     InsertTailChild($3.Obj);
-                                                     ParamDecls := $3.Obj;
-                                                     InsertTailChild($5.Obj);
-                                                     Statement := $5.Obj;
-                                                   end; }
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynProcedure);
+                                                  with $$.Obj as TSqlSynProcedure do
+                                                  begin
+                                                    StructuralType := sstProcedure;
+                                                    InsertHeadChild($2.Obj);
+                                                    Name := $2.Obj as TSqlSynIdent;
+                                                    InsertTailChild($3.Obj);
+                                                    ParamDecls := $3.Obj as TSqlSynList;
+                                                    if Assigned($5.Obj) then //NIL if the statement is not supported.
+                                                    begin
+                                                      InsertTailChild($5.Obj);
+                                                      Statement := $5.Obj as TSQLSynStructural;
+                                                    end;
+                                                  end; }
         ;
 
   procedure_name : identifier                   { $$ := $1; }
@@ -4436,14 +4596,14 @@ The notation is written out longhand several times, instead;
 
   parameter_declarations :
                 parameter_declaration           { $$.Text := '';
-                                                  $$.Obj := MakeClass(TTempTpl);
-                                                  with $$.Obj as TTempTpl do
+                                                  $$.Obj := MakeClass(TSqlSynList);
+                                                  with $$.Obj as TSqlSynList do
                                                   begin
                                                     InsertTailChild($1.Obj);
                                                   end; }
         |       parameter_declarations comma parameter_declaration
                                                 { $$ := $1;
-                                                  with $$.Obj as TTempTpl do
+                                                  with $$.Obj as TSqlSynList do
                                                   begin
                                                     InsertTailChild($3.Obj);
                                                   end; }
@@ -4527,7 +4687,7 @@ The notation is written out longhand several times, instead;
                                                           with $$.Obj as TSqlSynSchema do
                                                           begin
                                                             InsertTailChild($5.Obj);
-                                                            Elements := $5.Obj;
+                                                            Elements := $5.Obj as TSqlSynList;
                                                           end; }
         ;
 
@@ -4541,17 +4701,12 @@ The notation is written out longhand several times, instead;
 
   /* TODO - Handle NIL Schema elements. */
   schema_elements :
-                schema_element                          { $$.Text := '';
-                                                          $$.Obj := MakeClass(TTempTpl);
-                                                          with $$.Obj as TTempTpl do
-                                                          begin
-                                                            InsertTailChild($1.Obj);
-                                                          end; }
+        /* Empty */                                     { $$.Text := '';
+                                                          $$.Obj := MakeClass(TSqlSynList); }
         |       schema_elements schema_element          { $$ := $1;
-                                                          with $$.Obj as TTempTpl do
-                                                          begin
-                                                            InsertTailChild($2.Obj);
-                                                          end; }
+                                                          if Assigned($2.Obj) then //NIL if the element is ignored / not supported.
+                                                            with $$.Obj as TSqlSynList do
+                                                              InsertTailChild($2.Obj); }
         ;
 
   schema_name_clause :
@@ -4573,7 +4728,7 @@ The notation is written out longhand several times, instead;
                                                     StructuralType := sstCreateorDecl;
                                                     CreateOrDeclType := codSchema;
                                                     InsertTailChild($2.Obj);
-                                                    Authorization := $2.Obj;
+                                                    Authorization := $2.Obj as TSQLSynIdent;
                                                   end; }
 	|	schema_name _AUTHORIZATION schema_authorization_identifier
                                                 { $$.Text := '';
@@ -4585,7 +4740,7 @@ The notation is written out longhand several times, instead;
                                                     InsertHeadChild($1.Obj);
                                                     Name := $1.Obj as TSqlSynIdent;
                                                     InsertTailChild($3.Obj);
-                                                    Authorization := $3.Obj;
+                                                    Authorization := $3.Obj as TSQLSynIdent;
                                                   end; }
         ;
 
@@ -4624,16 +4779,16 @@ The notation is written out longhand several times, instead;
                                                             InsertTailChild($3.Obj);
                                                             Name := $3.Obj as TSqlSynIdent;
                                                             InsertTailChild($5.Obj);
-                                                            DataType := $5.Obj;
+                                                            DataType := $5.Obj as TSQLSynType;
                                                             if Assigned($6.Obj) then
                                                             begin
                                                               InsertTailChild($6.Obj);
-                                                              _Default := $6.Obj;
+                                                              _Default := $6.Obj as TSQLSynLiteral;
                                                             end;
                                                             if Assigned($7.Obj) then
                                                             begin
                                                               InsertTailChild($7.obj);
-                                                              Constraint := $7.Obj;
+                                                              Constraint := $7.Obj as TSqlSynConstraint;
                                                               //TODO - Do we support any of the contraints
                                                               //you could impose on a domain at the moment?
                                                             end;
@@ -4671,8 +4826,8 @@ The notation is written out longhand several times, instead;
                                                     TempOpts := TSqlSynCreateOrDeclTableOpts($2.Obj);
                                                     InsertTailChild($4.Obj);
                                                     Name := $4.Obj as TSqlSynIdent;
-                                                    FlattenColDefsConstraints($5.Obj as TTempTpl);
-                                                    $5.Obj.Free;
+                                                    InsertTailChild($5.Obj);
+                                                    ElementList := $5.Obj as TSqlSynList;
                                                     RowCommitAction := TSqlSynRowCommitAction($6.Obj);
                                                   end;}
         ;
@@ -4702,10 +4857,15 @@ The notation is written out longhand several times, instead;
                                                   $$.Obj := MakeClass(TSqlSynView);
                                                   with $$.Obj as TSqlSynView do
                                                   begin
+                                                    StructuralType := sstCreateOrDecl;
+                                                    CreateOrDeclType := codView;
                                                     InsertTailChild($3.Obj);
                                                     Name := $3.Obj as TSqlSynIdent;
-                                                    InsertTailChild($4.Obj);
-                                                    ColumnList := $4.Obj;
+                                                    if Assigned($4.Obj) then
+                                                    begin
+                                                      InsertTailChild($4.Obj);
+                                                      ColumnList := $4.Obj as TSqlSynList;
+                                                    end;
                                                     InsertTailChild($6.Obj);
                                                     QueryExpr := $6.Obj as TSqlSynExpr;
                                                     ViewCheck := TSqlSynViewCheckOption($7.Obj);
@@ -4742,21 +4902,21 @@ The notation is written out longhand several times, instead;
                                                     InsertTailChild($4.Obj);
                                                     ObjectName := $4.Obj as TSqlSynIdent;
                                                     InsertTailChild($6.Obj);
-                                                    GranteeList := $6.Obj;
+                                                    GranteeList := $6.Obj as TSqlSynList;
                                                     GrantOption := Boolean($7.Obj);
                                                   end; }
         ;
 
   grantee_list :
                 grantee                         { $$.Text := '';
-                                                  $$.Obj := MakeClass(TTempTpl);
-                                                  with $$.Obj as TTempTpl do
+                                                  $$.Obj := MakeClass(TSqlSynList);
+                                                  with $$.Obj as TSqlSynList do
                                                   begin
                                                     InsertTailChild($1.Obj);
                                                   end; }
         |       grantee_list comma grantee
                                                 { $$ := $1;
-                                                  with $$.Obj as TTempTpl do
+                                                  with $$.Obj as TSqlSynList do
                                                   begin
                                                     InsertTailChild($3.Obj);
                                                   end; }
@@ -4779,13 +4939,13 @@ The notation is written out longhand several times, instead;
         ;
 
   action_list :
-                action                          { $$.Text := ''; $$.Obj := MakeClass(TTempTpl);
-                                                  with $$.Obj as TTempTpl do
+                action                          { $$.Text := ''; $$.Obj := MakeClass(TSqlSynList);
+                                                  with $$.Obj as TSqlSynList do
                                                   begin
                                                     InsertTailChild($1.Obj);
                                                   end; }
         |       action_list  comma action       { $$ := $1;
-                                                  with $$.Obj as TTempTpl do
+                                                  with $$.Obj as TSqlSynList do
                                                   begin
                                                     InsertTailChild($3.Obj);
                                                   end; }
@@ -4815,7 +4975,7 @@ The notation is written out longhand several times, instead;
                                                     if Assigned($2.Obj) then
                                                     begin
                                                       InsertTailChild($2.Obj);
-                                                      ColumnList := $2.Obj;
+                                                      ColumnList := $2.Obj as TSqlSynList;
                                                     end;
                                                   end; }
 	|	_UPDATE privilege_column_list_opt
@@ -4827,7 +4987,7 @@ The notation is written out longhand several times, instead;
                                                     if Assigned($2.Obj) then
                                                     begin
                                                       InsertTailChild($2.Obj);
-                                                      ColumnList := $2.Obj;
+                                                      ColumnList := $2.Obj as TSqlSynList;
                                                     end;
                                                   end; }
 	|	_REFERENCES privilege_column_list_opt
@@ -4839,7 +4999,7 @@ The notation is written out longhand several times, instead;
                                                     if Assigned($2.Obj) then
                                                     begin
                                                       InsertTailChild($2.Obj);
-                                                      ColumnList := $2.Obj;
+                                                      ColumnList := $2.Obj as TSqlSynList;
                                                     end;
                                                   end; }
 	|	_USAGE
@@ -4963,12 +5123,20 @@ The notation is written out longhand several times, instead;
         ;
 
   external_collation :
-	_EXTERNAL left_paren quote external_collation_name quote right_paren
-                                                        { $$ := $4; }
+	_EXTERNAL left_paren external_collation_name right_paren
+                                                        { $$ := $3; }
         ;
 
-  external_collation_name : collation_name
-                                                        { $$ := $1; }
+  /* The BNF has <quote> <collation name> <quote>, but the lexer returns the
+     quoted name as one string token, so the name is checked in Pascal. */
+  external_collation_name :
+                string_literal_continuation
+                                                        { $$.Text := UnquoteStringToken(UTF8ToString(Lexer.yytext));
+                                                          if not IsQualifiedNameText($$.Text) then
+                                                            yyerror('Not a valid external collation name: ''' + $$.Text + '''');
+                                                          $$.Obj := MakeClass(TSQLSynIdent);
+                                                          with $$.Obj as TSQLSynIdent do
+                                                            IdentName := $$.Text; }
         ;
 
   schema_collation_name : collation_name
@@ -4978,7 +5146,8 @@ The notation is written out longhand several times, instead;
   translation_collation : _TRANSLATION translation_name translation_collation_opt
                                                         { $$.Text := ''; $$.Obj := nil;
                                                           //Translation collations ignored.
-                                                        }
+                                                          $2.Obj.Free;
+                                                          $3.Obj.Free; }
         ;
 
   translation_collation_opt :
@@ -4989,7 +5158,7 @@ The notation is written out longhand several times, instead;
         |       _THEN _COLLATION collation_name
                                                         { $$.Text := ''; $$.Obj := nil;
                                                           //Translation collations ignored.
-                                                        }
+                                                          $3.Obj.Free; }
         ;
 
   collation_definition :
@@ -4997,7 +5166,10 @@ The notation is written out longhand several times, instead;
 			_FROM collation_source pad_attribute_opt
                                                         { $$.Text := ''; $$.Obj := nil;
                                                           //Collation definitions are an error.
-                                                        }
+                                                          $3.Obj.Free;
+                                                          $5.Obj.Free;
+                                                          $7.Obj.Free;
+                                                          $8.Obj.Free; }
 
         ;
 
@@ -5053,13 +5225,19 @@ The notation is written out longhand several times, instead;
         ;
 
   external_translation :
-		_EXTERNAL left_paren quote external_translation_name quote right_paren
-                                                        { $$ := $4; }
+		_EXTERNAL left_paren external_translation_name right_paren
+                                                        { $$ := $3; }
         ;
 
+  /* As external_collation_name. */
   external_translation_name :
-		translation_name
-                                                        { $$ := $1; }
+                string_literal_continuation
+                                                        { $$.Text := UnquoteStringToken(UTF8ToString(Lexer.yytext));
+                                                          if not IsQualifiedNameText($$.Text) then
+                                                            yyerror('Not a valid external translation name: ''' + $$.Text + '''');
+                                                          $$.Obj := MakeClass(TSQLSynIdent);
+                                                          with $$.Obj as TSQLSynIdent do
+                                                            IdentName := $$.Text; }
         ;
 
   schema_translation_name : translation_name
@@ -5105,15 +5283,24 @@ The notation is written out longhand several times, instead;
 
   alter_table_statement : _ALTER _TABLE table_name alter_table_action
                                                         { $$.Text := '';
-                                                          $$.Obj := MakeClass(TSqlSynAlterTable);
-                                                          with $$.Obj as TSqlSynAlterTable do
+                                                          if not Assigned($4.Obj) then
                                                           begin
-                                                            StructuralType := sstAlter;
-                                                            AlterType := codTable;
-                                                            InsertTailChild($3.Obj);
-                                                            Name := $3.Obj as TSqlSynIdent;
-                                                            InsertTailChild($4.Obj);
-                                                            Action := $4.Obj as TSqlSynAlterTableAction;
+                                                            //Action ignored (ADD of a check constraint): nothing to do.
+                                                            $$.Obj := nil;
+                                                            $3.Obj.Free;
+                                                          end
+                                                          else
+                                                          begin
+                                                            $$.Obj := MakeClass(TSqlSynAlterTable);
+                                                            with $$.Obj as TSqlSynAlterTable do
+                                                            begin
+                                                              StructuralType := sstAlter;
+                                                              AlterType := codTable;
+                                                              InsertTailChild($3.Obj);
+                                                              Name := $3.Obj as TSqlSynIdent;
+                                                              InsertTailChild($4.Obj);
+                                                              Action := $4.Obj as TSqlSynAlterTableAction;
+                                                            end;
                                                           end; }
         ;
 
@@ -5151,7 +5338,7 @@ The notation is written out longhand several times, instead;
                                                           begin
                                                             InsertHeadChild($3.Obj);
                                                             ColName := $3.Obj as TSqlSynIdent;
-                                                          end; };
+                                                          end; }
         ;
 
   alter_column_action :
@@ -5202,14 +5389,19 @@ The notation is written out longhand several times, instead;
   add_table_constraint_definition :
                 _ADD table_constraint_definition
                                                         { $$.Text := '';
-                                                          $$.Obj := MakeClass(TSqlSynAddTableConstraint);
-                                                          with $$.Obj as TSqlSynAddTableConstraint do
+                                                          if not Assigned($2.Obj) then
+                                                            $$.Obj := nil //Check constraint ignored.
+                                                          else
                                                           begin
-                                                            StructuralType := sstAlterTableAction;
-                                                            ActionType := atatAddCons;
-                                                            InsertTailChild($2.Obj);
-                                                            Constraint := $2.Obj as TSqlSynConstraint;
-                                                            PropagateNameUp;
+                                                            $$.Obj := MakeClass(TSqlSynAddTableConstraint);
+                                                            with $$.Obj as TSqlSynAddTableConstraint do
+                                                            begin
+                                                              StructuralType := sstAlterTableAction;
+                                                              ActionType := atatAddCons;
+                                                              InsertTailChild($2.Obj);
+                                                              Constraint := $2.Obj as TSqlSynConstraint;
+                                                              PropagateNameUp;
+                                                            end;
                                                           end; }
         ;
 
@@ -5270,7 +5462,7 @@ The notation is written out longhand several times, instead;
                                                     InsertTailChild($5.Obj);
                                                     ObjectName := $5.Obj as TSqlSynIdent;
                                                     InsertTailChild($7.Obj);
-                                                    GranteeList := $7.Obj;
+                                                    GranteeList := $7.Obj as TSqlSynList;
                                                     Propagation := TSqlSynDropPropagation($8.Obj);
                                                   end; }
         ;
@@ -5282,15 +5474,24 @@ The notation is written out longhand several times, instead;
 
   alter_domain_statement : _ALTER _DOMAIN domain_name alter_domain_action
                                                 { $$.Text := '';
-                                                  $$.Obj := MakeClass(TSqlSynAlterDomain);
-                                                  with $$.Obj as TSqlSynAlterDomain do
+                                                  if not Assigned($4.Obj) then
                                                   begin
-                                                    StructuralType := sstAlter;
-                                                    AlterType := codDomain;
-                                                    InsertTailChild($3.Obj);
-                                                    Name := $3.Obj as TSqlSynIdent;
-                                                    InsertTailChild($4.Obj);
-                                                    Action := $4.Obj as TSqlSynAlterDomainAction;
+                                                    //Action ignored (ADD of a check constraint): nothing to do.
+                                                    $$.Obj := nil;
+                                                    $3.Obj.Free;
+                                                  end
+                                                  else
+                                                  begin
+                                                    $$.Obj := MakeClass(TSqlSynAlterDomain);
+                                                    with $$.Obj as TSqlSynAlterDomain do
+                                                    begin
+                                                      StructuralType := sstAlter;
+                                                      AlterType := codDomain;
+                                                      InsertTailChild($3.Obj);
+                                                      Name := $3.Obj as TSqlSynIdent;
+                                                      InsertTailChild($4.Obj);
+                                                      Action := $4.Obj as TSqlSynAlterDomainAction;
+                                                    end;
                                                   end; }
         ;
 
@@ -5328,14 +5529,19 @@ The notation is written out longhand several times, instead;
   add_domain_constraint_definition :
                 _ADD domain_constraint
                                                         { $$.Text := '';
-                                                          $$.Obj := MakeClass(TSqlSynAddDomainConstraintAction);
-                                                          with $$.Obj as TSqlSynAddDomainConstraintAction do
+                                                          if not Assigned($2.Obj) then
+                                                            $$.Obj := nil //Check constraint ignored.
+                                                          else
                                                           begin
-                                                            StructuralType := sstAlterDomainAction;
-                                                            ActionType := adatAddCons;
-                                                            InsertTailChild($2.Obj);
-                                                            Constraint := $2.Obj as TSqlSynConstraint;
-                                                            PropagateNameUp;
+                                                            $$.Obj := MakeClass(TSqlSynAddDomainConstraintAction);
+                                                            with $$.Obj as TSqlSynAddDomainConstraintAction do
+                                                            begin
+                                                              StructuralType := sstAlterDomainAction;
+                                                              ActionType := adatAddCons;
+                                                              InsertTailChild($2.Obj);
+                                                              Constraint := $2.Obj as TSqlSynConstraint;
+                                                              PropagateNameUp;
+                                                            end;
                                                           end; }
         ;
 
@@ -5439,10 +5645,10 @@ The notation is written out longhand several times, instead;
                                                             if Assigned($2.Obj) then
                                                             begin
                                                               InsertHeadChild($2.Obj);
-                                                              Orientation := $2.Obj;
+                                                              Orientation := $2.Obj as TSqlSynFetchOrientation;
                                                             end;
                                                             InsertTailChild($5.Obj);
-                                                            FetchTarget := $5.Obj;
+                                                            FetchTarget := $5.Obj as TSqlSynList;
                                                           end; }
         ;
 
@@ -5508,15 +5714,15 @@ The notation is written out longhand several times, instead;
 
   fetch_target_list :
                 target_specification                    { $$.Text := '';
-                                                          $$.Obj := MakeClass(TTempTpl);
-                                                          with $$.Obj as TTempTpl do
+                                                          $$.Obj := MakeClass(TSqlSynList);
+                                                          with $$.Obj as TSqlSynList do
                                                           begin
                                                             InsertTailChild($1.Obj);
                                                           end; }
 
         |       fetch_target_list comma target_specification
                                                         { $$ := $1;
-                                                          with $$.Obj as TTempTpl do
+                                                          with $$.Obj as TSqlSynList do
                                                           begin
                                                             InsertTailChild($3.Obj);
                                                           end; }
@@ -5556,21 +5762,21 @@ The notation is written out longhand several times, instead;
                                                        Quantifier := TSqlSynSetFunctionQuantifier($2.Obj);
                                                      end;
                                                      InsertHeadChild($5.Obj);
-                                                     TargetList:= $5.Obj;
+                                                     TargetList:= $5.Obj as TSqlSynList;
                                                    end; }
         ;
 
   select_target_list :
                 target_specification            { $$.Text := '';
-                                                  $$.Obj := MakeClass(TTempTpl);
-                                                  with $$.Obj as TTempTpl do
+                                                  $$.Obj := MakeClass(TSqlSynList);
+                                                  with $$.Obj as TSqlSynList do
                                                   begin
                                                     InsertTailChild($1.Obj);
                                                   end; }
 
         |       select_target_list comma target_specification
                                                 { $$ := $1;
-                                                  with $$.Obj as TTempTpl do
+                                                  with $$.Obj as TSqlSynList do
                                                   begin
                                                     InsertTailChild($3.Obj);
                                                   end; }
@@ -5635,7 +5841,7 @@ The notation is written out longhand several times, instead;
                                                     StructuralType := sstDmlNoCursor;
                                                     DmlNoCursorType := sdnInsert;
                                                     InsertTailChild($2.Obj);
-                                                    ColList := $2.Obj;
+                                                    ColList := $2.Obj as TSqlSynList;
                                                     InsertTailChild($4.Obj);
                                                     Query := $4.Obj as TSqlSynExpr;
                                                   end; }
@@ -5674,7 +5880,7 @@ The notation is written out longhand several times, instead;
                                                     InsertTailChild($2.Obj);
                                                     Table := $2.Obj as TSqlSynIdent;
                                                     InsertTailChild($4.Obj);
-                                                    SetClauseList := $4.Obj;
+                                                    SetClauseList := $4.Obj as TSqlSynList;
                                                     InsertTailChild($8.Obj);
                                                     CursorName := $8.Obj as TSqlSynIdent;
                                                   end; }
@@ -5682,14 +5888,14 @@ The notation is written out longhand several times, instead;
 
   set_clause_list :
                 set_clause                      { $$.Text := '';
-                                                  $$.Obj := MakeClass(TTempTpl);
-                                                  with $$.Obj as TTempTpl do
+                                                  $$.Obj := MakeClass(TSqlSynList);
+                                                  with $$.Obj as TSqlSynList do
                                                   begin
                                                     InsertTailChild($1.Obj);
                                                   end; }
         |       set_clause_list comma set_clause
                                                 { $$ := $1;
-                                                  with $$.Obj as TTempTpl do
+                                                  with $$.Obj as TSqlSynList do
                                                   begin
                                                     InsertTailChild($3.Obj);
                                                   end; }
@@ -5728,7 +5934,7 @@ The notation is written out longhand several times, instead;
                                                     InsertTailChild($2.Obj);
                                                     Table := $2.Obj as TSqlSynIdent;
                                                     InsertTailChild($4.Obj);
-                                                    SetClauseList := $4.Obj;
+                                                    SetClauseList := $4.Obj as TSqlSynList;
                                                     if Assigned($5.Obj) then
                                                     begin
                                                       InsertTailChild($5.Obj);
@@ -5753,21 +5959,21 @@ The notation is written out longhand several times, instead;
                                                     StructuralType := sstMiscStatement;
                                                     MiscStatementType := smstSetTransaction;
                                                     InsertTailChild($3.Obj);
-                                                    ModeList := $3.Obj;
+                                                    ModeList := $3.Obj as TSqlSynList;
                                                   end; }
 
         ;
 
   transaction_mode_list :
                 transaction_mode                { $$.Text := '';
-                                                  $$.Obj := MakeClass(TTempTpl);
-                                                  with $$.Obj as TTempTpl do
+                                                  $$.Obj := MakeClass(TSqlSynList);
+                                                  with $$.Obj as TSqlSynList do
                                                   begin
                                                      InsertTailChild($1.Obj);
                                                   end; }
         |       transaction_mode_list comma transaction_mode
                                                 { $$ := $1;
-                                                  with $$.Obj as TTempTpl do
+                                                  with $$.Obj as TSqlSynList do
                                                   begin
                                                     InsertTailChild($3.Obj);
                                                   end; }
@@ -5847,7 +6053,7 @@ The notation is written out longhand several times, instead;
                                                     if Assigned($3.Obj) then
                                                     begin
                                                       InsertTailChild($3.Obj);
-                                                      ConstraintNameList := $3.Obj;
+                                                      ConstraintNameList := $3.Obj as TSqlSynList;
                                                     end;
                                                   end; }
 
@@ -5862,7 +6068,7 @@ The notation is written out longhand several times, instead;
                                                     if Assigned($3.Obj) then
                                                     begin
                                                       InsertTailChild($3.Obj);
-                                                      ConstraintNameList := $3.Obj;
+                                                      ConstraintNameList := $3.Obj as TSqlSynList;
                                                     end;
                                                   end; }
          ;
@@ -5875,14 +6081,14 @@ The notation is written out longhand several times, instead;
 
   constraint_name_list_some:
                 constraint_name
-                                                { $$.Text := ''; $$.Obj := MakeClass(TTempTpl);
-                                                  with $$.Obj as TTempTpl do
+                                                { $$.Text := ''; $$.Obj := MakeClass(TSqlSynList);
+                                                  with $$.Obj as TSqlSynList do
                                                   begin
                                                     InsertTailChild($1.Obj);
                                                   end; }
         |       constraint_name_list_some comma constraint_name
                                                 { $$ := $1;
-                                                  with $$.Obj as TTempTpl do
+                                                  with $$.Obj as TSqlSynList do
                                                   begin
                                                     InsertTailChild($3.Obj);
                                                   end; }
@@ -6064,7 +6270,7 @@ The notation is written out longhand several times, instead;
                                                     MiscStatementType := smstSessionSet;
                                                     SessionSetType := ssstCatalog;
                                                     InsertTailChild($3.Obj);
-                                                    ValueSpec := $3.Obj;
+                                                    ValueSpec := $3.Obj as TSQLSynExpr;
                                                   end; }
         ;
 
@@ -6082,7 +6288,7 @@ The notation is written out longhand several times, instead;
                                                     MiscStatementType := smstSessionSet;
                                                     SessionSetType := ssstSchema;
                                                     InsertTailChild($3.Obj);
-                                                    ValueSpec := $3.Obj;
+                                                    ValueSpec := $3.Obj as TSQLSynExpr;
                                                   end; }
         ;
 
@@ -6095,7 +6301,7 @@ The notation is written out longhand several times, instead;
                                                     MiscStatementType := smstSessionSet;
                                                     SessionSetType := ssstNames;
                                                     InsertTailChild($3.Obj);
-                                                    ValueSpec := $3.Obj;
+                                                    ValueSpec := $3.Obj as TSQLSynExpr;
                                                   end; }
         ;
 
@@ -6108,7 +6314,7 @@ The notation is written out longhand several times, instead;
                                                     MiscStatementType := smstSessionSet;
                                                     SessionSetType := ssstAuth;
                                                     InsertTailChild($4.Obj);
-                                                    ValueSpec := $4.Obj;
+                                                    ValueSpec := $4.Obj as TSQLSynExpr;
                                                   end; }
         ;
 
@@ -6167,14 +6373,15 @@ Note that <colon> is written as a literal colon in the ANSI grammar;
                                                             if Assigned($2.Obj) then
                                                             begin
                                                               InsertTailChild($2.Obj);
-                                                              OrderBy := $2.Obj;
+                                                              OrderBy := $2.Obj as TSqlSynList;
                                                             end;
                                                           end; }
         ;
 
   direct_implementation_defined_statement : identifier
                                                         { $$.Text := ''; $$.Obj := nil;
-                                                          yyerror('Unrecognised statement.'); }
+                                                          yyerror('Unrecognised statement.');
+                                                          $1.Obj.Free; }
         ;
 
 /*
@@ -6187,25 +6394,30 @@ Note that <colon> is written as a literal colon in the ANSI grammar;
 */
 
 sql_statement :
-      direct_SQL_statement                      { $$ := $1; }
+      direct_SQL_statement semicolon            { $$ := $1; }
     ;
 
 sql_script :
                 sql_statement                   { $$.Text := '';
-                                                  $$.Obj := MakeClass(TTempTpl);
-                                                  with $$.Obj as TTempTpl do
-                                                  begin
-                                                    InsertTailChild($1.Obj);
-                                                  end; }
+                                                  $$.Obj := MakeClass(TSqlSynList);
+                                                  if Assigned($1.Obj) then //NIL if the statement is not supported.
+                                                    $$.Obj.InsertTailChild($1.Obj); }
     |           sql_script sql_statement        { $$ := $1;
-                                                  with $$.Obj as TTempTpl do
-                                                  begin
-                                                    InsertTailChild($1.Obj);
-                                                  end; }
+                                                  if Assigned($2.Obj) then //NIL if the statement is not supported.
+                                                    $$.Obj.InsertTailChild($2.Obj); }
     ;
 
 sql_input :
       sql_script                                { $$ := $1; }
+    | sql_script direct_SQL_statement           { //Final statement, semicolon omitted.
+                                                  $$ := $1;
+                                                  if Assigned($2.Obj) then //NIL if the statement is not supported.
+                                                    $$.Obj.InsertTailChild($2.Obj); }
+    | direct_SQL_statement                      { //Single statement, semicolon omitted.
+                                                  $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynList);
+                                                  if Assigned($1.Obj) then //NIL if the statement is not supported.
+                                                    $$.Obj.InsertTailChild($1.Obj); }
     | module                                    { $$ := $1; }
     ;
 
@@ -6215,6 +6427,7 @@ SQL92Grammar :
                                                   $$.Obj := MakeClass(TSqlSynTopLevel);
                                                   with $$.Obj as TSqlSynTopLevel do
                                                   begin
+                                                    StructuralType := sstTopLevel;
                                                     InsertTailChild($1.Obj);
                                                   end;
                                                   //TODO - connect top level parse to rest of program.
@@ -6270,33 +6483,278 @@ begin
   //TODO - State and action as debug?
 end;
 
-function SQL92GrammarParser.CheckContinuation(S: string; T: TSQLSynLiteralType): boolean;
+function SQL92GrammarParser.WrapJoinAsQuery(Join: TSqlSynNode): TSqlSynNode;
 begin
-  Assert(false);
-  //TODO - Write this.
-  result := false;
+  { Build SELECT * FROM <Join>, for a joined table used as a query
+    (joined_table_as_query, and a bracketed join with a correlation name). }
+  result := MakeClass(TSqlSynQuerySelect);
+  with result as TSqlSynQuerySelect do
+  begin
+    ExprType := setQuerySelect;
+    Quantifier := ssqNone;
+    SelectList := MakeClass(TSqlSynSelectList) as TSqlSynSelectList;
+    SelectList.StructuralType := sstSelectList;
+    SelectList.Wildcard := true;
+    InsertTailChild(SelectList);
+    From := MakeClass(TSqlSynList) as TSqlSynList; //Same shape as from_clause_list.
+    From.InsertTailChild(Join);
+    InsertTailChild(From);
+  end;
+end;
+
+{ String literal pieces.
+
+  S is always one quoted piece, '...', exactly as the lexer matched it:
+  a plain string, a national string with its N removed, or a continuation
+  of a bit / hex string. The lexer has already checked the quoting (an
+  embedded quote is always doubled). The text is UTF-8, converted to a
+  native string by the caller, so national strings need nothing special. }
+
+function SQL92GrammarParser.CheckContinuation(S: string; T: TSQLSynLiteralType): boolean;
+var
+  i: integer;
+begin
+  result := (Length(S) >= 2) and (S[1] = '''') and (S[Length(S)] = '''');
+  if not result then
+    exit;
+  case T of
+    sltString, sltNatString:
+    begin
+      { Any characters, but every quote inside must be doubled. }
+      i := 2;
+      while i < Length(S) do
+      begin
+        if S[i] = '''' then
+        begin
+          if (i + 1 >= Length(S)) or (S[i + 1] <> '''') then
+            exit(false);
+          Inc(i, 2);
+        end
+        else
+          Inc(i);
+      end;
+    end;
+    sltBitString:
+      for i := 2 to Length(S) - 1 do
+        if not CharInSet(S[i], ['0', '1']) then
+          exit(false);
+    sltHexString:
+      for i := 2 to Length(S) - 1 do
+        if not CharInSet(S[i], ['0'..'9', 'A'..'F', 'a'..'f']) then
+          exit(false);
+  else
+    result := false;
+  end;
 end;
 
 function SQL92GrammarParser.HandleContinuation(S: string; T: TSQLSynLiteralType): string;
 begin
-  Assert(false);
-  //TODO - Write this.
-  result := '';
+  { Strip the outer quotes and undouble embedded quotes. Call after
+    CheckContinuation; bit and hex pieces have no quotes inside. }
+  Assert(CheckContinuation(S, T));
+  result := StringReplace(Copy(S, 2, Length(S) - 2), '''''', '''', [rfReplaceAll]);
 end;
 
+{ Delimited identifiers.
+
+  S is one "..." token exactly as the lexer matched it; the lexer has
+  already checked that any embedded double quote is doubled. The case of
+  the name is kept: unlike a regular identifier, a delimited one is
+  case sensitive. }
+
 function SQL92GrammarParser.CheckDelimIdent(S: string): boolean;
+var
+  i: integer;
 begin
-  Assert(false);
-  //TODO - Write this.
-  result := false;
+  { <delimited identifier body> must have at least one character, so ""
+    is not a valid name. Embedded double quotes must be doubled. }
+  result := (Length(S) >= 3) and (S[1] = '"') and (S[Length(S)] = '"');
+  if not result then
+    exit;
+  i := 2;
+  while i < Length(S) do
+  begin
+    if S[i] = '"' then
+    begin
+      if (i + 1 >= Length(S)) or (S[i + 1] <> '"') then
+        exit(false);
+      Inc(i, 2);
+    end
+    else
+      Inc(i);
+  end;
 end;
 
 function SQL92GrammarParser.HandleDelimIdent(S: string): string;
 begin
-  Assert(false);
-  //TODO - Write this.
-  result := '';
+  { Strip the outer double quotes and undouble embedded ones. Call after
+    CheckDelimIdent. }
+  Assert(CheckDelimIdent(S));
+  result := StringReplace(Copy(S, 2, Length(S) - 2), '""', '"', [rfReplaceAll]);
 end;
 
+
+{ Helpers for strings whose contents the BNF defines at character level
+  (datetime, interval, external collation / translation names). }
+
+function SQL92GrammarParser.UnquoteStringToken(S: string): string;
+begin
+  { One string_literal_continuation token: strip the outer quotes and
+    undouble any embedded ones. }
+  Assert(Length(S) >= 2);
+  Assert(S[1] = '''');
+  Assert(S[Length(S)] = '''');
+  result := StringReplace(Copy(S, 2, Length(S) - 2), '''''', '''', [rfReplaceAll]);
+end;
+
+function SQL92GrammarParser.LiteralShape(S: string): string;
+var
+  i: integer;
+  InDigits: boolean;
+begin
+  { Each run of digits becomes 'n'; - + : . and space are kept; anything else
+    becomes '?', so it can never match. e.g. '2024-01-31' -> 'n-n-n'. }
+  result := '';
+  InDigits := false;
+  for i := 1 to Length(S) do
+  begin
+    if CharInSet(S[i], ['0'..'9']) then
+    begin
+      if not InDigits then
+        result := result + 'n';
+      InDigits := true;
+    end
+    else
+    begin
+      InDigits := false;
+      if CharInSet(S[i], ['-', '+', ':', '.', ' ']) then
+        result := result + S[i]
+      else
+        result := result + '?';
+    end;
+  end;
+end;
+
+function IsSecondsShape(Shape: string): boolean;
+begin
+  { <seconds value> ::= <seconds integer value> [ <period> [ <seconds fraction> ] ] }
+  result := (Shape = 'n') or (Shape = 'n.') or (Shape = 'n.n');
+end;
+
+function IsTimeValueShape(Shape: string): boolean;
+begin
+  { <time value> ::= <hours value> <colon> <minutes value> <colon> <seconds value> }
+  result := (Copy(Shape, 1, 4) = 'n:n:') and IsSecondsShape(Copy(Shape, 5, MaxInt));
+end;
+
+function SQL92GrammarParser.SplitTimeZone(S: string; out Base, TZ: string): boolean;
+var
+  i: integer;
+  Shape: string;
+begin
+  { If S ends in a <time zone interval> (<sign> hh:mm), split it off.
+    The last + or - is the only candidate: date minus signs come earlier,
+    and the time part has no signs of its own. }
+  result := false;
+  Base := S;
+  TZ := '';
+  i := LastDelimiter('+-', S);
+  if i > 0 then
+  begin
+    Shape := LiteralShape(Copy(S, i, MaxInt));
+    if (Shape = '+n:n') or (Shape = '-n:n') then
+    begin
+      Base := Copy(S, 1, i - 1);
+      TZ := Copy(S, i, MaxInt);
+      result := true;
+    end;
+  end;
+end;
+
+function SQL92GrammarParser.IsDateString(S: string): boolean;
+begin
+  { <date value> ::= <years value> <minus sign> <months value> <minus sign> <days value> }
+  result := LiteralShape(S) = 'n-n-n';
+end;
+
+function SQL92GrammarParser.IsTimeString(S: string): boolean;
+var
+  Base, TZ: string;
+begin
+  { <time value> [ <time zone interval> ] }
+  SplitTimeZone(S, Base, TZ);
+  result := IsTimeValueShape(LiteralShape(Base));
+end;
+
+function SQL92GrammarParser.IsTimestampString(S: string): boolean;
+var
+  Base, TZ: string;
+  i: integer;
+begin
+  { <date value> <space> <time value> [ <time zone interval> ] }
+  SplitTimeZone(S, Base, TZ);
+  i := Pos(' ', Base);
+  result := (i > 0)
+    and IsDateString(Copy(Base, 1, i - 1))
+    and IsTimeValueShape(LiteralShape(Copy(Base, i + 1, MaxInt)));
+end;
+
+function SQL92GrammarParser.GetIntervalStringType(S: string; out IST: TSQLSynIntervalStringType): boolean;
+var
+  Shape: string;
+begin
+  (* <interval string> ::= <quote> { <year-month literal> | <day-time literal> } <quote>
+    Classified the same way as the old token-level rules. 'n' alone could be
+    years, days, hours, minutes or seconds; the <interval qualifier> decides. *)
+  Shape := LiteralShape(S);
+  result := true;
+  IST := istPlainInt;
+  if Shape = 'n' then
+    IST := istPlainInt
+  else if Shape = 'n-n' then
+    IST := istYearMonth                               { years-months }
+  else if Shape = 'n n' then
+    IST := istDayTime1                                { days hours }
+  else if Shape = 'n n:n' then
+    IST := istDayTime2                                { days hours:minutes }
+  else if (Copy(Shape, 1, 6) = 'n n:n:') and IsSecondsShape(Copy(Shape, 7, MaxInt)) then
+    IST := istDayTime3                                { days hours:minutes:seconds }
+  else if (Shape = 'n.') or (Shape = 'n.n') then
+    IST := istTime1                                   { seconds with fraction }
+  else if (Copy(Shape, 1, 2) = 'n:') and IsSecondsShape(Copy(Shape, 3, MaxInt)) then
+    IST := istTime2                                   { hours:minutes or minutes:seconds }
+  else if IsTimeValueShape(Shape) then
+    IST := istTime3                                   { hours:minutes:seconds }
+  else
+    result := false;
+end;
+
+function SQL92GrammarParser.IsQualifiedNameText(S: string): boolean;
+var
+  i, PartLen, Parts: integer;
+begin
+  { One to four <regular identifier>s separated by periods, as qualified_name.
+    Delimited identifiers inside the quotes are not supported. }
+  result := false;
+  Parts := 1;
+  PartLen := 0;
+  for i := 1 to Length(S) do
+  begin
+    if S[i] = '.' then
+    begin
+      if PartLen = 0 then
+        exit;
+      Inc(Parts);
+      PartLen := 0;
+    end
+    else if CharInSet(S[i], ['A'..'Z', 'a'..'z']) then
+      Inc(PartLen)
+    else if CharInSet(S[i], ['0'..'9', '_']) and (PartLen > 0) then
+      Inc(PartLen)
+    else
+      exit;
+  end;
+  result := (PartLen > 0) and (Parts <= 4);
+end;
 
 end.
