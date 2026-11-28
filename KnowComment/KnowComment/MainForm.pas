@@ -1,10 +1,10 @@
-unit MainForm;
+ï»¿unit MainForm;
 {
 
-Copyright © 2020 Martin Harvey <martin_c_harvey@hotmail.com>
+Copyright Â© 2020 Martin Harvey <martin_c_harvey@hotmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the “Software”), to deal in
+this software and associated documentation files (the â€œSoftwareâ€), to deal in
 the Software without restriction, including without limitation the rights to
 use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
 of the Software, and to permit persons to whom the Software is furnished to do
@@ -13,7 +13,7 @@ so, subject to the following conditions:
 The above copyright notice and this permission notice shall be included in
 all copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+THE SOFTWARE IS PROVIDED â€œAS ISâ€, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
@@ -299,11 +299,17 @@ begin
 end;
 
 procedure TMainFrm.HandleDBUnavailable(Sender: TObject);
+var
+  ErrStr: string;
 begin
   LoadingLbl.Visible := true;
   Application.OnIdle := nil;
   FreeAndNil(FClientForm);
-  LoadingLbl.Text := S_DB_UNAVAILABLE;
+  ErrStr := DBCont.DB.MemDB.LastError;
+  if Length(ErrStr) > 0 then
+    LoadingLbl.Text := S_DB_UNAVAILABLE + ' (' + ErrStr + ')'
+  else
+    LoadingLbl.Text := S_DB_UNAVAILABLE;
   CloseIfPending;
 end;
 

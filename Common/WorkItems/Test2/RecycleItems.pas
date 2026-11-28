@@ -1,10 +1,31 @@
 unit RecycleItems;
+{
 
-{ Martin Harvey 2015 }
+Copyright © 2026 Martin Harvey <martin_c_harvey@hotmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.
+
+}
 
 interface
 
-uses WorkItems, IndexedStore, SyncObjs, Winapi.Windows,
+uses WorkItems, IndexedStore, LockAbstractions, Winapi.Windows,
     System.Classes;
 
 { A quick demonstration of how to use workitems to split and join work.
@@ -226,7 +247,7 @@ begin
     SplitPoint := SplitPoint - (SplitPoint and BITS_PER_CARDINAL_MASK);
     Assert(SplitPoint < FUpper);
     Assert(SplitPoint > FLower);
-    InterlockedIncrement(FParentStore.FBlocksSpawned);
+    LockAbstractions.InterlockedIncrement(FParentStore.FBlocksSpawned);
     Child := FParentStore.AllocWI;
     Child.Lower := SplitPoint;
     Child.Upper := FUpper;
@@ -405,7 +426,7 @@ begin
   //If workitems are in the tree, then they are candidates for merge.
   //If not in the tree, then can't be merged.
   //Workitems in consistent state when in tree.
-  InterlockedIncrement(FParentStore.FMergeOps);
+  LockAbstractions.InterlockedIncrement(FParentStore.FMergeOps);
 
   //INode to search for self.
   MyINode := TSearchPointerINode.Create;
@@ -601,17 +622,17 @@ begin
     case LocalState of
       Ord(rsIdle):
       begin
-        if InterlockedCompareExchange(FRequeueState, Ord(rsQOrExec), Ord(rsIdle)) = Ord(rsIdle) then
+        if LockAbstractions.InterlockedCompareExchange(FRequeueState, Ord(rsQOrExec), Ord(rsIdle)) = Ord(rsIdle) then
         begin
           Again := false;
           if FParentStore.FWorkFarm.AddWorkItem(self) then
           begin
-            InterlockedIncrement(FParentStore.FBlocksQueued);
+            LockAbstractions.InterlockedIncrement(FParentStore.FBlocksQueued);
             result := 0
           end
           else
           begin
-            InterlockedExchange(FRequeueState, Ord(rsIdle));
+            LockAbstractions.InterlockedExchange(FRequeueState, Ord(rsIdle));
             //Don't try to cancel here, surriounding code will almost certainly
             //cancel, when this fn fails,
             //and if we try to cancel twice, bad things will happen.
@@ -621,7 +642,7 @@ begin
       end;
       Ord(rsQOrExec):
       begin
-        if InterlockedCompareExchange(FRequeueState, Ord(rsQOrExecRequeue), Ord(rsQOrExec)) = Ord(rsQOrExec) then
+        if LockAbstractions.InterlockedCompareExchange(FRequeueState, Ord(rsQOrExecRequeue), Ord(rsQOrExec)) = Ord(rsQOrExec) then
         begin
           Again := false;
           result := 0;
@@ -664,7 +685,7 @@ begin
       Ord(rsQOrExec):
       begin
         //Just finished executing, can requeue, but not requested.
-        if InterlockedCompareExchange(FRequeueState, Ord(rsIdle), Ord(rsQOrExec)) = Ord(rsQOrExec) then
+        if LockAbstractions.InterlockedCompareExchange(FRequeueState, Ord(rsIdle), Ord(rsQOrExec)) = Ord(rsQOrExec) then
         begin
           Again := false;
           result := 0;
@@ -674,17 +695,17 @@ begin
       begin
         //Just finished executing, and we need a requeue,
         //back to the am queued state, via a requeue op.
-        if InterlockedCompareExchange(FRequeueState, Ord(rsQOrExec), Ord(rsQOrExecRequeue)) = Ord(rsQOrExecRequeue) then
+        if LockAbstractions.InterlockedCompareExchange(FRequeueState, Ord(rsQOrExec), Ord(rsQOrExecRequeue)) = Ord(rsQOrExecRequeue) then
         begin
           Again := false;
           if FParentStore.FWorkFarm.AddWorkItem(self) then
           begin
-            InterlockedIncrement(FParentStore.FBlocksQueued);
+            LockAbstractions.InterlockedIncrement(FParentStore.FBlocksQueued);
             result := 0
           end
           else
           begin
-            InterlockedExchange(FRequeueState, Ord(rsIdle));
+            LockAbstractions.InterlockedExchange(FRequeueState, Ord(rsIdle));
             result := E_WORKITEM_REQUEUE_FAILED_Q_FLUSH;
           end;
         end;
@@ -717,7 +738,7 @@ begin
     case LocalState of
       Ord(rsIdle):
       begin
-        if InterlockedCompareExchange(FRequeueState, Ord(rsCancelled), Ord(rsIdle)) = Ord(rsIdle) then
+        if LockAbstractions.InterlockedCompareExchange(FRequeueState, Ord(rsCancelled), Ord(rsIdle)) = Ord(rsIdle) then
         begin
           Again := false;
           result := 0;
@@ -729,7 +750,7 @@ begin
       Ord(rsQOrExec):
       begin
         //Queued or running, put into pending cancel state.
-        if InterlockedCompareExchange(FRequeueState, Ord(rsQOrExecCancel), Ord(rsQOrExec)) = Ord(rsQOrExec) then
+        if LockAbstractions.InterlockedCompareExchange(FRequeueState, Ord(rsQOrExecCancel), Ord(rsQOrExec)) = Ord(rsQOrExec) then
         begin
           Cancel;
           Again := false;
@@ -740,7 +761,7 @@ begin
       begin
         //Queued or running, put into pending cancel state.
         //and in addition don't requeue.
-        if InterlockedCompareExchange(FRequeueState, Ord(rsQOrExecCancel), Ord(rsQOrExecRequeue)) = Ord(rsQOrExecRequeue) then
+        if LockAbstractions.InterlockedCompareExchange(FRequeueState, Ord(rsQOrExecCancel), Ord(rsQOrExecRequeue)) = Ord(rsQOrExecRequeue) then
         begin
           Cancel;
           Again := false;
@@ -776,7 +797,7 @@ begin
       or (LocalState = Ord(rsQOrExecRequeue))
       or (LocalState = Ord(rsQOrExecCancel)) then
     begin
-      if InterlockedCompareExchange(FRequeueState, Ord(rsCancelled), LocalState) = LocalState then
+      if LockAbstractions.InterlockedCompareExchange(FRequeueState, Ord(rsCancelled), LocalState) = LocalState then
       begin
         Again := false;
         result := 0;
@@ -934,7 +955,7 @@ begin
   FirstItem := AllocWI;
   if Assigned(FirstItem) then
   begin
-    InterlockedIncrement(FBlocksSpawned);
+    LockAbstractions.InterlockedIncrement(FBlocksSpawned);
     FirstItem.Lower := Lower;
     FirstItem.Upper := Upper;
     if FirstItem.RequestRequeue <> 0 then

@@ -1,11 +1,11 @@
-program KnowComment;
+Ôªøprogram KnowComment;
 
 {
 
-Copyright © 2020 Martin Harvey <martin_c_harvey@hotmail.com>
+Copyright ¬© 2020 Martin Harvey <martin_c_harvey@hotmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the ìSoftwareî), to deal in
+this software and associated documentation files (the ‚ÄúSoftware‚Äù), to deal in
 the Software without restriction, including without limitation the rights to
 use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
 of the Software, and to permit persons to whom the Software is furnished to do
@@ -14,7 +14,7 @@ so, subject to the following conditions:
 The above copyright notice and this permission notice shall be included in
 all copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED ìAS ISî, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+THE SOFTWARE IS PROVIDED ‚ÄúAS IS‚Äù, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
@@ -102,7 +102,11 @@ uses
   TinyLock in '..\..\Common\LockAbstractions\TinyLock.pas',
   Reffed in '..\..\Common\Reffed\Reffed.pas',
   CoWTree in '..\..\Common\CoWTree\CoWTree.pas',
-  PatchFreeMem in '..\..\Common\PatchFreeMem\PatchFreeMem.pas';
+  PatchFreeMem in '..\..\Common\PatchFreeMem\PatchFreeMem.pas',
+  SRWLockWrapper in '..\..\Common\SRWLockWrapper\SRWLockWrapper.pas',
+  LockedSList in '..\..\Common\LockedSList\LockedSList.pas',
+  LSLCache in '..\..\Common\LockedSList\LSLCache.pas',
+  MemDB2ObjectCaches in '..\..\Common\MemDB2\MemDB2ObjectCaches.pas';
 
 {$R *.res}
 

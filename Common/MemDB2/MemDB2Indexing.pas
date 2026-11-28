@@ -33,10 +33,23 @@ uses
 {$IFDEF USE_TRACKABLES}
   Trackables,
 {$ENDIF}
-  MemDB2Misc, MemDB2Streamable, CowTree, IndexedStore, Reffed, Classes;
+  MemDB2Misc, MemDB2Streamable, CowTree, IndexedStore, Reffed, Classes,
+  LSLCache;
 
 type
   TMemDbIndexLeafGeneric = class;
+  TMemDBNodeCache = class;
+
+  TMemDBNodeCacheProxy = class(TLSLObject)
+  private
+    FNodeCache: TMemDBNodeCache;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    procedure CreateFromCache(Cache: TLSLCache);override;
+    procedure Reset(Cache: TLSLCache);override;
+    property NodeCache: TMemDbNodeCache read FNodeCache;
+  end;
 
   TMemDBNodeCache = class(TReffedCache)
   protected
@@ -49,12 +62,16 @@ type
   public
     constructor Create;
     destructor Destroy; override;
+    //These cached functions to do with getting / putting nodes in the cache.
     function GetFromCache: TReffed; override;
     function PutToCache(Reffed: TReffed): boolean; override;
-    procedure TakeNodesFrom(Cache: TMemDbNodeCache);
+    //These functions to do with caching the caches(!)
+    procedure TrimForCacheCache;
+
     property PinCache: TObject read FPinCache;
     property Capacity: integer read GetCapacity write SetCapacity;
     property Count: integer read GetCount;
+
   end;
 
   { Quick reminder. Indexes are *immutable* once created,
@@ -66,13 +83,15 @@ type
     FNext: TMemDBIndexLeafGeneric;
   protected
     FStandbyCache: TMemDBNodeCache;
+    FCacheProxy: TMemDBNodeCacheProxy;
 
     function SelToRoot(Sel: TAbSelType): TMemDBIndexLeafGeneric;
     function GetNodeCache: TMemDBNodeCache;
   public
     constructor Create; virtual;
+    procedure CreateCachedInternals(const Tid: TTransactionId; Internal: boolean);
     destructor Destroy; override;
-    function Clone: TMemDBIndexGeneric; virtual;
+    function Clone(const Tid: TTransactionId): TMemDBIndexGeneric; virtual;
 
     //We don't inc/dec the ref for leaves with user ops here,
     //but other cursor handling code might.
@@ -122,7 +141,7 @@ type
 
   public
     destructor Destroy; override;
-    function Clone: TMemDBIndexGeneric; override;
+    function Clone(const Tid: TTransactionId): TMemDBIndexGeneric; override;
     function Find(Sel: TAbSelType; SV: TMemDBIndexSearchVal): TMemDBIndexLeaf;
 
     property FinalFieldOffsets: TFieldOffsets read FFinalFieldOffsets write SetFinalFieldOffsets;
@@ -218,7 +237,7 @@ const
 implementation
 
 uses
-  MemDB2Buffered, SysUtils, MemDB2BufBase, PComp;
+  MemDB2Buffered, SysUtils, MemDB2BufBase, PComp, MemDB2ObjectCaches;
 
 { Misc functions }
 
@@ -385,7 +404,32 @@ begin
   end;
 end;
 
-{ TMemDBIndexGeneric }
+{ TMemDbNodeCacheProxy }
+
+constructor TMemDbNodeCacheProxy.Create;
+begin
+  inherited;
+  FNodeCache := TMemDBNodeCache.Create;
+end;
+
+destructor TMemDBNodeCacheProxy.Destroy;
+begin
+  FNodeCache.Free;
+  inherited;
+end;
+
+procedure TMemDbNodeCacheProxy.CreateFromCache(Cache: TLSLCache);
+begin
+  Assert(Assigned(FNodeCache));
+end;
+
+procedure TMemDbNodeCacheProxy.Reset(Cache: TLSLCache);
+begin
+  Assert(Assigned(FNodeCache));
+  FNodeCache.TrimForCacheCache;
+end;
+
+{ TMemDBNodeCache }
 
 constructor TMemDBNodeCache.Create;
 begin
@@ -398,12 +442,16 @@ end;
 destructor TMemDBNodeCache.Destroy;
 var
   i: integer;
+  Node: TReffed;
 begin
   if Assigned(FPtrs) then
   begin
-    FPtrs.Sort(ComparePointers);
-    for i := 0 to Pred(FPtrs.Count) do
-      TReffed(FPtrs[i]).Release; //Refcounts 1 for cached objects.
+    for i := Pred(FPtrs.Count) downto 0 do
+    begin
+      Node := TReffed(FPtrs[i]); //Refcounts 1 for cached objects.
+      FPtrs.Delete(i);
+      Node.Release;
+    end;
   end;
   FPtrs.Free;
   FPinCache.Free;
@@ -418,7 +466,7 @@ begin
   if Count > 0 then
   begin
     Dec(Count);
-    result := TReffed(FPtrs[Count]);
+    result := TReffed(FPtrs.List[Count]);
     FPtrs.Delete(Count);
   end
   else
@@ -435,6 +483,8 @@ begin
     if Count < FPtrs.Capacity then
     begin
       FPtrs.Add(Reffed); //Add before reset so size calc is OK ...
+
+      //Reminder. Reffed.Reset sets the refcount back to 1.
       Reffed.Reset(self);
       result := true;
     end
@@ -445,14 +495,26 @@ begin
     result := true;
 end;
 
-procedure TMemDBNodeCache.TakeNodesFrom(Cache: TMemDbNodeCache);
+procedure TMemDbNodeCache.TrimForCacheCache;
 var
   i: integer;
+  Node: TReffed;
 begin
-  for i := 0 to Pred(Cache.FPtrs.Count) do
-    FPtrs.Add(Cache.FPtrs[i]);
-  Cache.FPtrs.Clear;
-  (FPinCache as TMemDBIPinCache).TakeNodesFrom(Cache.FPinCache as TMemDBIPinCache);
+  if Assigned(FPtrs) then
+  begin
+    if FPtrs.Count > SMALL_NODE_PIN_CACHE_SIZE then
+    begin
+      for i := Pred(FPtrs.Count) downto SMALL_NODE_PIN_CACHE_SIZE do
+      begin
+        Node := TReffed(FPtrs[i]); //Refcounts 1 for cached objects.
+        FPtrs.Delete(i);
+        Node.Release;
+      end;
+      Assert(FPtrs.Count = SMALL_NODE_PIN_CACHE_SIZE);
+      FPtrs.Capacity := FPtrs.Count;
+    end;
+  end;
+  TMemDBIPinCache(FPinCache).TrimForCacheCache;
 end;
 
 function TMemDBNodeCache.GetCount: integer;
@@ -476,8 +538,36 @@ end;
 
 constructor TMemDBIndexGeneric.Create;
 begin
-  FCache := TMemDBNodeCache.Create;
   inherited;
+end;
+
+procedure TMemDBIndexGeneric.CreateCachedInternals(const Tid: TTransactionId; Internal: boolean);
+begin
+  if Internal then
+  begin
+  {$IFOPT C+}
+    FCacheProxy := GetCacheBlockForTid(Tid).InternalNodeCacheCache.GetFromCache as TMemDBNodeCacheProxy;
+  {$ELSE}
+    FCacheProxy := TMemDBNodeCacheProxy(GetCacheBlockForTid(Tid).InternalNodeCacheCache.GetFromCache);
+  {$ENDIF}
+  end
+  else
+  begin
+  {$IFOPT C+}
+    FCacheProxy := GetCacheBlockForTid(Tid).NodeCacheCache.GetFromCache as TMemDBNodeCacheProxy;
+  {$ELSE}
+    FCacheProxy := TMemDBNodeCacheProxy(GetCacheBlockForTid(Tid).NodeCacheCache.GetFromCache);
+  {$ENDIF}
+  end;
+  if not Assigned(FCacheProxy) then
+  begin
+    FCacheProxy := TMemDBNodeCacheProxy.Create;
+    if Internal then
+      FCacheProxy.FMyCache := GetCacheBlockForTid(Tid).InternalNodeCacheCache
+    else
+      FCacheProxy.FMyCache := GetCacheBlockForTid(Tid).NodeCacheCache;
+  end;
+  FCache := FCacheProxy.NodeCache;
 end;
 
 destructor TMemDBIndexGeneric.Destroy;
@@ -485,12 +575,26 @@ begin
   FParentIndex.Release;
   FRoot.Release; //Not to cache...
   FNext.Release; //Not to cache...
-  FCache.Free;
+
+  //Free the large cache, and recycle the small cache in the normal way.
+  if Assigned(FStandbyCache) then
+  begin
+    FCache.Free;
+    FCache := FStandbyCache;
+    FStandbyCache := nil;
+  end;
+  //Cache the node cache.
+  if Assigned(FCacheProxy) then
+  begin
+    FCacheProxy.MyCache.PutToCache(FCacheProxy);
+    FCacheProxy := nil;
+  end;
+  FCache := nil;
   FStandbyCache.Free; //Placate claude code. Should be NIL unless internal error.
   inherited;
 end;
 
-function TMemDbIndexGeneric.Clone;
+function TMemDbIndexGeneric.Clone(const Tid: TTransactionId): TMemDBIndexGeneric;
 begin
   if Assigned(FParentIndex) then
     raise EMemDBInternalException.Create(S_CANNOT_CLONE_CLONES);
@@ -499,6 +603,7 @@ begin
   result := TMemDBIndexGenericClass(self.ClassType).Create;
   with result do
   begin
+    CreateCachedInternals(Tid, result is TMemDBIndexInternal);
     FParentIndex:= self.AddRef as TMemDBIndexGeneric;
     FRoot := self.FRoot.AddRef as TMemDbIndexLeaf;
     FNext := nil;
@@ -568,7 +673,6 @@ function TMemDBIndexGeneric.GetNodeCache: TMemDBNodeCache;
 begin
   result := FCache as TMemDbNodeCache;
 end;
-
 
 function TMemDbIndexGeneric.SelToRoot(Sel: TAbSelType): TMemDBIndexLeafGeneric;
 begin
@@ -813,7 +917,7 @@ begin
   inherited;
 end;
 
-function TMemDBIndex.Clone: TMemDBIndexGeneric;
+function TMemDBIndex.Clone(const Tid: TTransactionId): TMemDBIndexGeneric;
 begin
   result := inherited;
   if Assigned(result) then
@@ -842,8 +946,13 @@ end;
 destructor TMemDBIndexLeafGeneric.Destroy;
 begin
   Assert(Assigned(self.FPin) = Assigned(self.FRow));
+{$IFOPT C+}
   if Assigned(FPin) then
     (FRow as TMemDBRow).UnpinFromIndex(self, nil);
+{$ELSE}
+  if Assigned(FPin) then
+    TMemDBRow(FRow).UnpinFromIndex(self, nil);
+{$ENDIF}
   inherited;
 end;
 
@@ -861,8 +970,13 @@ begin
   NCache := TMemDBNodeCache(Cache);
   PCache := TMemDBIPinCache(NCache.PinCache);
 {$ENDIF}
+{$IFOPT C+}
   if Assigned(FPin) then
     (FRow as TMemDBRow).UnpinFromIndex(self, PCache);
+{$ELSE}
+  if Assigned(FPin) then
+    TMemDBRow(FRow).UnpinFromIndex(self, PCache);
+{$ENDIF}
   FOriginalIndex := nil;
   FPin := nil;
   FRow := nil;
@@ -936,6 +1050,7 @@ begin
     PCache := NCache.PinCache as TMemDBIPinCache
   else
     PCache := nil;
+  (SL.Row as TMemDBRow).DupIndexPin(SL, self, PCache);
 {$ELSE}
   IndexCheck := TMemDbIndexGeneric(SrcTree);
   NCache := TMemDBNodeCache(IndexCheck.FCache);
@@ -943,8 +1058,8 @@ begin
     PCache := TMemDBIPinCache(NCache.PinCache)
   else
     PCache := nil;
+  TMemDBRow(SL.Row).DupIndexPin(SL, self, PCache);
 {$ENDIF}
-  (SL.Row as TMemDBRow).DupIndexPin(SL, self, PCache);
   //Now we need a key de-dupe which is invariant even when we copy nodes,
   //otherwise very bad things happen...
   Assert(PMemDBIndexPin(self.FPin).PinnedItem = PMemDBIndexPin(SL.FPin).PinnedItem);

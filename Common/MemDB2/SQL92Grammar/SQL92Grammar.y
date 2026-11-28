@@ -1,4 +1,3 @@
-
 %{
 
 unit SQL92Grammar_parser;
@@ -45,10 +44,23 @@ uses
 %classfunc  procedure yyerror ( msg : String ); override;
 %classfunc  procedure yyaction_debug(State: integer; Action: integer); override;
 %classfunc  function MakeClass(ClassType: TSQLSynNodeClass): TSQLSynNode;
+%classfunc  function WrapJoinAsQuery(Join: TSqlSynNode): TSqlSynNode;
 %classfunc  function CheckContinuation(S: string; T: TSQLSynLiteralType): boolean;
 %classfunc function HandleContinuation(S: string; T: TSQlSynLiteralType): string;
 %classfunc  function CheckDelimIdent(S: string): boolean;
 %classfunc function HandleDelimIdent(S: string): string;
+%classfunc  function UnquoteStringToken(S: string): string;
+%classfunc  function LiteralShape(S: string): string;
+%classfunc  function SplitTimeZone(S: string; out Base, TZ: string): boolean;
+%classfunc  function IsDateString(S: string): boolean;
+%classfunc  function IsTimeString(S: string): boolean;
+%classfunc  function IsTimestampString(S: string): boolean;
+%classfunc  function GetIntervalStringType(S: string; out IST: TSQLSynIntervalStringType): boolean;
+%classfunc  function IsQualifiedNameText(S: string): boolean;
+
+%{
+// space tab carriage_return line_feed no longer tokens.
+%}
 
 %token
 
@@ -64,10 +76,6 @@ uses
                 less_than_or_equals_operator
                 concatenation_operator
                 double_period
-                space
-                tab
-                carriage_return
-                line_feed
                 double_quote
                 percent
                 ampersand
@@ -298,6 +306,7 @@ uses
 		_TRIM
 		_TRUE
 		_UNION
+		_UNION_JOIN
 		_UNIQUE
 		_UNKNOWN
 		_UPDATE
@@ -392,6 +401,8 @@ uses
   //TODO - Remove tmp decls if not required.
   var
     TmpInt: integer;
+    TmpStr, TmpStr2: string;
+    TmpIST: TSQLSynIntervalStringType;
     TmpClass, TmpClass2: TSqlSynNode;
 %}
 
@@ -450,6 +461,7 @@ uses
                                                   $$.Obj := MakeClass(TSQLSynLiteral);
                                                   with $$.Obj as TSQLSynLiteral do
                                                   begin
+                                                    ExprType := setLiteral;
                                                     LitType := sltUnsInt;
                                                     Text := $$.text;
                                                   end; }
@@ -533,6 +545,7 @@ uses
                                                   with $$.Obj as TSQLSynLiteral do
                                                   begin
                                                     Text := $$.Text;
+                                                    ExprType := setLiteral;
                                                     LitType := sltNatString;
                                                   end; }
         ;
@@ -545,7 +558,10 @@ uses
                                                   if CheckContinuation(UTF8ToString(Lexer.yytext), sltNatString) then
                                                     $$.Text := $1.Text + HandleContinuation(UTF8ToString(Lexer.yytext), sltNatString)
                                                   else
-                                                    yyerror('String continuation not a national character string'); }
+                                                  begin
+                                                    $$.Text := '';
+                                                    yyerror('String continuation not a national character string');
+                                                  end; }
 
         ;
 
@@ -569,6 +585,7 @@ uses
                                                   with $$.Obj as TSQLSynLiteral do
                                                   begin
                                                     Text := $$.Text;
+                                                    ExprType := setLiteral;
                                                     LitType := sltBitString;
                                                   end; }
         ;
@@ -580,7 +597,10 @@ uses
                                                   if CheckContinuation(UTF8ToString(Lexer.yytext), sltBitString) then
                                                     $$.Text := $1.Text + HandleContinuation(UTF8ToString(Lexer.yytext), sltBitString)
                                                   else
-                                                    yyerror('String continuation not a bit string'); }
+                                                  begin
+                                                    $$.Text := '';
+                                                    yyerror('String continuation not a bit string');
+                                                  end; }
         ;
 
   _hex_string_literal_start :
@@ -603,6 +623,7 @@ uses
                                                   with $$.Obj as TSQLSynLiteral do
                                                   begin
                                                     Text := $$.Text;
+                                                    ExprType := setLiteral;
                                                     LitType := sltHexString;
                                                   end; }
         ;
@@ -614,7 +635,10 @@ uses
                                                   if CheckContinuation(UTF8ToString(Lexer.yytext), sltHexString) then
                                                     $$.Text := $1.Text + HandleContinuation(UTF8ToString(Lexer.yytext), sltHexString)
                                                   else
-                                                    yyerror('String continuation not a hex string'); }
+                                                  begin
+                                                    $$.Text := '';
+                                                    yyerror('String continuation not a hex string');
+                                                  end; }
         ;
 
   character_string_literal :
@@ -629,17 +653,21 @@ uses
 
   character_string_literal_main :
                 string_literal_continuation     { if CheckContinuation(UTF8ToString(Lexer.yytext), sltString) then
-                                                  begin
-                                                    $$.Text := HandleContinuation(UTF8ToString(Lexer.yyText), sltString);
-                                                    $$.Obj := MakeClass(TSqlSynLiteral);
-                                                    with $$.Obj as TSqlSynLiteral do
-                                                    begin
-                                                      Text := $$.Text;
-                                                      LitType := sltString;
-                                                    end;
-                                                  end
+                                                    $$.Text := HandleContinuation(UTF8ToString(Lexer.yyText), sltString)
                                                   else
-                                                    yyerror('Not a valid character string'); }
+                                                  begin
+                                                    //Still build the literal (empty): a NIL here would reach every
+                                                    //expression that can hold a literal.
+                                                    $$.Text := '';
+                                                    yyerror('Not a valid character string');
+                                                  end;
+                                                  $$.Obj := MakeClass(TSqlSynLiteral);
+                                                  with $$.Obj as TSqlSynLiteral do
+                                                  begin
+                                                    Text := $$.Text;
+                                                    ExprType := setLiteral;
+                                                    LitType := sltString;
+                                                  end; }
         |       character_string_literal_main
                 string_literal_continuation     { if CheckContinuation(UTF8ToString(Lexer.yytext), sltString) then
                                                   begin
@@ -651,7 +679,10 @@ uses
                                                     ($$.Obj as TSQLSynLiteral).Text := $$.Text;
                                                   end
                                                   else
-                                                    yyerror('Not a valid character string'); }
+                                                  begin
+                                                    $$ := $1; //Keep the literal so far.
+                                                    yyerror('Not a valid character string');
+                                                  end; }
         ;
 
   introducer : underscore                       { $$.Obj := nil;
@@ -705,180 +736,75 @@ uses
   actual_identifier :
                 regular_identifier              { $$ := $1; }
         |       delimited_identifier            { if CheckDelimIdent(UTF8ToString(Lexer.yytext)) then
-                                                  begin
-                                                    $$.Text := HandleDelimIdent(UTF8ToString(Lexer.yytext));
-                                                    $$.Obj := MakeClass(TSQLSynIdent);
-                                                    with $$.Obj as TSQLSynIdent do
-                                                      IdentName := $$.Text;
-                                                  end
+                                                    $$.Text := HandleDelimIdent(UTF8ToString(Lexer.yytext))
                                                   else
-                                                    yyerror('Not a valid delimited identifier.'); }
+                                                  begin
+                                                    //Still build the identifier (empty): a NIL here would reach every
+                                                    //rule that takes a name.
+                                                    $$.Text := '';
+                                                    yyerror('Not a valid delimited identifier.');
+                                                  end;
+                                                  $$.Obj := MakeClass(TSQLSynIdent);
+                                                  with $$.Obj as TSQLSynIdent do
+                                                    IdentName := $$.Text; }
         ;
 
   SQL_language_identifier :
                 regular_identifier              { $$ := $1; }
         ;
 
+  /* Datetime and interval strings.
+     The BNF describes these at character level (<quote> <date value> <quote>
+     etc.), but the lexer returns the whole quoted string as a single
+     string_literal_continuation token, so the contents are checked in Pascal
+     (IsDateString etc., at the end of this file) rather than in the grammar.
+     Each rule is a single token so it reduces before the next token is read,
+     and Lexer.yytext is still the string. */
   date_string :
-                quote date_value quote          { $$ := $2 }
-        ;
-
-  date_value :
-                unsigned_integer minus_sign unsigned_integer minus_sign unsigned_integer
-                                                { $$.Text := $1.Text + '-' +
-                                                             $3.Text + '-' +
-                                                             $5.Text;
+                string_literal_continuation
+                                                { $$.Text := UnquoteStringToken(UTF8ToString(Lexer.yytext));
                                                   $$.Obj := nil;
-                                                  $1.Obj.Free;
-                                                  $3.Obj.Free;
-                                                  $5.Obj.Free; }
+                                                  if not IsDateString($$.Text) then
+                                                    yyerror('Not a valid date string: ''' + $$.Text + ''''); }
         ;
 
   time_string :
-                quote time_value quote          { $$ := $2; }
-                quote time_value time_zone_interval quote
-                                                { $$.Text := $2.Text + $3.Text;
-                                                  $$.Obj := nil; }
-        ;
-
-  time_value :
-                unsigned_integer colon unsigned_integer colon seconds_value
-                                                { $$.Text := $1.Text + ':'
-                                                  + $3.Text + ':' + $5.Text;
+                string_literal_continuation
+                                                { $$.Text := UnquoteStringToken(UTF8ToString(Lexer.yytext));
                                                   $$.Obj := nil;
-                                                  $1.Obj.Free;
-                                                  $3.Obj.Free;
-                                                  $5.Obj.Free; }
-        ;
-
-  seconds_value :
-                unsigned_integer                { $$ := $1; }
-        |       unsigned_integer period unsigned_integer
-                                                { $$.Obj := nil;
-                                                  $$.Text := $1.Text + '.' + $3.Text;
-                                                  $1.Obj.Free;
-                                                  $3.Obj.Free; }
-        ;
-
-  time_zone_interval : sign unsigned_integer colon unsigned_integer
-                                                { $$.Obj := nil;
-                                                  $$.Text := $1.Text + $2.Text +
-                                                  ':' + $4.Text;
-                                                  $2.Obj.Free;
-                                                  $4.Obj.Free; }
+                                                  if not IsTimeString($$.Text) then
+                                                    yyerror('Not a valid time string: ''' + $$.Text + ''''); }
         ;
 
   timestamp_string :
-                quote date_value space time_value quote
-                                                { $$.Obj := nil;
-                                                  $$.Text := $2.Text + ' ' + $$.Text }
-        |       quote date_value space time_value time_zone_interval quote
-                                                { $$.Obj := nil;
-                                                  $$.Text := $2.Text + ' ' + $$.Text;
-                                                  yyinfo('Time zone ignored in in timestamp string.'); }
+                string_literal_continuation
+                                                { $$.Text := UnquoteStringToken(UTF8ToString(Lexer.yytext));
+                                                  $$.Obj := nil;
+                                                  if not IsTimestampString($$.Text) then
+                                                    yyerror('Not a valid timestamp string: ''' + $$.Text + '''')
+                                                  else if SplitTimeZone($$.Text, TmpStr, TmpStr2) then
+                                                  begin
+                                                    $$.Text := TmpStr;
+                                                    yyinfo('Time zone ignored in timestamp string.');
+                                                  end; }
         ;
 
   interval_string :
-                quote interval_string_literal quote { $$ := $1; }
-        ;
-
-  interval_string_literal :
-                unsigned_integer                { $$ := $1;
-                                                  $$.Obj.Free;
+                string_literal_continuation
+                                                { $$.Text := UnquoteStringToken(UTF8ToString(Lexer.yytext));
+                                                  if not GetIntervalStringType($$.Text, TmpIST) then
+                                                  begin
+                                                    yyerror('Not a valid interval string: ''' + $$.Text + '''');
+                                                    TmpIST := istPlainInt;
+                                                  end;
                                                   $$.Obj := MakeClass(TSQLSynIntervalStringLiteral);
                                                   with $$.Obj as TSQLSynIntervalStringLiteral do
                                                   begin
+                                                    ExprType := setLiteral;
                                                     LitType := sltIntervalString;
-                                                    IntervalStringType := istPlainInt;
+                                                    IntervalStringType := TmpIST;
                                                     Text := $$.Text;
                                                   end; }
-                /* Year month interval */
-        |       unsigned_integer minus_sign unsigned_integer
-                                                { $$.Text := $1.Text + '-' + $3.Text;
-                                                  $$.Obj := MakeClass(TSQLSynIntervalStringLiteral);
-                                                  with $$.Obj as TSQLSynIntervalStringLiteral do
-                                                  begin
-                                                    LitType := sltIntervalString;
-                                                    IntervalStringType := istYearMonth;
-                                                    Text := $$.Text;
-                                                  end;
-                                                  $1.Obj.Free;
-                                                  $3.Obj.Free; }
-                /* Day time intervals */
-        |       unsigned_integer space unsigned_integer
-                                                { $$.Text := $1.Text + ' ' + $3.Text;
-                                                  $$.Obj := MakeClass(TSQLSynIntervalStringLiteral);
-                                                  with $$.Obj as TSQLSynIntervalStringLiteral do
-                                                  begin
-                                                    LitType := sltIntervalString;
-                                                    IntervalStringType := istDayTime1;
-                                                    Text := $$.Text;
-                                                  end;
-                                                  $1.Obj.Free;
-                                                  $3.Obj.Free; }
-        |       unsigned_integer space unsigned_integer colon unsigned_integer
-                                                { $$.Text := $1.Text + ' ' + $3.Text
-                                                  + ':' + $5.Text;
-                                                  $$.Obj := MakeClass(TSQLSynIntervalStringLiteral);
-                                                  with $$.Obj as TSQLSynIntervalStringLiteral do
-                                                  begin
-                                                    LitType := sltIntervalString;
-                                                    IntervalStringType := istDayTime2;
-                                                    Text := $$.Text;
-                                                  end;
-                                                  $1.Obj.Free;
-                                                  $3.Obj.Free;
-                                                  $5.Obj.Free; }
-        |       unsigned_integer space unsigned_integer colon unsigned_integer colon seconds_value
-                                                { $$.Text := $1.Text + ' ' + $3.Text
-                                                  + ':' + $5.Text + ':' + $7.Text;
-                                                  $$.Obj := MakeClass(TSQLSynIntervalStringLiteral);
-                                                  with $$.Obj as TSQLSynIntervalStringLiteral do
-                                                  begin
-                                                    LitType := sltIntervalString;
-                                                    IntervalStringType := istDayTime3;
-                                                    Text := $$.Text;
-                                                  end;
-                                                  $1.Obj.Free;
-                                                  $3.Obj.Free;
-                                                  $5.Obj.Free;
-                                                  $7.Obj.Free; }
-                /* Time intervals */
-	|	unsigned_integer period unsigned_integer
-                                                { $$.Text := $1.Text + '.' + $3.Text;
-                                                  $$.Obj := MakeClass(TSQLSynIntervalStringLiteral);
-                                                  with $$.Obj as TSQLSynIntervalStringLiteral do
-                                                  begin
-                                                    LitType := sltIntervalString;
-                                                    IntervalStringType := istTime1;
-                                                    Text := $$.Text;
-                                                  end;
-                                                  $1.Obj.Free;
-                                                  $3.Obj.Free; }
-        |       unsigned_integer colon seconds_value
-                                                { $$.Text := $1.Text + ':' + $3.Text;
-                                                  $$.Obj := MakeClass(TSQLSynIntervalStringLiteral);
-                                                  with $$.Obj as TSQLSynIntervalStringLiteral do
-                                                  begin
-                                                    LitType := sltIntervalString;
-                                                    IntervalStringType := istTime2;
-                                                    Text := $$.Text;
-                                                  end;
-                                                  $1.Obj.Free;
-                                                  $3.Obj.Free; }
-        |       unsigned_integer colon unsigned_integer colon seconds_value
-                                                { $$.Text := $1.Text + ':' + $3.Text
-                                                  + ':' + $5.Text;
-                                                  $$.Obj := MakeClass(TSQLSynIntervalStringLiteral);
-                                                  with $$.Obj as TSQLSynIntervalStringLiteral do
-                                                  begin
-                                                    LitType := sltIntervalString;
-                                                    IntervalStringType := istTime3;
-                                                    Text := $$.Text;
-                                                  end;
-                                                  $1.Obj.Free;
-                                                  $3.Obj.Free;
-                                                  $5.Obj.Free; }
         ;
 
 /*
@@ -892,37 +818,24 @@ uses
 		module_name_clause
                 language_clause
                 module_authorization_clause
+                temp_table_decls
                 module_contents
-                                                {
-                                                  $$ := $1; //Module and name
+                                                { $$ := $1; //Module and name
                                                   with $$.Obj as TSqlSynModule do
                                                   begin
                                                     // Language clause
                                                     InsertTailChild($2.Obj);
                                                     Language := $2.Obj as TSQLSynIdent;
-                                                    // Module auth clause
-                                                      //Schema.
-                                                    if Assigned(($3.Obj as TTempTpl).T1) then
-                                                    begin
-                                                      ($3.Obj as TTempTpl).T1.RemoveFromTree;
-                                                      InsertTailChild(($3.Obj as TTempTpl).T1);
-                                                      Schema := ($3.Obj as TTempTpl).T1 as TSqlSynIdent;
-                                                    end;
-                                                      //Authorization
-                                                    if Assigned(($3.Obj as TTempTpl).T2) then
-                                                    begin
-                                                      ($3.Obj as TTempTpl).T2.RemoveFromTree;
-                                                      InsertTailChild(($3.Obj as TTempTpl).T2);
-                                                      Authorization := ($3.Obj as TTempTpl).T2 as TSqlSynIdent;
-                                                    end;
-                                                    $3.Obj.Free;
-                                                    // Module opt.
-                                                    // Flatten tree, and keep a cpl of pointers as to
-                                                    // locations of things.
-                                                    FlattenModuleContents(($4.Obj) as TTempTpl);
-                                                    $4.Obj.Free;
-                                                  end;
-                                                }
+                                                    //Auth clause.
+                                                    InsertTailChild($3.Obj);
+                                                    AuthClause := $3.Obj as TSqlSynModuleAuth;
+                                                    //Temp table decls.
+                                                    InsertTailChild($4.Obj);
+                                                    TempTables := $4.Obj as TSqlSynList;
+                                                    //Contents
+                                                    InsertTailChild($5.Obj);
+                                                    Contents := $5.Obj as TSqlSynList;
+                                                  end; }
         ;
 
 
@@ -999,29 +912,32 @@ uses
   module_authorization_clause :
 		_SCHEMA schema_name
                                                 { $$.Text := '';
-                                                  $$.Obj := MakeClass(TTempTpl);
-                                                  with $$.Obj as TTempTpl do
+                                                  $$.Obj := MakeClass(TSqlSynModuleAuth);
+                                                  with $$.Obj as TSqlSynModuleAuth do
                                                   begin
+                                                    StructuralType := sstModuleAuth;
                                                     InsertTailChild($2.Obj);
-                                                    T1 := $2.Obj;
+                                                    Schema := $2.Obj as TSQLSynIdent;
                                                   end; }
 	|	_AUTHORIZATION module_authorization_identifier
                                                 { $$.Text := '';
-                                                  $$.Obj := MakeClass(TTempTpl);
-                                                  with $$.Obj as TTempTpl do
+                                                  $$.Obj := MakeClass(TSqlSynModuleAuth);
+                                                  with $$.Obj as TSqlSynModuleAuth do
                                                   begin
+                                                    StructuralType := sstModuleAuth;
                                                     InsertTailChild($2.Obj);
-                                                    T2 := $2.Obj;
+                                                    Auth := $2.Obj as TSQLSynIdent;
                                                   end; }
 	|	_SCHEMA schema_name _AUTHORIZATION module_authorization_identifier
                                                 { $$.Text := '';
-                                                  $$.Obj := MakeClass(TTempTpl);
-                                                  with $$.Obj as TTempTpl do
+                                                  $$.Obj := MakeClass(TSqlSynModuleAuth);
+                                                  with $$.Obj as TSqlSynModuleAuth do
                                                   begin
+                                                    StructuralType := sstModuleAuth;
                                                     InsertTailChild($2.Obj);
-                                                    T1 := $2.Obj;
+                                                    Schema := $2.Obj as TSQLSynIdent;
                                                     InsertTailChild($4.Obj);
-                                                    T2 := $4.Obj;
+                                                    Auth := $4.Obj as TSQLSynIdent;
                                                   end; }
         ;
 
@@ -1035,6 +951,8 @@ uses
                                                 { $$ := $1; }
         ;
 
+  /* TODO - Check with the AI about whether this is consistent with creations
+    elsewhere. */
   temporary_table_declaration :
                 _DECLARE _LOCAL _TEMPORARY _TABLE
                 qualified_local_table_name
@@ -1045,12 +963,12 @@ uses
                                                   with $$.Obj as TSqlSynCreateOrDeclTable do
                                                   begin
                                                     StructuralType := sstCreateOrDecl;
-                                                    Temporary := true;
-                                                    Local := true;
+                                                    CreateOrDeclType := codTable;
+                                                    TempOpts := dtoLocalTemporary;
                                                     InsertTailChild($5.Obj);
                                                     Name := $5.Obj as TSqlSynIdent;
-                                                    FlattenColDefsConstraints($6.Obj as TTempTpl);
-                                                    $6.Obj.Free;
+                                                    InsertTailChild($6.Obj);
+                                                    ElementList := $6.Obj as TSqlSynList;
                                                     RowCommitAction := TSqlSynRowCommitAction($7.Obj);
                                                   end;}
         ;
@@ -1083,20 +1001,21 @@ uses
   table_element_list :
         left_paren table_element table_element_list_opt right_paren
                                                 { $$ := $3;
-                                                  with $$.Obj as TTempTpl do
-                                                    InsertHeadChild($2.Obj); }
+                                                  if Assigned($2.Obj) then //NIL if check constraint ignored.
+                                                    with $$.Obj as TSqlSynList do
+                                                      InsertHeadChild($2.Obj); }
         ;
 
   table_element_list_opt :
         /* Empty */
                                                 { $$.Text := '';
-                                                  $$.Obj := MakeClass(TTempTpl); }
+                                                  $$.Obj := MakeClass(TSqlSynList); }
         |       table_element_list_opt comma table_element
                                                 { $$ := $1;
                                                   if Assigned($3.Obj) then
                                                   begin
                                                     //Check constraints may be omitted / NIL.
-                                                    with $$.Obj as TTempTpl do
+                                                    with $$.Obj as TSqlSynList do
                                                       InsertTailChild($3.Obj);
                                                   end;}
         ;
@@ -1112,7 +1031,7 @@ uses
                 column_name
                 column_definition_sel
                 default_clause_opt
-                column_constraint_definition_opt
+                column_constraint_definition_opts
                 collate_clause_opt
                                                 { $$.Text := '';
                                                   $$.Obj := MakeClass(TSqlSynColDef);
@@ -1126,18 +1045,14 @@ uses
                                                     if Assigned($3.Obj) then
                                                     begin
                                                       InsertTailChild($3.Obj);
-                                                      _Default := $3.Obj as TSqlSynExpr;
+                                                      _Default := $3.Obj as TSqlSynLiteral;
                                                     end;
                                                     if Assigned($4.Obj) then
                                                     begin
                                                       InsertTailChild($4.Obj);
-                                                      Constraint := $4.Obj;
+                                                      Constraints := $4.Obj as TSqlSynList;
                                                     end;
-                                                    if Assigned($5.Obj) then
-                                                    begin
-                                                      InsertTailChild($5.Obj);
-                                                      Collation := $5.Obj;
-                                                    end;
+                                                    Assert(not Assigned($5.Obj)); //No collations yet.
                                                   end; }
         ;
 
@@ -1155,12 +1070,56 @@ uses
                                                 { $$ := $1; }
         ;
 
-  column_constraint_definition_opt :
+  column_constraint_definition_opts :
         /* Empty */
-                                                { $$.Text := ''; $$.Obj := nil; }
-        |       column_constraint_definition
-                                                { $$ := $1; }
+                                                { $$.Text := ''; $$.Obj := MakeClass(TSqlSynList); }
+        |       column_constraint_definition_opts column_constraint_definition
+                                                { $$ := $1;
+                                                  //Text IGNORED marks that the last constraint was an ignored (NIL)
+                                                  //check constraint, so attributes after it are dropped rather than
+                                                  //attached to the constraint before it.
+                                                  if Assigned($2.Obj) then
+                                                  begin
+                                                    $$.Obj.InsertTailChild($2.Obj);
+                                                    $$.Text := '';
+                                                  end
+                                                  else
+                                                    $$.Text := 'IGNORED'; }
+        |       column_constraint_definition_opts column_constraint_attribute
+                                                { $$ := $1;
+                                                  //Attributes apply to the constraint immediately before them.
+                                                  if $$.Text = 'IGNORED' then
+                                                    $2.Obj.Free //That constraint was ignored, so are its attributes.
+                                                  else if not ($$.Obj.LastChild is TSqlSynConstraint) then
+                                                  begin
+                                                    $2.Obj.Free;
+                                                    yyerror('Constraint attributes must follow a column constraint.');
+                                                  end
+                                                  else
+                                                  with $$.Obj.LastChild as TSqlSynConstraint do
+                                                  begin
+                                                    if not Assigned(Attributes) then
+                                                    begin
+                                                      InsertTailChild($2.Obj);
+                                                      Attributes := $2.Obj as TSqlSynConstraintAttributes;
+                                                    end
+                                                    else
+                                                    begin
+                                                      with $2.Obj as TSqlSynConstraintAttributes do
+                                                      begin
+                                                        if (InitDeferred <> sidUnspec) and (Attributes.InitDeferred <> sidUnspec)
+                                                          or (Deferrable <> ssdUnspec) and (Attributes.Deferrable <> ssdUnspec) then
+                                                          yyerror('Duplicate constraint attribute.');
+                                                        if InitDeferred <> sidUnspec then
+                                                          Attributes.InitDeferred := InitDeferred;
+                                                        if Deferrable <> ssdUnspec then
+                                                          Attributes.Deferrable := Deferrable;
+                                                      end;
+                                                      $2.Obj.Free;
+                                                    end;
+                                                  end; }
         ;
+
 
   collate_clause_opt :
         /* Empty */
@@ -1406,12 +1365,16 @@ uses
         ;
 
   numeric_precision_scale_opt :
-        /* Empty */
+        /* Empty */                             { $$.Text := ''; $$.Obj := nil; }
         |       left_paren precision comma scale right_paren
-                                                { yyerror('Integer scaling not supported at the moment. E-mail the author.'); }
+                                                { $$.Text := ''; $$.Obj := nil;
+                                                  yyerror('Integer scaling not supported at the moment. E-mail the author.');
+                                                  $2.Obj.Free;
+                                                  $4.Obj.Free; }
         |       left_paren precision right_paren
-                                                { yyinfo('Integer precision ignored in type.');
-                                                  $1.Obj.Free; }
+                                                { $$.Text := ''; $$.Obj := nil;
+                                                  yyinfo('Integer precision ignored in type.');
+                                                  $2.Obj.Free; }
         ;
 
   precision : unsigned_integer
@@ -1466,7 +1429,7 @@ uses
         ;
 
   timestamp_precision_opt :
-        /* Empty */
+        /* Empty */                             { $$.Text := ''; $$.Obj := nil; }
         |       left_paren timestamp_precision right_paren
                                                 { yyinfo('Timestamp precision ignored.');
                                                   $$.Text := ''; $$.obj := nil;
@@ -1474,7 +1437,7 @@ uses
         ;
 
   time_precision_opt :
-        /* Empty */
+        /* Empty */                             { $$.Text := ''; $$.Obj := nil; }
         |       left_paren time_precision right_paren
                                                 { yyinfo('Time precision ignored.');
                                                   $$.Text := ''; $$.obj := nil;
@@ -1482,9 +1445,10 @@ uses
         ;
 
   tz_opt :
-        /* Empty */
+        /* Empty */                             { $$.Text := ''; $$.Obj := nil; }
         |        _WITH _TIME _ZONE
-                                                { yyerror('Time zones not supported.');}
+                                                { $$.Text := ''; $$.Obj := nil;
+                                                  yyerror('Time zones not supported.');}
         ;
 
 
@@ -1505,6 +1469,7 @@ uses
                                                   $$.Obj := MakeClass(TSQLSynIntervalType);
                                                   with $$.Obj as TSQLSynIntervalType do
                                                   begin
+                                                    GeneralType := sgtInterval;
                                                     InsertTailChild($2.Obj);
                                                     Qualifier := $2.Obj as TSQLSynIntervalQualifier;
                                                   end; }
@@ -1516,6 +1481,7 @@ uses
                                                   $$.Obj := MakeClass(TSQLSynIntervalQualifier);
                                                   with $$.Obj as TSQlSynIntervalQualifier do
                                                   begin
+                                                    StructuralType := sstIntervalQualifier;
                                                     Start := TSQLSynQualField($1.Obj);
                                                     _End := TSQLSynQualField($1.Obj);
                                                   end; }
@@ -1524,6 +1490,7 @@ uses
                                                   $$.Obj := MakeClass(TSQLSynIntervalQualifier);
                                                   with $$.Obj as TSQlSynIntervalQualifier do
                                                   begin
+                                                    StructuralType := sstIntervalQualifier;
                                                     Start := TSQLSynQualField($1.Obj);
                                                     _End := TSQLSynQualField($3.Obj);
                                                   end; }
@@ -1532,6 +1499,7 @@ uses
                                                   $$.Obj := MakeClass(TSQLSynIntervalQualifier);
                                                   with $$.Obj as TSQlSynIntervalQualifier do
                                                   begin
+                                                    StructuralType := sstIntervalQualifier;
                                                     Start := sqfSecond;
                                                     _End := sqfSecond;
                                                   end; }
@@ -1543,7 +1511,7 @@ uses
         |       non_second_datetime_field left_paren precision right_paren
                                                 { $$ := $1;
                                                   yyinfo('Datetime field precision ignored.');
-                                                  $2.Obj.Free; }
+                                                  $3.Obj.Free; }
         ;
 
   non_second_datetime_field :
@@ -1616,6 +1584,13 @@ uses
                                                   ($$.Obj as TSqlSynIdent).IdentName := $$.Text;
                                                   $3.Obj.Free;
                                                   $5.Obj.Free; }
+        |       identifier period identifier period identifier period identifier
+                                                { $$ := $1;
+                                                  $$.Text := $$.Text + '.' + $3.Text + '.' + $5.Text + '.' + $7.Text;
+                                                  ($$.Obj as TSqlSynIdent).IdentName := $$.Text;
+                                                  $3.Obj.Free;
+                                                  $5.Obj.Free;
+                                                  $7.Obj.Free; }
         ;
 
   qualified_name_trail_asterisk :
@@ -1653,7 +1628,7 @@ uses
 
   default_clause :
                 _DEFAULT default_option
-                                                { $$ := $1; }
+                                                { $$ := $2; }
         ;
 
   default_option :
@@ -1665,27 +1640,47 @@ uses
                                                 { $$.Text := '';
                                                   $$.Obj := MakeClass(TSqlSynBuiltin);
                                                   with $$.Obj as TSqlSynBuiltIn do
-                                                    BuiltInType := sftUser; }
+                                                  begin
+                                                    ExprType := setLiteral;
+                                                    LitType := sltBuiltIn;
+                                                    BuiltInType := sftUser;
+                                                  end;}
 	|	_CURRENT_USER
                                                 { $$.Text := '';
                                                   $$.Obj := MakeClass(TSqlSynBuiltin);
                                                   with $$.Obj as TSqlSynBuiltIn do
-                                                    BuiltInType := sftCurrentUser; }
+                                                  begin
+                                                    ExprType := setLiteral;
+                                                    LitType := sltBuiltIn;
+                                                    BuiltInType := sftCurrentUser;
+                                                  end; }
 	|	_SESSION_USER
                                                 { $$.Text := '';
                                                   $$.Obj := MakeClass(TSqlSynBuiltin);
                                                   with $$.Obj as TSqlSynBuiltIn do
-                                                    BuiltInType := sftSessionUser; }
+                                                  begin
+                                                    ExprType := setLiteral;
+                                                    LitType := sltBuiltIn;
+                                                    BuiltInType := sftSessionUser;
+                                                  end; }
 	|	_SYSTEM_USER
                                                 { $$.Text := '';
                                                   $$.Obj := MakeClass(TSqlSynBuiltin);
                                                   with $$.Obj as TSqlSynBuiltIn do
-                                                    BuiltInType := sftSystemUser; }
+                                                  begin
+                                                    ExprType := setLiteral;
+                                                    LitType := sltBuiltIn;
+                                                    BuiltInType := sftSystemUser;
+                                                  end; }
 	|	_NULL
                                                 { $$.Text := '';
                                                   $$.Obj := MakeClass(TSqlSynBuiltin);
                                                   with $$.Obj as TSqlSynBuiltIn do
-                                                    BuiltInType := sftNull; }
+                                                  begin
+                                                    ExprType := setLiteral;
+                                                    LitType := sltBuiltIn;
+                                                    BuiltInType := sftNull;
+                                                  end;}
         ;
 
 /*
@@ -1747,33 +1742,36 @@ uses
         ;
 
   date_literal : _DATE date_string
-                                                { $$.Text := $1.Text;
-                                                  Assert(not Assigned($1.Obj));
+                                                { $$.Text := $2.Text;
+                                                  Assert(not Assigned($2.Obj));
                                                   $$.Obj := MakeClass(TSQlSynLiteral);
                                                   with $$.Obj as TSQLSynLiteral do
                                                   begin
+                                                    ExprType := setLiteral;
                                                     LitType := sltDate;
                                                     Text := $$.Text;
                                                   end; }
         ;
 
   time_literal : _TIME time_string
-                                                { $$.Text := $1.Text;
-                                                  Assert(not Assigned($1.Obj));
+                                                { $$.Text := $2.Text;
+                                                  Assert(not Assigned($2.Obj));
                                                   $$.Obj := MakeClass(TSQlSynLiteral);
                                                   with $$.Obj as TSQLSynLiteral do
                                                   begin
+                                                    ExprType := setLiteral;
                                                     LitType := sltTime;
                                                     Text := $$.Text;
                                                   end; }
         ;
 
   timestamp_literal : _TIMESTAMP timestamp_string
-                                                { $$.Text := $1.Text;
-                                                  Assert(not Assigned($1.Obj));
+                                                { $$.Text := $2.Text;
+                                                  Assert(not Assigned($2.Obj));
                                                   $$.Obj := MakeClass(TSQlSynLiteral);
                                                   with $$.Obj as TSQLSynLiteral do
                                                   begin
+                                                    ExprType := setLiteral;
                                                     LitType := sltTimestamp;
                                                     Text := $$.Text;
                                                   end; }
@@ -1785,6 +1783,7 @@ uses
                                                   $$.Obj := MakeClass(TSQLSynIntervalLiteral);
                                                   with $$.Obj as TSQLSynIntervalLiteral do
                                                   begin
+                                                    ExprType := setLiteral;
                                                     LitType := sltInterval;
                                                     Text := $$.Text;
                                                     InsertTailChild($2.Obj);
@@ -1797,6 +1796,7 @@ uses
                                                   $$.Obj := MakeClass(TSQLSynIntervalLiteral);
                                                   with $$.Obj as TSQLSynIntervalLiteral do
                                                   begin
+                                                    ExprType := setLiteral;
                                                     LitType := sltInterval;
                                                     Text := $$.Text;
                                                     if $2.Text <> '+' then
@@ -1818,21 +1818,33 @@ uses
   current_date_value_function : _CURRENT_DATE
                                                 { $$.Text := '';
                                                   $$.Obj := MakeClass(TSqlSynBuiltin);
-                                                  with $$.Obj as TSqlSynBuiltin do
-                                                    BuiltInType := sftCurrentDate; }
+                                                  with $$.Obj as TSqlSynBuiltIn do
+                                                  begin
+                                                    ExprType := setLiteral;
+                                                    LitType := sltBuiltIn;
+                                                    BuiltInType := sftCurrentDate;
+                                                  end;}
         ;
 
   current_time_value_function :
                 _CURRENT_TIME
                                                 { $$.Text := '';
                                                   $$.Obj := MakeClass(TSqlSynBuiltin);
-                                                  with $$.Obj as TSqlSynBuiltin do
-                                                    BuiltInType := sftCurrentTime; }
+                                                  with $$.Obj as TSqlSynBuiltIn do
+                                                  begin
+                                                    ExprType := setLiteral;
+                                                    LitType := sltBuiltIn;
+                                                    BuiltInType := sftCurrentTime;
+                                                  end; }
         |       _CURRENT_TIME left_paren time_precision right_paren
                                                 { $$.Text := '';
                                                   $$.Obj := MakeClass(TSqlSynBuiltin);
-                                                  with $$.Obj as TSqlSynBuiltin do
+                                                  with $$.Obj as TSqlSynBuiltIn do
+                                                  begin
+                                                    ExprType := setLiteral;
+                                                    LitType := sltBuiltIn;
                                                     BuiltInType := sftCurrentTime;
+                                                  end;
                                                   $3.Obj.Free;
                                                   yyinfo('Time precision ignored in current time function.'); }
         ;
@@ -1841,13 +1853,21 @@ uses
                 _CURRENT_TIMESTAMP
                                                 { $$.Text := '';
                                                   $$.Obj := MakeClass(TSqlSynBuiltin);
-                                                  with $$.Obj as TSqlSynBuiltin do
-                                                    BuiltInType := sftCurrentTimestamp; }
+                                                  with $$.Obj as TSqlSynBuiltIn do
+                                                  begin
+                                                    ExprType := setLiteral;
+                                                    LitType := sltBuiltIn;
+                                                    BuiltInType := sftCurrentTimestamp;
+                                                  end;}
         |       _CURRENT_TIMESTAMP left_paren timestamp_precision right_paren
                                                 { $$.Text := '';
                                                   $$.Obj := MakeClass(TSqlSynBuiltin);
-                                                  with $$.Obj as TSqlSynBuiltin do
+                                                  with $$.Obj as TSqlSynBuiltIn do
+                                                  begin
+                                                    ExprType := setLiteral;
+                                                    LitType := sltBuiltIn;
                                                     BuiltInType := sftCurrentTimestamp;
+                                                  end;
                                                   $3.Obj.Free;
                                                   yyinfo('Timestamp precision ignored in current timestamp function.'); }
         ;
@@ -1859,46 +1879,80 @@ uses
 */
 
   column_constraint_definition :
-		constraint_name_definition_opt
                 column_constraint
-                constraint_attributes_opt
                                                 { //NB. Arbitary check constraints not supported
                                                   //at this time, so building this part of the tree is
                                                   //optional...
-
-                                                  //TODO - Always create relational constraint so we can
-                                                  //fix up columns later.
-                                                  if Assigned($2.Obj) then
+                                                  //No constraint_name_definition_opt or constraint_attributes_opt
+                                                  //here: empty optionals before/after each list element make
+                                                  //NOT NULL / NOT DEFERRABLE ambiguous. Attributes are separate
+                                                  //list elements, see column_constraint_definition_opts.
+                                                  $$.Text := '';
+                                                  if Assigned($1.Obj) then
                                                   begin
-                                                    $$.Text := '';
                                                     $$.Obj := MakeClass(TSqlSynConstraint);
                                                     with $$.Obj as TSqlSynConstraint do
                                                     begin
                                                       StructuralType := sstConstraint;
                                                       ConstraintType := sctColumn;
-                                                      if Assigned($1.Obj) then
-                                                      begin
-                                                        InsertTailChild($1.Obj);
-                                                        Name := $1.Obj as TSqlSynIdent;
-                                                      end;
                                                       //For relational column constraints, reffing rows fixed up
                                                       //later.
-                                                      InsertTailChild($2.Obj);
+                                                      InsertTailChild($1.Obj);
                                                       Detail := $1.Obj as TSqlSynConstraintDetail;
-                                                      if Assigned($3.Obj) then
-                                                      begin
-                                                        InsertTailChild($3.Obj);
-                                                        Attributes := $3.Obj as TSqlSynConstraintAttributes;
-                                                      end;
+                                                    end;
+                                                  end
+                                                  else
+                                                    $$.Obj := nil; }
+        |       constraint_name_definition column_constraint
+                                                { $$.Text := '';
+                                                  if Assigned($2.Obj) then
+                                                  begin
+                                                    $$.Obj := MakeClass(TSqlSynConstraint);
+                                                    with $$.Obj as TSqlSynConstraint do
+                                                    begin
+                                                      StructuralType := sstConstraint;
+                                                      ConstraintType := sctColumn;
+                                                      InsertTailChild($1.Obj);
+                                                      Name := $1.Obj as TSqlSynIdent;
+                                                      InsertTailChild($2.Obj);
+                                                      Detail := $2.Obj as TSqlSynConstraintDetail;
                                                     end;
                                                   end
                                                   else
                                                   begin
-                                                    $$.Text := '';
                                                     $$.Obj := nil;
                                                     $1.Obj.Free;
-                                                    $3.Obj.Free;
-                                                  end;}
+                                                  end; }
+        ;
+
+  column_constraint_attribute :
+                constraint_check_time
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynConstraintAttributes);
+                                                  with ($$.Obj as TSqlSynConstraintAttributes) do
+                                                  begin
+                                                    StructuralType := sstConstraintAttributes;
+                                                    InitDeferred := TSqlSynInitDeferred($1.Obj);
+                                                    Deferrable := ssdUnspec;
+                                                  end; }
+        |       _DEFERRABLE
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynConstraintAttributes);
+                                                  with ($$.Obj as TSqlSynConstraintAttributes) do
+                                                  begin
+                                                    StructuralType := sstConstraintAttributes;
+                                                    InitDeferred := sidUnspec;
+                                                    Deferrable := ssdDeferrable;
+                                                  end; }
+        |       _NOT _DEFERRABLE
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynConstraintAttributes);
+                                                  with ($$.Obj as TSqlSynConstraintAttributes) do
+                                                  begin
+                                                    StructuralType := sstConstraintAttributes;
+                                                    InitDeferred := sidUnspec;
+                                                    Deferrable := ssdNotDeferrable;
+                                                  end; }
         ;
 
   constraint_name_definition :
@@ -1957,17 +2011,14 @@ uses
 		_REFERENCES referenced_table_and_columns
                 match_type_opt
                 referential_triggered_action_opt
-                                                { $$.Obj := MakeClass(TSqlSynReferencesConstraintDetail);
+                                                { $$ := $2;
                                                   with $$.Obj as TSqlSynReferencesConstraintDetail do
                                                   begin
-                                                    StructuralType := sstConstraintDetail;
-                                                    DetailType := cdtReferences;
                                                     MatchType := TSqlSynMatchType($3.Obj);
-                                                    FlattenReffedDetails($2.Obj as TTempTpl);
                                                     if Assigned($4.Obj) then
                                                     begin
                                                       InsertTailChild($4.Obj);
-                                                      RefAction := $4.Obj;
+                                                      RefAction := $4.Obj as TSqlSynRefAction;
                                                     end;
                                                   end; }
         ;
@@ -1990,11 +2041,19 @@ uses
   referenced_table_and_columns :
                 table_name reference_column_list_opt
                                                 { $$.Text := '';
-                                                  if Assigned($2.Obj) then
-                                                    $$.Obj := $2.Obj
-                                                  else
-                                                    $$.Obj := MakeClass(TTempTpl);
-                                                  ($$.Obj as TTempTpl).InsertHeadChild($1.Obj); }
+                                                  $$.Obj := MakeClass(TSqlSynReferencesConstraintDetail);
+                                                  with $$.Obj as TSqlSynReferencesConstraintDetail do
+                                                  begin
+                                                    StructuralType := sstConstraintDetail;
+                                                    DetailType := cdtReferences;
+                                                    InsertTailChild($1.Obj);
+                                                    ReferencesTable := $1.Obj as TSqlSynIdent;
+                                                    if Assigned($2.Obj) then
+                                                    begin
+                                                      InsertTailChild($2.Obj);
+                                                      ReferencesColumns := $2.Obj as TSqlSynList;
+                                                    end;
+                                                  end; }
         ;
 
   reference_column_list_opt :
@@ -2019,11 +2078,11 @@ uses
   column_name_list :
                 column_name
                                                 { $$.Text := '';
-                                                  $$.Obj := MakeClass(TTempTpl);
-                                                  ($$.Obj as TTempTpl).InsertTailChild($1.Obj); }
+                                                  $$.Obj := MakeClass(TSqlSynList);
+                                                  ($$.Obj as TSqlSynList).InsertTailChild($1.Obj); }
         |       column_name_list comma column_name
                                                 { $$ := $1;
-                                                  ($$.Obj as TTempTpl).InsertTailChild($2.Obj); }
+                                                  ($$.Obj as TSqlSynList).InsertTailChild($3.Obj); }
         ;
 
   match_type :
@@ -2108,179 +2167,520 @@ uses
 
   search_condition :
                 boolean_term
+                                                { $$ := $1; }
 	|       search_condition _OR boolean_term
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynBinaryOperator);
+                                                  with $$.Obj as TSqlSynBinaryOperator do
+                                                  begin
+                                                    ExprType := setBinaryOr;
+                                                    InsertTailChild($1.Obj);
+                                                    Left := $1.Obj as TSqlSynExpr;
+                                                    InsertTailChild($3.Obj);
+                                                    Right := $3.Obj as TSqlSynExpr;
+                                                  end; }
         ;
 
   boolean_term :
 		boolean_factor
+                                                { $$ := $1; }
 	|       boolean_term _AND boolean_factor
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynBinaryOperator);
+                                                  with $$.Obj as TSqlSynBinaryOperator do
+                                                  begin
+                                                    ExprType := setBinaryAnd;
+                                                    InsertTailChild($1.Obj);
+                                                    Left := $1.Obj as TSqlSynExpr;
+                                                    InsertTailChild($3.Obj);
+                                                    Right := $3.Obj as TSqlSynExpr;
+                                                  end; }
         ;
 
   boolean_factor :
                 boolean_test
+                                                { $$ := $1; }
         |       _NOT boolean_test
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynUnaryOperator);
+                                                  with $$.Obj as TSqlSynUnaryOperator do
+                                                  begin
+                                                    ExprType := setUnaryNot;
+                                                    InsertTailChild($2.Obj);
+                                                    Expr := $2.Obj as TSqlSynExpr;
+                                                  end; }
         ;
 
   boolean_test :
                 boolean_primary
+                                                { $$ := $1; }
         |       boolean_primary _IS truth_value
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynBinaryOperator);
+                                                  with $$.Obj as TSqlSynBinaryOperator do
+                                                  begin
+                                                    ExprType := setBinaryTest;
+                                                    InsertTailChild($1.Obj);
+                                                    Left := $1.Obj as TSqlSynExpr;
+                                                    InsertTailChild($3.Obj);
+                                                    Right := $3.Obj as TSqlSynExpr;
+                                                  end; }
         |       boolean_primary _IS _NOT truth_value
+                                                { $$.Text := '';
+                                                  TmpClass := MakeClass(TSqlSynBinaryOperator);
+                                                  with TmpClass as TSqlSynBinaryOperator do
+                                                  begin
+                                                    ExprType := setBinaryTest;
+                                                    InsertTailChild($1.Obj);
+                                                    Left := $1.Obj as TSqlSynExpr;
+                                                    InsertTailChild($4.Obj);
+                                                    Right := $4.Obj as TSqlSynExpr;
+                                                  end;
+                                                  $$.Obj := MakeClass(TSqlSynUnaryOperator);
+                                                  with $$.Obj as TSqlSynUnaryOperator do
+                                                  begin
+                                                    ExprType := setUnaryNot;
+                                                    InsertTailChild(TmpClass);
+                                                    Expr := TmpClass as TSqlSynExpr;
+                                                  end; }
         ;
 
   boolean_primary :
                 predicate
+                                                { $$ := $1; }
         |       left_paren search_condition right_paren
+                                                { $$ := $2; }
         ;
 
   predicate :
 	    comparison_predicate
+                                                { $$ := $1; }
 	|   between_predicate
+                                                { $$ := $1; }
 	|   in_predicate
+                                                { $$ := $1; }
 	|   like_predicate
+                                                { $$ := $1; }
 	|   null_predicate
+                                                { $$ := $1; }
 	|   quantified_comparison_predicate
+                                                { $$ := $1; }
 	|   exists_predicate
+                                                { $$ := $1; }
         |   unique_predicate
+                                                { $$ := $1; }
 	|   match_predicate
-	|   overlaps_predicate ;
+                                                { $$ := $1; }
+	|   overlaps_predicate
+                                                { $$ := $1; }
+        ;
 
-  comparison_predicate : row_value_constructor comp_op row_value_constructor
+  comparison_predicate :
+                row_value_constructor comp_op row_value_constructor
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynComparisonPredicate);
+                                                  with $$.Obj as TSqlSynComparisonPredicate do
+                                                  begin
+                                                    ExprType := setPredicate;
+                                                    PredicateType := sptComparisonPredicate;
+                                                    CompOp := TSqlSynCompOp($2.Obj);
+                                                    InsertTailChild($1.Obj);
+                                                    Left := $1.Obj as TSqlSynExpr;
+                                                    InsertTailChild($3.Obj);
+                                                    Right := $3.Obj as TSqlSynExpr;
+                                                  end; }
         ;
 
   row_value_constructor :
                 expression
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlRowValConstructor);
+                                                  with $$.Obj as TSqlRowValConstructor do
+                                                  begin
+                                                    ExprType := setRValConstructor;
+                                                    InsertTailChild($1.Obj);
+                                                  end; }
         |       left_paren row_value_constructor_list right_paren
+                                                { $$ := $2; }
         ;
 
   primary_expression :
                 unsigned_value_specification
-    |           column_reference
+                                                { $$ := $1; }
+    |           column_reference_as_expr
+                                                { $$ := $1; }
     |           set_function_specification
+                                                { $$ := $1; }
     |           scalar_subquery
+                                                { $$ := $1; }
     |           case_expression
+                                                { $$ := $1; }
     |           cast_specification
+                                                { $$ := $1; }
     |           numeric_value_function
+                                                { $$ := $1; }
     |           string_value_function
+                                                { $$ := $1; }
     |           datetime_value_function
+                                                { $$ := $1; }
     |           null_specification
+                                                { $$ := $1; }
     |           default_specification
+                                                { $$ := $1; }
     |           left_paren expression right_paren
+                                                { $$ := $2; }
     ;
 
   postfix_expression:
                 primary_expression
+                                                { $$ := $1; }
       |         primary_expression postfix_op
+                                                { if Assigned($2.Obj) then
+                                                  begin
+                                                    //Interval qualifier: the operator node wraps the operand.
+                                                    $$ := $2;
+                                                    with $$.Obj as TSqlSynIntervalQualifierOperator do
+                                                    begin
+                                                      InsertHeadChild($1.Obj);
+                                                      Expr := $1.Obj as TSqlSynExpr;
+                                                    end;
+                                                  end
+                                                  else
+                                                    $$ := $1; //Postfix op ignored (time zone, collation).
+                                                }
     ;
 
-  postfix_op :
-                time_zone
-        |       interval_qualifier
-        |       collate_clause
-        ;
-
+  postfix_op :
+                time_zone
+                                                { $$.Text := ''; $$.Obj := nil;
+                                                  yyerror('Time zones not supported');
+                                                  $1.Obj.Free; }
+        |       interval_qualifier
+                                                { //The operand (Expr) is filled in by postfix_expression.
+                                                  $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynIntervalQualifierOperator);
+                                                  with $$.Obj as TSqlSynIntervalQualifierOperator do
+                                                  begin
+                                                    ExprType := setUnaryPostfixIntervalQualifier;
+                                                    InsertTailChild($1.Obj);
+                                                    Qualifier := $1.Obj as TSQLSynIntervalQualifier;
+                                                  end; }
+        |       collate_clause
+                                                { $$.Text := ''; $$.Obj := nil;
+                                                  yyerror('Collations not supported');
+                                                  $1.Obj.Free; }        ;
+
   unary_expression :
         plus_sign postfix_expression
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynUnaryOperator);
+                                                  with $$.Obj as TSqlSynUnaryOperator do
+                                                  begin
+                                                    ExprType := setUnaryPlus;
+                                                    InsertTailChild($2.Obj);
+                                                    Expr := $2.Obj as TSqlSynExpr;
+                                                  end; }
     |   minus_sign postfix_expression
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynUnaryOperator);
+                                                  with $$.Obj as TSqlSynUnaryOperator do
+                                                  begin
+                                                    ExprType := setUnaryMinus;
+                                                    InsertTailChild($2.Obj);
+                                                    Expr := $2.Obj as TSqlSynExpr;
+                                                  end; }
     |   postfix_expression
+                                                { $$ := $1; }
     ;
 
   multiplicative_expression :
-      unary_expression
-    | multiplicative_expression asterisk unary_expression
-    | multiplicative_expression solidus unary_expression
+        unary_expression
+                                                { $$ := $1; }
+    |   multiplicative_expression asterisk unary_expression
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynBinaryOperator);
+                                                  with $$.Obj as TSqlSynBinaryOperator do
+                                                  begin
+                                                    ExprType := setBinaryMul;
+                                                    InsertTailChild($1.Obj);
+                                                    Left := $1.Obj as TSqlSynExpr;
+                                                    InsertTailChild($3.Obj);
+                                                    Right := $3.Obj as TSqlSynExpr;
+                                                  end; }
+    |   multiplicative_expression solidus unary_expression
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynBinaryOperator);
+                                                  with $$.Obj as TSqlSynBinaryOperator do
+                                                  begin
+                                                    ExprType := setBinaryDiv;
+                                                    InsertTailChild($1.Obj);
+                                                    Left := $1.Obj as TSqlSynExpr;
+                                                    InsertTailChild($3.Obj);
+                                                    Right := $3.Obj as TSqlSynExpr;
+                                                  end; }
     ;
 
   /* numeric or string, or times or intervals, resolved later */
   expression :
-      multiplicative_expression
-    | expression plus_sign multiplicative_expression
-    | expression minus_sign multiplicative_expression
-    | expression concatenation_operator multiplicative_expression
+        multiplicative_expression
+                                                { $$ := $1; }
+    |   expression plus_sign multiplicative_expression
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynBinaryOperator);
+                                                  with $$.Obj as TSqlSynBinaryOperator do
+                                                  begin
+                                                    ExprType := setBinaryAdd;
+                                                    InsertTailChild($1.Obj);
+                                                    Left := $1.Obj as TSqlSynExpr;
+                                                    InsertTailChild($3.Obj);
+                                                    Right := $3.Obj as TSqlSynExpr;
+                                                  end; }
+    |   expression minus_sign multiplicative_expression
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynBinaryOperator);
+                                                  with $$.Obj as TSqlSynBinaryOperator do
+                                                  begin
+                                                    ExprType := setBinarySub;
+                                                    InsertTailChild($1.Obj);
+                                                    Left := $1.Obj as TSqlSynExpr;
+                                                    InsertTailChild($3.Obj);
+                                                    Right := $3.Obj as TSqlSynExpr;
+                                                  end; }
+    |   expression concatenation_operator multiplicative_expression
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynBinaryOperator);
+                                                  with $$.Obj as TSqlSynBinaryOperator do
+                                                  begin
+                                                    ExprType := setBinaryCat;
+                                                    InsertTailChild($1.Obj);
+                                                    Left := $1.Obj as TSqlSynExpr;
+                                                    InsertTailChild($3.Obj);
+                                                    Right := $3.Obj as TSqlSynExpr;
+                                                  end; }
     ;
 
   string_value_function :
-      character_value_function
-;
+        character_value_function
+                                                { $$ := $1 }
+        ;
+
+  /* As per the BNF, scalar, table (and row) subqueries are all the same
+     syntax: <subquery> ::= ( <query expression> ), distinguished by context.
+     table_subquery MUST precede scalar_subquery: the remaining reduce/reduce
+     conflict on ((query)) is resolved in favour of the first rule, giving the
+     standard's bracketed-query reading. */
+  table_subquery :
+                subquery
+                                                { $$ := $1; }
+        ;
 
   scalar_subquery :
-        left_paren subquery right_paren
+                subquery
+                                                { $$ := $1; }
         ;
 
   subquery :
-        query_expression
+        left_paren query_expression right_paren
+                                                { $$ := $2; }
         ;
 
   unsigned_value_specification :
                 unsigned_literal
+                                                { $$ := $1; }
         |       general_value_specification
+                                                { $$ := $1; }
         ;
 
   unsigned_literal :
                 unsigned_numeric_literal
-        |       general_literal ;
+                                                { $$ := $1; }
+        |       general_literal
+                                                { $$ := $1; }
+        ;
 
   general_value_specification :
-	    parameter_specification
-	|   _USER
-	|   _CURRENT_USER
-	|   _SESSION_USER
-	|   _SYSTEM_USER
+                parameter_specification
+                                                { $$ := $1; }
+	|	_USER
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynBuiltin);
+                                                  with $$.Obj as TSqlSynBuiltIn do
+                                                  begin
+                                                    ExprType := setLiteral;
+                                                    LitType := sltBuiltIn;
+                                                    BuiltInType := sftUser;
+                                                  end;}
+	|	_CURRENT_USER
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynBuiltin);
+                                                  with $$.Obj as TSqlSynBuiltIn do
+                                                  begin
+                                                    ExprType := setLiteral;
+                                                    LitType := sltBuiltIn;
+                                                    BuiltInType := sftCurrentUser;
+                                                  end; }
+	|	_SESSION_USER
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynBuiltin);
+                                                  with $$.Obj as TSqlSynBuiltIn do
+                                                  begin
+                                                    ExprType := setLiteral;
+                                                    LitType := sltBuiltIn;
+                                                    BuiltInType := sftSessionUser;
+                                                  end; }
+	|	_SYSTEM_USER
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynBuiltin);
+                                                  with $$.Obj as TSqlSynBuiltIn do
+                                                  begin
+                                                    ExprType := setLiteral;
+                                                    LitType := sltBuiltIn;
+                                                    BuiltInType := sftSystemUser;
+                                                  end; }
 	|   _VALUE
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynBuiltin);
+                                                  with $$.Obj as TSqlSynBuiltIn do
+                                                  begin
+                                                    ExprType := setLiteral;
+                                                    LitType := sltBuiltIn;
+                                                    BuiltInType := sftValue;
+                                                  end; }
         ;
 
   parameter_specification :
                 parameter_name indicator_parameter_opt
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynParameterSpec);
+                                                  with $$.Obj as TSqlSynParameterSpec do
+                                                  begin
+                                                    ExprType := setParameter;
+                                                    InsertTailChild($1.Obj);
+                                                    ParamName := $1.Obj as TSqlSynIdent;
+                                                    if Assigned($2.Obj) then
+                                                    begin
+                                                      InsertTailChild($2.Obj);
+                                                      Indicator := $2.Obj as TSqlSynIdent;
+                                                    end;
+                                                  end;}
         ;
 
-  parameter_name : colon identifier ;
+  parameter_name :
+                colon identifier
+                                                { $$ := $2; }
+        ;
 
   indicator_parameter_opt :
         /* Empty */
+                                                { $$.Text := ''; $$.Obj := nil; }
         |       _INDICATOR parameter_name
+                                                { $$ := $2; }
         |       parameter_name
+                                                { $$ := $1; }
+        ;
+
+  column_reference_as_expr :
+                column_reference
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynIdentWrapper);
+                                                  with $$.Obj as TSqlSynIdentWrapper do
+                                                  begin
+                                                    ExprType := setIdentWrapper;
+                                                    InsertTailChild($1.Obj);
+                                                    Ident := $1.Obj as TSqlSynIdent;
+                                                  end; }
         ;
 
   column_reference :
+                /* Table Name or Correlation name qualified
+                   or just bare column name */
                 qualified_name
-/*
-                qualifier period column_name
-        |       column_name
-*/
+                                                { $$ := $1; }
         ;
 
-/*
-  qualifier :
-                table_name
-        |       correlation_name
+  correlation_name : identifier
+                                                { $$ := $1; }
         ;
-*/
-
-  correlation_name : identifier ;
 
   /* TODO - I have generalised the args, need to check
      for the specific set function */
 
   set_function_specification :
 	        general_set_function
+                                                { $$ := $1; }
         ;
 
   general_set_function :
 		set_function_type left_paren set_quantifier_args right_paren
+                                                { $$ := $3;
+                                                  with $$.Obj as TSqlSynSetFunction do
+                                                    SetFunctionType := TSqlSynSetFunctionType($1.Obj); }
         ;
 
   set_quantifier_args :
-        /* Empty */
-        |       asterisk
+                asterisk
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynSetFunction);
+                                                  with $$.Obj as TSqlSynSetFunction do
+                                                  begin
+                                                    ExprType := setSetFunction;
+                                                    Quantifier := ssqWildcard;
+                                                  end; }
         |       set_quantifier expression
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynSetFunction);
+                                                  with $$.Obj as TSqlSynSetFunction do
+                                                  begin
+                                                    ExprType := setSetFunction;
+                                                    Quantifier := TSqlSynSetFunctionQuantifier($1.Obj);
+                                                    InsertTailChild($2.Obj);
+                                                    Expr := $2.Obj as TSqlSynExpr;
+                                                  end; }
+        |       expression
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynSetFunction);
+                                                  with $$.Obj as TSqlSynSetFunction do
+                                                  begin
+                                                    ExprType := setSetFunction;
+                                                    Quantifier := ssqNone;
+                                                    InsertTailChild($1.Obj);
+                                                    Expr := $1.Obj as TSqlSynExpr;
+                                                  end; }
         ;
 
-  set_function_type : _AVG | _MAX | _MIN | _SUM | _COUNT ;
+  set_function_type :
+                _AVG
+                                                { $$.Text := '';
+                                                  $$.Obj := TSqlSynNode(ssfAvg); }
+        |       _MAX
+                                                { $$.Text := '';
+                                                  $$.Obj := TSqlSynNode(ssfMax); }
+        |       _MIN
+                                                { $$.Text := '';
+                                                  $$.Obj := TSqlSynNode(ssfMin); }
+        |       _SUM
+                                                { $$.Text := '';
+                                                  $$.Obj := TSqlSynNode(ssfSum); }
+        |       _COUNT
+                                                { $$.Text := '';
+                                                  $$.Obj := TSqlSynNode(ssfCount); }
+        ;
 
-  set_quantifier : _DISTINCT | _ALL;
+  set_quantifier :
+                _DISTINCT
+                                                { $$.Text := '';
+                                                  $$.Obj := TSqlSynNode(ssqDistinct); }
+        |       _ALL
+                                                { $$.Text := '';
+                                                  $$.Obj := TSqlSynNode(ssqAll); }
+        ;
 
   set_quantifier_opt :
         /* Empty */
+                                                { $$.Text := '';
+                                                  $$.Obj := TSqlSynNode(ssqNone); }
         |       set_quantifier
+                                                { $$ := $1; }
         ;
 
 /*
@@ -2291,61 +2691,168 @@ uses
 
   query_expression :
 		non_join_query_term
+                                                { $$ := $1; }
+	|	joined_table_as_query
+                                                { $$ := $1; }
 	|	query_expression _UNION all_opt corresponding_spec_opt query_term
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynQueryBinary);
+                                                  with $$.Obj as TSqlSynQueryBinary do
+                                                  begin
+                                                    ExprType := setQueryUnion;
+                                                    InsertTailChild($1.Obj);
+                                                    Left := $1.Obj as TSqlSynExpr;
+                                                    All := Boolean($3.Obj);
+                                                    if Assigned($4.Obj) then
+                                                    begin
+                                                      InsertTailChild($4.Obj);
+                                                      Corresponding := $4.Obj as TSqlSynList;
+                                                    end;
+                                                    InsertTailChild($5.Obj);
+                                                    Right := $5.Obj as TSqlSynExpr;
+                                                  end; }
 	|	query_expression _EXCEPT all_opt corresponding_spec_opt query_term
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynQueryBinary);
+                                                  with $$.Obj as TSqlSynQueryBinary do
+                                                  begin
+                                                    ExprType := setQueryExcept;
+                                                    InsertTailChild($1.Obj);
+                                                    Left := $1.Obj as TSqlSynExpr;
+                                                    All := Boolean($3.Obj);
+                                                    if Assigned($4.Obj) then
+                                                    begin
+                                                      InsertTailChild($4.Obj);
+                                                      Corresponding := $4.Obj as TSqlSynList;
+                                                    end;
+                                                    InsertTailChild($5.Obj);
+                                                    Right := $5.Obj as TSqlSynExpr;
+                                                  end; }
         ;
 
   non_join_query_term :
 		non_join_query_primary
+                                                { $$ := $1; }
 	|	query_term _INTERSECT all_opt corresponding_spec_opt query_primary
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynQueryBinary);
+                                                  with $$.Obj as TSqlSynQueryBinary do
+                                                  begin
+                                                    ExprType := setQueryIntersect;
+                                                    InsertTailChild($1.Obj);
+                                                    Left := $1.Obj as TSqlSynExpr;
+                                                    All := Boolean($3.Obj);
+                                                    if Assigned($4.Obj) then
+                                                    begin
+                                                      InsertTailChild($4.Obj);
+                                                      Corresponding := $4.Obj as TSqlSynList;
+                                                    end;
+                                                    InsertTailChild($5.Obj);
+                                                    Right := $5.Obj as TSqlSynExpr;
+                                                  end; }
         ;
 
   all_opt :
         /* Empty */
+                                                { $$.Text := ''; $$.Obj := TSqlSynNode(false); }
         |       _ALL
+                                                { $$.Text := ''; $$.Obj := TSqlSynNode(true); }
         ;
 
   corresponding_spec_opt :
         /* Empty */
+                                                { $$.Text := ''; $$.Obj := nil; }
         |       corresponding_spec
+                                                { $$ := $1; }
         ;
 
   non_join_query_primary :
                 simple_table
+                                                { $$ := $1; }
         |       table_subquery
+                                                { $$ := $1; }
         ;
 
   simple_table :
 		query_specification
+                                                { $$ := $1; }
 	|	table_value_constructor
+                                                { $$ := $1; }
 	|	explicit_table
+                                                { $$ := $1; }
         ;
 
   query_specification :
-		_SELECT set_quantifier_opt select_list table_expression ;
+		_SELECT set_quantifier_opt select_list table_expression
+                                                { $$ := $4;
+                                                  with $$.Obj as TSqlSynQuerySelect do
+                                                  begin
+                                                    InsertHeadChild($3.Obj);
+                                                    SelectList := $3.Obj as TSqlSynSelectList;
+                                                    Quantifier := TSqlSynSetFunctionQuantifier($2.Obj);
+                                                  end; }
+        ;
 
   select_list :
 		asterisk
-	|	select_list_opt ;
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynSelectList);
+                                                  with $$.Obj as TSqlSynSelectList do
+                                                  begin
+                                                    StructuralType := sstSelectList;
+                                                    Wildcard := true;
+                                                  end; }
+	|	select_list_opt
+                                                { $$ := $1; }
+        ;
 
   select_list_opt :
                 select_sublist
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynSelectList);
+                                                  ($$.Obj as TSqlSynSelectList).StructuralType := sstSelectList;
+                                                  $$.Obj.InsertTailChild($1.Obj); }
         |       select_list_opt comma select_sublist
+                                                { $$ := $1;
+                                                  $$.Obj.InsertTailChild($3.Obj); }
         ;
 
   select_sublist :
                 derived_column
+                                                { $$ := $1; }
         |       qualified_name_trail_asterisk
+                                                { $$ := $1; }
         ;
 
+  /* TODO - Expressions must evaluate to a value expression */
   derived_column :
                 expression
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynDerivedColumn);
+                                                  with $$.Obj as TSqlSynDerivedColumn do
+                                                  begin
+                                                    StructuralType := sstDerivedColumn;
+                                                    InsertTailChild($1.Obj);
+                                                    Expr := $1.Obj as TSqlSynExpr;
+                                                  end; }
         |       expression as_clause
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynDerivedColumn);
+                                                  with $$.Obj as TSqlSynDerivedColumn do
+                                                  begin
+                                                    StructuralType := sstDerivedColumn;
+                                                    InsertTailChild($1.Obj);
+                                                    Expr := $1.Obj as TSqlSynExpr;
+                                                    InsertTailChild($2.Obj);
+                                                    AsClause := $2.Obj as TSqlSynIdent;
+                                                  end; }
         ;
 
   as_clause :
                 column_name
+                                                { $$ := $1; }
         |       _AS column_name
+                                                { $$ := $2; }
         ;
 
 
@@ -2354,29 +2861,65 @@ uses
 		where_clause_opt
 		group_by_clause_opt
 		having_clause_opt
+                                        { $$.Text := '';
+                                          $$.Obj := MakeClass(TSqlSynQuerySelect);
+                                          with $$.Obj as TSqlSynQuerySelect do
+                                          begin
+                                            ExprType := setQuerySelect;
+                                            InsertTailChild($1.Obj);
+                                            From := $1.Obj as TSqlSynList;
+                                            if Assigned($2.Obj) then
+                                            begin
+                                              InsertTailChild($2.Obj);
+                                              Where := $2.Obj as TSqlSynExpr;
+                                            end;
+                                            if Assigned($3.Obj) then
+                                            begin
+                                              InsertTailChild($3.Obj);
+                                              GroupBy := $3.Obj as TSqlSynList;
+                                            end;
+                                            if Assigned($4.Obj) then
+                                            begin
+                                              InsertTailChild($4.Obj);
+                                              Having := $4.Obj as TSqlSynExpr;
+                                            end;
+                                          end; }
         ;
 
   where_clause_opt :
         /* Empty */
+                                        { $$.Text := ''; $$.Obj := nil; }
         |       where_clause
+                                        { $$ := $1; }
         ;
 
   group_by_clause_opt :
         /* Empty */
+                                        { $$.Text := ''; $$.Obj := nil; }
         |       group_by_clause
+                                        { $$ := $1; }
         ;
 
   having_clause_opt :
         /* Empty */
+                                        { $$.Text := ''; $$.Obj := nil; }
         |       having_clause
+                                        { $$ := $1; }
         ;
 
   from_clause : _FROM from_clause_list
+                                        { $$ := $2; }
         ;
 
   from_clause_list :
                 table_reference
+                                        { $$.Obj := MakeClass(TSqlSynList);
+                                          $$.Text := '';
+                                          $$.Obj.InsertTailChild($1.Obj); }
+
         |       from_clause_list comma table_reference
+                                        { $$ := $1;
+                                          $$.Obj.InsertTailChild($3.Obj); }
         ;
 
 /*
@@ -2390,146 +2933,455 @@ The notation is written out longhand several times, instead;
 
   table_reference :
                 joined_table
+                                        { $$ := $1; }
         |       table_factor
+                                        { $$ := $1; }
         ;
 
   table_factor :
-                table_name
-        |       table_name correlation_specification
+                table_name_as_expr
+                                        { $$ := $1; }
+        |       table_name_as_expr correlation_specification
+                                        { $$ := $2;
+                                          $$.Obj.InsertHeadChild($1.Obj);
+                                          ($$.Obj as TSqlSynCorrelation).TableLike := $1.Obj as TSqlSynExpr };
         |       derived_table correlation_specification
-        |       table_name _AS correlation_specification
+                                        { $$ := $2;
+                                          $$.Obj.InsertHeadChild($1.Obj);
+                                          ($$.Obj as TSqlSynCorrelation).TableLike := $1.Obj as TSqlSynExpr };
+        |       table_name_as_expr _AS correlation_specification
+                                        { $$ := $3;
+                                          $$.Obj.InsertHeadChild($1.Obj);
+                                          ($$.Obj as TSqlSynCorrelation).TableLike := $1.Obj as TSqlSynExpr };
         |       derived_table _AS correlation_specification
+                                        { $$ := $3;
+                                          $$.Obj.InsertHeadChild($1.Obj);
+                                          ($$.Obj as TSqlSynCorrelation).TableLike := $1.Obj as TSqlSynExpr };
+        /* A bracketed join with a correlation name is a derived table whose
+           query is the join, i.e. (SELECT * FROM <join>) AS x. It can't go
+           through derived_table: at the right paren the parser has already
+           shifted it as a bracketed joined_table (see joined_table_as_query). */
+        |       left_paren joined_table right_paren correlation_specification
+                                        { $$ := $4;
+                                          TmpClass := WrapJoinAsQuery($2.Obj);
+                                          $$.Obj.InsertHeadChild(TmpClass);
+                                          ($$.Obj as TSqlSynCorrelation).TableLike := TmpClass as TSqlSynExpr; }
+        |       left_paren joined_table right_paren _AS correlation_specification
+                                        { $$ := $5;
+                                          TmpClass := WrapJoinAsQuery($2.Obj);
+                                          $$.Obj.InsertHeadChild(TmpClass);
+                                          ($$.Obj as TSqlSynCorrelation).TableLike := TmpClass as TSqlSynExpr; }
+        ;
+
+  /* Table names are TSqlSynIdent; wrap them so joins / correlations get a TSqlSynExpr. */
+  table_name_as_expr :
+                table_name
+                                        { $$.Text := '';
+                                          $$.Obj := MakeClass(TSqlSynIdentWrapper);
+                                          with $$.Obj as TSqlSynIdentWrapper do
+                                          begin
+                                            ExprType := setIdentWrapper;
+                                            InsertTailChild($1.Obj);
+                                            Ident := $1.Obj as TSqlSynIdent;
+                                          end; }
         ;
 
   correlation_specification :
 		correlation_name derived_column_list_opt
+                                        { $$.Text := '';
+                                          $$.Obj := MakeClass(TSqlSynCorrelation);
+                                          with $$.Obj as TSqlSynCorrelation do
+                                          begin
+                                            ExprType := setCorrelation;
+                                            InsertHeadChild($1.Obj);
+                                            CorrelationName := $1.Obj as TSqlSynIdent;
+                                            if Assigned($2.Obj) then
+                                            begin
+                                              InsertTailChild($2.Obj);
+                                              Columns := $2.Obj as TSqlSynList;
+                                            end;
+                                          end; }
         ;
 
+  /* No semantic change with this _AS being omitted... */
   as_opt :
         /* Empty */
+                                        { $$.Text := ''; $$.Obj := nil; }
         | _AS
+                                        { $$.Text := ''; $$.Obj := nil; }
         ;
 
   derived_column_list_opt :
         /* Empty */
+                                        { $$.Text := ''; $$.Obj := nil; }
         |       left_paren derived_column_list right_paren
+                                        { $$ := $2; }
         ;
 
   derived_column_list :
                 column_name_list
+                                        { $$ := $1; }
         ;
 
   derived_table :
                 table_subquery
-        ;
-
-  table_subquery :
-                left_paren query_expression right_paren
+                                        { $$ := $1; }
         ;
 
   joined_table :
 		cross_join
+                                        { $$ := $1; }
 	|       qualified_join
+                                        { $$ := $1; }
 	|       left_paren joined_table right_paren
+                                        { $$ := $2; }
+        ;
+
+  /* SQL-92: a <joined table> used as a query expression / term / primary
+     means SELECT * FROM <joined table>. Build exactly that tree, so nothing
+     downstream sees a bare join. */
+  joined_table_as_query :
+                joined_table
+                                        { $$.Text := '';
+                                          $$.Obj := WrapJoinAsQuery($1.Obj); }
         ;
 
   cross_join :
-        table_reference _CROSS _JOIN table_factor
+        table_reference _CROSS _JOIN join_right_operand
+                                        { $$.Text := '';
+                                          $$.Obj := MakeClass(TSqlSynJoinBinary);
+                                          with $$.Obj as TSqlSynJoinBinary do
+                                          begin
+                                            ExprType := setJoin;
+                                            JoinType := jtCross;
+                                            InsertHeadChild($1.Obj);
+                                            Left := $1.Obj as TSqlSynExpr;
+                                            InsertTailChild($4.Obj);
+                                            Right := $4.Obj as TSqlSynExpr;
+                                          end; }
         ;
 
   qualified_join :
-                table_reference _JOIN table_factor join_specification
-        |       table_reference _INNER _JOIN table_factor join_specification
-        |       table_reference _LEFT outer_opt _JOIN table_factor join_specification
-        |       table_reference _RIGHT outer_opt _JOIN table_factor join_specification
-        |       table_reference _FULL outer_opt _JOIN table_factor join_specification
-        |       table_reference _NATURAL _JOIN table_factor
-        |       table_reference _NATURAL _INNER _JOIN table_factor
-        |       table_reference _NATURAL _LEFT outer_opt _JOIN table_factor
-        |       table_reference _NATURAL _RIGHT outer_opt _JOIN table_factor
-        |       table_reference _NATURAL _FULL outer_opt _JOIN table_factor
-        |       table_reference _NATURAL _UNION _JOIN table_factor
+                table_reference _JOIN join_right_operand join_specification
+                                        { $$.Text := '';
+                                          $$.Obj := MakeClass(TSqlSynJoinBinary);
+                                          with $$.Obj as TSqlSynJoinBinary do
+                                          begin
+                                            ExprType := setJoin;
+                                            JoinType := jtInner;
+                                            InsertHeadChild($1.Obj);
+                                            Left := $1.Obj as TSqlSynExpr;
+                                            InsertTailChild($3.Obj);
+                                            Right := $3.Obj as TSqlSynExpr;
+                                            InsertTailChild($4.Obj);
+                                            Spec := $4.Obj as TSqlSynJoinSpec;
+                                          end; }
+        |       table_reference _INNER _JOIN join_right_operand join_specification
+                                        { $$.Text := '';
+                                          $$.Obj := MakeClass(TSqlSynJoinBinary);
+                                          with $$.Obj as TSqlSynJoinBinary do
+                                          begin
+                                            ExprType := setJoin;
+                                            JoinType := jtInner;
+                                            InsertHeadChild($1.Obj);
+                                            Left := $1.Obj as TSqlSynExpr;
+                                            InsertTailChild($4.Obj);
+                                            Right := $4.Obj as TSqlSynExpr;
+                                            InsertTailChild($5.Obj);
+                                            Spec := $5.Obj as TSqlSynJoinSpec;
+                                          end; }
+        |       table_reference _LEFT outer_opt _JOIN join_right_operand join_specification
+                                        { $$.Text := '';
+                                          $$.Obj := MakeClass(TSqlSynJoinBinary);
+                                          with $$.Obj as TSqlSynJoinBinary do
+                                          begin
+                                            ExprType := setJoin;
+                                            JoinType := jtLeft;
+                                            InsertHeadChild($1.Obj);
+                                            Left := $1.Obj as TSqlSynExpr;
+                                            InsertTailChild($5.Obj);
+                                            Right := $5.Obj as TSqlSynExpr;
+                                            InsertTailChild($6.Obj);
+                                            Spec := $6.Obj as TSqlSynJoinSpec;
+                                            Outer := Boolean($3.Obj);
+                                          end; }
+        |       table_reference _RIGHT outer_opt _JOIN join_right_operand join_specification
+                                        { $$.Text := '';
+                                          $$.Obj := MakeClass(TSqlSynJoinBinary);
+                                          with $$.Obj as TSqlSynJoinBinary do
+                                          begin
+                                            ExprType := setJoin;
+                                            JoinType := jtRight;
+                                            InsertHeadChild($1.Obj);
+                                            Left := $1.Obj as TSqlSynExpr;
+                                            InsertTailChild($5.Obj);
+                                            Right := $5.Obj as TSqlSynExpr;
+                                            InsertTailChild($6.Obj);
+                                            Spec := $6.Obj as TSqlSynJoinSpec;
+                                            Outer := Boolean($3.Obj);
+                                          end; }
+        |       table_reference _FULL outer_opt _JOIN join_right_operand join_specification
+                                        { $$.Text := '';
+                                          $$.Obj := MakeClass(TSqlSynJoinBinary);
+                                          with $$.Obj as TSqlSynJoinBinary do
+                                          begin
+                                            ExprType := setJoin;
+                                            JoinType := jtFull;
+                                            InsertHeadChild($1.Obj);
+                                            Left := $1.Obj as TSqlSynExpr;
+                                            InsertTailChild($5.Obj);
+                                            Right := $5.Obj as TSqlSynExpr;
+                                            InsertTailChild($6.Obj);
+                                            Spec := $6.Obj as TSqlSynJoinSpec;
+                                            Outer := Boolean($3.Obj);
+                                          end; }
+        /* UNION JOIN is lexed as the single token _UNION_JOIN: after a table
+           reference, a plain _UNION can't tell UNION JOIN from a query UNION
+           (FROM a UNION SELECT ..) with one token of lookahead. */
+        |       table_reference _UNION_JOIN join_right_operand
+                                        { $$.Text := '';
+                                          $$.Obj := MakeClass(TSqlSynJoinBinary);
+                                          with $$.Obj as TSqlSynJoinBinary do
+                                          begin
+                                            ExprType := setJoin;
+                                            JoinType := jtUnion;
+                                            InsertHeadChild($1.Obj);
+                                            Left := $1.Obj as TSqlSynExpr;
+                                            InsertTailChild($3.Obj);
+                                            Right := $3.Obj as TSqlSynExpr;
+                                          end; }
+        |       table_reference _NATURAL _JOIN join_right_operand
+                                        { $$.Text := '';
+                                          $$.Obj := MakeClass(TSqlSynJoinBinary);
+                                          with $$.Obj as TSqlSynJoinBinary do
+                                          begin
+                                            ExprType := setJoin;
+                                            JoinType := jtInner;
+                                            InsertHeadChild($1.Obj);
+                                            Left := $1.Obj as TSqlSynExpr;
+                                            InsertTailChild($4.Obj);
+                                            Right := $4.Obj as TSqlSynExpr;
+                                            Natural := true;
+                                          end; }
+        |       table_reference _NATURAL _INNER _JOIN join_right_operand
+                                        { $$.Text := '';
+                                          $$.Obj := MakeClass(TSqlSynJoinBinary);
+                                          with $$.Obj as TSqlSynJoinBinary do
+                                          begin
+                                            ExprType := setJoin;
+                                            JoinType := jtInner;
+                                            InsertHeadChild($1.Obj);
+                                            Left := $1.Obj as TSqlSynExpr;
+                                            InsertTailChild($5.Obj);
+                                            Right := $5.Obj as TSqlSynExpr;
+                                            Natural := true;
+                                          end; }
+        |       table_reference _NATURAL _LEFT outer_opt _JOIN join_right_operand
+                                        { $$.Text := '';
+                                          $$.Obj := MakeClass(TSqlSynJoinBinary);
+                                          with $$.Obj as TSqlSynJoinBinary do
+                                          begin
+                                            ExprType := setJoin;
+                                            JoinType := jtLeft;
+                                            InsertHeadChild($1.Obj);
+                                            Left := $1.Obj as TSqlSynExpr;
+                                            InsertTailChild($6.Obj);
+                                            Right := $6.Obj as TSqlSynExpr;
+                                            Natural := true;
+                                            Outer := Boolean($4.Obj);
+                                          end; }
+        |       table_reference _NATURAL _RIGHT outer_opt _JOIN join_right_operand
+                                        { $$.Text := '';
+                                          $$.Obj := MakeClass(TSqlSynJoinBinary);
+                                          with $$.Obj as TSqlSynJoinBinary do
+                                          begin
+                                            ExprType := setJoin;
+                                            JoinType := jtRight;
+                                            InsertHeadChild($1.Obj);
+                                            Left := $1.Obj as TSqlSynExpr;
+                                            InsertTailChild($6.Obj);
+                                            Right := $6.Obj as TSqlSynExpr;
+                                            Natural := true;
+                                            Outer := Boolean($4.Obj);
+                                          end; }
+        |       table_reference _NATURAL _FULL outer_opt _JOIN join_right_operand
+                                        { $$.Text := '';
+                                          $$.Obj := MakeClass(TSqlSynJoinBinary);
+                                          with $$.Obj as TSqlSynJoinBinary do
+                                          begin
+                                            ExprType := setJoin;
+                                            JoinType := jtFull;
+                                            InsertHeadChild($1.Obj);
+                                            Left := $1.Obj as TSqlSynExpr;
+                                            InsertTailChild($6.Obj);
+                                            Right := $6.Obj as TSqlSynExpr;
+                                            Natural := true;
+                                            Outer := Boolean($4.Obj);
+                                          end; }
+        /* No NATURAL UNION JOIN: the SQL-92 syntax rules for <joined table>
+           forbid NATURAL and a <join specification> with UNION. */
+        ;
+
+  /* Right-hand operand of a join. The BNF allows any <table reference> here,
+     but an unbracketed right-nested join (a JOIN b JOIN c ON .. ON ..) makes
+     join chains ambiguous (~40 extra conflicts). So a joined table on the
+     right must be bracketed: a JOIN (b JOIN c ON ..) ON .. */
+  join_right_operand :
+                table_factor
+                                        { $$ := $1; }
+        |       left_paren joined_table right_paren
+                                        { $$ := $2; }
         ;
 
   outer_opt:
         /* Empty */
+                                        { $$.Text := ''; $$.Obj := TSqlSynNode(false); }
         |       _OUTER
+                                        { $$.Text := ''; $$.Obj := TSqlSynNode(true); }
         ;
 
   join_specification :
                 join_condition
+                                        { $$ := $1; }
         |       named_columns_join
+                                        { $$ := $1; }
         ;
 
   join_condition :
                 _ON search_condition
+                                        { $$.Text := '';
+                                          $$.Obj := MakeClass(TSqlSynJoinSpec);
+                                          with $$.Obj as TSqlSynJoinSpec do
+                                          begin
+                                            StructuralType := sstJoinSpec;
+                                            SpecType := stJoinCond;
+                                            InsertTailChild($2.Obj);
+                                            JoinCondition := $2.Obj as TSqlSynExpr;
+                                          end; }
         ;
 
   named_columns_join :
                 _USING left_paren join_column_list right_paren
+                                        { $$.Text := '';
+                                          $$.Obj := MakeClass(TSqlSynJoinSpec);
+                                          with $$.Obj as TSqlSynJoinSpec do
+                                          begin
+                                            StructuralType := sstJoinSpec;
+                                            SpecType := stNamedColsJoin;
+                                            InsertTailChild($3.Obj);
+                                            ColList := $3.Obj as TSqlSynList;
+                                          end; }
         ;
 
   join_column_list :
                 column_name_list
+                                        { $$ := $1; }
         ;
 
   where_clause :
                 _WHERE search_condition
+                                        { $$ := $2; }
         ;
 
   group_by_clause :
                 _GROUP _BY grouping_column_reference_list
+                                        { $$ := $3; }
         ;
 
   grouping_column_reference_list :
                 grouping_column_reference
+                                        { $$.Text := '';
+                                          $$.Obj := MakeClass(TSqlSynList);
+                                          $$.Obj.InsertTailChild($1.Obj); }
         |       grouping_column_reference_list comma grouping_column_reference
+                                        { $$ := $1;
+                                          $$.Obj.InsertTailChild($3.Obj); }
         ;
 
   grouping_column_reference :
                 column_reference collate_clause_opt
+                                        { $$ := $1;
+                                          Assert(not Assigned($2.Obj)); }
         ;
 
   collate_clause :
                 _COLLATE collation_name
+                                        { $$.Text := ''; $$.Obj := nil;
+                                          yyerror('Collations not supported');
+                                          $2.Obj.Free; }
         ;
 
   collation_name :
                 qualified_name
+                                        { $$ := $1; }
         ;
 
   having_clause :
                 _HAVING search_condition
+                                        { $$ := $2; }
         ;
 
   table_value_constructor :
                 _VALUES table_value_constructor_list
+                                        { $$ := $2; }
         ;
 
   table_value_constructor_list :
                 row_value_constructor
+                                        { $$.Text := '';
+                                          $$.Obj := MakeClass(TSqlTableValConstructor);
+                                          with $$.Obj as TSqlTableValConstructor do
+                                          begin
+                                            ExprType := setTValConstructor;
+                                            InsertTailChild($1.Obj);
+                                          end; }
         |       table_value_constructor_list  comma row_value_constructor
+                                        { $$ := $1;
+                                          with $$.Obj as TSqlTableValConstructor do
+                                          begin
+                                            InsertTailChild($3.Obj);
+                                          end; }
         ;
 
   explicit_table : _TABLE table_name
+                                        { $$.Text := '';
+                                          $$.Obj := MakeClass(TSqlSynExplicitTable);
+                                          with $$.Obj as TSqlSynExplicitTable do
+                                          begin
+                                            ExprType := setExplicitTable;
+                                            InsertTailChild($2.Obj);
+                                            TableName := $2.Obj as TSqlSynIdent;
+                                          end; }
         ;
 
   query_term :
                 non_join_query_term
+                                        { $$ := $1; }
+        |       joined_table_as_query
+                                        { $$ := $1; }
         ;
 
   corresponding_spec : _CORRESPONDING corresponding_column_list_opt
+                                        { $$ := $2; }
         ;
 
   corresponding_column_list_opt :
         /* Empty */
+                                        { $$.Text := ''; $$.Obj := nil; }
         |       _BY left_paren corresponding_column_list right_paren
+                                        { $$ := $3; }
         ;
 
-  corresponding_column_list : column_name_list ;
+  corresponding_column_list :
+                column_name_list
+                                        { $$ := $1; }
+        ;
 
   query_primary :
                 non_join_query_primary
+                                        { $$ := $1; }
+        |       joined_table_as_query
+                                        { $$ := $1; }
         ;
 
 /*
@@ -2540,301 +3392,858 @@ The notation is written out longhand several times, instead;
 
   case_expression :
                 case_abbreviation
+                                        { $$ := $1; }
         |       case_specification
+                                        { $$ := $1; }
         ;
 
   case_abbreviation :
 		_NULLIF left_paren expression comma expression right_paren
+                                        { $$.Text := '';
+                                          $$.Obj := MakeClass(TSqlSynCaseAbbr);
+                                          with $$.Obj as TSqlSynCaseAbbr do
+                                          begin
+                                            ExprType := setCaseAbbr;
+                                            CaseType := scetNullif;
+                                            InsertTailChild($3.Obj);
+                                            InsertTailChild($5.Obj);
+                                            FirstExpr := $3.Obj as TSqlSynExpr;
+                                            LastExpr := $5.Obj as TSqlSynExpr;
+                                          end; }
 	|	_COALESCE left_paren expression_list right_paren
+                                        { $$.Text := '';
+                                          $$.Obj := MakeClass(TSqlSynCaseAbbr);
+                                          with $$.Obj as TSqlSynCaseAbbr do
+                                          begin
+                                            ExprType := setCaseAbbr;
+                                            CaseType := scetCoalesce;
+                                            InsertTailChild($3.Obj);
+                                            List := $3.Obj as TSqlSynList;
+                                          end; }
         ;
 
   expression_list :
                 expression
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynList);
+                                                  ($$.Obj as TSqlSynList).InsertTailChild($1.Obj); }
         |       expression_list comma expression
+                                                { $$ := $1;
+                                                  ($$.Obj as TSqlSynList).InsertTailChild($3.Obj); }
         ;
 
   case_specification :
                 simple_case
+                                                { $$ := $1; }
         |       searched_case
+                                                { $$ := $1; }
         ;
 
   simple_case :
-		_CASE case_operand
-			simple_when_clause
-                        else_clause_opt
-		_END
+		_CASE case_operand simple_when_clauses else_clause_opt _END
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynSimpleSearchedCase);
+                                                  with $$.Obj as TSqlSynSimpleSearchedCase do
+                                                  begin
+                                                    ExprType := setSimpleSearchedCase;
+                                                    SSCaseType := sscetSimple;
+                                                    InsertHeadChild($2.Obj);
+                                                    Operand := $2.Obj as TSqlSynExpr;
+                                                    InsertHeadChild($3.Obj);
+                                                    WhenClauses := $3.Obj as TSqlSynList;
+                                                    if Assigned($4.Obj) then
+                                                    begin
+                                                      InsertTailChild($4.Obj);
+                                                      _Else := $4.Obj as TSqlSynExpr;
+                                                    end;
+                                                  end; }
         ;
 
   else_clause_opt :
-        /* Empty */
+        /* Empty */                             { $$.Text := ''; $$.Obj := nil; }
         |       else_clause
+                                                { $$ := $1; }
         ;
 
   case_operand :
-                expression
+                expression                      { $$ := $1; }
+        ;
+
+  simple_when_clauses :
+                simple_when_clause              { $$.Text := ''; $$.Obj := MakeClass(TSqlSynList);
+                                                  $$.Obj.InsertTailChild($1.Obj); }
+        |       simple_when_clauses simple_when_clause
+                                                { $$ := $1; $$.Obj.InsertTailChild($2.Obj); }
         ;
 
   simple_when_clause :
                 _WHEN when_operand _THEN result
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynSimpleCaseWhen);
+                                                  with $$.Obj as TSqlSynSimpleCaseWhen do
+                                                  begin
+                                                    StructuralType := sstSimpleCaseWhen;
+                                                    InsertTailChild($2.Obj);
+                                                    ComparatorOrSearched := $2.Obj as TSqlSynExpr;
+                                                    InsertTailChild($4.Obj);
+                                                    _When := $4.Obj as TSqlSynExpr;
+                                                  end; }
         ;
 
   when_operand :
                 expression
+                                                { $$ := $1; }
         ;
 
   result :
                 expression /* Which can be NULL specification */
+                                                { $$ := $1; }
         ;
 
   else_clause :
                 _ELSE result
+                                                { $$ := $2; }
         ;
 
   searched_case :
-		_CASE
-                searched_when_clause
-                else_clause_opt
-		_END
+		_CASE searched_when_clauses else_clause_opt _END
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynSimpleSearchedCase);
+                                                  with $$.Obj as TSqlSynSimpleSearchedCase do
+                                                  begin
+                                                    if Assigned($3.Obj) then
+                                                    begin
+                                                      ExprType := setSimpleSearchedCase;
+                                                      SSCaseType := sscetSearched;
+                                                      InsertTailChild($2.Obj);
+                                                      WhenClauses := $2.Obj as TSqlSynList;
+                                                      InsertTailChild($3.Obj);
+                                                      _Else := $3.Obj as TSqlSynExpr;
+                                                    end;
+                                                  end; }
+        ;
+
+  searched_when_clauses :
+                searched_when_clause            { $$.Text := ''; $$.Obj := MakeClass(TSqlSynList);
+                                                  $$.Obj.InsertTailChild($1.Obj); }
+        |       searched_when_clauses searched_when_clause
+                                                { $$ := $1; $$.Obj.InsertTailChild($2.Obj); }
         ;
 
   searched_when_clause :
                 _WHEN search_condition _THEN result
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynSimpleCaseWhen);
+                                                  with $$.Obj as TSqlSynSimpleCaseWhen do
+                                                  begin
+                                                    StructuralType := sstSimpleCaseWhen;
+                                                    InsertTailChild($2.Obj);
+                                                    ComparatorOrSearched := $2.Obj as TSqlSynExpr;
+                                                    InsertTailChild($4.Obj);
+                                                    _When := $4.Obj as TSqlSynExpr;
+                                                  end; }
         ;
 
   cast_specification :
                 _CAST left_paren cast_operand _AS cast_target right_paren
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynCastOperator);
+                                                  with $$.Obj as TSqlSynCastOperator do
+                                                  begin
+                                                    ExprType := setCast;
+                                                    InsertTailChild($3.Obj);
+                                                    Expr := $3.Obj as TSqlSynExpr;
+                                                    InsertTailChild($5.Obj);
+                                                    CastType := $5.Obj;
+                                                  end; }
         ;
 
   cast_operand :
                 expression      /* Which can be null specification */
+                                                {$$ := $1; }
         ;
 
   cast_target :
                 domain_name
+                                                { $$ := $1; }
         |       data_type
+                                                { $$ := $1; }
         ;
 
   numeric_value_function :
                 position_expression
+                                                { $$ := $1; }
         |       extract_expression
+                                                { $$ := $1; }
         |       length_expression
+                                                { $$ := $1; }
         ;
 
   position_expression :
-	        _POSITION left_paren
-                expression /* TODO - check char-ness / bit-ness */
-                _IN
-                expression right_paren
+	        _POSITION left_paren expression _IN expression right_paren
+                /* TODO - check char-ness / bit-ness */
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynBinaryNumericFunction);
+                                                  with $$.Obj as TSqlSynBinaryNumericFunction do
+                                                  begin
+                                                    ExprType := setNumericFunction;
+                                                    FuncType:= nfPosition;
+                                                    InsertTailChild($3.Obj);
+                                                    Expr := $3.Obj as TSqlSynExpr;
+                                                    InsertTailChild($5.Obj);
+                                                    SecondExpr := $5.Obj as TSqlSynExpr;
+                                                  end; }
         ;
 
 
   character_value_function :
 	    character_bit_substring_function
+                                                { $$ := $1; }
 	|   fold
+                                                { $$ := $1; }
 	|   form_of_use_conversion
+                                                { $$ := $1; }
 	|   character_translation
+                                                { $$ := $1; }
 	|   trim_function
+                                                { $$ := $1; }
         ;
 
   character_bit_substring_function :
 		_SUBSTRING left_paren expression
                 _FROM start_position for_strlength_opt right_paren
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynCharacterFunction);
+                                                  with $$.Obj as TSqlSynCharacterFunction do
+                                                  begin
+                                                    ExprType := setCharacterFunction;
+                                                    FuncType := cfsSubString;
+                                                    InsertTailChild($3.Obj);
+                                                    First := $3.Obj as TSqlSynExpr;
+                                                    InsertTailChild($5.Obj);
+                                                    if Assigned($6.Obj) then
+                                                    begin
+                                                      Second := $6.Obj as TSqlSynExpr;
+                                                      InsertTailChild($6.Obj);
+                                                    end;
+                                                  end; }
         ;
 
   for_strlength_opt :
-        /* Empty */
-        |       _FOR string_length
+        /* Empty */                             { $$.Text := ''; $$.Obj := nil; }
+        |       _FOR string_length              { $$ := $2; }
         ;
 
-  start_position : expression ;
+  start_position : expression
+                                                { $$ := $1; }
+        ;
 
-  string_length : expression ;
+  string_length : expression
+                                                { $$ := $1; }
+        ;
 
   fold :
                 _UPPER left_paren expression right_paren
+                                                {  $$.Text := '';
+                                                   $$.Obj := MakeClass(TSqlSynCharacterFunction);
+                                                   with $$.Obj as TSqlSynCharacterFunction do
+                                                   begin
+                                                     ExprType := setCharacterFunction;
+                                                     FuncType := cfsFold;
+                                                     FoldType := sftUpper;
+                                                     InsertTailChild($3.Obj);
+                                                     First := $3.Obj as TSqlSynExpr;
+                                                   end; }
         |       _LOWER left_paren expression right_paren
+                                                {  $$.Text := '';
+                                                   $$.Obj := MakeClass(TSqlSynCharacterFunction);
+                                                   with $$.Obj as TSqlSynCharacterFunction do
+                                                   begin
+                                                     ExprType := setCharacterFunction;
+                                                     FuncType := cfsFold;
+                                                     FoldType := sftLower;
+                                                     InsertTailChild($3.Obj);
+                                                     First := $3.Obj as TSqlSynExpr;
+                                                   end; }
         ;
 
   form_of_use_conversion :
 		_CONVERT left_paren expression
                 _USING form_of_use_conversion_name right_paren
+                                                { //Pass the operand through rather than NIL: this is an expression,
+                                                  //and a NIL would reach every rule that takes one.
+                                                  $$ := $3;
+                                                  yyerror('Form of use conversions not supported.');
+                                                  $5.Obj.Free; }
         ;
 
-  form_of_use_conversion_name : qualified_name ;
+  form_of_use_conversion_name : qualified_name
+                                                { $$ := $1; }
+        ;
 
   character_translation :
-		_TRANSLATE left_paren expression _USING translation_name right_paren ;
+		_TRANSLATE left_paren expression _USING translation_name right_paren
+                                                { //Pass the operand through, as form_of_use_conversion.
+                                                  $$ := $3;
+                                                  yyerror('Character translations not supported.');
+                                                  $5.Obj.Free; }
+        ;
 
-  translation_name : qualified_name ;
+  translation_name : qualified_name
+                                                { $$ := $1; }
+        ;
 
   trim_function :
                 _TRIM left_paren trim_operands right_paren
+                                                {  $$ := $3; }
         ;
 
   trim_operands :
                 trim_source
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynCharacterFunction);
+                                                  with $$.Obj as TSqlSynCharacterFunction do
+                                                  begin
+                                                     ExprType := setCharacterFunction;
+                                                     FuncType := cfsTrim;
+                                                     InsertTailChild($1.Obj);
+                                                     First := $1.Obj as TSqlSynExpr;
+                                                  end; }
         |       trim_specification _FROM trim_source
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynCharacterFunction);
+                                                  with $$.Obj as TSqlSynCharacterFunction do
+                                                  begin
+                                                     ExprType := setCharacterFunction;
+                                                     FuncType := cfsTrimSpec;
+                                                     InsertTailChild($1.Obj);
+                                                     First := $1.Obj;
+                                                     InsertTailChild($3.Obj);
+                                                     Second := $3.Obj as TSqlSynExpr;
+                                                  end; }
         |       trim_character _FROM trim_source
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynCharacterFunction);
+                                                  with $$.Obj as TSqlSynCharacterFunction do
+                                                  begin
+                                                     ExprType := setCharacterFunction;
+                                                     FuncType := cfsTrimChar;
+                                                     InsertTailChild($1.Obj);
+                                                     First := $1.Obj as TSqlSynExpr;
+                                                     InsertTailChild($3.Obj);
+                                                     Second := $3.Obj as TSqlSynExpr;
+                                                  end; }
         |       trim_specification trim_character _FROM trim_source
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynCharacterFunction);
+                                                  with $$.Obj as TSqlSynCharacterFunction do
+                                                  begin
+                                                     ExprType := setCharacterFunction;
+                                                     FuncType := cfsTrim;
+                                                     InsertTailChild($1.Obj);
+                                                     First := $1.Obj;
+                                                     InsertTailChild($2.Obj);
+                                                     Second := $2.Obj as TSqlSynExpr;
+                                                     InsertTailChild($4.Obj);
+                                                     Third := $4.Obj as TSqlSynExpr;
+                                                  end; }
+        |       _FROM trim_source
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynCharacterFunction);
+                                                  with $$.Obj as TSqlSynCharacterFunction do
+                                                  begin
+                                                     ExprType := setCharacterFunction;
+                                                     FuncType := cfsTrim;
+                                                     InsertTailChild($2.Obj);
+                                                     First := $2.Obj as TSqlSynExpr;
+                                                  end; }
   ;
 
   trim_specification :
                 _LEADING
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynTrimSpecification);
+                                                  with $$.Obj as TSqlSynTrimSpecification do
+                                                  begin
+                                                    StructuralType := sstTrimSpecification;
+                                                    SpecType := sttLeading;
+                                                  end; }
         |       _TRAILING
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynTrimSpecification);
+                                                  with $$.Obj as TSqlSynTrimSpecification do
+                                                  begin
+                                                    StructuralType := sstTrimSpecification;
+                                                    SpecType := sttTrailing;
+                                                  end; }
         |       _BOTH
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynTrimSpecification);
+                                                  with $$.Obj as TSqlSynTrimSpecification do
+                                                  begin
+                                                    StructuralType := sstTrimSpecification;
+                                                    SpecType := sttBoth;
+                                                  end; }
   ;
 
   trim_character :
-                expression /* Check char/bit */
+                expression /* Check char/bit */ { $$ := $1; }
         ;
 
   trim_source :
-                expression /* Check char/bit */
+                expression /* Check char/bit */ { $$ := $1; }
         ;
 
   extract_expression :
                 _EXTRACT left_paren extract_field _FROM extract_source right_paren
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynExtractFunction);
+                                                  with $$.Obj as TSqlSynExtractFunction do
+                                                  begin
+                                                    ExprType := setNumericFunction;
+                                                    FuncType:= nfExtract;
+                                                    ExtractField := TSQLSynQualField($3.Obj);
+                                                    InsertTailChild($5.Obj);
+                                                    Expr := $5.Obj as TSqlSynExpr;
+                                                  end; }
         ;
 
   extract_field :
                 datetime_field
+                                                { $$ := $1; }
         |       time_zone_field
+                                                { $$ := $1; }
         ;
 
   datetime_field :
                 non_second_datetime_field
+                                                { $$ := $1; }
         |       _SECOND
+                                                { $$.Text := ''; $$.Obj := TSQLSynNode(sqfSecond); }
         ;
 
   time_zone_field :
                 _TIMEZONE_HOUR
+                                                { $$.Text := ''; $$.Obj := TSQLSynNode(sqfHour); }
         |       _TIMEZONE_MINUTE
+                                                { $$.Text := ''; $$.Obj := TSQLSynNode(sqfMinute); }
         ;
 
   extract_source :
                 expression
+                                                { $$ := $1; }
         ;
 
   time_zone :
                 _AT time_zone_specifier
+                                                { $$ := $2; //Not impl. }
         ;
 
   time_zone_specifier :
                 _LOCAL
-        |       _TIME _ZONE expression
+                                                { $$.Text := ''; $$.Obj := nil; //Not impl. }
+        |       _TIME _ZONE primary_expression
+                                                { $$ := $3; //Not impl. }
         ;
 
   length_expression :
                 char_length_expression
+                                                { $$ := $1; }
         |       octet_length_expression
+                                                { $$ := $1; }
         |       bit_length_expression
+                                                { $$ := $1; }
         ;
 
   char_length_expression :
                 char_length_specifier left_paren expression right_paren
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynUnaryNumericFunction);
+                                                  with $$.Obj as TSQLSynUnaryNumericFunction do
+                                                  begin
+                                                    ExprType := setNumericFunction;
+                                                    FuncType := nfLength;
+                                                    LengthSubtype := lfsChar;
+                                                    InsertTailChild($3.Obj);
+                                                    Expr := $3.Obj as TSqlSynExpr;
+                                                  end; }
         ;
 
   char_length_specifier :
                 _CHAR_LENGTH
+                                                { $$.Text := ''; $$.Obj := nil; }
         |       _CHARACTER_LENGTH
+                                                { $$.Text := ''; $$.Obj := nil; }
         ;
 
   octet_length_expression :
                 _OCTET_LENGTH left_paren expression right_paren
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynUnaryNumericFunction);
+                                                  with $$.Obj as TSQLSynUnaryNumericFunction do
+                                                  begin
+                                                    ExprType := setNumericFunction;
+                                                    FuncType := nfLength;
+                                                    LengthSubtype := lfsOctet;
+                                                    InsertTailChild($3.Obj);
+                                                    Expr := $3.Obj as TSqlSynExpr;
+                                                  end; }
         ;
 
   bit_length_expression :
                 _BIT_LENGTH left_paren expression right_paren
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSQLSynUnaryNumericFunction);
+                                                  with $$.Obj as TSQLSynUnaryNumericFunction do
+                                                  begin
+                                                    ExprType := setNumericFunction;
+                                                    FuncType := nfLength;
+                                                    LengthSubtype := lfsBit;
+                                                    InsertTailChild($3.Obj);
+                                                    Expr := $3.Obj as TSqlSynExpr;
+                                                  end; }
         ;
 
-  null_specification : _NULL ;
+  null_specification : _NULL
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynSpecification);
+                                                  with $$.Obj as TSqlSynSpecification do
+                                                  begin
+                                                    ExprType := setSpecification;
+                                                    SpecType := sstNull;
+                                                  end; }
+        ;
 
-  default_specification : _DEFAULT ;
+  default_specification : _DEFAULT
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynSpecification);
+                                                  with $$.Obj as TSqlSynSpecification do
+                                                  begin
+                                                    ExprType := setSpecification;
+                                                    SpecType := sstDefault;
+                                                  end; }
+        ;
 
   row_value_constructor_list :
                 expression
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlRowValConstructor);
+                                                  with $$.Obj as TSqlRowValConstructor do
+                                                  begin
+                                                    ExprType := setRValConstructor;
+                                                    InsertTailChild($1.Obj);
+                                                  end; }
         |       row_value_constructor_list comma expression
+                                                { $$ := $1;
+                                                  with $$.Obj as TSqlRowValConstructor do
+                                                    InsertTailChild($3.Obj); }
         ;
 
   comp_op :
 	    equals_operator
+                                                { $$.Text := '';
+                                                  $$.Obj := TSqlSynNode(coEquals); }
 	|   not_equals_operator
+                                                { $$.Text := '';
+                                                  $$.Obj := TSqlSynNode(coNotEquals); }
 	|   less_than_operator
+                                                { $$.Text := '';
+                                                  $$.Obj := TSqlSynNode(coLessThan); }
 	|   greater_than_operator
+                                                { $$.Text := '';
+                                                  $$.Obj := TSqlSynNode(coGreaterThan); }
 	|   less_than_or_equals_operator
-	|   greater_than_or_equals_operator ;
+                                                { $$.Text := '';
+                                                  $$.Obj := TSqlSynNode(coLessThanOrEq); }
+	|   greater_than_or_equals_operator
+                                                { $$.Text := '';
+                                                  $$.Obj := TSqlSynNode(coGreaterThanOrEq); }
+        ;
 
   between_predicate :
 		row_value_constructor _BETWEEN row_value_constructor _AND row_value_constructor
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSyn3VPredicate);
+                                                  with $$.Obj as TSqlSyn3VPredicate do
+                                                  begin
+                                                    ExprType := setPredicate;
+                                                    PredicateType := sptBetweenPredicate;
+                                                    InsertTailChild($1.Obj);
+                                                    Left := $1.Obj as TSqlSynExpr;
+                                                    InsertTailChild($3.Obj);
+                                                    Middle := $3.Obj as TSqlSynExpr;
+                                                    InsertTailChild($5.Obj);
+                                                    Right := $5.Obj as TSqlSynExpr;
+                                                  end; }
+
 	|	row_value_constructor _NOT _BETWEEN row_value_constructor _AND row_value_constructor
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSyn3VPredicate);
+                                                  with $$.Obj as TSqlSyn3VPredicate do
+                                                  begin
+                                                    ExprType := setPredicate;
+                                                    PredicateType := sptNotBetweenPredicate;
+                                                    InsertTailChild($1.Obj);
+                                                    Left := $1.Obj as TSqlSynExpr;
+                                                    InsertTailChild($4.Obj);
+                                                    Middle := $4.Obj as TSqlSynExpr;
+                                                    InsertTailChild($6.Obj);
+                                                    Right := $6.Obj as TSqlSynExpr;
+                                                  end; }
         ;
 
   in_predicate :
                 row_value_constructor _IN in_predicate_value
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynInPredicate);
+                                                  with $$.Obj as TSqlSynInPredicate do
+                                                  begin
+                                                    ExprType := setPredicate;
+                                                    PredicateType := sptInPredicate;
+                                                    InsertTailChild($1.Obj);
+                                                    Expr := $1.Obj as TSqlSynExpr;
+                                                    InsertTailChild($3.Obj);
+                                                    InList := $3.Obj;
+                                                  end; }
         |        row_value_constructor _NOT _IN in_predicate_value
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynInPredicate);
+                                                  with $$.Obj as TSqlSynInPredicate do
+                                                  begin
+                                                    ExprType := setPredicate;
+                                                    PredicateType := sptNotInPredicate;
+                                                    InsertTailChild($1.Obj);
+                                                    Expr := $1.Obj as TSqlSynExpr;
+                                                    InsertTailChild($4.Obj);
+                                                    InList := $4.Obj;
+                                                  end; }
         ;
 
-  in_predicate_value : table_subquery | left_paren in_value_list right_paren ;
+  in_predicate_value :
+                table_subquery
+                                                { $$ := $1; }
+        |       left_paren in_value_list right_paren
+                                                { $$ := $2; }
+        ;
 
   in_value_list :
-                expression
+                expression comma expression     { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynList);
+                                                  with $$.Obj as TSqlSynList do
+                                                  begin
+                                                    InsertTailChild($1.Obj);
+                                                    InsertTailChild($3.Obj);
+                                                  end; }
         |       in_value_list comma expression
+                                                { $$ := $1;
+                                                  with $$.Obj as TSqlSynList do
+                                                        InsertTailChild($3.Obj); }
         ;
 
   like_predicate : /* Check char-bit expressions */
-                expression _LIKE pattern like_predicate_escape_opt
-        |       expression _NOT _LIKE pattern like_predicate_escape_opt
+                row_value_constructor _LIKE pattern like_predicate_escape_opt
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSyn3VPredicate);
+                                                  with $$.Obj as TSqlSyn3VPredicate do
+                                                  begin
+                                                    ExprType := setPredicate;
+                                                    PredicateType := sptLikePredicate;
+                                                    InsertTailChild($1.Obj);
+                                                    Left := $1.Obj as TSqlSynExpr;
+                                                    InsertTailChild($3.Obj);
+                                                    Middle := $3.Obj as TSqlSynExpr;
+                                                    if Assigned($4.obj) then
+                                                    begin
+                                                      InsertTailChild($4.Obj);
+                                                      Right := $4.Obj as TSqlSynExpr;
+                                                    end;
+                                                  end; }
+        |       row_value_constructor _NOT _LIKE pattern like_predicate_escape_opt
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSyn3VPredicate);
+                                                  with $$.Obj as TSqlSyn3VPredicate do
+                                                  begin
+                                                    ExprType := setPredicate;
+                                                    PredicateType := sptNotLikePredicate;
+                                                    InsertTailChild($1.Obj);
+                                                    Left := $1.Obj as TSqlSynExpr;
+                                                    InsertTailChild($4.Obj);
+                                                    Middle := $4.Obj as TSqlSynExpr;
+                                                    if Assigned($5.obj) then
+                                                    begin
+                                                      InsertTailChild($5.Obj);
+                                                      Right := $5.Obj as TSqlSynExpr;
+                                                    end;
+                                                  end; }
         ;
 
   like_predicate_escape_opt :
-        /* Empty */
+        /* Empty */                             { $$.Text := ''; $$.Obj := nil; }
         |       _ESCAPE escape_character
+                                                { $$ := $2; }
         ;
 
-  pattern : expression /* Check char-bit */;
+  pattern : expression /* Check char-bit */
+                                                { $$ := $1; }
+        ;
 
-  escape_character : expression /* Check char-bit */;
+  escape_character : expression /* Check char-bit */
+                                                { $$ := $1; }
+        ;
 
   null_predicate :
                 row_value_constructor _IS _NULL
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSyn1VPredicate);
+                                                  with $$.Obj as TSqlSyn1VPredicate do
+                                                  begin
+                                                    ExprType := setPredicate;
+                                                    PredicateType := sptNullPredicate;
+                                                    InsertTailChild($1.Obj);
+                                                    Expr := $1.Obj as TSqlSynExpr;
+                                                  end; }
         |       row_value_constructor _IS _NOT _NULL
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSyn1VPredicate);
+                                                  with $$.Obj as TSqlSyn1VPredicate do
+                                                  begin
+                                                    ExprType := setPredicate;
+                                                    PredicateType := sptNotNullPredicate;
+                                                    InsertTailChild($1.Obj);
+                                                    Expr := $1.Obj as TSqlSynExpr;
+                                                  end; }
         ;
 
-  quantified_comparison_predicate : row_value_constructor comp_op quantifier table_subquery ;
+  quantified_comparison_predicate : row_value_constructor comp_op quantifier table_subquery
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynQuantComparisonPredicate);
+                                                  with $$.Obj as TSqlSynQuantComparisonPredicate do
+                                                  begin
+                                                    ExprType := setPredicate;
+                                                    PredicateType := sptQuantifiedComparisonPredicate;
+                                                    CompOp := TSqlSynCompOp($2.Obj);
+                                                    Quantifier := TSqlQuantifierType($3.Obj);
+                                                    InsertTailChild($1.Obj);
+                                                    Left := $1.Obj as TSqlSynExpr;
+                                                    InsertTailChild($4.Obj);
+                                                    Right :=$4.Obj as TSqlSynExpr;
+                                                  end; }
+        ;
 
-  quantifier : all | some ;
+  quantifier :
+                all                             { $$ := $1; }
+        |       some                            { $$ := $1; }
+        ;
 
-  all : _ALL ;
+  all : _ALL                                    { $$.Text := ''; $$.Obj := TSqlSynNode(sqtAll); }
+        ;
 
-  some : _SOME | _ANY ;
+  some : _SOME                                  { $$.Text := ''; $$.Obj := TSqlSynNode(sqtSome); }
+        | _ANY                                  { $$.Text := ''; $$.Obj := TSqlSynNode(sqtAny); }
+        ;
 
-  exists_predicate : _EXISTS table_subquery ;
+  exists_predicate : _EXISTS table_subquery     { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSyn1VPredicate);
+                                                  with $$.Obj as TSqlSyn1VPredicate do
+                                                  begin
+                                                    ExprType := setPredicate;
+                                                    PredicateType := sptExistsPredicate;
+                                                    InsertTailChild($2.Obj);
+                                                    Expr := $2.Obj as TSqlSynExpr;
+                                                  end; }
+        ;
 
-  unique_predicate : _UNIQUE table_subquery ;
+  unique_predicate : _UNIQUE table_subquery     { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSyn1VPredicate);
+                                                  with $$.Obj as TSqlSyn1VPredicate do
+                                                  begin
+                                                    ExprType := setPredicate;
+                                                    PredicateType := sptUniquePredicate;
+                                                    InsertTailChild($2.Obj);
+                                                    Expr := $2.Obj as TSqlSynExpr;
+                                                  end; }
+        ;
 
-  match_predicate : row_value_constructor _MATCH unique_opt partial_full_opt table_subquery ;
+  match_predicate : row_value_constructor _MATCH unique_opt partial_full_opt table_subquery
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynMatchPredicate);
+                                                  with $$.Obj as TSqlSynMatchPredicate do
+                                                  begin
+                                                    ExprType := setPredicate;
+                                                    PredicateType := sptMatchPredicate;
+                                                    InsertTailChild($1.Obj);
+                                                    Left := $1.Obj as TSqlSynExpr;
+                                                    InsertTailChild($5.Obj);
+                                                    Right := $5.Obj as TSqlSynExpr;
+                                                    UniqueOpt := TSqlSynUniqueOpt($3.Obj);
+                                                    PartialOpt := TSqlSynPartialOpt($4.Obj);
+                                                  end; }
+        ;
 
   unique_opt :
-        /* Empty */
-        |       _UNIQUE
+        /* Empty */                             { $$.Text := ''; $$.Obj := TSqlSynNode(suoNone); }
+        |       _UNIQUE                         { $$.Text := ''; $$.Obj := TSqlSynNode(suoUnique); }
         ;
 
   partial_full_opt:
-        /* Empty */
-        |       _PARTIAL
-        |       _FULL
+        /* Empty */                             { $$.Text := ''; $$.Obj := TSqlSynNode(spoNone); }
+        |       _PARTIAL                        { $$.Text := ''; $$.Obj := TSqlSynNode(spoPartial); }
+        |       _FULL                           { $$.Text := ''; $$.Obj := TSqlSynNode(spoFull); }
         ;
 
-  overlaps_predicate : row_value_constructor_1 _OVERLAPS row_value_constructor_2 ;
+  overlaps_predicate : row_value_constructor_1 _OVERLAPS row_value_constructor_2
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSyn2VPredicate);
+                                                  with $$.Obj as TSqlSyn2VPredicate do
+                                                  begin
+                                                    ExprType := setPredicate;
+                                                    PredicateType := sptOverlapsPredicate;
+                                                    InsertTailChild($1.Obj);
+                                                    Left := $1.Obj as TSqlSynExpr;
+                                                    InsertTailChild($3.Obj);
+                                                    Right := $3.Obj as TSqlSynExpr;
+                                                  end; }
+        ;
 
-  row_value_constructor_1 : row_value_constructor ;
+  row_value_constructor_1 : row_value_constructor
+                                                { $$ := $1; }
+        ;
 
-  row_value_constructor_2 : row_value_constructor ;
+  row_value_constructor_2 : row_value_constructor
+                                                { $$ := $1; }
+        ;
 
   truth_value :
                 _TRUE
+                                                { $$.Text := UpperCase(UTF8ToString(Lexer.yytext));
+                                                  $$.Obj := MakeClass(TSqlSynTruthValue);
+                                                  with $$.Obj as TSqlSynTruthValue do
+                                                  begin
+                                                    ExprType := setLiteral;
+                                                    LitType := sltTruthValue;
+                                                    TruthValue := tvtTrue;
+                                                    Text := $$.text;
+                                                  end; }
         |       _FALSE
+                                                { $$.Text := UpperCase(UTF8ToString(Lexer.yytext));
+                                                  $$.Obj := MakeClass(TSqlSynTruthValue);
+                                                  with $$.Obj as TSqlSynTruthValue do
+                                                  begin
+                                                    ExprType := setLiteral;
+                                                    LitType := sltTruthValue;
+                                                    TruthValue := tvtTrue;
+                                                    Text := $$.text;
+                                                  end; }
         |       _UNKNOWN
+                                                { $$.Text := UpperCase(UTF8ToString(Lexer.yytext));
+                                                  $$.Obj := MakeClass(TSqlSynTruthValue);
+                                                  with $$.Obj as TSqlSynTruthValue do
+                                                  begin
+                                                    ExprType := setLiteral;
+                                                    LitType := sltTruthValue;
+                                                    TruthValue := tvtTrue;
+                                                    Text := $$.text;
+                                                  end; }
         ;
 
 /*
@@ -2869,6 +4278,15 @@ The notation is written out longhand several times, instead;
                                              Deferrable := ssdDeferrable;
                                              InitDeferred := TSqlSynInitDeferred($2.Obj);
                                            end; }
+	|	_NOT _DEFERRABLE constraint_check_time_opt
+                                        {  $$.Text := '';
+                                           $$.Obj := MakeClass(TSqlSynConstraintAttributes);
+                                           with ($$.Obj as TSqlSynConstraintAttributes) do
+                                           begin
+                                             StructuralType := sstConstraintAttributes;
+                                             Deferrable := ssdNotDeferrable;
+                                             InitDeferred := TSqlSynInitDeferred($3.Obj);
+                                           end; }
         ;
 
   deferrable_opt :
@@ -2899,46 +4317,27 @@ The notation is written out longhand several times, instead;
                 constraint_name_definition_opt
                 table_constraint
                 table_constraint_attributes_opt
-                                                { //NB. Arbitary check constraints not supported
-                                                  //at this time, so building this part of the tree is
-                                                  //optional...
-                                                  if Assigned($2.Obj) then
+                                                { $$ := $2;
+                                                  if not Assigned($$.Obj) then
                                                   begin
+                                                    //Check constraint ignored: so are its name and attributes.
                                                     $$.Text := '';
-                                                    //Always relational constraint, always provided column list.
-                                                    $$.Obj := MakeClass(TSqlSynConstraint);
-                                                    with $$.Obj as TSqlSynConstraint do
-                                                    begin
-                                                      StructuralType := sstConstraint;
-                                                      ConstraintType := sctTable;
-                                                      if Assigned($1.Obj) then
-                                                      begin
-                                                        InsertTailChild($1.Obj);
-                                                        Name := $1.Obj as TSqlSynIdent;
-                                                      end;
-                                                      //This is a table constraint so at this point,
-                                                      //can take columns from column list, instead of later
-                                                      //fixup.
-                                                      TmpClass := $2.Obj.FirstChild; // Column list.
-                                                      FlattenReffingCols(TmpClass as TTempTpl);
-                                                      TmpClass := $2.Obj.LastChild; // Constraint details.
-                                                      TmpClass.RemoveFromTree;
-                                                      InsertTailChild(TmpClass);
-                                                      Detail := TmpClass as TSqlSynConstraintDetail;
-                                                      if Assigned($3.Obj) then
-                                                      begin
-                                                        InsertTailChild($3.Obj);
-                                                        Attributes := $3.Obj as TSqlSynConstraintAttributes;
-                                                      end;
-                                                    end;
-                                                    $2.Obj.Free;
-                                                  end
-                                                  else
-                                                  begin
-                                                    $$.Text := '';
-                                                    $$.Obj := nil;
                                                     $1.Obj.Free;
                                                     $3.Obj.Free;
+                                                  end
+                                                  else
+                                                  with $$.Obj as TSqlSynTableConstraint do
+                                                  begin
+                                                    if Assigned($1.Obj) then
+                                                    begin
+                                                      InsertTailChild($1.Obj);
+                                                      Name := $1.Obj as TSqlSynIdent;
+                                                    end;
+                                                    if Assigned($3.Obj) then
+                                                    begin
+                                                      InsertTailChild($3.Obj);
+                                                      Attributes := $3.Obj as TSqlSynConstraintAttributes;
+                                                    end;
                                                   end; }
         ;
 
@@ -2955,27 +4354,31 @@ The notation is written out longhand several times, instead;
                                              end;
                                            end
                                            else
-                                             $1.Obj := nil; }
+                                             $$.Obj := nil; }
         ;
 
   table_constraint :
-		unique_constraint_definition
-	|	referential_constraint_definition
+		unique_constraint_definition            { $$ := $1; }
+	|	referential_constraint_definition       { $$ := $1; }
 	|	check_constraint_definition
                                                 { $$.Text := '';
                                                   $$.Obj := nil;
-                                                  yyinfo('Arbitrary check constraints not supported at thhis time');
+                                                  yyinfo('Arbitrary check constraints not supported at this time');
                                                   $1.Obj.Free;}
         ;
 
   unique_constraint_definition :
                 unique_specification left_paren unique_column_list right_paren
                                                 { $$.Text := '';
-                                                  $$.Obj := MakeClass(TTempTpl);
-                                                  with $$.Obj as TTempTpl do
+                                                  $$.Obj := MakeClass(TSqlSynTableConstraint);
+                                                  with $$.Obj as TSqlSynTableConstraint do
                                                   begin
-                                                    InsertTailChild($3.Obj); //Column list.
-                                                    InsertTailChild($1.Obj); //Unique specification.
+                                                    StructuralType := sstConstraint;
+                                                    ConstraintType := sctTable;
+                                                    InsertTailChild($1.Obj);
+                                                    Detail := $1.Obj as TSqlSynConstraintDetail;
+                                                    InsertTailChild($3.Obj);
+                                                    Columns := $3.Obj as TSqlSynList;
                                                   end; }
         ;
 
@@ -2987,11 +4390,15 @@ The notation is written out longhand several times, instead;
   referential_constraint_definition :
 		_FOREIGN _KEY left_paren referencing_columns right_paren references_specification
                                                 { $$.Text := '';
-                                                  $$.Obj := MakeClass(TTempTpl);
-                                                  with $$.Obj as TTempTpl do
+                                                  $$.Obj := MakeClass(TSqlSynTableConstraint);
+                                                  with $$.Obj as TSqlSynTableConstraint do
                                                   begin
-                                                    InsertTailChild($4.Obj); //Column list.
-                                                    InsertTailChild($6.Obj); //References specification.
+                                                    StructuralType := sstConstraint;
+                                                    ConstraintType := sctTable;
+                                                    InsertTailChild($6.Obj);
+                                                    Detail := $6.Obj as TSqlSynConstraintDetail;
+                                                    InsertTailChild($4.Obj);
+                                                    Columns := $4.Obj as TSqlSynList;
                                                   end; }
         ;
 
@@ -3006,8 +4413,17 @@ The notation is written out longhand several times, instead;
 --/h2
 */
 
+  temp_table_decls :
+        /* Empty */                             { $$.Obj := MakeClass(TSqlSynList); $$.Text := ''; }
+        |       temp_table_decls temporary_table_declaration
+                                                { $$ := $1;
+                                                  $$.Obj.InsertTailChild($2.Obj); }
+        ;
+
   module_contents :
-        /* Empty */                             { $$.Obj := MakeClass(TTempTpl); $$.Text := ''; }
+                module_content
+                                                { $$.Obj := MakeClass(TSqlSynList); $$.Text := '';
+                                                  $$.Obj.InsertTailChild($1.Obj); }
         |       module_contents module_content
                                                 { $$ := $1;
                                                   $$.Obj.InsertTailChild($2.Obj); }
@@ -3018,56 +4434,130 @@ The notation is written out longhand several times, instead;
                                                 { $$ := $1; }
 	|	procedure
                                                 { $$ := $1; }
-        |       temporary_table_declaration
-                                                { $$ := $1; }
         ;
 
   declare_cursor :
-		_DECLARE cursor_name insensitive_opt scroll_opt _CURSOR _FOR cursor_specification ;
+		_DECLARE cursor_name insensitive_opt scroll_opt _CURSOR _FOR cursor_specification
+                                                { $$ := $7;
+                                                  with $$.Obj as TSqlSynDeclCursor do
+                                                  begin
+                                                    InsertHeadChild($2.Obj);
+                                                    Name := $2.Obj as TSqlSynIdent;
+                                                    Insensitive := Boolean($3.Obj);
+                                                    Scroll := Boolean($4.Obj);
+                                                  end; }
+        ;
 
   insensitive_opt :
-        /* Empty */
-        |       _INSENSITIVE
+        /* Empty */                             { $$.Text := ''; $$.Obj := TSqlSynNode(false); }
+        |       _INSENSITIVE                    { $$.Text := ''; $$.Obj := TSqlSynNode(true); }
         ;
 
   scroll_opt :
-        /* Empty */
-        |       _SCROLL
+        /* Empty */                             { $$.Text := ''; $$.Obj := TSqlSynNode(false); }
+        |       _SCROLL                         { $$.Text := ''; $$.Obj := TSqlSynNode(true); }
         ;
 
-  cursor_name : identifier ;
+  cursor_name : identifier
+                                                { $$ := $1; }
+        ;
 
-  cursor_specification : query_expression order_by_clause_opt updatability_clause_opt ;
+  cursor_specification : query_expression order_by_clause_opt updatability_clause_opt
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynDeclCursor);
+                                                  with $$.Obj as TSqlSynDeclCursor do
+                                                  begin
+                                                    StructuralType := sstCreateOrDecl;
+                                                    CreateorDeclType := codCursor;
+                                                    InsertTailChild($1.Obj);
+                                                    Query := $1.Obj as TSqlSynExpr;
+                                                    if Assigned($2.Obj) then
+                                                    begin
+                                                      InsertTailChild($2.Obj);
+                                                      OrderBy := $2.Obj as TSqlSynList;
+                                                    end;
+                                                    if Assigned($3.Obj) then
+                                                    begin
+                                                      InsertTailChild($3.Obj);
+                                                      Updatability := $3.Obj as TSqlSynUpdatability;
+                                                    end;
+                                                  end; }
+        ;
 
   order_by_clause_opt :
-        /* Empty */
+        /* Empty */                             { $$.Text := ''; $$.Obj := nil; }
         |       _ORDER _BY sort_specification_list
+                                                { $$ := $3; }
         ;
 
   sort_specification_list :
-                sort_specification
+                sort_specification              { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynList);
+                                                  with $$.Obj as TSqlSynList do
+                                                  begin
+                                                    InsertTailChild($1.Obj);
+                                                  end; }
         |       sort_specification_list comma sort_specification
+                                                { $$ := $1;
+                                                  with $$.Obj as TSqlSynList do
+                                                  begin
+                                                    InsertTailChild($3.Obj);
+                                                  end; }
         ;
 
-  sort_specification : sort_key collate_clause_opt ordering_specification_opt ;
+  sort_specification : sort_key collate_clause_opt ordering_specification_opt
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynSortSpecification);
+                                                  with $$.Obj as TSqlSynSortSpecification do
+                                                  begin
+                                                    StructuralType := sstSortSpecification;
+                                                    InsertTailChild($1.Obj);
+                                                    SortKey := $1.Obj;
+                                                    Assert(not Assigned($2.Obj));
+                                                    //No collations yet.
+                                                    OrderingSpecType :=
+                                                        TSqlSynOrderingSpecType($3.Obj);
+                                                  end; }
+        ;
 
-  sort_key : column_name | unsigned_integer ;
+  sort_key :
+                column_name                     { $$ := $1; }
+        |       unsigned_integer                { $$ := $1; }
+        ;
 
   ordering_specification_opt :
-        /* Empty */
-        |       _ASC
-        |       _DESC
+        /* Empty */                             { $$.Text := ''; $$.Obj := TSqlSynNode(ostNone); }
+        |       _ASC                            { $$.Text := ''; $$.Obj := TSqlSynNode(ostAscending); }
+        |       _DESC                           { $$.Text := ''; $$.Obj := TSqlSynNode(ostDescending); }
         ;
 
   updatability_clause_opt :
-        /* Empty */
-        |       _FOR _READ _ONLY
+        /* Empty */                             { $$.Text := ''; $$.Obj := nil; }
+        |       _FOR _READ _ONLY                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynUpdatability);
+                                                  with $$.Obj as TSqlSynUpdatability do
+                                                  begin
+                                                    StructuralType := sstUpdatability;
+                                                    ForUpdate := false;
+                                                  end; }
         |       _FOR _UPDATE updatability_column_opt
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynUpdatability);
+                                                  with $$.Obj as TSqlSynUpdatability do
+                                                  begin
+                                                    StructuralType := sstUpdatability;
+                                                    ForUpdate := true;
+                                                    if Assigned($3.Obj) then
+                                                    begin
+                                                      InsertTailChild($3.Obj);
+                                                      Columns := $3.Obj as TSqlSynList;
+                                                    end;
+                                                  end; }
         ;
 
   updatability_column_opt:
-        /* Empty */
-        |       _OF column_name_list
+        /* Empty */                             { $$.Text := ''; $$.Obj := nil; }
+        |       _OF column_name_list            { $$ := $2; }
         ;
 
 /*
@@ -3078,35 +4568,85 @@ The notation is written out longhand several times, instead;
 
   procedure :
 	_PROCEDURE procedure_name parameter_declaration_list
-        semicolon SQL_procedure_statement semicolon ;
+        semicolon SQL_procedure_statement semicolon
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynProcedure);
+                                                  with $$.Obj as TSqlSynProcedure do
+                                                  begin
+                                                    StructuralType := sstProcedure;
+                                                    InsertHeadChild($2.Obj);
+                                                    Name := $2.Obj as TSqlSynIdent;
+                                                    InsertTailChild($3.Obj);
+                                                    ParamDecls := $3.Obj as TSqlSynList;
+                                                    if Assigned($5.Obj) then //NIL if the statement is not supported.
+                                                    begin
+                                                      InsertTailChild($5.Obj);
+                                                      Statement := $5.Obj as TSQLSynStructural;
+                                                    end;
+                                                  end; }
+        ;
 
-  procedure_name : identifier ;
+  procedure_name : identifier                   { $$ := $1; }
+        ;
 
   parameter_declaration_list :
 		left_paren parameter_declarations right_paren
+                                                { $$ := $2; }
         ;
 
   parameter_declarations :
-                parameter_declaration
+                parameter_declaration           { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynList);
+                                                  with $$.Obj as TSqlSynList do
+                                                  begin
+                                                    InsertTailChild($1.Obj);
+                                                  end; }
         |       parameter_declarations comma parameter_declaration
+                                                { $$ := $1;
+                                                  with $$.Obj as TSqlSynList do
+                                                  begin
+                                                    InsertTailChild($3.Obj);
+                                                  end; }
         ;
 
   parameter_declaration :
                 parameter_name data_type
-        |       status_parameter
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynParameterDecl);
+                                                  with $$.Obj as TSqlSynParameterDecl do
+                                                  begin
+                                                    StructuralType := sstParameterDecl;
+                                                    InsertTailChild($1.Obj);
+                                                    Name := $1.Obj as TSqlSynIdent;
+                                                    InsertTailChild($2.Obj);
+                                                    DataType := $2.Obj as TSQLSynType;
+                                                  end; }
+        |       status_parameter                { $$ := $1; }
         ;
 
   status_parameter :
-                _SQLCODE
-        |       _SQLSTATE
+                _SQLCODE                        { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynStatusParamDecl);
+                                                  with $$.Obj as TSqlSynStatusParamDecl do
+                                                  begin
+                                                    StructuralType := sstStatusParamDecl;
+                                                    SqlCode := true;
+                                                  end; }
+        |       _SQLSTATE                       { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynStatusParamDecl);
+                                                  with $$.Obj as TSqlSynStatusParamDecl do
+                                                  begin
+                                                    StructuralType := sstStatusParamDecl;
+                                                    SqlState := true;
+                                                  end; }
         ;
 
   SQL_procedure_statement :
-		SQL_schema_statement
-	|	SQL_data_statement
-	|	SQL_transaction_statement
-	|	SQL_connection_statement
-	|	SQL_session_statement
+		SQL_schema_statement            { $$ := $1; }
+	|	SQL_data_statement              { $$ := $1; }
+	|	SQL_transaction_statement       { $$ := $1; }
+	|	SQL_connection_statement        { $$ := $1; }
+	|	SQL_session_statement           { $$ := $1; }
         ;
 
 /*
@@ -3116,59 +4656,145 @@ The notation is written out longhand several times, instead;
 */
 
   SQL_schema_statement :
-		SQL_schema_definition_statement
-	|	SQL_schema_manipulation_statement
+		SQL_schema_definition_statement         { $$ := $1; }
+	|	SQL_schema_manipulation_statement       { $$ := $1; }
         ;
 
+  /* TODO - Ask The AI about where nil's here might percolate to,
+     and in fact more generally cases where ignored code generate NIL's
+     in the tree. */
+
   SQL_schema_definition_statement :
-		schema_definition
-	|	table_definition
-	|	view_definition
-	|	grant_statement
-	|	domain_definition
-	|	character_set_definition
-	|	collation_definition
-	|	translation_definition
-	|	assertion_definition ;
+		schema_definition                       { $$ := $1; }
+	|	table_definition                        { $$ := $1; }
+	|	view_definition                         { $$ := $1; }
+	|	grant_statement                         { $$ := $1; }
+	|	domain_definition                       { $$ := $1; }
+	|	character_set_definition                { $$.Text := ''; $$.Obj := nil;
+                                                          yyinfo('Character set definition in schema definition ignored.'); }
+	|	collation_definition                    { $$.Text := ''; $$.Obj := nil;
+                                                          yyerror('Collation definitions not supported in schema definition'); }
+	|	translation_definition                  { $$.Text := ''; $$.Obj := nil;
+                                                          yyerror('Translation definitions not supported in schema definition'); }
+	|	assertion_definition                    { $$ := $1; }
+        ;
 
   schema_definition :
 		_CREATE _SCHEMA schema_name_clause
 			schema_character_set_specification_opt
-			schema_elements ;
-
-  schema_character_set_specification_opt :
-        /* Empty */
-        |       schema_character_set_specification
+			schema_elements
+                                                        { $$ := $3;
+                                                          with $$.Obj as TSqlSynSchema do
+                                                          begin
+                                                            InsertTailChild($5.Obj);
+                                                            Elements := $5.Obj as TSqlSynList;
+                                                          end; }
         ;
 
+  schema_character_set_specification_opt :
+        /* Empty */                                     { $$.Text := ''; $$.Obj := nil; }
+        |       schema_character_set_specification
+                                                        { $$.Text := ''; $$.Obj := nil;
+                                                          yyinfo('Character set specification ignored in schema definition.');
+                                                          $1.Obj.Free; }
+        ;
+
+  /* TODO - Handle NIL Schema elements. */
   schema_elements :
-                schema_element
-        |       schema_elements schema_element
+        /* Empty */                                     { $$.Text := '';
+                                                          $$.Obj := MakeClass(TSqlSynList); }
+        |       schema_elements schema_element          { $$ := $1;
+                                                          if Assigned($2.Obj) then //NIL if the element is ignored / not supported.
+                                                            with $$.Obj as TSqlSynList do
+                                                              InsertTailChild($2.Obj); }
         ;
 
   schema_name_clause :
 		schema_name
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynSchema);
+                                                  with $$.Obj as TSqlSynSchema do
+                                                  begin
+                                                    StructuralType := sstCreateorDecl;
+                                                    CreateOrDeclType := codSchema;
+                                                    InsertHeadChild($1.Obj);
+                                                    Name := $1.Obj as TSqlSynIdent;
+                                                  end; }
 	|	_AUTHORIZATION schema_authorization_identifier
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynSchema);
+                                                  with $$.Obj as TSqlSynSchema do
+                                                  begin
+                                                    StructuralType := sstCreateorDecl;
+                                                    CreateOrDeclType := codSchema;
+                                                    InsertTailChild($2.Obj);
+                                                    Authorization := $2.Obj as TSQLSynIdent;
+                                                  end; }
 	|	schema_name _AUTHORIZATION schema_authorization_identifier
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynSchema);
+                                                  with $$.Obj as TSqlSynSchema do
+                                                  begin
+                                                    StructuralType := sstCreateorDecl;
+                                                    CreateOrDeclType := codSchema;
+                                                    InsertHeadChild($1.Obj);
+                                                    Name := $1.Obj as TSqlSynIdent;
+                                                    InsertTailChild($3.Obj);
+                                                    Authorization := $3.Obj as TSQLSynIdent;
+                                                  end; }
         ;
 
-  schema_authorization_identifier : authorization_identifier ;
+  schema_authorization_identifier : authorization_identifier
+                                                { $$ := $1; }
+        ;
 
-  schema_character_set_specification : _DEFAULT _CHARACTER _SET character_set_specification ;
+  schema_character_set_specification : _DEFAULT _CHARACTER _SET character_set_specification
+                                                { $$ := $4; }
+        ;
 
+  /* TODO - Ask The AI about where nil's here might percolate to. */
   schema_element :
-		domain_definition
-	|	table_definition
-	|	view_definition
-	|	grant_statement
-	|	assertion_definition
-	|	character_set_definition
-	|	collation_definition
-	|	translation_definition ;
+		domain_definition                       { $$ := $1; }
+	|	table_definition                        { $$ := $1; }
+	|	view_definition                         { $$ := $1; }
+	|	grant_statement                         { $$ := $1; }
+	|	assertion_definition                    { $$ := $1; }
+	|	character_set_definition                { $$.Text := ''; $$.Obj := nil;
+                                                          yyinfo('Character set definition in schema ignored.'); }
+	|	collation_definition                    { $$.Text := ''; $$.Obj := nil;
+                                                          yyerror('Collation definitions not supported in schema'); }
+	|	translation_definition                  { $$.Text := ''; $$.Obj := nil;
+                                                          yyerror('Translation definitions not supported in schema'); }
+        ;
 
   domain_definition :
 		_CREATE _DOMAIN domain_name as_opt data_type
-			default_clause_opt domain_constraint_opt collate_clause_opt ;
+			default_clause_opt domain_constraint_opt collate_clause_opt
+                                                        { $$.Text := '';
+                                                          $$.Obj := MakeClass(TSqlSynDomain);
+                                                          with $$.Obj as TSqlSynDomain do
+                                                          begin
+                                                            StructuralType := sstCreateorDecl;
+                                                            CreateOrDeclType := codDomain;
+                                                            InsertTailChild($3.Obj);
+                                                            Name := $3.Obj as TSqlSynIdent;
+                                                            InsertTailChild($5.Obj);
+                                                            DataType := $5.Obj as TSQLSynType;
+                                                            if Assigned($6.Obj) then
+                                                            begin
+                                                              InsertTailChild($6.Obj);
+                                                              _Default := $6.Obj as TSQLSynLiteral;
+                                                            end;
+                                                            if Assigned($7.Obj) then
+                                                            begin
+                                                              InsertTailChild($7.obj);
+                                                              Constraint := $7.Obj as TSqlSynConstraint;
+                                                              //TODO - Do we support any of the contraints
+                                                              //you could impose on a domain at the moment?
+                                                            end;
+                                                            Assert(not Assigned($8.Obj));
+                                                          end; }
+        ;
 
   domain_constraint_opt :
         /* Empty */
@@ -3188,145 +4814,378 @@ The notation is written out longhand several times, instead;
 
   table_definition :
 		_CREATE table_definition_opts _TABLE
-                table_name table_element_list table_commit_opts ;
+                table_name
+                table_element_list
+                table_commit_opts
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynCreateOrDeclTable);
+                                                  with $$.Obj as TSqlSynCreateOrDeclTable do
+                                                  begin
+                                                    StructuralType := sstCreateOrDecl;
+                                                    CreateOrDeclType := codTable;
+                                                    TempOpts := TSqlSynCreateOrDeclTableOpts($2.Obj);
+                                                    InsertTailChild($4.Obj);
+                                                    Name := $4.Obj as TSqlSynIdent;
+                                                    InsertTailChild($5.Obj);
+                                                    ElementList := $5.Obj as TSqlSynList;
+                                                    RowCommitAction := TSqlSynRowCommitAction($6.Obj);
+                                                  end;}
+        ;
 
   table_definition_opts :
-        /* Empty */
-        |       _GLOBAL _TEMPORARY
-        |       _LOCAL _TEMPORARY
+        /* Empty */                             { $$.Text := ''; $$.Obj := TSqlSynNode(dtoNone); }
+        |       _GLOBAL _TEMPORARY              { $$.Text := ''; $$.Obj := TSqlSynNode(dtoGlobalTemporary); }
+        |       _LOCAL _TEMPORARY               { $$.Text := ''; $$.Obj := TSqlSynNode(dtoLocalTemporary); }
         ;
 
   table_commit_opts :
         /* Empty */
-        |       _ON _COMMIT _DELETE _ROWS
+                                                { $$.Text := '';
+                                                  $$.Obj := TSqlSynNode(rcaUnspecified); }
         |       _ON _COMMIT _PRESERVE _ROWS
+                                                { $$.Text := '';
+                                                  $$.Obj := TSqlSynNode(rcaCommitRows); }
+        |       _ON _COMMIT _DELETE _ROWS
+                                                { $$.Text := '';
+                                                  $$.Obj := TSqlSynNode(rcaDeleteRows); }
         ;
 
   view_definition :
 		_CREATE _VIEW table_name view_column_list_opt
-			_AS query_expression view_check_opt ;
+			_AS query_expression view_check_opt
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynView);
+                                                  with $$.Obj as TSqlSynView do
+                                                  begin
+                                                    StructuralType := sstCreateOrDecl;
+                                                    CreateOrDeclType := codView;
+                                                    InsertTailChild($3.Obj);
+                                                    Name := $3.Obj as TSqlSynIdent;
+                                                    if Assigned($4.Obj) then
+                                                    begin
+                                                      InsertTailChild($4.Obj);
+                                                      ColumnList := $4.Obj as TSqlSynList;
+                                                    end;
+                                                    InsertTailChild($6.Obj);
+                                                    QueryExpr := $6.Obj as TSqlSynExpr;
+                                                    ViewCheck := TSqlSynViewCheckOption($7.Obj);
+                                                  end; }
+        ;
 
   view_column_list_opt :
-        /* Empty */
+        /* Empty */                             { $$.Text := ''; $$.Obj := nil; }
         |       left_paren view_column_list right_paren
+                                                { $$ := $2; }
         ;
 
   view_check_opt :
-        /* Empty */
-        |       _WITH _CHECK _OPTION
-        |       _WITH _CASCADED _CHECK _OPTION
-        |       _WITH _LOCAL _CHECK _OPTION
+        /* Empty */                             { $$.Text := ''; $$.Obj := TSqlSynNode(vcoNone); }
+        |       _WITH _CHECK _OPTION            { $$.Text := ''; $$.Obj := TSqlSynNode(vcoCheck); }
+        |       _WITH _CASCADED _CHECK _OPTION  { $$.Text := ''; $$.Obj := TSqlSynNode(vcoCascadedCheck); }
+        |       _WITH _LOCAL _CHECK _OPTION     { $$.Text := ''; $$.Obj := TSqlSynNode(vcoLocalCheck); }
         ;
 
-  view_column_list : column_name_list ;
+  view_column_list : column_name_list
+                                                { $$ := $1; }
+        ;
 
   grant_statement :
-		_GRANT privileges _ON object_name _TO grantee_list grant_option ;
+		_GRANT privileges _ON object_name _TO grantee_list grant_option
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynGrantStatement);
+                                                  with $$.Obj as TSqlSynGrantStatement do
+                                                  begin
+                                                    StructuralType := sstMiscStatement;
+                                                    MiscStatementType := smstGrant;
+                                                    InsertTailChild($2.Obj);
+                                                    Privs := $2.Obj;
+                                                    InsertTailChild($4.Obj);
+                                                    ObjectName := $4.Obj as TSqlSynIdent;
+                                                    InsertTailChild($6.Obj);
+                                                    GranteeList := $6.Obj as TSqlSynList;
+                                                    GrantOption := Boolean($7.Obj);
+                                                  end; }
+        ;
 
   grantee_list :
-                grantee
+                grantee                         { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynList);
+                                                  with $$.Obj as TSqlSynList do
+                                                  begin
+                                                    InsertTailChild($1.Obj);
+                                                  end; }
         |       grantee_list comma grantee
+                                                { $$ := $1;
+                                                  with $$.Obj as TSqlSynList do
+                                                  begin
+                                                    InsertTailChild($3.Obj);
+                                                  end; }
         ;
 
   grant_option :
-        /* Empty */
-        |       _WITH _GRANT _OPTION
+        /* Empty */                             { $$.Text := ''; $$.Obj := TSqlSynNode(false); }
+        |       _WITH _GRANT _OPTION            { $$.Text := ''; $$.Obj := TSqlSynNode(true); }
         ;
 
-  privileges : _ALL _PRIVILEGES | action_list ;
+  privileges : _ALL _PRIVILEGES
+                                                { $$.Text := ''; $$.Obj := MakeClass(TSqlSynPriv);
+                                                  with $$.Obj as TSqlSynPriv do
+                                                  begin
+                                                    StructuralType := sstPrivilege;
+                                                    Priv := ssptAll;
+                                                  end; }
+        | action_list
+                                                { $$ := $1; }
+        ;
 
   action_list :
-                action
-        |       action_list  comma action
+                action                          { $$.Text := ''; $$.Obj := MakeClass(TSqlSynList);
+                                                  with $$.Obj as TSqlSynList do
+                                                  begin
+                                                    InsertTailChild($1.Obj);
+                                                  end; }
+        |       action_list  comma action       { $$ := $1;
+                                                  with $$.Obj as TSqlSynList do
+                                                  begin
+                                                    InsertTailChild($3.Obj);
+                                                  end; }
         ;
 
   action :
 		_SELECT
+                                                { $$.Text := ''; $$.Obj := MakeClass(TSqlSynPriv);
+                                                  with $$.Obj as TSqlSynPriv do
+                                                  begin
+                                                    StructuralType := sstPrivilege;
+                                                    Priv := ssptSelect;
+                                                  end; }
 	|	_DELETE
+                                                { $$.Text := ''; $$.Obj := MakeClass(TSqlSynPriv);
+                                                  with $$.Obj as TSqlSynPriv do
+                                                  begin
+                                                    StructuralType := sstPrivilege;
+                                                    Priv := ssptDelete;
+                                                  end; }
 	|	_INSERT privilege_column_list_opt
+                                                { $$.Text := ''; $$.Obj := MakeClass(TSqlSynPriv);
+                                                  with $$.Obj as TSqlSynPriv do
+                                                  begin
+                                                    StructuralType := sstPrivilege;
+                                                    Priv := ssptInsert;
+                                                    if Assigned($2.Obj) then
+                                                    begin
+                                                      InsertTailChild($2.Obj);
+                                                      ColumnList := $2.Obj as TSqlSynList;
+                                                    end;
+                                                  end; }
 	|	_UPDATE privilege_column_list_opt
+                                                { $$.Text := ''; $$.Obj := MakeClass(TSqlSynPriv);
+                                                  with $$.Obj as TSqlSynPriv do
+                                                  begin
+                                                    StructuralType := sstPrivilege;
+                                                    Priv := ssptUpdate;
+                                                    if Assigned($2.Obj) then
+                                                    begin
+                                                      InsertTailChild($2.Obj);
+                                                      ColumnList := $2.Obj as TSqlSynList;
+                                                    end;
+                                                  end; }
 	|	_REFERENCES privilege_column_list_opt
+                                                { $$.Text := ''; $$.Obj := MakeClass(TSqlSynPriv);
+                                                  with $$.Obj as TSqlSynPriv do
+                                                  begin
+                                                    StructuralType := sstPrivilege;
+                                                    Priv := ssptReferences;
+                                                    if Assigned($2.Obj) then
+                                                    begin
+                                                      InsertTailChild($2.Obj);
+                                                      ColumnList := $2.Obj as TSqlSynList;
+                                                    end;
+                                                  end; }
 	|	_USAGE
+                                                { $$.Text := ''; $$.Obj := MakeClass(TSqlSynPriv);
+                                                  with $$.Obj as TSqlSynPriv do
+                                                  begin
+                                                    StructuralType := sstPrivilege;
+                                                    Priv := ssptUsage;
+                                                  end; }
         ;
 
   privilege_column_list_opt :
-        /* Empty */
+        /* Empty */                             { $$.Text := ''; $$.Obj := nil; }
         |       left_paren privilege_column_list right_paren
+                                                { $$ := $2; }
         ;
 
-  privilege_column_list : column_name_list ;
+  privilege_column_list : column_name_list      { $$ := $1; }
+        ;
 
   object_name :
-		table_opt table_name
-	|	_DOMAIN domain_name
-	|	_COLLATION collation_name
-	|	_CHARACTER _SET character_set_name
-	|	_TRANSLATION translation_name ;
-
-  table_opt :
-        /* Empty */
-        |       _TABLE
+		table_opt table_name                    { $$ := $2; }
+	|	_DOMAIN domain_name                     { $$ := $2; }
+	|	_COLLATION collation_name               { $$ := $2; }
+	|	_CHARACTER _SET character_set_name      { $$ := $3; }
+	|	_TRANSLATION translation_name           { $$ := $2; }
         ;
 
-  grantee : _PUBLIC | authorization_identifier ;
+  table_opt :
+        /* Empty */                                     { $$.Text := ''; $$.Obj := nil; }
+        |       _TABLE                                  { $$.Text := ''; $$.Obj := nil; }
+        ;
+
+  grantee :
+        _PUBLIC
+                                                        { $$.Text := UTF8ToString(Lexer.yytext);
+                                                          $$.Obj := MakeClass(TSQLSynIdent);
+                                                          with $$.Obj as TSQLSynIdent do
+                                                            IdentName := $$.Text; }
+        | authorization_identifier
+                                                        { $$ := $1; }
+        ;
 
   assertion_definition :
 		_CREATE _ASSERTION constraint_name assertion_check constraint_attributes_opt
+                                                        { $$.Text := '';
+                                                          $$.Obj := MakeClass(TSqlSynAssertion);
+                                                          with $$.Obj as TSqlSynAssertion do
+                                                          begin
+                                                            StructuralType := sstCreateOrDecl;
+                                                            CreateorDeclType := codAssertion;
+                                                            InsertTailChild($3.Obj);
+                                                            Name := $3.Obj as TSqlSynIdent;
+                                                            InsertTailChild($4.Obj);
+                                                            SearchCondition := $4.Obj as TSqlSynExpr;
+                                                            if Assigned($5.Obj) then
+                                                            begin
+                                                              InsertTailChild($5.Obj);
+                                                              Attributes := $5.Obj as TSqlSynConstraintAttributes;
+                                                            end;
+                                                          end; }
+
         ;
 
   assertion_check : _CHECK left_paren search_condition right_paren
+                                                        { $$ := $3; }
         ;
 
   character_set_definition :
 		_CREATE _CHARACTER _SET character_set_name as_opt character_set_source
-		charset_collation_opt ;
-
-  charset_collation_opt :
-        /* Empty */
-        |       collate_clause
-        |       limited_collation_definition
+		charset_collation_opt
+                                                        { $$.Text := ''; $$.Obj := nil;
+                                                          yyinfo('Create character set ignored.');
+                                                          //Character set definitions ignored.
+                                                          $4.Obj.Free;
+                                                          $6.Obj.Free;
+                                                          $7.Obj.Free; }
         ;
 
-  character_set_source : _GET existing_character_set_name ;
+  charset_collation_opt :
+        /* Empty */                                     { $$.Text := ''; $$.Obj := nil; }
+        |       collate_clause
+                                                        { $$.Text := ''; $$.Obj := nil;
+                                                          $1.Obj.Free; }
+        |       limited_collation_definition
+                                                        { $$.Text := ''; $$.Obj := nil;
+                                                          $1.Obj.Free; }
+        ;
+
+  character_set_source : _GET existing_character_set_name
+                                                        { $$.Text := ''; $$.Obj := nil;
+                                                          $2.Obj.Free; }
+        ;
 
   existing_character_set_name :
                 character_set_name
+                                                        { $$ := $1; }
         ;
 
   limited_collation_definition :
-		_COLLATION _FROM collation_source ;
+		_COLLATION _FROM collation_source
+                                                        { $$ := $3;}
+        ;
 
-  collation_source : collating_sequence_definition | translation_collation ;
+  collation_source :
+                collating_sequence_definition           { $$ := $1; }
+        |       translation_collation                   { $$ := $1; }
+        ;
 
   collating_sequence_definition :
 		external_collation
+                                                        { $$ := $1; }
 	|	schema_collation_name
+                                                        { $$ := $1; }
 	|	_DESC left_paren collation_name right_paren
-	|	_DEFAULT ;
+                                                        { $$ := $3; }
+	|	_DEFAULT
+                                                        { $$.Text := ''; $$.Obj := nil;
+                                                          //TODO - Some marker here if/when collations supported.
+                                                        }
+        ;
 
   external_collation :
-	_EXTERNAL left_paren quote external_collation_name quote right_paren ;
+	_EXTERNAL left_paren external_collation_name right_paren
+                                                        { $$ := $3; }
+        ;
 
-  external_collation_name : collation_name ;
+  /* The BNF has <quote> <collation name> <quote>, but the lexer returns the
+     quoted name as one string token, so the name is checked in Pascal. */
+  external_collation_name :
+                string_literal_continuation
+                                                        { $$.Text := UnquoteStringToken(UTF8ToString(Lexer.yytext));
+                                                          if not IsQualifiedNameText($$.Text) then
+                                                            yyerror('Not a valid external collation name: ''' + $$.Text + '''');
+                                                          $$.Obj := MakeClass(TSQLSynIdent);
+                                                          with $$.Obj as TSQLSynIdent do
+                                                            IdentName := $$.Text; }
+        ;
 
-  schema_collation_name : collation_name ;
+  schema_collation_name : collation_name
+                                                        { $$ := $1; }
+        ;
 
-  translation_collation : _TRANSLATION translation_name translation_collation_opt ;
+  translation_collation : _TRANSLATION translation_name translation_collation_opt
+                                                        { $$.Text := ''; $$.Obj := nil;
+                                                          //Translation collations ignored.
+                                                          $2.Obj.Free;
+                                                          $3.Obj.Free; }
+        ;
 
   translation_collation_opt :
         /* Empty */
+                                                        { $$.Text := ''; $$.Obj := nil;
+                                                          //Translation collations ignored.
+                                                        }
         |       _THEN _COLLATION collation_name
+                                                        { $$.Text := ''; $$.Obj := nil;
+                                                          //Translation collations ignored.
+                                                          $3.Obj.Free; }
         ;
 
   collation_definition :
 		_CREATE _COLLATION collation_name _FOR character_set_specification
 			_FROM collation_source pad_attribute_opt
+                                                        { $$.Text := ''; $$.Obj := nil;
+                                                          //Collation definitions are an error.
+                                                          $3.Obj.Free;
+                                                          $5.Obj.Free;
+                                                          $7.Obj.Free;
+                                                          $8.Obj.Free; }
+
         ;
 
   pad_attribute_opt :
         /* Empty */
+                                                        { $$.Text := ''; $$.Obj := nil;
+                                                          //Collation definitions are an error.
+                                                        }
         |       _NO _PAD
+                                                        { $$.Text := ''; $$.Obj := nil;
+                                                          //Collation definitions are an error.
+                                                        }
         |       _PAD _SPACE
+                                                        { $$.Text := ''; $$.Obj := nil;
+                                                          //Collation definitions are an error.
+                                                        }
         ;
 
   translation_definition :
@@ -3334,158 +5193,417 @@ The notation is written out longhand several times, instead;
 			_FOR source_character_set_specification
 			_TO target_character_set_specification
 			_FROM translation_source
+                                                        { $$.Text := ''; $$.Obj := nil;
+                                                          //Translation definitions are an error.
+                                                          $3.Obj.Free;
+                                                          $5.Obj.Free;
+                                                          $7.Obj.Free;
+                                                          $9.Obj.Free;
+                                                        }
         ;
 
-  source_character_set_specification : character_set_specification ;
+  source_character_set_specification : character_set_specification
+                                                        { $$ := $1;}
+        ;
 
-  target_character_set_specification : character_set_specification ;
+  target_character_set_specification : character_set_specification
+                                                        { $$ := $1;}
+        ;
 
-  translation_source : translation_specification ;
+  translation_source : translation_specification
+                                                        { $$ := $1; }
+        ;
 
   translation_specification :
-		external_translation
+		external_translation                    { $$ := $1; }
 	|	_IDENTITY
-	|	schema_translation_name ;
+                                                        { $$.Text := ''; $$.Obj := nil;
+                                                          //Some marker here if translations supported.
+                                                        }
+	|	schema_translation_name
+                                                        { $$ := $1; }
+        ;
 
   external_translation :
-		_EXTERNAL left_paren quote external_translation_name quote right_paren ;
+		_EXTERNAL left_paren external_translation_name right_paren
+                                                        { $$ := $3; }
+        ;
 
+  /* As external_collation_name. */
   external_translation_name :
-		translation_name ;
+                string_literal_continuation
+                                                        { $$.Text := UnquoteStringToken(UTF8ToString(Lexer.yytext));
+                                                          if not IsQualifiedNameText($$.Text) then
+                                                            yyerror('Not a valid external translation name: ''' + $$.Text + '''');
+                                                          $$.Obj := MakeClass(TSQLSynIdent);
+                                                          with $$.Obj as TSQLSynIdent do
+                                                            IdentName := $$.Text; }
+        ;
 
-  schema_translation_name : translation_name ;
+  schema_translation_name : translation_name
+                                                        { $$ := $1; }
+        ;
 
   SQL_schema_manipulation_statement :
-		drop_schema_statement
-	|	alter_table_statement
-	|	drop_table_statement
-	|	drop_view_statement
-	|	revoke_statement
-	|	alter_domain_statement
-	|	drop_domain_statement
-	|	drop_character_set_statement
-	|	drop_collation_statement
-	|	drop_translation_statement
-	|	drop_assertion_statement
+		drop_schema_statement                   { $$ := $1; }
+	|	alter_table_statement                   { $$ := $1; }
+	|	drop_table_statement                    { $$ := $1; }
+	|	drop_view_statement                     { $$ := $1; }
+	|	revoke_statement                        { $$ := $1; }
+	|	alter_domain_statement                  { $$ := $1; }
+	|	drop_domain_statement                   { $$ := $1; }
+	|	drop_character_set_statement            { $$ := $1;
+                                                          yyinfo('Drop character set ignored.');}
+	|	drop_collation_statement                { $$.Text := ''; $$.Obj := nil;
+                                                          yyerror('Drop collation not supported in schema'); }
+	|	drop_translation_statement              { $$.Text := ''; $$.Obj := nil;
+                                                          yyerror('Drop translation not supported in schema'); }
+	|	drop_assertion_statement                { $$ := $1; }
         ;
 
   drop_schema_statement : _DROP _SCHEMA schema_name drop_behaviour
+                                                        { $$.Text := '';
+                                                          $$.Obj := MakeClass(TSqlSynDropEntity);
+                                                          with $$.Obj as TSqlSynDropEntity do
+                                                          begin
+                                                            StructuralType := sstDrop;
+                                                            DropType := codSchema;
+                                                            InsertTailChild($3.Obj);
+                                                            Name := $3.Obj as TSqlSynIdent;
+                                                            Propagation := TSqlSynDropPropagation($4.Obj);
+                                                          end; }
         ;
 
-  drop_behaviour : _CASCADE | _RESTRICT
+  drop_behaviour :
+                _CASCADE
+                                                        { $$.Text := ''; $$.Obj := TSqlSynNode(sdpCascade); }
+        |       _RESTRICT
+                                                        { $$.Text := ''; $$.Obj := TSqlSynNode(sdpRestrict); }
         ;
 
   alter_table_statement : _ALTER _TABLE table_name alter_table_action
+                                                        { $$.Text := '';
+                                                          if not Assigned($4.Obj) then
+                                                          begin
+                                                            //Action ignored (ADD of a check constraint): nothing to do.
+                                                            $$.Obj := nil;
+                                                            $3.Obj.Free;
+                                                          end
+                                                          else
+                                                          begin
+                                                            $$.Obj := MakeClass(TSqlSynAlterTable);
+                                                            with $$.Obj as TSqlSynAlterTable do
+                                                            begin
+                                                              StructuralType := sstAlter;
+                                                              AlterType := codTable;
+                                                              InsertTailChild($3.Obj);
+                                                              Name := $3.Obj as TSqlSynIdent;
+                                                              InsertTailChild($4.Obj);
+                                                              Action := $4.Obj as TSqlSynAlterTableAction;
+                                                            end;
+                                                          end; }
         ;
 
   alter_table_action :
-		add_column_definition
-	|	alter_column_definition
-	|	drop_column_definition
-	|	add_table_constraint_definition
-	|	drop_table_constraint_definition
+		add_column_definition                   { $$ := $1; }
+	|	alter_column_definition                 { $$ := $1; }
+	|	drop_column_definition                  { $$ := $1; }
+	|	add_table_constraint_definition         { $$ := $1; }
+	|	drop_table_constraint_definition        { $$ := $1; }
         ;
 
   column_opt :
-        /* Empty */
-        |       _COLUMN
+        /* Empty */                                     { $$.Text := ''; $$.Obj := nil; }
+        |       _COLUMN                                 { $$.Text := ''; $$.Obj := nil; }
         ;
 
   add_column_definition :
                 _ADD column_opt column_definition
+                                                        { $$.Text := '';
+                                                          $$.Obj := MakeClass(TSqlSynAlterColDef);
+                                                          with $$.Obj as TSqlSynAlterColDef do
+                                                          begin
+                                                            StructuralType := sstAlterTableAction;
+                                                            ActionType := atatAddCol;
+                                                            InsertTailChild($3.Obj);
+                                                            ColDef := $3.Obj as TSqlSynColDef;
+                                                            PropagateNameUp;
+                                                          end; }
         ;
 
   alter_column_definition :
                 _ALTER column_opt column_name alter_column_action
+                                                        { $$ := $4;
+                                                          with $$.Obj as TSqlSynAlterColDef do
+                                                          begin
+                                                            InsertHeadChild($3.Obj);
+                                                            ColName := $3.Obj as TSqlSynIdent;
+                                                          end; }
         ;
 
   alter_column_action :
                 set_column_default_clause
+                                                        { $$.Text := '';
+                                                          $$.Obj := MakeClass(TSqlSynAlterColDef);
+                                                          with $$.Obj as TSqlSynAlterColDef do
+                                                          begin
+                                                            StructuralType := sstAlterTableAction;
+                                                            ActionType := atatAlterColSetDefault;
+                                                            InsertTailChild($1.Obj);
+                                                            DefaultClause := $1.Obj as TSqlSynExpr;
+                                                          end; }
         |       drop_column_default_clause
+                                                        { $$.Text := '';
+                                                          $$.Obj := MakeClass(TSqlSynAlterColDef);
+                                                          with $$.Obj as TSqlSynAlterColDef do
+                                                          begin
+                                                            StructuralType := sstAlterTableAction;
+                                                            ActionType := atatAlterColDropDefault;
+                                                          end; }
         ;
 
   set_column_default_clause :
                 _SET default_clause
+                                                        { $$ := $2; }
         ;
 
   drop_column_default_clause :
                 _DROP _DEFAULT
+                                                        { $$.Text := ''; $$.Obj := nil; }
         ;
 
   drop_column_definition :
                 _DROP column_opt column_name drop_behaviour
+                                                        { $$.Text := '';
+                                                          $$.Obj := MakeClass(TSqlSynDropTableComponent);
+                                                          with $$.Obj as TSqlSynDropTableComponent do
+                                                          begin
+                                                            StructuralType := sstAlterTableAction;
+                                                            ActionType := atatDropCol;
+                                                            InsertHeadChild($3.Obj);
+                                                            Name := $3.Obj as TSqlSynIdent;
+                                                            Propagation := TSqlSynDropPropagation($4.Obj);
+                                                          end; }
         ;
 
   add_table_constraint_definition :
                 _ADD table_constraint_definition
+                                                        { $$.Text := '';
+                                                          if not Assigned($2.Obj) then
+                                                            $$.Obj := nil //Check constraint ignored.
+                                                          else
+                                                          begin
+                                                            $$.Obj := MakeClass(TSqlSynAddTableConstraint);
+                                                            with $$.Obj as TSqlSynAddTableConstraint do
+                                                            begin
+                                                              StructuralType := sstAlterTableAction;
+                                                              ActionType := atatAddCons;
+                                                              InsertTailChild($2.Obj);
+                                                              Constraint := $2.Obj as TSqlSynConstraint;
+                                                              PropagateNameUp;
+                                                            end;
+                                                          end; }
         ;
 
   drop_table_constraint_definition :
                 _DROP _CONSTRAINT constraint_name drop_behaviour
+                                                        { $$.Text := '';
+                                                          $$.Obj := MakeClass(TSqlSynDropTableComponent);
+                                                          with $$.Obj as TSqlSynDropTableComponent do
+                                                          begin
+                                                            StructuralType := sstAlterTableAction;
+                                                            ActionType := atatDropCons;
+                                                            InsertHeadChild($3.Obj);
+                                                            Name := $3.Obj as TSqlSynIdent;
+                                                            Propagation := TSqlSynDropPropagation($4.Obj);
+                                                          end; }
         ;
 
   drop_table_statement :
                 _DROP _TABLE table_name drop_behaviour
+                                                        { $$.Text := '';
+                                                          $$.Obj := MakeClass(TSqlSynDropEntity);
+                                                          with $$.Obj as TSqlSynDropEntity do
+                                                          begin
+                                                            StructuralType := sstDrop;
+                                                            DropType := codTable;
+                                                            InsertTailChild($3.Obj);
+                                                            Name := $3.Obj as TSqlSynIdent;
+                                                            Propagation := TSqlSynDropPropagation($4.Obj);
+                                                          end; }
         ;
 
   drop_view_statement :
                 _DROP _VIEW table_name drop_behaviour
+                                                        { $$.Text := '';
+                                                          $$.Obj := MakeClass(TSqlSynDropEntity);
+                                                          with $$.Obj as TSqlSynDropEntity do
+                                                          begin
+                                                            StructuralType := sstDrop;
+                                                            DropType := codView;
+                                                            InsertTailChild($3.Obj);
+                                                            Name := $3.Obj as TSqlSynIdent;
+                                                            Propagation := TSqlSynDropPropagation($4.Obj);
+                                                          end; }
         ;
 
   revoke_statement :
 		_REVOKE grant_option_for_opt privileges _ON object_name
 			_FROM grantee_list drop_behaviour
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynRevokeStatement);
+                                                  with $$.Obj as TSqlSynRevokeStatement do
+                                                  begin
+                                                    Structuraltype := sstMiscStatement;
+                                                    MiscStatementType := smstRevoke;
+                                                    GrantOption := Boolean($2.Obj);
+                                                    InsertTailChild($3.obj);
+                                                    Privs := $3.Obj;
+                                                    InsertTailChild($5.Obj);
+                                                    ObjectName := $5.Obj as TSqlSynIdent;
+                                                    InsertTailChild($7.Obj);
+                                                    GranteeList := $7.Obj as TSqlSynList;
+                                                    Propagation := TSqlSynDropPropagation($8.Obj);
+                                                  end; }
         ;
 
   grant_option_for_opt :
-        /* Empty */
-        |        _GRANT _OPTION _FOR
+        /* Empty */                                     { $$.Text := ''; $$.Obj := TSqlSynNode(false); }
+        |        _GRANT _OPTION _FOR                    { $$.Text := ''; $$.obj := TSqlSynNode(true); }
         ;
 
   alter_domain_statement : _ALTER _DOMAIN domain_name alter_domain_action
+                                                { $$.Text := '';
+                                                  if not Assigned($4.Obj) then
+                                                  begin
+                                                    //Action ignored (ADD of a check constraint): nothing to do.
+                                                    $$.Obj := nil;
+                                                    $3.Obj.Free;
+                                                  end
+                                                  else
+                                                  begin
+                                                    $$.Obj := MakeClass(TSqlSynAlterDomain);
+                                                    with $$.Obj as TSqlSynAlterDomain do
+                                                    begin
+                                                      StructuralType := sstAlter;
+                                                      AlterType := codDomain;
+                                                      InsertTailChild($3.Obj);
+                                                      Name := $3.Obj as TSqlSynIdent;
+                                                      InsertTailChild($4.Obj);
+                                                      Action := $4.Obj as TSqlSynAlterDomainAction;
+                                                    end;
+                                                  end; }
         ;
 
   alter_domain_action :
-		set_domain_default_clause
-	|	drop_domain_default_clause
-	|	add_domain_constraint_definition
-	|	drop_domain_constraint_definition
+		set_domain_default_clause               { $$ := $1; }
+	|	drop_domain_default_clause              { $$ := $1; }
+	|	add_domain_constraint_definition        { $$ := $1; }
+	|	drop_domain_constraint_definition       { $$ := $1; }
         ;
 
   set_domain_default_clause :
                 _SET default_clause
+                                                        { $$.Text := '';
+                                                          $$.Obj := MakeClass(TSqlSynSetDomainDefaultAction);
+                                                          with $$.Obj as TSqlSynSetDomainDefaultAction do
+                                                          begin
+                                                            StructuralType := sstAlterDomainAction;
+                                                            ActionType := adatAlterSetDefault;
+                                                            InsertTailChild($2.Obj);
+                                                            DefaultClause := $2.Obj as TSqlSynExpr;
+                                                          end; }
         ;
 
   drop_domain_default_clause :
                 _DROP _DEFAULT
+                                                        { $$.Text := '';
+                                                          $$.Obj := MakeClass(TSqlSynAlterDomainAction);
+                                                          with $$.Obj as TSqlSynAlterDomainAction do
+                                                          begin
+                                                            StructuralType := sstAlterDomainAction;
+                                                            ActionType := adatAlterDropDefault;
+                                                          end; }
         ;
 
   add_domain_constraint_definition :
                 _ADD domain_constraint
+                                                        { $$.Text := '';
+                                                          if not Assigned($2.Obj) then
+                                                            $$.Obj := nil //Check constraint ignored.
+                                                          else
+                                                          begin
+                                                            $$.Obj := MakeClass(TSqlSynAddDomainConstraintAction);
+                                                            with $$.Obj as TSqlSynAddDomainConstraintAction do
+                                                            begin
+                                                              StructuralType := sstAlterDomainAction;
+                                                              ActionType := adatAddCons;
+                                                              InsertTailChild($2.Obj);
+                                                              Constraint := $2.Obj as TSqlSynConstraint;
+                                                              PropagateNameUp;
+                                                            end;
+                                                          end; }
         ;
 
   drop_domain_constraint_definition :
                 _DROP _CONSTRAINT constraint_name
+                                                        { $$.Text := '';
+                                                          $$.Obj := MakeClass(TSqlSynDropDomainConstraint);
+                                                          with $$.Obj as TSqlSynDropDomainConstraint do
+                                                          begin
+                                                            StructuralType := sstAlterDomainAction;
+                                                            ActionType := adatDropCons;
+                                                            InsertTailChild($3.Obj);
+                                                            Name := $3.Obj as TSqlSynIdent;
+                                                          end; }
         ;
 
   drop_domain_statement :
                 _DROP _DOMAIN domain_name drop_behaviour
+                                                        { $$.Text := '';
+                                                          $$.Obj := MakeClass(TSqlSynDropEntity);
+                                                          with $$.Obj as TSqlSynDropEntity do
+                                                          begin
+                                                            StructuralType := sstDrop;
+                                                            DropType := codDomain;
+                                                            InsertTailChild($3.Obj);
+                                                            Name := $3.Obj as TSqlSynIdent;
+                                                            Propagation := TSqlSynDropPropagation($4.Obj);
+                                                          end; }
         ;
 
   drop_character_set_statement :
                 _DROP _CHARACTER _SET character_set_name
+                                                        { $$.Text := ''; $$.Obj := nil;
+                                                          //Character set definitions ignored.
+                                                          $4.Obj.Free; }
         ;
 
   drop_collation_statement :
                 _DROP _COLLATION collation_name
+                                                        { $$.Text := ''; $$.Obj := nil;
+                                                          //Collation drops are an error.
+                                                          $3.Obj.Free; }
         ;
 
   drop_translation_statement :
                 _DROP _TRANSLATION translation_name
+                                                        { $$.Text := ''; $$.Obj := nil;
+                                                          //Translation drops are an error.
+                                                          $3.Obj.Free; }
         ;
 
   drop_assertion_statement :
                 _DROP _ASSERTION constraint_name
+                                                        { $$.Text := '';
+                                                          $$.Obj := MakeClass(TSqlSynDropEntity);
+                                                          with $$.Obj as TSqlSynDropEntity do
+                                                          begin
+                                                            StructuralType := sstDrop;
+                                                            DropType := codAssertion;
+                                                            InsertTailChild($3.Obj);
+                                                            Name := $3.Obj as TSqlSynIdent;
+                                                          end; }
         ;
 
 /*
@@ -3495,171 +5613,527 @@ The notation is written out longhand several times, instead;
 */
 
   SQL_data_statement :
-		open_statement
-	|	fetch_statement
-	|	close_statement
-	|	select_statement__single_row
-	|	SQL_data_change_statement ;
+		open_statement                          { $$ := $1; }
+	|	fetch_statement                         { $$ := $1; }
+	|	close_statement                         { $$ := $1; }
+	|	select_statement__single_row            { $$ := $1; }
+	|	SQL_data_change_statement               { $$ := $1; }
+        ;
 
-  open_statement : _OPEN cursor_name ;
+  open_statement : _OPEN cursor_name
+                                                        { $$.Text := '';
+                                                          $$.Obj := MakeClass(TSqlSynDmlCursor);
+                                                          with $$.Obj as TSqlSynDmlCursor do
+                                                          begin
+                                                            StructuralType := sstDmlWithCursor;
+                                                            DmlCursorType := sdcOpen;
+                                                            InsertTailChild($2.Obj);
+                                                            CursorName := $2.obj as TSqlSynIdent;
+                                                          end; }
+        ;
 
   fetch_statement :
-		_FETCH fetch_orientation_opt cursor_name _INTO fetch_target_list ;
+		_FETCH fetch_orientation_opt cursor_name _INTO fetch_target_list
+                                                        { $$.Text := '';
+                                                          $$.Obj := MakeClass(TSqlSynDmlCursorFetch);
+                                                          with $$.Obj as TSqlSynDmlCursorFetch do
+                                                          begin
+                                                            StructuralType := sstDmlWithCursor;
+                                                            DmlCursorType := sdcFetch;
+                                                            InsertTailChild($3.Obj);
+                                                            CursorName := $3.Obj as TSqlSynIdent;
+                                                            if Assigned($2.Obj) then
+                                                            begin
+                                                              InsertHeadChild($2.Obj);
+                                                              Orientation := $2.Obj as TSqlSynFetchOrientation;
+                                                            end;
+                                                            InsertTailChild($5.Obj);
+                                                            FetchTarget := $5.Obj as TSqlSynList;
+                                                          end; }
+        ;
 
   fetch_orientation_opt :
-        /* Empty */
-        |       _FROM
-        |       fetch_orientation _FROM
+        /* Empty */                                     { $$.Text := ''; $$.Obj := nil; }
+        |       _FROM                                   { $$.Text := ''; $$.Obj := nil; }
+        |       fetch_orientation _FROM                 { $$ := $1; }
         ;
 
   fetch_orientation :
-		_NEXT
-	|	_PRIOR
-	|	_FIRST
-	|	_LAST
-	|	_ABSOLUTE simple_value_specification
-        |       _RELATIVE simple_value_specification
+		_NEXT                                   { $$.Text := '';
+                                                          $$.Obj := MakeClass(TSqlSynFetchOrientation);
+                                                          with $$.Obj as TSqlSynFetchOrientation do
+                                                          begin
+                                                            StructuralType := sstFetchOrientation;
+                                                            FetchOrientDir := sfdNext;
+                                                          end; }
+	|	_PRIOR                                  { $$.Text := '';
+                                                          $$.Obj := MakeClass(TSqlSynFetchOrientation);
+                                                          with $$.Obj as TSqlSynFetchOrientation do
+                                                          begin
+                                                            StructuralType := sstFetchOrientation;
+                                                            FetchOrientDir := sfdPrior;
+                                                          end; }
+	|	_FIRST                                  { $$.Text := '';
+                                                          $$.Obj := MakeClass(TSqlSynFetchOrientation);
+                                                          with $$.Obj as TSqlSynFetchOrientation do
+                                                          begin
+                                                            StructuralType := sstFetchOrientation;
+                                                            FetchOrientDir := sfdFirst;
+                                                          end; }
+	|	_LAST                                   { $$.Text := '';
+                                                          $$.Obj := MakeClass(TSqlSynFetchOrientation);
+                                                          with $$.Obj as TSqlSynFetchOrientation do
+                                                          begin
+                                                            StructuralType := sstFetchOrientation;
+                                                            FetchOrientDir := sfdLast;
+                                                          end; }
+	|	_ABSOLUTE simple_value_specification    { $$.Text := '';
+                                                          $$.Obj := MakeClass(TSqlSynFetchOrientation);
+                                                          with $$.Obj as TSqlSynFetchOrientation do
+                                                          begin
+                                                            StructuralType := sstFetchOrientation;
+                                                            FetchOrientDir := sfdAbsolute;
+                                                            InsertTailChild($2.Obj);
+                                                            ValSpec := $2.Obj;
+                                                          end; }
+        |       _RELATIVE simple_value_specification    { $$.Text := '';
+                                                          $$.Obj := MakeClass(TSqlSynFetchOrientation);
+                                                          with $$.Obj as TSqlSynFetchOrientation do
+                                                          begin
+                                                            StructuralType := sstFetchOrientation;
+                                                            FetchOrientDir := sfdRelative;
+                                                            InsertTailChild($2.Obj);
+                                                            ValSpec := $2.Obj;
+                                                          end; }
         ;
 
   simple_value_specification :
-                parameter_name
-        |       literal
+                parameter_name                          { $$ := $1; }
+        |       literal                                 { $$ := $1; }
         ;
 
   fetch_target_list :
-                target_specification
+                target_specification                    { $$.Text := '';
+                                                          $$.Obj := MakeClass(TSqlSynList);
+                                                          with $$.Obj as TSqlSynList do
+                                                          begin
+                                                            InsertTailChild($1.Obj);
+                                                          end; }
+
         |       fetch_target_list comma target_specification
+                                                        { $$ := $1;
+                                                          with $$.Obj as TSqlSynList do
+                                                          begin
+                                                            InsertTailChild($3.Obj);
+                                                          end; }
         ;
 
   target_specification :
-		parameter_specification
+		parameter_specification                 { $$ := $1; }
         ;
 
   close_statement :
-                _CLOSE cursor_name
+                _CLOSE cursor_name                      {  $$.Text := '';
+                                                           $$.Obj := MakeClass(TSqlSynDmlCursor);
+                                                          with $$.Obj as TSqlSynDmlCursor do
+                                                          begin
+                                                            StructuralType := sstDmlWithCursor;
+                                                            DmlCursorType := sdcClose;
+                                                            InsertTailChild($2.Obj);
+                                                            CursorName := $2.obj as TSqlSynIdent;
+                                                          end; }
         ;
 
   select_statement__single_row :
 	        _SELECT set_quantifier_opt select_list
                 _INTO select_target_list table_expression
+                                                {  $$.Text := '';
+                                                   $$.Obj := MakeClass(TSqlSynDmlSelectToTarget);
+                                                   with $$.Obj as TSqlSynDmlSelectToTarget do
+                                                   begin
+                                                     StructuralType := sstDmlNoCursor;
+                                                     DmlNoCursorType := sdnSelectTotarget;
+                                                     SelectExpr := $6.Obj as TSqlSynExpr;
+                                                     InsertTailChild($6.Obj);
+                                                     with SelectExpr as TSqlSynQuerySelect do
+                                                     begin
+                                                       InsertHeadChild($3.Obj);
+                                                       SelectList := $3.Obj as TSqlSynSelectList;
+                                                       Quantifier := TSqlSynSetFunctionQuantifier($2.Obj);
+                                                     end;
+                                                     InsertHeadChild($5.Obj);
+                                                     TargetList:= $5.Obj as TSqlSynList;
+                                                   end; }
         ;
 
   select_target_list :
-                target_specification
+                target_specification            { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynList);
+                                                  with $$.Obj as TSqlSynList do
+                                                  begin
+                                                    InsertTailChild($1.Obj);
+                                                  end; }
+
         |       select_target_list comma target_specification
+                                                { $$ := $1;
+                                                  with $$.Obj as TSqlSynList do
+                                                  begin
+                                                    InsertTailChild($3.Obj);
+                                                  end; }
         ;
 
   SQL_data_change_statement :
-		delete_statement__positioned
-	|	delete_statement__searched
-	|	insert_statement
-	|	update_statement__positioned
-	|	update_statement__searched ;
+		delete_statement__positioned    { $$ := $1; }
+	|	delete_statement__searched      { $$ := $1; }
+	|	insert_statement                { $$ := $1; }
+	|	update_statement__positioned    { $$ := $1; }
+	|	update_statement__searched      { $$ := $1; }
+        ;
 
   delete_statement__positioned :
-                _DELETE _FROM table_name
-                _WHERE _CURRENT _OF cursor_name
+                _DELETE _FROM table_name _WHERE _CURRENT _OF cursor_name
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynDmlDeletePositioned);
+                                                  with $$.Obj as TSqlSynDmlDeletePositioned do
+                                                  begin
+                                                    StructuralType := sstDmlWithCursor;
+                                                    DmlCursorType := sdcDeletePositioned;
+                                                    InsertTailChild($7.Obj);
+                                                    CursorName := $7.Obj as TSqlSynIdent;
+                                                    InsertTailChild($3.Obj);
+                                                    Table := $3.Obj as TSqlSynIdent;
+                                                  end; }
         ;
 
   delete_statement__searched :
-                _DELETE _FROM table_name where_clause_opt ;
+                _DELETE _FROM table_name where_clause_opt
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynDmlDeleteSearched);
+                                                  with $$.Obj as TSqlSynDmlDeleteSearched do
+                                                  begin
+                                                    StructuralType := sstDmlNoCursor;
+                                                    DmlNoCursorType := sdnDeleteSearched;
+                                                    InsertTailChild($3.Obj);
+                                                    Table := $3.obj as TSqlSynIdent;
+                                                    if Assigned($4.Obj) then
+                                                    begin
+                                                      InsertTailChild($4.Obj);
+                                                      Where := $4.Obj as TSqlSynExpr;
+                                                    end;
+                                                  end; }
+        ;
 
-  insert_statement : _INSERT _INTO table_name insert_columns_and_source ;
+  insert_statement : _INSERT _INTO table_name insert_columns_and_source
+                                                { $$ := $4;
+                                                  with $$.Obj as TSqlSynDmlInsert do
+                                                  begin
+                                                    InsertHeadChild($3.Obj);
+                                                    Table := $3.Obj as TSqlSynIdent;
+                                                  end; }
+        ;
 
   insert_columns_and_source :
                 left_paren insert_column_list right_paren query_expression
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynDmlInsert);
+                                                  with $$.Obj as TSqlSynDmlInsert do
+                                                  begin
+                                                    StructuralType := sstDmlNoCursor;
+                                                    DmlNoCursorType := sdnInsert;
+                                                    InsertTailChild($2.Obj);
+                                                    ColList := $2.Obj as TSqlSynList;
+                                                    InsertTailChild($4.Obj);
+                                                    Query := $4.Obj as TSqlSynExpr;
+                                                  end; }
         |       query_expression
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynDmlInsert);
+                                                  with $$.Obj as TSqlSynDmlInsert do
+                                                  begin
+                                                    StructuralType := sstDmlNoCursor;
+                                                    DmlNoCursorType := sdnInsert;
+                                                    InsertTailChild($1.Obj);
+                                                    Query := $1.Obj as TSqlSynExpr;
+                                                  end; }
         |       _DEFAULT _VALUES
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynDmlInsert);
+                                                  with $$.Obj as TSqlSynDmlInsert do
+                                                  begin
+                                                    StructuralType := sstDmlNoCursor;
+                                                    DmlNoCursorType := sdnInsert;
+                                                  end; }
         ;
 
-  insert_column_list : column_name_list ;
+  insert_column_list :
+                column_name_list                { $$ := $1; }
+        ;
 
   update_statement__positioned :
-		_UPDATE table_name _SET set_clause_list _WHERE _CURRENT _OF cursor_name ;
+		_UPDATE table_name _SET set_clause_list _WHERE _CURRENT _OF cursor_name
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynDmlCursorUpdate);
+                                                  with $$.Obj as TSqlSynDmlCursorUpdate do
+                                                  begin
+                                                    StructuralType := sstDmlWithCursor;
+                                                    DmlCursorType := sdcUpdatePositioned;
+                                                    InsertTailChild($2.Obj);
+                                                    Table := $2.Obj as TSqlSynIdent;
+                                                    InsertTailChild($4.Obj);
+                                                    SetClauseList := $4.Obj as TSqlSynList;
+                                                    InsertTailChild($8.Obj);
+                                                    CursorName := $8.Obj as TSqlSynIdent;
+                                                  end; }
+        ;
 
   set_clause_list :
-                set_clause
+                set_clause                      { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynList);
+                                                  with $$.Obj as TSqlSynList do
+                                                  begin
+                                                    InsertTailChild($1.Obj);
+                                                  end; }
         |       set_clause_list comma set_clause
+                                                { $$ := $1;
+                                                  with $$.Obj as TSqlSynList do
+                                                  begin
+                                                    InsertTailChild($3.Obj);
+                                                  end; }
         ;
 
   set_clause :
                 object_column equals_operator update_source
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynDmlSetClause);
+                                                  with $$.Obj as TSqlSynDmlSetClause do
+                                                  begin
+                                                    StructuralType := sstSetClause;
+                                                    InsertTailChild($1.Obj);
+                                                    ColName := $1.Obj as TSqlSynIdent;
+                                                    InsertTailChild($3.Obj);
+                                                    UpdateSource := $3.Obj as TSqlSynExpr;
+                                                  end; }
         ;
 
-  object_column : column_name ;
+  object_column : column_name                   { $$ := $1; }
+        ;
 
   update_source :
-                expression
+                expression                      { $$ := $1; }
                 /* Expression includes NULL and DEFAULT specifications */
         ;
 
   update_statement__searched :
 		_UPDATE table_name _SET set_clause_list where_clause_opt
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSymDmlUpdateSearched);
+                                                  with $$.Obj as TSqlSymDmlUpdateSearched do
+                                                  begin
+                                                    StructuralType := sstDmlNoCursor;
+                                                    DmlNoCursorType := sdnUpdateSearched;
+                                                    InsertTailChild($2.Obj);
+                                                    Table := $2.Obj as TSqlSynIdent;
+                                                    InsertTailChild($4.Obj);
+                                                    SetClauseList := $4.Obj as TSqlSynList;
+                                                    if Assigned($5.Obj) then
+                                                    begin
+                                                      InsertTailChild($5.Obj);
+                                                      WhereClause := $5.Obj as TSqlSynExpr;
+                                                    end;
+                                                  end;  }
         ;
 
   SQL_transaction_statement :
-		set_transaction_statement
-	|	set_constraints_mode_statement
-	|	commit_statement
-	|	rollback_statement
+		set_transaction_statement       { $$ := $1; }
+	|	set_constraints_mode_statement  { $$ := $1; }
+	|	commit_statement                { $$ := $1; }
+	|	rollback_statement              { $$ := $1; }
         ;
 
   set_transaction_statement :
-		_SET _TRANSACTION transaction_mode_list ;
+		_SET _TRANSACTION transaction_mode_list
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynSetTransactionStatement);
+                                                  with $$.Obj as TSqlSynSetTransactionStatement do
+                                                  begin
+                                                    StructuralType := sstMiscStatement;
+                                                    MiscStatementType := smstSetTransaction;
+                                                    InsertTailChild($3.Obj);
+                                                    ModeList := $3.Obj as TSqlSynList;
+                                                  end; }
+
+        ;
 
   transaction_mode_list :
-                transaction_mode
+                transaction_mode                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynList);
+                                                  with $$.Obj as TSqlSynList do
+                                                  begin
+                                                     InsertTailChild($1.Obj);
+                                                  end; }
         |       transaction_mode_list comma transaction_mode
+                                                { $$ := $1;
+                                                  with $$.Obj as TSqlSynList do
+                                                  begin
+                                                    InsertTailChild($3.Obj);
+                                                  end; }
         ;
 
   transaction_mode :
-		isolation_level
-	|	transaction_access_mode
-	|	diagnostics_size
+		isolation_level                 { $$ := $1; }
+	|	transaction_access_mode         { $$ := $1; }
+	|	diagnostics_size                { $$ := $1; }
         ;
 
-  isolation_level : _ISOLATION _LEVEL level_of_isolation ;
+  isolation_level : _ISOLATION _LEVEL level_of_isolation
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TTransactionMode);
+                                                  with $$.Obj as TTransactionMode do
+                                                  begin
+                                                    StructuralType := sstTransactionMode;
+                                                    ModeType := tmtIsolation;
+                                                    IsoVal := TTransactionIsoVal($3.Obj);
+                                                  end; }
+        ;
 
   level_of_isolation :
-		_READ _UNCOMMITTED
-	|	_READ _COMMITTED
-	|	_REPEATABLE _READ
-	|	_SERIALIZABLE
-        |       _SNAPSHOT
+		_READ _UNCOMMITTED              { $$.Text := ''; $$.Obj := TSqlSynNode(tivReadUncommited); }
+	|	_READ _COMMITTED                { $$.Text := ''; $$.Obj := TSqlSynNode(tivReadComitted); }
+	|	_REPEATABLE _READ               { $$.Text := ''; $$.Obj := TSqlSynNode(tivReadRepeatable); }
+	|	_SERIALIZABLE                   { $$.Text := ''; $$.Obj := TSqlSynNode(tivSerializable); }
+        |       _SNAPSHOT                       { $$.Text := ''; $$.Obj := TSqlSynNode(tivSnapshot); }
         ;
 
   transaction_access_mode :
                 _READ _ONLY
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TTransactionMode);
+                                                  with $$.Obj as TTransactionMode do
+                                                  begin
+                                                    StructuralType := sstTransactionMode;
+                                                    ModeType := tmtAccessType;
+                                                    RWVal := trwReadOnly;
+                                                  end; }
         |       _READ _WRITE
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TTransactionMode);
+                                                  with $$.Obj as TTransactionMode do
+                                                  begin
+                                                    StructuralType := sstTransactionMode;
+                                                    ModeType := tmtAccessType;
+                                                    RWVal := trwReadWrite;
+                                                  end; }
         ;
 
-  diagnostics_size : _DIAGNOSTICS _SIZE number_of_conditions ;
+  diagnostics_size : _DIAGNOSTICS _SIZE number_of_conditions
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TTransactionMode);
+                                                  with $$.Obj as TTransactionMode do
+                                                  begin
+                                                    StructuralType := sstTransactionMode;
+                                                    ModeType := tmtDiagnosticSize;
+                                                    InsertTailChild($3.Obj);
+                                                    DiagSize := $3.Obj;
+                                                  end; }
+        ;
 
-  number_of_conditions : simple_value_specification ;
+  number_of_conditions :
+                simple_value_specification      { $$ := $1; }
+        ;
 
   set_constraints_mode_statement :
                 _SET _CONSTRAINTS constraint_name_list _DEFERRED
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynSetConstraintsModeStatement);
+                                                  with $$.Obj as TSqlSynSetConstraintsModeStatement do
+                                                  begin
+                                                    StructuralType := sstMiscStatement;
+                                                    MiscStatementType := smstSetConstraintsMode;
+                                                    Immediate := false;
+                                                    if Assigned($3.Obj) then
+                                                    begin
+                                                      InsertTailChild($3.Obj);
+                                                      ConstraintNameList := $3.Obj as TSqlSynList;
+                                                    end;
+                                                  end; }
+
          |      _SET _CONSTRAINTS constraint_name_list _IMMEDIATE
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynSetConstraintsModeStatement);
+                                                  with $$.Obj as TSqlSynSetConstraintsModeStatement do
+                                                  begin
+                                                    StructuralType := sstMiscStatement;
+                                                    MiscStatementType := smstSetConstraintsMode;
+                                                    Immediate := true;
+                                                    if Assigned($3.Obj) then
+                                                    begin
+                                                      InsertTailChild($3.Obj);
+                                                      ConstraintNameList := $3.Obj as TSqlSynList;
+                                                    end;
+                                                  end; }
          ;
 
   constraint_name_list :
-                _ALL
+                _ALL                            { $$.Text := ''; $$.Obj := nil; }
         |       constraint_name_list_some
+                                                { $$ := $1; }
         ;
 
   constraint_name_list_some:
                 constraint_name
+                                                { $$.Text := ''; $$.Obj := MakeClass(TSqlSynList);
+                                                  with $$.Obj as TSqlSynList do
+                                                  begin
+                                                    InsertTailChild($1.Obj);
+                                                  end; }
         |       constraint_name_list_some comma constraint_name
+                                                { $$ := $1;
+                                                  with $$.Obj as TSqlSynList do
+                                                  begin
+                                                    InsertTailChild($3.Obj);
+                                                  end; }
         ;
 
   commit_statement :
                 _COMMIT
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynCommitRollbackStatement);
+                                                  with $$.Obj as TSqlSynCommitRollbackStatement do
+                                                  begin
+                                                    StructuralType := sstMiscStatement;
+                                                    MiscStatementType := smstCommit;
+                                                    Commit := true;
+                                                  end; }
         |       _COMMIT _WORK
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynCommitRollbackStatement);
+                                                  with $$.Obj as TSqlSynCommitRollbackStatement do
+                                                  begin
+                                                    StructuralType := sstMiscStatement;
+                                                    MiscStatementType := smstCommit;
+                                                    Commit := true;
+                                                  end; }
         ;
 
   rollback_statement :
                 _ROLLBACK
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynCommitRollbackStatement);
+                                                  with $$.Obj as TSqlSynCommitRollbackStatement do
+                                                  begin
+                                                    StructuralType := sstMiscStatement;
+                                                    MiscStatementType := smstRollback;
+                                                    Commit := false;
+                                                  end; }
         |       _ROLLBACK _WORK
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynCommitRollbackStatement);
+                                                  with $$.Obj as TSqlSynCommitRollbackStatement do
+                                                  begin
+                                                    StructuralType := sstMiscStatement;
+                                                    MiscStatementType := smstRollback;
+                                                    Commit := false;
+                                                  end; }
         ;
 
 /*
@@ -3669,39 +6143,109 @@ The notation is written out longhand several times, instead;
 */
 
   SQL_connection_statement :
-		connect_statement
-	|	set_connection_statement
-	|	disconnect_statement ;
+		connect_statement               { $$ := $1; }
+	|	set_connection_statement        { $$ := $1; }
+	|	disconnect_statement            { $$ := $1; }
+        ;
 
-  connect_statement : _CONNECT _TO connection_target ;
+  connect_statement : _CONNECT _TO connection_target
+                                                { $$ := $3; }
+        ;
 
   connection_target :
 		SQL_server_name connection_name_opt user_name_opt
-	|	_DEFAULT ;
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynConnectStatement);
+                                                  with $$.Obj as TSqlSynConnectStatement do
+                                                  begin
+                                                    StructuralType := sstMiscStatement;
+                                                    MiscStatementType := smstConnect;
+                                                    InsertTailChild($1.Obj);
+                                                    ServerName := $1.Obj;
+                                                    if Assigned($2.Obj) then
+                                                    begin
+                                                      InsertTailChild($2.Obj);
+                                                      ConnectionName := $2.Obj;
+                                                    end;
+                                                    if Assigned($3.Obj) then
+                                                    begin
+                                                      InsertTailChild($3.Obj);
+                                                      UserName := $3.Obj;
+                                                    end;
+                                                  end; }
+	|	_DEFAULT
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynConnectStatement);
+                                                  with $$.Obj as TSqlSynConnectStatement do
+                                                  begin
+                                                    StructuralType := sstMiscStatement;
+                                                    MiscStatementType := smstConnect;
+                                                  end; }
+        ;
 
   connection_name_opt :
-        /* Empty */
-        |       _AS connection_name
+        /* Empty */                             { $$.Text := ''; $$.Obj := nil }
+        |       _AS connection_name             { $$ := $2; }
         ;
 
   user_name_opt :
-        /* Empty */
-        |       _USER user_name
+        /* Empty */                             { $$.Text := ''; $$.Obj := nil }
+        |       _USER user_name                 { $$ := $2; }
         ;
 
-  SQL_server_name : simple_value_specification ;
+  SQL_server_name : simple_value_specification  { $$ := $1; }
+        ;
 
-  connection_name : simple_value_specification ;
+  connection_name : simple_value_specification  { $$ := $1; }
+        ;
 
-  user_name : simple_value_specification ;
+  user_name : simple_value_specification        { $$ := $1; }
+        ;
 
-  set_connection_statement : _SET _CONNECTION connection_object ;
+  set_connection_statement : _SET _CONNECTION connection_object
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynConnectStatement);
+                                                  with $$.Obj as TSqlSynConnectStatement do
+                                                  begin
+                                                    StructuralType := sstMiscStatement;
+                                                    MiscStatementType := smstSetConnection;
+                                                    if Assigned($3.Obj) then
+                                                    begin
+                                                      InsertTailChild($3.Obj);
+                                                      ConnectionName := $3.Obj;
+                                                    end;
+                                                  end; }
+        ;
 
-  connection_object : _DEFAULT | connection_name ;
+  connection_object :
+          _DEFAULT                              { $$.Text := ''; $$.Obj := nil }
+        | connection_name                       { $$ := $1; }
+        ;
 
-  disconnect_statement : _DISCONNECT disconnect_object ;
+  disconnect_statement : _DISCONNECT disconnect_object
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynDisconnectStatement);
+                                                  with $$.Obj as TSqlSynDisconnectStatement do
+                                                  begin
+                                                    StructuralType := sstMiscStatement;
+                                                    MiscStatementType := smstDisconnect;
+                                                    if $2.Obj = TSqlSynNode(ssdAll) then
+                                                      Conns := TSqlSynDisconnectContext($2.Obj)
+                                                    else if $2.Obj = TSqlSynNode(ssdCurrent) then
+                                                      Conns := TSqlSynDisconnectContext($2.Obj)
+                                                    else if Assigned($2.Obj) then
+                                                    begin
+                                                      Conns := ssdSpecified;
+                                                      InsertTailChild($2.Obj);
+                                                      ConnectionName := $2.Obj;
+                                                    end;
+                                                  end; }
+        ;
 
-  disconnect_object : connection_object | _ALL | _CURRENT ;
+  disconnect_object :
+          connection_object                     { $$ := $1; }
+        | _ALL                                  { $$.Text := ''; $$.Obj := TSqlSynNode(ssdAll); }
+        | _CURRENT                              { $$.Text := ''; $$.Obj := TSqlSynNode(ssdCurrent); }
 
 /*
 --hr
@@ -3710,25 +6254,79 @@ The notation is written out longhand several times, instead;
 */
 
   SQL_session_statement :
-		set_catalog_statement
-	|	set_schema_statement
-	|	set_names_statement
-	|	set_session_authorization_identifier_statement
-	|	set_local_time_zone_statement ;
+		set_catalog_statement           { $$ := $1; }
+	|	set_schema_statement            { $$ := $1; }
+	|	set_names_statement             { $$ := $1; }
+	|	set_session_authorization_identifier_statement  { $$ := $1; }
+	|	set_local_time_zone_statement   { $$ := $1; }
+        ;
 
-  set_catalog_statement : _SET _CATALOG value_specification ;
+  set_catalog_statement : _SET _CATALOG value_specification
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynSessionSetStatement);
+                                                  with $$.Obj as TSqlSynSessionSetStatement do
+                                                  begin
+                                                    StructuralType := sstMiscStatement;
+                                                    MiscStatementType := smstSessionSet;
+                                                    SessionSetType := ssstCatalog;
+                                                    InsertTailChild($3.Obj);
+                                                    ValueSpec := $3.Obj as TSQLSynExpr;
+                                                  end; }
+        ;
 
-  value_specification : literal | general_value_specification ;
+  value_specification :
+                literal                         { $$ := $1; }
+        |       general_value_specification     { $$ := $1; }
+        ;
 
-  set_schema_statement : _SET _SCHEMA value_specification ;
+  set_schema_statement : _SET _SCHEMA value_specification
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynSessionSetStatement);
+                                                  with $$.Obj as TSqlSynSessionSetStatement do
+                                                  begin
+                                                    StructuralType := sstMiscStatement;
+                                                    MiscStatementType := smstSessionSet;
+                                                    SessionSetType := ssstSchema;
+                                                    InsertTailChild($3.Obj);
+                                                    ValueSpec := $3.Obj as TSQLSynExpr;
+                                                  end; }
+        ;
 
-  set_names_statement : _SET _NAMES value_specification ;
+  set_names_statement : _SET _NAMES value_specification
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynSessionSetStatement);
+                                                  with $$.Obj as TSqlSynSessionSetStatement do
+                                                  begin
+                                                    StructuralType := sstMiscStatement;
+                                                    MiscStatementType := smstSessionSet;
+                                                    SessionSetType := ssstNames;
+                                                    InsertTailChild($3.Obj);
+                                                    ValueSpec := $3.Obj as TSQLSynExpr;
+                                                  end; }
+        ;
 
-  set_session_authorization_identifier_statement : _SET _SESSION _AUTHORIZATION value_specification ;
+  set_session_authorization_identifier_statement : _SET _SESSION _AUTHORIZATION value_specification
+                                                { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynSessionSetStatement);
+                                                  with $$.Obj as TSqlSynSessionSetStatement do
+                                                  begin
+                                                    StructuralType := sstMiscStatement;
+                                                    MiscStatementType := smstSessionSet;
+                                                    SessionSetType := ssstAuth;
+                                                    InsertTailChild($4.Obj);
+                                                    ValueSpec := $4.Obj as TSQLSynExpr;
+                                                  end; }
+        ;
 
-  set_local_time_zone_statement : _SET _TIME _ZONE set_time_zone_value ;
+  set_local_time_zone_statement : _SET _TIME _ZONE set_time_zone_value
+                                                { $$.Text := ''; $$.Obj := nil;
+                                                  yyerror('Time zones not supported.'); }
+        ;
 
-  set_time_zone_value : expression /* Check interval */; | _LOCAL ;
+  set_time_zone_value :
+          expression                            { $$.Text := ''; $$.Obj := nil; $1.Obj.Free; }
+        | _LOCAL                                { $$.Text := ''; $$.Obj := nil; }
+        ;
 
 /*
 --hr
@@ -3747,24 +6345,44 @@ Note that <colon> is written as a literal colon in the ANSI grammar;
 */
 
   direct_SQL_statement :
-		direct_SQL_data_statement
-	|	SQL_schema_statement
-	|	SQL_transaction_statement
-	|	SQL_connection_statement
-	|	SQL_session_statement
-	|	direct_implementation_defined_statement ;
+		direct_SQL_data_statement               { $$ := $1; }
+	|	SQL_schema_statement                    { $$ := $1; }
+	|	SQL_transaction_statement               { $$ := $1; }
+	|	SQL_connection_statement                { $$ := $1; }
+	|	SQL_session_statement                   { $$ := $1; }
+	|	direct_implementation_defined_statement { $$ := $1; }
+        ;
 
   direct_SQL_data_statement :
-		delete_statement__searched
-	|	direct_select_statement__multiple_rows
-	|	insert_statement
-	|	update_statement__searched
-	|	temporary_table_declaration ;
+		delete_statement__searched              { $$ := $1; }
+	|	direct_select_statement__multiple_rows  { $$ := $1; }
+	|	insert_statement                        { $$ := $1; }
+	|	update_statement__searched              { $$ := $1; }
+	|	temporary_table_declaration             { $$ := $1; }
+        ;
 
-  direct_select_statement__multiple_rows : query_expression order_by_clause_opt ;
+  direct_select_statement__multiple_rows : query_expression order_by_clause_opt
+                                                        { $$.Text := '';
+                                                          $$.Obj := MakeClass(TSqlSynDirectQueryWrapper);
+                                                          with $$.Obj as TSqlSynDirectQueryWrapper do
+                                                          begin
+                                                            
+                                                            ExprType := setDirectQueryWrapper;
+                                                            InsertTailChild($1.Obj);
+                                                            Query := $1.Obj as TSqlSynExpr;
+                                                            if Assigned($2.Obj) then
+                                                            begin
+                                                              InsertTailChild($2.Obj);
+                                                              OrderBy := $2.Obj as TSqlSynList;
+                                                            end;
+                                                          end; }
+        ;
 
-  direct_implementation_defined_statement : identifier ;
-                                          /* TODO - SynError; */
+  direct_implementation_defined_statement : identifier
+                                                        { $$.Text := ''; $$.Obj := nil;
+                                                          yyerror('Unrecognised statement.');
+                                                          $1.Obj.Free; }
+        ;
 
 /*
 --hr
@@ -3776,22 +6394,45 @@ Note that <colon> is written as a literal colon in the ANSI grammar;
 */
 
 sql_statement :
-      direct_SQL_statement
+      direct_SQL_statement semicolon            { $$ := $1; }
     ;
 
 sql_script :
-                sql_statement
-    |           sql_script sql_statement
-    ;
+                sql_statement                   { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynList);
+                                                  if Assigned($1.Obj) then //NIL if the statement is not supported.
+                                                    $$.Obj.InsertTailChild($1.Obj); }
+    |           sql_script sql_statement        { $$ := $1;
+                                                  if Assigned($2.Obj) then //NIL if the statement is not supported.
+                                                    $$.Obj.InsertTailChild($2.Obj); }
+    ;
 
 sql_input :
-      sql_script
-    | module
+      sql_script                                { $$ := $1; }
+    | sql_script direct_SQL_statement           { //Final statement, semicolon omitted.
+                                                  $$ := $1;
+                                                  if Assigned($2.Obj) then //NIL if the statement is not supported.
+                                                    $$.Obj.InsertTailChild($2.Obj); }
+    | direct_SQL_statement                      { //Single statement, semicolon omitted.
+                                                  $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynList);
+                                                  if Assigned($1.Obj) then //NIL if the statement is not supported.
+                                                    $$.Obj.InsertTailChild($1.Obj); }
+    | module                                    { $$ := $1; }
     ;
 
 SQL92Grammar :
 
-  sql_input ;
+  sql_input                                     { $$.Text := '';
+                                                  $$.Obj := MakeClass(TSqlSynTopLevel);
+                                                  with $$.Obj as TSqlSynTopLevel do
+                                                  begin
+                                                    StructuralType := sstTopLevel;
+                                                    InsertTailChild($1.Obj);
+                                                  end;
+                                                  //TODO - connect top level parse to rest of program.
+                                                }
+  ;
 
 %%
 
@@ -3842,33 +6483,278 @@ begin
   //TODO - State and action as debug?
 end;
 
-function SQL92GrammarParser.CheckContinuation(S: string; T: TSQLSynLiteralType): boolean;
+function SQL92GrammarParser.WrapJoinAsQuery(Join: TSqlSynNode): TSqlSynNode;
 begin
-  Assert(false);
-  //TODO - Write this.
-  result := false;
+  { Build SELECT * FROM <Join>, for a joined table used as a query
+    (joined_table_as_query, and a bracketed join with a correlation name). }
+  result := MakeClass(TSqlSynQuerySelect);
+  with result as TSqlSynQuerySelect do
+  begin
+    ExprType := setQuerySelect;
+    Quantifier := ssqNone;
+    SelectList := MakeClass(TSqlSynSelectList) as TSqlSynSelectList;
+    SelectList.StructuralType := sstSelectList;
+    SelectList.Wildcard := true;
+    InsertTailChild(SelectList);
+    From := MakeClass(TSqlSynList) as TSqlSynList; //Same shape as from_clause_list.
+    From.InsertTailChild(Join);
+    InsertTailChild(From);
+  end;
+end;
+
+{ String literal pieces.
+
+  S is always one quoted piece, '...', exactly as the lexer matched it:
+  a plain string, a national string with its N removed, or a continuation
+  of a bit / hex string. The lexer has already checked the quoting (an
+  embedded quote is always doubled). The text is UTF-8, converted to a
+  native string by the caller, so national strings need nothing special. }
+
+function SQL92GrammarParser.CheckContinuation(S: string; T: TSQLSynLiteralType): boolean;
+var
+  i: integer;
+begin
+  result := (Length(S) >= 2) and (S[1] = '''') and (S[Length(S)] = '''');
+  if not result then
+    exit;
+  case T of
+    sltString, sltNatString:
+    begin
+      { Any characters, but every quote inside must be doubled. }
+      i := 2;
+      while i < Length(S) do
+      begin
+        if S[i] = '''' then
+        begin
+          if (i + 1 >= Length(S)) or (S[i + 1] <> '''') then
+            exit(false);
+          Inc(i, 2);
+        end
+        else
+          Inc(i);
+      end;
+    end;
+    sltBitString:
+      for i := 2 to Length(S) - 1 do
+        if not CharInSet(S[i], ['0', '1']) then
+          exit(false);
+    sltHexString:
+      for i := 2 to Length(S) - 1 do
+        if not CharInSet(S[i], ['0'..'9', 'A'..'F', 'a'..'f']) then
+          exit(false);
+  else
+    result := false;
+  end;
 end;
 
 function SQL92GrammarParser.HandleContinuation(S: string; T: TSQLSynLiteralType): string;
 begin
-  Assert(false);
-  //TODO - Write this.
-  result := '';
+  { Strip the outer quotes and undouble embedded quotes. Call after
+    CheckContinuation; bit and hex pieces have no quotes inside. }
+  Assert(CheckContinuation(S, T));
+  result := StringReplace(Copy(S, 2, Length(S) - 2), '''''', '''', [rfReplaceAll]);
 end;
 
+{ Delimited identifiers.
+
+  S is one "..." token exactly as the lexer matched it; the lexer has
+  already checked that any embedded double quote is doubled. The case of
+  the name is kept: unlike a regular identifier, a delimited one is
+  case sensitive. }
+
 function SQL92GrammarParser.CheckDelimIdent(S: string): boolean;
+var
+  i: integer;
 begin
-  Assert(false);
-  //TODO - Write this.
-  result := false;
+  { <delimited identifier body> must have at least one character, so ""
+    is not a valid name. Embedded double quotes must be doubled. }
+  result := (Length(S) >= 3) and (S[1] = '"') and (S[Length(S)] = '"');
+  if not result then
+    exit;
+  i := 2;
+  while i < Length(S) do
+  begin
+    if S[i] = '"' then
+    begin
+      if (i + 1 >= Length(S)) or (S[i + 1] <> '"') then
+        exit(false);
+      Inc(i, 2);
+    end
+    else
+      Inc(i);
+  end;
 end;
 
 function SQL92GrammarParser.HandleDelimIdent(S: string): string;
 begin
-  Assert(false);
-  //TODO - Write this.
-  result := '';
+  { Strip the outer double quotes and undouble embedded ones. Call after
+    CheckDelimIdent. }
+  Assert(CheckDelimIdent(S));
+  result := StringReplace(Copy(S, 2, Length(S) - 2), '""', '"', [rfReplaceAll]);
 end;
 
+
+{ Helpers for strings whose contents the BNF defines at character level
+  (datetime, interval, external collation / translation names). }
+
+function SQL92GrammarParser.UnquoteStringToken(S: string): string;
+begin
+  { One string_literal_continuation token: strip the outer quotes and
+    undouble any embedded ones. }
+  Assert(Length(S) >= 2);
+  Assert(S[1] = '''');
+  Assert(S[Length(S)] = '''');
+  result := StringReplace(Copy(S, 2, Length(S) - 2), '''''', '''', [rfReplaceAll]);
+end;
+
+function SQL92GrammarParser.LiteralShape(S: string): string;
+var
+  i: integer;
+  InDigits: boolean;
+begin
+  { Each run of digits becomes 'n'; - + : . and space are kept; anything else
+    becomes '?', so it can never match. e.g. '2024-01-31' -> 'n-n-n'. }
+  result := '';
+  InDigits := false;
+  for i := 1 to Length(S) do
+  begin
+    if CharInSet(S[i], ['0'..'9']) then
+    begin
+      if not InDigits then
+        result := result + 'n';
+      InDigits := true;
+    end
+    else
+    begin
+      InDigits := false;
+      if CharInSet(S[i], ['-', '+', ':', '.', ' ']) then
+        result := result + S[i]
+      else
+        result := result + '?';
+    end;
+  end;
+end;
+
+function IsSecondsShape(Shape: string): boolean;
+begin
+  { <seconds value> ::= <seconds integer value> [ <period> [ <seconds fraction> ] ] }
+  result := (Shape = 'n') or (Shape = 'n.') or (Shape = 'n.n');
+end;
+
+function IsTimeValueShape(Shape: string): boolean;
+begin
+  { <time value> ::= <hours value> <colon> <minutes value> <colon> <seconds value> }
+  result := (Copy(Shape, 1, 4) = 'n:n:') and IsSecondsShape(Copy(Shape, 5, MaxInt));
+end;
+
+function SQL92GrammarParser.SplitTimeZone(S: string; out Base, TZ: string): boolean;
+var
+  i: integer;
+  Shape: string;
+begin
+  { If S ends in a <time zone interval> (<sign> hh:mm), split it off.
+    The last + or - is the only candidate: date minus signs come earlier,
+    and the time part has no signs of its own. }
+  result := false;
+  Base := S;
+  TZ := '';
+  i := LastDelimiter('+-', S);
+  if i > 0 then
+  begin
+    Shape := LiteralShape(Copy(S, i, MaxInt));
+    if (Shape = '+n:n') or (Shape = '-n:n') then
+    begin
+      Base := Copy(S, 1, i - 1);
+      TZ := Copy(S, i, MaxInt);
+      result := true;
+    end;
+  end;
+end;
+
+function SQL92GrammarParser.IsDateString(S: string): boolean;
+begin
+  { <date value> ::= <years value> <minus sign> <months value> <minus sign> <days value> }
+  result := LiteralShape(S) = 'n-n-n';
+end;
+
+function SQL92GrammarParser.IsTimeString(S: string): boolean;
+var
+  Base, TZ: string;
+begin
+  { <time value> [ <time zone interval> ] }
+  SplitTimeZone(S, Base, TZ);
+  result := IsTimeValueShape(LiteralShape(Base));
+end;
+
+function SQL92GrammarParser.IsTimestampString(S: string): boolean;
+var
+  Base, TZ: string;
+  i: integer;
+begin
+  { <date value> <space> <time value> [ <time zone interval> ] }
+  SplitTimeZone(S, Base, TZ);
+  i := Pos(' ', Base);
+  result := (i > 0)
+    and IsDateString(Copy(Base, 1, i - 1))
+    and IsTimeValueShape(LiteralShape(Copy(Base, i + 1, MaxInt)));
+end;
+
+function SQL92GrammarParser.GetIntervalStringType(S: string; out IST: TSQLSynIntervalStringType): boolean;
+var
+  Shape: string;
+begin
+  (* <interval string> ::= <quote> { <year-month literal> | <day-time literal> } <quote>
+    Classified the same way as the old token-level rules. 'n' alone could be
+    years, days, hours, minutes or seconds; the <interval qualifier> decides. *)
+  Shape := LiteralShape(S);
+  result := true;
+  IST := istPlainInt;
+  if Shape = 'n' then
+    IST := istPlainInt
+  else if Shape = 'n-n' then
+    IST := istYearMonth                               { years-months }
+  else if Shape = 'n n' then
+    IST := istDayTime1                                { days hours }
+  else if Shape = 'n n:n' then
+    IST := istDayTime2                                { days hours:minutes }
+  else if (Copy(Shape, 1, 6) = 'n n:n:') and IsSecondsShape(Copy(Shape, 7, MaxInt)) then
+    IST := istDayTime3                                { days hours:minutes:seconds }
+  else if (Shape = 'n.') or (Shape = 'n.n') then
+    IST := istTime1                                   { seconds with fraction }
+  else if (Copy(Shape, 1, 2) = 'n:') and IsSecondsShape(Copy(Shape, 3, MaxInt)) then
+    IST := istTime2                                   { hours:minutes or minutes:seconds }
+  else if IsTimeValueShape(Shape) then
+    IST := istTime3                                   { hours:minutes:seconds }
+  else
+    result := false;
+end;
+
+function SQL92GrammarParser.IsQualifiedNameText(S: string): boolean;
+var
+  i, PartLen, Parts: integer;
+begin
+  { One to four <regular identifier>s separated by periods, as qualified_name.
+    Delimited identifiers inside the quotes are not supported. }
+  result := false;
+  Parts := 1;
+  PartLen := 0;
+  for i := 1 to Length(S) do
+  begin
+    if S[i] = '.' then
+    begin
+      if PartLen = 0 then
+        exit;
+      Inc(Parts);
+      PartLen := 0;
+    end
+    else if CharInSet(S[i], ['A'..'Z', 'a'..'z']) then
+      Inc(PartLen)
+    else if CharInSet(S[i], ['0'..'9', '_']) and (PartLen > 0) then
+      Inc(PartLen)
+    else
+      exit;
+  end;
+  result := (PartLen > 0) and (Parts <= 4);
+end;
 
 end.

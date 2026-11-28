@@ -16,7 +16,9 @@ uses
   DLList in '..\..\..\..\Common\DLList\DLList.pas',
   ExactCover in '..\..\..\..\Common\ExactCover\ExactCover.pas',
   SparseMatrix in '..\..\..\..\Common\SparseMatrix\SparseMatrix.pas',
-  CellCountShared in '..\..\Shared\CellCountShared.pas';
+  CellCountShared in '..\..\Shared\CellCountShared.pas',
+  LockAbstractions in '..\..\..\..\Common\LockAbstractions\LockAbstractions.pas',
+  SRWLockWrapper in '..\..\..\..\Common\SRWLockWrapper\SRWLockWrapper.pas';
 
 begin
   try

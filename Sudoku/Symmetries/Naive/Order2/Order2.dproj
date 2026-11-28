@@ -53,7 +53,7 @@
     <PropertyGroup Condition="'$(Base)'!=''">
         <VerInfo_Keys>CompanyName=;FileDescription=;FileVersion=1.0.0.0;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=;ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
         <VerInfo_Locale>2057</VerInfo_Locale>
-        <DCC_Define>ORDER2;$(DCC_Define)</DCC_Define>
+        <DCC_Define>USE_WINDOWS_LOCKS;ORDER2;$(DCC_Define)</DCC_Define>
         <Manifest_File>None</Manifest_File>
         <DCC_Namespace>System;Xml;Data;Datasnap;Web;Soap;$(DCC_Namespace)</DCC_Namespace>
         <DCC_DcuOutput>.\$(Platform)\$(Config)</DCC_DcuOutput>
@@ -117,6 +117,8 @@
         <DCCReference Include="..\..\CellCount\CellCountSymmetries.pas"/>
         <DCCReference Include="..\..\Graph\GraphSymmetries.pas"/>
         <DCCReference Include="..\..\Shared\CellCountShared.pas"/>
+        <DCCReference Include="..\..\..\..\Common\LockAbstractions\LockAbstractions.pas"/>
+        <DCCReference Include="..\..\..\..\Common\SRWLockWrapper\SRWLockWrapper.pas"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>

@@ -5,7 +5,9 @@ uses
   WorkItemTest3 in 'WorkItemTest3.pas' {Form1},
   WorkItemsNUMA in '..\WorkItemsNUMA.pas',
   WorkItems in '..\WorkItems.pas',
-  DLList in '..\..\DLList\DLList.pas';
+  DLList in '..\..\DLList\DLList.pas',
+  LockAbstractions in '..\..\LockAbstractions\LockAbstractions.pas',
+  SRWLockWrapper in '..\..\SRWLockWrapper\SRWLockWrapper.pas';
 
 {$R *.res}
 

@@ -1,10 +1,10 @@
-unit Parallelizer;
+ï»¿unit Parallelizer;
 {
 
-Copyright © 2024 Martin Harvey <martin_c_harvey@hotmail.com>
+Copyright Â© 2024 Martin Harvey <martin_c_harvey@hotmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the “Software”), to deal in
+this software and associated documentation files (the â€œSoftwareâ€), to deal in
 the Software without restriction, including without limitation the rights to
 use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
 of the Software, and to permit persons to whom the Software is furnished to do
@@ -13,7 +13,7 @@ so, subject to the following conditions:
 The above copyright notice and this permission notice shall be included in
 all copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+THE SOFTWARE IS PROVIDED â€œAS ISâ€, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
@@ -77,7 +77,12 @@ procedure ExecParallel(Handlers: TParallelHandlers;
                        var  Rets: TPHRefs;
                        const Xlators: PExceptionHandlerChain = nil);
 
-function ParalleliserFilterCommonExceptions(EClass: SysUtils.ExceptClass;
+function ParalleliserRecordCommonExceptions(EClass: SysUtils.ExceptClass;
+                                             EMsg: string):TExceptionFilterAction;
+procedure ParalleliserNoForwardCommonExceptions(EClass: SysUtils.ExceptClass;
+                                             EMsg: string);
+
+function ParalleliserPropagateCommonExceptions(EClass: SysUtils.ExceptClass;
                                              EMsg: string):TExceptionFilterAction;
 procedure ParalleliserForwardCommonExceptions(EClass: SysUtils.ExceptClass;
                                              EMsg: string);
@@ -118,19 +123,48 @@ type
 
 procedure TParallelHandlerThread.Execute;
 begin
-  try
-    FRet := FHandler(FRef1, FRef2);
-  except
-    on E: Exception do
-    begin
-      FRaised := true;
-      FExceptClass := ExceptClass(E.ClassType);
-      FExceptMsg := E.Message;
+  if not Terminated then //Some error cases destroy before TThread.Start
+  begin
+    try
+      FRet := FHandler(FRef1, FRef2);
+    except
+      on E: Exception do
+      begin
+        FRaised := true;
+        FExceptClass := ExceptClass(E.ClassType);
+        FExceptMsg := E.Message;
+      end;
     end;
   end;
 end;
 
-function ParalleliserFilterCommonExceptions(EClass: SysUtils.ExceptClass;
+function ParalleliserRecordCommonExceptions(EClass: SysUtils.ExceptClass;
+                                             EMsg: string):TExceptionFilterAction;
+begin
+  while Assigned(EClass) do
+  begin
+    if (EClass = EOutOfMemory)
+      or (EClass = EAccessViolation)
+      or (EClass = EListError)
+      or (EClass = EIntError)
+      or (EClass = EMathError)
+      or (EClass = EStackOverflow) then
+    begin
+      result := tetaRecordException;
+      exit;
+    end;
+    EClass := ExceptClass(EClass.ClassParent);
+  end;
+  result := tetaIgnore;
+end;
+
+procedure ParalleliserNoForwardCommonExceptions(EClass: SysUtils.ExceptClass;
+                                             EMsg: string);
+begin
+  { NOP }
+end;
+
+function ParalleliserPropagateCommonExceptions(EClass: SysUtils.ExceptClass;
                                              EMsg: string):TExceptionFilterAction;
 begin
   while Assigned(EClass) do
@@ -240,9 +274,12 @@ begin
         if Length(Refs2) > 0 then
           FRef2 := Refs2[i];
         FHandler := Handlers[i];
-        Start;
       end;
     end;
+    //Don't start any of the threads until all are allocated and up.
+    for i := 0 to Pred(L) do
+      Threads[i].Start;
+
 {$IFDEF USE_WINDOWS_LOCKS}
     BatchOfs := 0;
     while BatchOfs < L do

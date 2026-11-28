@@ -1,11 +1,11 @@
-unit LockAbstractions;
+Ôªøunit LockAbstractions;
 
 {
 
-Copyright © 2025 Martin Harvey <martin_c_harvey@hotmail.com>
+Copyright ¬© 2025 Martin Harvey <martin_c_harvey@hotmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the ìSoftwareî), to deal in
+this software and associated documentation files (the ‚ÄúSoftware‚Äù), to deal in
 the Software without restriction, including without limitation the rights to
 use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
 of the Software, and to permit persons to whom the Software is furnished to do
@@ -14,7 +14,7 @@ so, subject to the following conditions:
 The above copyright notice and this permission notice shall be included in
 all copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED ìAS ISî, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+THE SOFTWARE IS PROVIDED ‚ÄúAS IS‚Äù, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
@@ -40,6 +40,19 @@ type
 {$ENDIF}
   TCriticalSection = SyncObjs.TCriticalSection;
   TEvent = SyncObjs.TEvent;
+  TSemaphore = SyncObjs.TSemaphore;
+  THandleObject = SyncObjs.THandleObject;
+{$IFDEF MSWINDOWS}
+  THandleObjectArray = SyncObjs.THandleObjectArray;
+{$ENDIF}
+  TWaitResult = SyncObjs.TWaitResult;
+
+const
+  wrSignaled = SyncObjs.wrSignaled;
+  wrTimeout = SyncObjs.wrTimeout;
+  wrAbandoned = SyncObjs.wrAbandoned;
+  wrError = SyncObjs.wrError;
+  INFINITE = Cardinal($FFFFFFFF);
 
 function InterlockedCompareExchange(var Destination: Integer; Exchange: Integer; Comparand: Integer): Integer;
 function InterlockedCompareExchange64(var Destination: Int64; Exchange: Int64; Comparand: Int64): Int64;
@@ -62,6 +75,9 @@ begin
 {$IFDEF USE_WINDOWS_LOCKS}
   result := Windows.InterlockedCompareExchange(Destination, Exchange, Comparand);
 {$ELSE}
+  {$IFDEF VER250}
+  Assert(false); //XE4: TInterlocked is broken, define USE_WINDOWS_LOCKS.
+  {$ENDIF}
   result := SyncObjs.TInterlocked.CompareExchange(Destination, Exchange, Comparand);
 {$ENDIF}
 end;
@@ -71,6 +87,9 @@ begin
 {$IFDEF USE_WINDOWS_LOCKS}
   result := Windows.InterlockedCompareExchange64(Destination, Exchange, Comparand);
 {$ELSE}
+  {$IFDEF VER250}
+  Assert(false); //XE4: TInterlocked is broken, define USE_WINDOWS_LOCKS.
+  {$ENDIF}
   result := SyncObjs.TInterlocked.CompareExchange(Destination, Exchange, Comparand);
 {$ENDIF}
 end;
@@ -80,6 +99,9 @@ begin
 {$IFDEF USE_WINDOWS_LOCKS}
   result := Windows.InterlockedCompareExchangePointer(Destination, Exchange, Comparand);
 {$ELSE}
+  {$IFDEF VER250}
+  Assert(false); //XE4: TInterlocked is broken, define USE_WINDOWS_LOCKS.
+  {$ENDIF}
   result := SyncObjs.TInterlocked.CompareExchange(Destination, Exchange, Comparand);
 {$ENDIF}
 end;
@@ -89,6 +111,9 @@ begin
 {$IFDEF USE_WINDOWS_LOCKS}
   result := Windows.InterlockedDecrement(Addend);
 {$ELSE}
+  {$IFDEF VER250}
+  Assert(false); //XE4: TInterlocked is broken, define USE_WINDOWS_LOCKS.
+  {$ENDIF}
   result := SyncObjs.TInterlocked.Decrement(Addend);
 {$ENDIF}
 end;
@@ -98,6 +123,9 @@ begin
 {$IFDEF USE_WINDOWS_LOCKS}
   result := Windows.InterlockedExchange(Target, Value);
 {$ELSE}
+  {$IFDEF VER250}
+  Assert(false); //XE4: TInterlocked is broken, define USE_WINDOWS_LOCKS.
+  {$ENDIF}
   result := SyncObjs.TInterlocked.Exchange(Target, Value);
 {$ENDIF}
 end;
@@ -121,6 +149,9 @@ begin
 {$IFDEF USE_WINDOWS_LOCKS}
   result := Windows.InterlockedExchangePointer(Target, Value);
 {$ELSE}
+  {$IFDEF VER250}
+  Assert(false); //XE4: TInterlocked is broken, define USE_WINDOWS_LOCKS.
+  {$ENDIF}
   result := SyncObjs.TInterlocked.Exchange(Target, Value);
 {$ENDIF}
 end;
@@ -130,6 +161,9 @@ begin
 {$IFDEF USE_WINDOWS_LOCKS}
   result := Windows.InterlockedIncrement(Addend);
 {$ELSE}
+  {$IFDEF VER250}
+  Assert(false); //XE4: TInterlocked is broken, define USE_WINDOWS_LOCKS.
+  {$ENDIF}
   result := SyncObjs.TInterlocked.Increment(Addend);
 {$ENDIF}
 end;

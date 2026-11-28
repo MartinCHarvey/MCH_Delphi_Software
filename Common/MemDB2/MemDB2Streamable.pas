@@ -304,6 +304,8 @@ function NotAssignedOrSentinel(X: TMemDBStreamable): boolean; inline;
 
 procedure GetTxionSizeEstimate(JournalEntry: TStream; var TxionSizeEstimate: int64);
 
+function MakeNullIncremental: TStream;
+
 implementation
 
 uses
@@ -425,7 +427,11 @@ end;
 
 function TMemStreamableList.GetItem(Idx: integer): TMemDBStreamable;
 begin
+{$IFOPT C+}
   result := FList.Items[idx];
+{$ELSE}
+  result := FList.List[idx];
+{$ENDIF}
 end;
 
 procedure TMemStreamableList.SetItem(Idx: integer; Item: TMemDBStreamable);
@@ -1308,5 +1314,13 @@ begin
     end;
   end;
 end;
+
+function MakeNullIncremental: TStream;
+begin
+  result := TMemoryStream.Create;
+  WrTag(result, mstDBStart);
+  WrTag(result, mstDBEnd);
+end;
+
 
 end.

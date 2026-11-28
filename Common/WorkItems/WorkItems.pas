@@ -1,10 +1,10 @@
-unit WorkItems;
+Ôªøunit WorkItems;
 {
 
-Copyright © 2020 Martin Harvey <martin_c_harvey@hotmail.com>
+Copyright ¬© 2020 Martin Harvey <martin_c_harvey@hotmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the ìSoftwareî), to deal in
+this software and associated documentation files (the ‚ÄúSoftware‚Äù), to deal in
 the Software without restriction, including without limitation the rights to
 use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
 of the Software, and to permit persons to whom the Software is furnished to do
@@ -13,7 +13,7 @@ so, subject to the following conditions:
 The above copyright notice and this permission notice shall be included in
 all copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED ìAS ISî, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+THE SOFTWARE IS PROVIDED ‚ÄúAS IS‚Äù, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
@@ -36,20 +36,20 @@ interface
 
 {$IFDEF USE_TRACKABLES}
 uses
-  DLList, Trackables, Classes, Windows, SyncObjs;
+  DLList, Trackables, Classes, Windows, LockAbstractions;
 {$ELSE}
 uses
-  DLList, Classes, Windows, SyncObjs;
+  DLList, Classes, Windows, LockAbstractions;
 {$ENDIF}
 
 {$ELSEIF Defined(POSIX)}
 
 {$IFDEF USE_TRACKABLES}
 uses
-  DLList, Trackables, Classes, SyncObjs;
+  DLList, Trackables, Classes, LockAbstractions;
 {$ELSE}
 uses
-  DLList, Classes, SyncObjs;
+  DLList, Classes, LockAbstractions;
 {$ENDIF}
 
 {$ENDIF}
@@ -286,7 +286,7 @@ begin
   LStart := FWorkItemState;
   while (TWorkItemState(LStart) in StartSet) and not result do
   begin
-    result := TInterlocked.CompareExchange(FWorkItemState, LDest, LStart) = LStart;
+    result := LockAbstractions.InterlockedCompareExchange(FWorkItemState, LDest, LStart) = LStart;
     LStart := FWorkItemState;
   end;
 end;
@@ -299,7 +299,7 @@ end;
 constructor TWorkItem.Create;
 begin
   inherited;
-  TInterlocked.Increment(FFreeRefCount);
+  LockAbstractions.InterlockedIncrement(FFreeRefCount);
   DLItemInitObj(Self, @FDLLink);
   FWorkItemState := Ord(wisStarting);
 end;
@@ -358,12 +358,12 @@ end;
 
 procedure TWorkItem.IncFreeRefCount;
 begin
-  TInterlocked.Increment(FFreeRefCount);
+  LockAbstractions.InterlockedIncrement(FFreeRefCount);
 end;
 
 procedure TWorkItem.DecFreeRefCount;
 begin
-  if TInterlocked.Decrement(FFreeRefCount) <= 0 then
+  if LockAbstractions.InterlockedDecrement(FFreeRefCount) <= 0 then
   begin
     FSpecificFreeCalled := true;
     inherited Free;

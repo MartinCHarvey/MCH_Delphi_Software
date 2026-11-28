@@ -133,6 +133,10 @@ type
     destructor Destroy ;override;
 
     //Use as "First/Next (poss by index)"
+    //WARNING: with no index name, isolation >= snapshot iterates an internal
+    //index, so rows are not visited in the order they were written.
+    //Isolation < snapshot uses original row order, but an asynchronous
+    //checkpoint permanently rewrites it to the same (by RowID) order.
     function Locate(Pos: TMemAPIPosition; IdxName: string = ''): boolean;
 
     function FindByIndex(IdxName: string;
@@ -391,7 +395,7 @@ begin
     //TODO, One day this will be improved with predicate locks?
     DB.CommitLock.Acquire;
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
-    DbgUnderCommitLock := true;
+    Inc(DbgUnderCommitLock);
 {$ENDIF}
     try
       DB.MetaIndexLock.Acquire;
@@ -402,7 +406,8 @@ begin
       end;
     finally
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
-      DbgUnderCommitLock := false;
+      Assert(DbgUnderCommitLock > 0);
+      Dec(DbgUnderCommitLock);
 {$ENDIF}
       DB.CommitLock.Release;
     end;
@@ -445,7 +450,7 @@ begin
   Ctxt := TXTransactionLocalContext.Create;
   Ctxt.SetPtrs(@EntSnapshot, @EntRegistered);
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
-  DbgUnderCommitLock := true; //We are serialised ...
+  Inc(DbgUnderCommitLock); //We are serialised ...
 {$ENDIF}
   try
     try
@@ -480,7 +485,8 @@ begin
     EntSnapshot.Release;
     EntRegistered.Release;
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
-    DbgUnderCommitLock := false;
+    Assert(DbgUnderCommitLock > 0);
+    Dec(DbgUnderCommitLock);
 {$ENDIF}
   end;
 end;
@@ -514,7 +520,7 @@ begin
 
     DB.CommitLock.Acquire;
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
-    DbgUnderCommitLock := true;
+    Inc(DbgUnderCommitLock);
 {$ENDIF}
     try
       //Under commit lock to robustly detect journal / memory copy not in sync.
@@ -581,7 +587,8 @@ begin
       end;
     finally
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
-      DbgUnderCommitLock := false;
+      Assert(DbgUnderCommitLock > 0);
+      Dec(DbgUnderCommitLock);
 {$ENDIF}
       DB.CommitLock.Release;
     end;
@@ -1092,7 +1099,7 @@ begin
   FCommitLock.Acquire;
   try
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
-    DbgUnderCommitLock := true;
+    Inc(DbgUnderCommitLock);
 {$ENDIF}
     FMetaIndexLock.Acquire;
     try
@@ -1102,7 +1109,8 @@ begin
     end;
   finally
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
-    DbgUnderCommitLock := false;
+    Assert(DbgUnderCommitLock > 0);
+    Dec(DbgUnderCommitLock);
 {$ENDIF}
     FCommitLock.Release;
   end;
@@ -1131,7 +1139,7 @@ begin
   FCommitLock.Acquire;
   try
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
-    DbgUnderCommitLock := true;
+    Inc(DbgUnderCommitLock);
 {$ENDIF}
     FMetaIndexLock.Acquire;
     try
@@ -1141,7 +1149,8 @@ begin
     end;
   finally
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
-    DbgUnderCommitLock := false;
+    Assert(DbgUnderCommitLock > 0);
+    Dec(DbgUnderCommitLock);
 {$ENDIF}
     FCommitLock.Release;
   end;

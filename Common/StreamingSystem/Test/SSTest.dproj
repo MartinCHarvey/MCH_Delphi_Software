@@ -34,7 +34,7 @@
         <Base>true</Base>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Base)'!=''">
-        <DCC_Define>DEBUG;$(DCC_Define)</DCC_Define>
+        <DCC_Define>USE_WINDOWS_LOCKS;DEBUG;$(DCC_Define)</DCC_Define>
         <DCC_IntegerOverflowCheck>true</DCC_IntegerOverflowCheck>
         <DCC_SymbolReferenceInfo>1</DCC_SymbolReferenceInfo>
         <DCC_S>false</DCC_S>
@@ -97,6 +97,7 @@
         <DCCReference Include="..\..\LockAbstractions\LockAbstractions.pas"/>
         <DCCReference Include="..\..\LockAbstractions\TinyLock.pas"/>
         <DCCReference Include="..\..\PComp\PComp.pas"/>
+        <DCCReference Include="..\..\SRWLockWrapper\SRWLockWrapper.pas"/>
         <None Include="..\TRIVXML.ATG"/>
         <BuildConfiguration Include="Debug">
             <Key>Cfg_2</Key>

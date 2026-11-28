@@ -7,7 +7,9 @@ uses
   SparseMatrix in '..\..\SparseMatrix\SparseMatrix.pas',
   Trackables in '..\..\Tracking\Trackables.pas',
   DLList in '..\..\DLList\DLList.pas',
-  BinaryTree in '..\..\Balanced Tree\BinaryTree.pas';
+  BinaryTree in '..\..\Balanced Tree\BinaryTree.pas',
+  LockAbstractions in '..\..\LockAbstractions\LockAbstractions.pas',
+  SRWLockWrapper in '..\..\SRWLockWrapper\SRWLockWrapper.pas';
 
 {$R *.res}
 

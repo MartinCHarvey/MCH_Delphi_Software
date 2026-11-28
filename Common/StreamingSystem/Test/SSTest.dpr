@@ -21,7 +21,8 @@ uses
   Parallelizer in '..\..\Parallelizer\Parallelizer.pas',
   LockAbstractions in '..\..\LockAbstractions\LockAbstractions.pas',
   TinyLock in '..\..\LockAbstractions\TinyLock.pas',
-  PComp in '..\..\PComp\PComp.pas';
+  PComp in '..\..\PComp\PComp.pas',
+  SRWLockWrapper in '..\..\SRWLockWrapper\SRWLockWrapper.pas';
 
 {$R *.RES}
 

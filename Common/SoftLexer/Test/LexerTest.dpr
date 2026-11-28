@@ -7,7 +7,9 @@ uses
   DLList in '..\..\DLList\DLList.pas',
   Trackables in '..\..\Tracking\Trackables.pas',
   BinaryTree in '..\..\Balanced Tree\BinaryTree.pas',
-  OrdinalSets in '..\..\OrdinalSets\OrdinalSets.pas';
+  OrdinalSets in '..\..\OrdinalSets\OrdinalSets.pas',
+  LockAbstractions in '..\..\LockAbstractions\LockAbstractions.pas',
+  SRWLockWrapper in '..\..\SRWLockWrapper\SRWLockWrapper.pas';
 
 {$R *.res}
 

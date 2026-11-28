@@ -13,7 +13,10 @@ uses
   lexlib_oo in '..\..\..\..\..\github\tply41a\tply41a\lib_oo\lexlib_oo.pas',
   yacclib_oo in '..\..\..\..\..\github\tply41a\tply41a\lib_oo\yacclib_oo.pas',
   SQL92Grammar_parser_debug in '..\SQL92Grammar_parser_debug.pas',
-  YYSType_incl in '..\YYSType_incl.pas';
+  YYSType_incl in '..\YYSType_incl.pas',
+  LockAbstractions in '..\..\..\LockAbstractions\LockAbstractions.pas',
+  SRWLockWrapper in '..\..\..\SRWLockWrapper\SRWLockWrapper.pas',
+  SQL92Data in '..\SQL92Data.pas';
 
 {$R *.res}
 

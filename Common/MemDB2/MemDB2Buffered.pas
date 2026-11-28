@@ -36,7 +36,7 @@ uses
   Trackables,
 {$ENDIF}
   IndexedStore, MemDB2Streamable, Classes, MemDB2Misc, DLList, LockAbstractions,
-  TinyLock, MemDB2BufBase, MemDB2Indexing, Reffed, SyncObjs;
+  TinyLock, MemDB2BufBase, MemDB2Indexing, Reffed, LSLCache;
 
 type
   TMemDBAPIInterfacedObject = class;
@@ -125,6 +125,7 @@ type
     procedure FromJournal(const PseudoTid: TTransactionId; Stream: TStream; Ctxt: TTXLocalContext);override;
     procedure FromScratch(const PseudoTid: TTransactionId; Stream: TStream; Opts:TOptimizeSet; Ctxt: TTXLocalContext);override;
 
+    procedure RemoveFromLocalIndex(TidLocal: TTidLocal; Index: TMemDbIndexGeneric; var ListTmp: TList);
     procedure RemoveFromLocalIndices(TidLocal: TTidLocal);
     procedure AddToLocalIndices(TidLocal: TTidLocal);
 
@@ -185,6 +186,7 @@ type
     FParentDB: TMemDBDatabasePersistent;
     FProxy: TMemDBEntityProxy;
     FInterfaced: TMemDBAPIInterfacedObject;
+    FFastTeardown: boolean;
   protected
     FMetadata: TMemDBEntityMetadata;
     function HandleInterfacedObjRequest(Transaction: TObject; ID: TMemDBAPIId): TMemDBAPI;virtual;
@@ -209,6 +211,7 @@ type
     property Proxy: TMemDBEntityProxy read FProxy;
     property Interfaced: TMemDBAPIInterfacedObject read FInterfaced;
     property Metadata: TMemDBEntityMetadata read FMetadata;
+    property FastTeardown: boolean read FFastTeardown write FFastTeardown;
   end;
 
   TMemDBFKMetaLists = record
@@ -332,12 +335,7 @@ type
     property DataPinned: boolean read FPinned;
   end;
 
-
-{$IFDEF USE_TRACKABLES}
-  TTidLocal = class(TTrackable)
-{$ELSE}
-  TTidLocal = class
-{$ENDIF}
+  TTidLocal = class(TLSLObject)
   private
     FTidLocalLinks: TDLEntry;
     FParentTable: TMemDBTablePersistent;
@@ -389,7 +387,8 @@ type
     function ChangedRowCount: Int64;
 
     procedure ToJournal(Stream: TStream);
-    procedure ToScratch(Stream: TStream);
+    procedure ToScratchSynchronous(Stream: TStream; Ctxt: TTXLocalContext);
+    procedure ToScratchAsynchronous(Stream: TStream; Ctxt: TTXLocalContext);
     procedure FromJournal(Stream: TStream);
     procedure FromScratch(Stream: TStream; Opts:TOptimizeSet);
 
@@ -400,6 +399,7 @@ type
     procedure IndexCommit(Ctxt: TTXLocalContext);
     procedure IndexRollback(Ctxt: TTXLocalContext);
 
+    function CalcLargeCacheSize: integer;
     function ThrottleBuildCheckPartialIndexParallel(Ref1, Ref2: pointer): pointer;
     function ThrottleBuildCheckPartialInternalIndexParallel(Ref1, Ref2: pointer): pointer;
     function BuildCheckPartialIndexParallel(Ref1, Ref2: pointer): pointer;
@@ -417,9 +417,14 @@ type
     procedure RowCPTidHandle(Sender: TObject; const Update: TTidUpdate);
 
     function GetIPinForIndex(Row: TMemDBRow; Index: TMemDbIndexGeneric; IndexSel: TAbSelType; var IPinListTmp: TList): PMemDbIndexPin;
+
+    procedure DestroyCommon; //Called by both destructor and reset.
   public
     constructor Create;
+    procedure CreateCachedInternals(const Tid: TTransactionId);
     destructor Destroy; override;
+    procedure CreateFromCache(Cache: TLSLCache); override;
+    procedure Reset(Cache: TLSLCache); override;
 
     procedure UpdateLayout(PinReason: TPinReason);
 
@@ -513,6 +518,7 @@ type
     FMasterInternalIndex: TMemDBIndexInternal;
 
   protected
+    function TableFastTeardown(Ref1, Ref2: pointer):pointer;
 
     //Returns whether Row lock newly created; Called Under master row lock.
     function AddAllRowProhibitForTableMod(const Tid:TTransactionId): boolean;
@@ -618,6 +624,8 @@ type
   TMemDBDatabasePersistent = class(TMemDBJournalCreator)
   private
   protected
+    FFastTeardown: boolean;
+
     //Stripe locking performance degrades if more threads than CPU's,
     //because threads become idle holding striped rowlocks. Hence the throttling.
     FPolicies: TOptimizePolicies;
@@ -631,6 +639,8 @@ type
     FCommitLock: TCriticalSection;
     FMetaIndexLock: TCriticalSection;
 
+    function DBFastTeardown(Ref1, Ref2: pointer):pointer;
+
     function HandleInterfacedObjRequest(Transaction: TObject; ID: TMemDBAPIId): TMemDBAPI;virtual;
     procedure LookaheadHelper(Stream: TStream;
                              var ChangeType: TMemDBEntityChangeType;
@@ -639,7 +649,6 @@ type
     //Use with care: entities actually registered to a transaction may be more
     //sensible / useful.
     function AssembleEntityList: TReffedList;
-    procedure ConsolidateAndFreeCaches(Ctxt: TTXLocalContext);
   public
     function EntitiesByName(const AB:TBufSelector; Name: string; PinReason: TPinReason; Ctxt: TTXLocalContext; IsoOverride: boolean): TMemDBEntity;
 
@@ -676,6 +685,7 @@ type
     property Interfaced: TMemDBAPIInterfacedObject read FInterfaced;
     property CommitLock: TCriticalSection read FCommitLock;
     property MetaIndexLock: TCriticalSection read FMetaIndexLock;
+    property FastTeardown: boolean read FFastTeardown write FFastTeardown;
   end;
 
   //Helper class to manage A/B buffered lists.
@@ -775,7 +785,7 @@ const
 implementation
 
 uses
-  SysUtils, MemDB2, NullStream, MemDB2Api, Parallelizer;
+  SysUtils, MemDB2, NullStream, MemDB2Api, Parallelizer, MemDB2ObjectCaches, Math;
 
 const
   S_COMMMIT_CONSISTENCY_OBJS = 'Commit consistency check failed: Duplicate table or foreign key names.';
@@ -915,6 +925,12 @@ const
   S_FKEYS_INTERNAL_7 = 'Foreign key checking internal error 7.';
   S_ENTITY_LIST_CONFUSION_CHECKING_CHANGES = 'Error: did not expect async mod of entity lists at this time.';
   S_API_TABLE_METADATA_NOT_COMMITED = 'No committed metadata for this table (api level)';
+  S_INTERNAL_LIST_ERROR_REPLAY = 'Internal error: Master row list / index on journal replay.';
+  S_INTERNAL_LIST_ERROR_ROW_HANDLING = 'Internal error adding / removing from master row list during change.';
+  S_ASYNC_CHECK_NO_INDEX_ROOT = 'Async checkpoint: No index root.';
+  S_ASYNC_CHECK_NO_FIELD_DEFS = 'Async checkpoint: No field defs for table.';
+  S_ASYNC_CHECK_PIN_FROM_INODE_FAILED = 'Async checkpoint: Pin from INode failed.';
+  S_ASYNC_CHECK_BAD_FORMAT = 'Async checkpoint: Row format check failed.';
 
 { Misc Functions }
 
@@ -1677,14 +1693,7 @@ var
   i: integer;
   MasterIndex: TMemDBIndex;
   CC: TMemTableMetadataItem;
-
 begin
-  FIndexHelper :=  TMemDblBufListHelper.Create;
-  FIndexHelper.OnChangeRequest := HandleHelperChangeRequest;
-  FFieldHelper := TMemDblBufListHelper.Create;
-  FFieldHelper.OnChangeRequest := HandleHelperChangeRequest;
-  FEmptyList := TMemStreamableList.Create;
-
   M := FParentTable.FMetadata.PinCurrent(FTid, pinEvolve);
   if Assigned(M) then
   begin
@@ -1693,10 +1702,10 @@ begin
     begin
       MasterIndex := FParentTable.FMasterIndexes.Items[i] as TMemDBIndex;
       Assert(Assigned(MasterIndex));
-      FLocalIndexCopies.AddNoRef(MasterIndex.Clone);
+      FLocalIndexCopies.AddNoRef(MasterIndex.Clone(FTid));
     end;
     if Assigned(FParentTable.FMasterInternalIndex) then
-      FInternalIndexCopy := FParentTable.FMasterInternalIndex.Clone as TMemDBIndexInternal
+      FInternalIndexCopy := FParentTable.FMasterInternalIndex.Clone(FTid) as TMemDBIndexInternal
     else
       FInternalIndexCopy := nil;
   end;
@@ -2063,9 +2072,6 @@ var
   FieldData: TMemFieldData;
   RowFields: TMemRowFields;
   NxtFieldDef, CurFieldDef: TMemFieldDef;
-{$IFDEF DBG_UNDER_COMMIT_LOCK}
-  OldUnderCommit: boolean;
-{$ENDIF}
 
 begin
   RNxt := FParentTable.FMetadata.GetNext(FTid);
@@ -2082,15 +2088,15 @@ begin
   //possible races - lock is against all changes since previous commit.
   FParentTable.FParentDB.CommitLock.Acquire;
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
-    OldUnderCommit := DbgUnderCommitLock;
-    DbgUnderCommitLock := true;
+    Inc(DbgUnderCommitLock);
 {$ENDIF}
   try
     if not FParentTable.AddAllRowProhibitForTableMod(FTid) then
       exit;
   finally
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
-    DbgUnderCommitLock := OldUnderCommit;
+    Assert(DbgUnderCommitLock > 0);
+    Dec(DbgUnderCommitLock);
 {$ENDIF}
     FParentTable.FParentDB.CommitLock.Release;
   end;
@@ -2201,8 +2207,29 @@ constructor TTidLocal.Create;
 begin
   inherited;
   DLItemInitObj(self, @FTidLocalLinks);
-  FCPRows := TIndexedStoreO.Create;
+  Assert(not Assigned(MyCache));
   FLocalIndexCopies := TReffedList.Create;
+  FCPRows := TIndexedStoreO.Create;
+
+  FIndexHelper := TMemDblBufListHelper.Create;
+  FFieldHelper := TMemDblBufListHelper.Create;
+  FEmptyList := TMemStreamableList.Create;
+  FIndexHelper.OnChangeRequest := HandleHelperChangeRequest;
+  FFieldHelper.OnChangeRequest := HandleHelperChangeRequest;
+end;
+
+procedure TTidLocal.CreateCachedInternals(const Tid: TTransactionId);
+begin
+  FMyCache := GetCacheBlockForTid(Tid).TidLocalCache;
+end;
+
+procedure TTidLocal.CreateFromCache(Cache: TLSLCache);
+begin
+  Assert(MyCache = Cache);
+  DLItemInitObj(self, @FTidLocalLinks);
+  Assert(Cache = MyCache);
+  FLocalIndexCopies := TReffedList.Create;
+  inherited;
 end;
 
 procedure TTidLocal.Init(Parent: TMemDBTablePersistent; const Tid: TTransactionId);
@@ -2234,12 +2261,11 @@ begin
     FParentTable.HandleAddRefForTidLocal(self);
 end;
 
-destructor TTidLocal.Destroy;
+
+procedure TTidLocal.DestroyCommon;
 var
   Release: boolean;
 begin
-  Assert((not Assigned(FCPRows)) or (FCPRows.Count = 0));
-  FCPRows.Free;
   if Assigned(FParentTable) then
   begin
     FParentTable.FTidLocalLock.Acquire;
@@ -2252,7 +2278,9 @@ begin
     if Release then
       FParentTable.HandleReleaseForTidLocal(self);
   end;
+  FParentTable := nil;
 
+  //Cached metadata, not cached local objects.
   FCachedCur.Release;
   FCachedNxt.Release;
   FCachedCur := nil;
@@ -2260,13 +2288,69 @@ begin
   FCachedCurValid := false;
   FCachedNxtValid := false;
 
-  FIndexHelper.Free;
-  FFieldHelper.Free;
-  FEmptyList.Release;
   FLocalIndexCopies.Release; //With contained indexes.
   FNewBuildIndices.Release;
   FInternalIndexCopy.Release;
   FTmpDeleting.Release;
+
+  FLocalIndexCopies := nil;
+  FNewBuildIndices := nil;
+  FInternalIndexCopy := nil;
+  FTmpDeleting := nil;
+end;
+
+
+procedure TTidLocal.Reset(Cache: TLSLCache);
+var
+  Tag: Pointer;
+  IRec: TItemRec;
+  IndNodeClassType: TIndexNodeClass;
+
+begin
+  Assert(Cache = MyCache);
+  Assert(Assigned(FCPRows));
+
+  Assert(FCPRows.IndexCount = 0);
+  while FCPRows.IndexCount > 0 do
+  begin
+    FCPRows.IndexInfoByOrdinal(0, Tag, IndNodeClassType);
+    FCPRows.DeleteIndex(Tag, false);
+  end;
+  IRec := FCPRows.GetAnItem;
+  Assert(not Assigned(IRec));
+  while Assigned(IRec) do
+  begin
+    FCPRows.RemoveItem(IRec);
+    IRec := FCPRows.GetAnItem;
+  end;
+
+  DestroyCommon;
+
+  FIndexHelper.ClearLists;
+  FFieldHelper.ClearLists;
+  Assert(FEmptyList.Count = 0);
+
+  FDataChanged := false;
+  FDataChangePrePrepare := false;
+  FIndexingChangeRequired := false;
+  FLayoutChangeRequired := false;
+  FInternalIndexChangeset := [];
+  SetLength(FIndexChangesets, 0);
+  SetLength(FFieldChangesets, 0);
+  FCacheReenter := false;
+  inherited;
+end;
+
+destructor TTidLocal.Destroy;
+begin
+  Assert((not Assigned(FCPRows)) or (FCPRows.Count = 0));
+  FCProws.Free;
+
+  DestroyCommon;
+
+  FIndexHelper.Free;
+  FFieldHelper.Free;
+  FEmptyList.Release;
   inherited;
 end;
 
@@ -2294,15 +2378,53 @@ begin
   WrTag(Stream, mstIndexedListEnd);
 end;
 
-procedure TTidLocal.ToScratch(Stream: TStream);
+procedure TTidLocal.ToScratchAsynchronous(Stream: TStream; Ctxt: TTXLocalContext);
+var
+  IRoot: TMemDBIndexGeneric;
+  INode: TMemDbIndexLeafGeneric;
+  Row: TMemDBRow;
+  FieldDefs: TMemStreamableList;
+  IdxDef: TMemIndexDef;
+
+begin
+  WrTag(Stream, mstIndexedListStart);
+  //Transaction local master index.
+  IRoot := GetUserIndexRoot(IdxDef, '');
+  if not Assigned(IRoot) then
+    raise EMemDBInternalException.Create(S_ASYNC_CHECK_NO_INDEX_ROOT);
+  FieldDefs := META_CurFieldDefList;
+  if not Assigned(FieldDefs) then
+    raise EMemDBInternalException.Create(S_ASYNC_CHECK_NO_FIELD_DEFS);
+
+  INode := IRoot.Locate(abCurrent, ptFirst, nil);
+  while Assigned(INode) do
+  begin
+    Row := INode.Row as TMemDBRow;
+    //Isolation level not a problem - no Nxt (not modified).
+    //Pins the row's data from the INode. In the internal master index, so
+    //we expect data for this txion (not iterating the more racy master row
+    //list): false means no data.
+    if not Row.PinForCursorFromInode(FTid, INode, pinEvolve) then
+      raise EMemDBInternalException.Create(S_ASYNC_CHECK_PIN_FROM_INODE_FAILED);
+
+    if not Row.CheckFormatAgainstMetaDefs(FTid, abCurrent, FieldDefs, pinEvolve) then
+      raise EMemDbInternalException.Create(S_ASYNC_CHECK_BAD_FORMAT);
+
+    //Streams the data pinned above (GetCurForToScratch re-uses the pin).
+    Row.ToScratch(FTid, Stream, Ctxt);
+
+    INode := IRoot.Locate(abCurrent, ptNext, INode);
+  end;
+  WrTag(Stream, mstIndexedListEnd);
+end;
+
+procedure TTidLocal.ToScratchSynchronous(Stream: TStream; Ctxt: TTXLocalContext);
 var
   IRec: TItemRec;
   Row: TMemDBRow;
   Cur: TMemDBStreamable;
 begin
   WrTag(Stream, mstIndexedListStart);
-  //TODO - Maybe do this in a way which doesn't lock the master list?
-  //Checkpoints to tend to be pretty rapid ...
   FParentTable.FMasterRowLock.Acquire;
   try
     IRec := FParentTable.FMasterRowList.GetAnItem;
@@ -2311,7 +2433,7 @@ begin
       Row := IRec.Item as TMemDBRow;
       Cur := Row.GetCurUnderCommitLock;
       if Assigned(Cur) then
-        Row.ToScratch(self.FTid, Stream, nil);
+        Row.ToScratch(self.FTid, Stream, Ctxt);
       FParentTable.FMasterRowList.GetAnotherItem(IRec);
     end;
   finally
@@ -2361,7 +2483,8 @@ begin
                 raise EMemDBInternalException.Create(S_CONCURRENT_MODIFY_DURING_REPLAY);
             end
             else
-              Assert(RV = rvNotFound);
+              if RV <> rvNotFound then
+                raise EMemDBInternalException.Create(S_INTERNAL_LIST_ERROR_REPLAY);
           finally
             FParentTable.FMasterRowLock.Release;
           end;
@@ -2426,6 +2549,7 @@ procedure TTidLocal.RowCPTidHandle(Sender: TObject; const Update: TTidUpdate);
 var
   IRec: TItemRec;
   GeneralPre, GeneralPost:boolean;
+  RV: TISRetVal;
 begin
   Assert(Assigned(Sender));
   GeneralPre := Update.Changes.Pre or Update.Pins.Pre;
@@ -2435,8 +2559,9 @@ begin
     Assert(Update.Tid = FTid);
     if GeneralPost then
     begin
-      FCPRows.AddItem(Sender, IRec);
-      Assert(Assigned(IRec));
+      RV := FCPRows.AddItem(Sender, IRec);
+      if RV <> rvOK then
+        raise EMemDBInternalException.Create(S_INTERNAL_LIST_ERROR_ROW_HANDLING);
     end
     else
     begin
@@ -2446,7 +2571,9 @@ begin
       IRec := FCPRows.GetAnItem;
       if not (Assigned(IRec) and (IRec.Item = Sender)) then
         raise EMemDBInternalException.Create(S_ROW_MAINT_INTERNAL);
-      FCPRows.RemoveItem(IRec);
+      RV := FCPRows.RemoveItem(IRec);
+      if RV <> rvOK then
+        raise EMemDBInternalException.Create(S_INTERNAL_LIST_ERROR_ROW_HANDLING);
     end;
   end;
   //And now deal with NoChanges -> Changes transition separately.
@@ -2615,6 +2742,7 @@ begin
       CompactOffsets[j] := FieldDefs[j].FieldIndex;
 
     NewIndex := TMemDBIndex.Create;
+    NewIndex.CreateCachedInternals(FTid, false);
 
     with NewIndex as TMemDBIndex do
     begin
@@ -2814,6 +2942,7 @@ begin
   try
     Context := PBuildValidateIdxParallelContext(Ref1);
     NewIndex := TMemDBIndexInternal.Create;
+    NewIndex.CreateCachedInternals(FTid, true);
 
     try
       if Context.LocalIter then
@@ -3122,6 +3251,43 @@ begin
   end;
 end;
 
+function TTidLocal.CalcLargeCacheSize: integer;
+var
+  MasterRowCount: double;
+  ChangeCount: double;
+  CacheSize: double;
+begin
+  FParentTable.FMasterRowLock.Acquire;
+  try
+    MasterRowCount := FParentTable.FMasterRowList.Count;
+  finally
+    FParentTable.FMasterRowLock.Release;
+  end;
+  ChangeCount := 2* FCPRows.Count; //Edit is worst case.
+  { Claude says, with more mathematical knowledge than me:
+    U ≈ K × (log₂(M/K) + 1), capped at M.
+    K = Number of changes, call it 2 for each FCPRow.
+    M = Number of nodes in the old tree.
+  }
+  if (ChangeCount <= MasterRowCount) and (ChangeCount > 0) then
+  begin
+    CacheSize := ChangeCount
+      * (Math.Log2(MasterRowCount / ChangeCount) + 1);
+    if CacheSize > MasterRowCount then
+      CacheSize := MasterRowCount;
+  end
+  else
+    if ChangeCount > 0 then
+      CacheSize := MasterRowCount
+    else
+      CacheSize := 0;
+
+  Assert(CacheSize >= 0);
+
+  CacheSize := CacheSize + SMALL_NODE_PIN_CACHE_SIZE;
+  result := Trunc(CacheSize);
+end;
+
 function TTidLocal.BuildCheckPartialIndexParallel(Ref1, Ref2: pointer): pointer;
 var
   C: TMemDBStreamable;
@@ -3160,9 +3326,7 @@ begin
 
   ListTmp := nil;
   try
-    //This is not big enough for small changes,
-    //but is big enough for entire tree. TODO - tune this.
-    Index.PushLargeCache(((3* FCPRows.Count) div 2) + SMALL_NODE_PIN_CACHE_SIZE);
+    Index.PushLargeCache(CalcLargeCacheSize);
 
     //TidLocal row set will not change under commit lock.
     IRec := FCPRows.GetAnItem;
@@ -3355,9 +3519,7 @@ begin
   //TidLocal row set will not change under commit lock.
   ListTmp := nil;
   try
-    //This is not big enough for small changes,
-    //but is big enough for entire tree. TODO - tune this.
-    Index.PushLargeCache(((3* FCPRows.Count) div 2) + SMALL_NODE_PIN_CACHE_SIZE);
+    Index.PushLargeCache(CalcLargeCacheSize);
 
     IRec := FCPRows.GetAnItem;
     while Assigned(IRec) do
@@ -4074,19 +4236,10 @@ begin
         result := nil;
     end;
     try
+      //Unfortunately data is immutable whilst indexed.
       Cursor.Row.RemoveFromLocalIndices(self);
-      try
-        //Unfortunately data is immutable whilst indexed.
-        Cursor.Row.Delete(FTid);
-      except
-        //Even if failed (typically concurrency case unless data totally hosed),
-        //re-add back in to local indices, which improves the situation
-        //where txion local data is used instead of an immediate abort.
-        //This case tested in RowEditDeleteConflict.
-
-        Cursor.Row.AddToLocalIndices(self);
-        raise;
-      end;
+      //If delete fails, do not reinsert - rollback txion.
+      Cursor.Row.Delete(FTid);
     except
       //Unfortunately have to alloc new cursor before delete.
       result.Free;
@@ -4146,22 +4299,15 @@ begin
     if not Assigned(Row) then
       raise EMemDbInternalException.Create(S_CURSOR_HAS_NO_ROW_AT_MODIFY);
 
-    //RequestChange will barf if it tries to undelete.
-    //Caught nicely in isolation >= RepeatableRead.
-    //Caught less nicely in isolation CommittedRead
+    //Exceptions in here, do not try to recover, rely on txion rollback.
+    //(re-add if no Next might pin wrong revision).
     Row.RemoveFromLocalIndices(self);
-    try
-      //Unfortunately, local indices can index "Next" items, which need
-      //to be immutable whilst they are in the index.
-      Row.RequestChange(FTid);
-      Next := Row.GetNext(FTid);
-      Next.DeepAssign(FieldList);
-    finally
-      //Even if failed (typically concurrency case unless data totally hosed),
-      //re-add back in to local indices, which improves the situation
-      //where txion local data is used instead of an immediate abort.
-      Row.AddToLocalIndices(self);
-    end;
+
+    Row.RequestChange(FTid);
+    Next := Row.GetNext(FTid);
+    Next.DeepAssign(FieldList);
+
+    Row.AddToLocalIndices(self);
 
     try
       //Similar to existing cursor, but no INode hint.
@@ -4184,8 +4330,13 @@ function TRowIndexNode.CompareItems(OwnItem: TObject; OtherItem: TObject; IndexT
 var
    Own, Other: TMemDBRow;
 begin
+{$IFOPT C+}
   Own := OwnItem as TMemDBRow;
   Other := OtherItem as TMemDBRow;
+{$ELSE}
+  Own := TMemDBRow(OwnItem);
+  Other := TMemDBRow(OtherItem);
+{$ENDIF}
   result := CompareGuids(Other.FRowID, Own.FRowID);
 end;
 
@@ -4197,7 +4348,11 @@ var
 begin
   Assert(not Assigned(OwnItem));
   Assert(Assigned(OtherItem));
+{$IFOPT C+}
   Other := OtherItem as TMemDBRow;
+{$ELSE}
+  Other := TMemDBROw(OtherItem);
+{$ENDIF}
   result := CompareGuids(Other.FRowID, FGuid);
 end;
 
@@ -4227,7 +4382,7 @@ var
   Lock: PRowChangeLock;
 begin
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
-    Assert(DbgUnderCommitLock);
+    Assert(DbgUnderCommitLock > 0);
 {$ENDIF}
   FMasterRowLock.Acquire;
   try
@@ -4262,7 +4417,7 @@ var
   Lock: PRowChangeLock;
 begin
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
-    Assert(DbgUnderCommitLock);
+    Assert(DbgUnderCommitLock > 0);
 {$ENDIF}
   FMasterRowLock.Acquire;
   try
@@ -4286,7 +4441,7 @@ var
   Lock: PRowChangeLock;
 begin
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
-    Assert(DbgUnderCommitLock);
+    Assert(DbgUnderCommitLock > 0);
 {$ENDIF}
   FMasterRowLock.Acquire;
   try
@@ -4420,13 +4575,37 @@ begin
   FMetadata := TMemDbTableMetadata.Create;
 end;
 
-destructor TMemDBTablePersistent.Destroy;
-{$IFNDEF CHECK_TEARDOWN_REFS}
+function TMemDBTablePersistent.TableFastTeardown(Ref1, Ref2: pointer):pointer;
 var
+  Index: TMemDBIndexGeneric;
+begin
+  FParentDB.FIndexThrottle.Acquire;
+  try
+    Index := TObject(Ref1) as TMemDBIndexGeneric;
+    Index.Release; //Should only need one deref at DB teardown time.
+  finally
+    FParentDB.FIndexThrottle.Release;
+  end;
+  result := nil;
+end;
+
+destructor TMemDBTablePersistent.Destroy;
+var
+  Handlers: TParallelHandlers;
+  Refs1: TPHRefs;
+  Refs2: TPHRefs;
+  Excepts: TPHExcepts;
+  Rets: TPHRefs;
+  PCount: integer;
+  i: integer;
+{$IFNDEF CHECK_TEARDOWN_REFS}
   Row: TMemDBRow;
   IRec: TItemRec;
+  RV: TIsRetVal;
 {$ENDIF}
 begin
+  ParallelInit(Handlers, Refs1, Refs2, Excepts, Rets, PCount);
+
   //TidLocal structure should always be empty.
   if Assigned(FTidLocalLock) then
   begin
@@ -4439,6 +4618,51 @@ begin
   end;
 
   //Release indexes first before unceromoniously removing rows underneath them.
+  //No fast teardown in failed constructor case.
+{$IFNDEF CHECK_TEARDOWN_REFS}
+  if FFastTeardown then
+  begin
+    //TODO - Exception handling cases needs to be considered here.
+    //Will not run this path if we've had an out of memory exception.
+
+    try
+      for i := 0 to Pred(FMasterIndexes.Count) do
+      begin
+        Assert(Assigned(FMasterIndexes[i]));
+        ParallelAddHandler(TableFastTeardown, FMasterIndexes[i], nil,
+          Handlers, Refs1, Refs2, Excepts, Rets, PCount);
+        FMasterIndexes[i] := nil;
+      end;
+      ParallelAddHandler(TableFastTeardown, FMasterInternalIndex, nil,
+        Handlers, Refs1, Refs2, Excepts, Rets, PCount);
+      Assert(Assigned(FMasterInternalIndex));
+      FMasterInternalIndex := nil;
+
+      //Swallow exceptions from within the threads, but before they
+      //execute can reasonably recover.
+      if PCount > 0 then
+        ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBRecordAndSwallowExceptions);
+    except
+      //Assuming record and swallow has caught all exceptions the thread is likely
+      //to raise, we're left with failure to allocate arrays, and failure to
+      //start threads.
+      for i := 0 to Pred(FMasterIndexes.Count) do
+      begin
+        if not Assigned(FMasterIndexes[i]) then
+        begin
+          Assert(i < Length(Refs1));
+          FMasterIndexes[i] := TObject(Refs1[i]) as TMemDBIndex;
+        end;
+      end;
+      if not Assigned(FMasterInternalIndex) then
+      begin
+        Assert(Length(Refs1) = Succ(FMasterIndexes.Count));
+        FMasterInternalIndex := TObject(Refs1[FMasterIndexes.Count]) as TMemDBIndexInternal;
+      end;
+    end;
+  end;
+{$ENDIF}
+
   FMasterIndexes.Release;
   FMasterInternalIndex.Release;
 
@@ -4467,7 +4691,11 @@ begin
         //N.B. Ordering here looks a bit nasty.
         //Removing from master list first (because IStore index changes
         //require access to row.
-        FMasterRowList.RemoveItem(IRec);
+        RV := FMasterRowList.RemoveItem(IRec);
+        //If the remove fails, the item stays in the list: raise rather
+        //than loop forever on the same item.
+        if RV <> rvOK then
+          raise EMemDBInternalException.Create(S_INTERNAL_INDEXING_ERROR);
 
         while Row.FProxy.TryRelease do ;
         //Row does not DCP handle in destructor.
@@ -4485,6 +4713,13 @@ begin
   FTidLocalLock.Free;
   FMetadata.Free;
   inherited;
+  ///And now we can forward an exception if necessary.
+  for i := 0 to Pred(Length(Excepts)) do
+    if Assigned(Excepts[i].EClass) then
+    begin
+      MemDBGeneralXlateExceptions(Excepts[i].EClass, Excepts[i].EMsg);
+      ParalleliserForwardCommonExceptions(Excepts[i].EClass, Excepts[i].EMsg);
+    end;
 end;
 
 procedure TMemDBTablePersistent.RowDCPHandleAndForward(Sender: TObject; const Update: TReferenceUpdate);
@@ -4644,12 +4879,16 @@ begin
   TidLocal.UpdateLayout(pinEvolve);
   //In Entity list if CPTids, however does not guarantee has data.
   //Stream only if current metdata indicates not NULL.
-  MCur := FMetadata.GetCurUnderCommitLock;
+  MCur := FMetadata.GetCurForToScratch(PseudoTid, Ctxt);
   if Assigned(MCur) then
   begin
     WrTag(Stream, mstTableStart);
     FMetadata.ToScratch(PseudoTid, Stream, Ctxt);
-    TidLocal.ToScratch(Stream);
+    Assert(TidLocal.FTid = PseudoTid);
+    if (Ctxt as TXTransactionLocalContext).AsynchronousCheckpoint then
+      TidLocal.ToScratchAsynchronous(Stream, Ctxt)
+    else
+      TidLocal.ToScratchSynchronous(Stream, Ctxt);
     WrTag(Stream, mstTableEnd);
   end;
 end;
@@ -4759,7 +4998,16 @@ begin
       TidLocal := TidLocal.FTidLocalLinks.FLink.Owner as TTidLocal;
     end;
 {$ENDIF}
-    TidLocal := TTidLocal.Create;
+{$IFOPT C+}
+    TidLocal := GetCacheBlockForTid(Tid).TidLocalCache.GetFromCache as TTidLocal;
+{$ELSE}
+    TidLocal := TTidLocal(GetCacheBlockForTid(Tid).TidLocalCache.GetFromCache);
+{$ENDIF}
+    if not Assigned(TidLocal) then
+    begin
+      TidLocal := TTidLocal.Create;
+      TidLocal.CreateCachedInternals(Tid);
+    end;
     TidLocal.Init(self, Tid);
   finally
     FTidLocalLock.Release;
@@ -4858,7 +5106,8 @@ begin
       FindRmRowProhibitLocks(Tid);
     end;
     ccpCleardown: begin
-      TidLocal.Free;
+      Assert(Assigned(TidLocal.MyCache));
+      (TidLocal.MyCache as TTidLocalCache).PutToCache(TidLocal)
     end;
   end;
 end;
@@ -4885,7 +5134,8 @@ begin
         rbpIndexRollback: TidLocal.IndexRollback(Ctxt);
         rbpDelayedRollback: begin
           TidLocal.Rollback;
-          TidLocal.Free;
+          Assert(Assigned(TidLocal.MyCache));
+          (TidLocal.MyCache as TTidLocalCache).PutToCache(TidLocal);
           //Not particularly harmful if we remove table mod locks late.
           FindRmRowProhibitLocks(Tid);
         end;
@@ -5129,7 +5379,7 @@ procedure TMemDBForeignKeyPersistent.ToScratch(const PseudoTid:TTransactionId; S
 var
   CP: TMemDBStreamable;
 begin
-  CP := FMetadata.GetCurUnderCommitLock;
+  CP := FMetadata.GetCurForToScratch(PseudoTid, Ctxt);
   if Assigned(CP) then
   begin
     WrTag(Stream, mstFkStart);
@@ -5952,7 +6202,8 @@ begin
               DelRowFields, Meta.FieldDefsReferredAbsIdx));
 {$ENDIF}
             DeletedRV := Meta.Lists.FReferredDeleted.RemoveItem(DeletedIRec);
-            Assert(DeletedRV = rvOK);
+            if DeletedRV <> rvOK then
+              raise EMemDBInternalException.Create(S_FKEYS_INTERNAL_5);
           end;
           DeletedIRec := NextDeletedIRec;
         end;
@@ -6558,11 +6809,27 @@ begin
   end;
 end;
 
+procedure TMemDBRow.RemoveFromLocalIndex(TidLocal: TTidLocal; Index: TMemDbIndexGeneric; var ListTmp: TList);
+var
+  Pin: PMemDbIndexPin;
+begin
+  Pin := TidLocal.GetIPinForIndex(self, Index, abCurrent, ListTmp);
+  try
+    if not Assigned(Pin) then
+        raise EMemDBException.Create(S_LOCAL_INDEX_DELETION_BAD_1);
+        //Can be deleted by other API object in same transaction ...
+    if not Index.Remove(abCurrent, Pin.INode) then
+        raise EMemDBInternalException.Create(S_LOCAL_INDEX_DELETION_BAD_2);
+  finally
+    if Assigned(Pin) then
+      ReleaseIndexPinOutsideLock(Pin, nil);
+  end;
+end;
+
 procedure TMemDBRow.RemoveFromLocalIndices(TidLocal: TTidLocal);
 var
   Index: TMemDbIndexGeneric;
   i: integer;
-  Pin: PMemDbIndexPin;
   ListTmp: TList;
 begin
   ListTmp := nil;
@@ -6573,18 +6840,8 @@ begin
         Index:= TidLocal.FInternalIndexCopy
       else
         Index := TidLocal.FLocalIndexCopies.Items[i] as TMemDbIndex;
-
-      Pin := TidLocal.GetIPinForIndex(self, Index, abCurrent, ListTmp);
-      try
-        if not Assigned(Pin) then
-            raise EMemDBException.Create(S_LOCAL_INDEX_DELETION_BAD_1);
-            //Can be deleted by other API object in same transaction ...
-        if not Index.Remove(abCurrent, Pin.INode) then
-            raise EMemDBInternalException.Create(S_LOCAL_INDEX_DELETION_BAD_2);
-      finally
-        if Assigned(Pin) then
-          ReleaseIndexPinOutsideLock(Pin, nil);
-      end;
+      //Not rolled back if this fails part way: see note above.
+      RemoveFromLocalIndex(TidLocal, Index, ListTmp);
     end;
   finally
     ListTmp.Free;
@@ -6596,47 +6853,65 @@ var
   Index: TMemDbIndexGeneric;
   Pin: PMemDbIndexPin;
   INode: TMemDbIndexLeafGeneric;
-  i: integer;
+  i, j: integer;
+  LastAdded: integer;
   ListTmp: TList;
 begin
   //Because of index de-duplication, we can't determine duplicate addition via
   //inode. However, because the index is local, we can be sure there
   //should not be any candidate IPins with our local index as the original index.
   ListTmp := nil;
+  LastAdded := -2; //Indices -1 .. LastAdded have had this row added.
   try
-    for i := -1 to Pred(TidLocal.FLocalIndexCopies.Count) do
-    begin
-      if i < 0 then
-        Index:= TidLocal.FInternalIndexCopy
-      else
-        Index := TidLocal.FLocalIndexCopies.Items[i] as TMemDbIndex;
+    try
+      for i := -1 to Pred(TidLocal.FLocalIndexCopies.Count) do
+      begin
+        if i < 0 then
+          Index:= TidLocal.FInternalIndexCopy
+        else
+          Index := TidLocal.FLocalIndexCopies.Items[i] as TMemDbIndex;
 
 {$IFOPT C+}
-      //This pre-check is a bit expensive for a release build.
-      Pin := TidLocal.GetIPinForIndex(self, Index, abCurrent, ListTmp);
-      if Assigned(Pin) then
-      begin
+        //This pre-check is a bit expensive for a release build.
+        Pin := TidLocal.GetIPinForIndex(self, Index, abCurrent, ListTmp);
+        if Assigned(Pin) then
+        begin
+          try
+            Assert(Pin.INode.OriginalIndex = Index);
+            raise EMemDBInternalException.Create(S_LOCAL_INDEX_INSERTION_DUPLICATE);
+          finally
+            ReleaseIndexPinOutsideLock(Pin, nil);
+          end;
+        end;
+{$ENDIF}
+        //OK, we're in with a chance of a good insertion.
+        if i < 0 then
+          INode := TMemDBInternalIndexLeaf.Create
+        else
+          INode := TMemDbIndexLeaf.Create;
         try
-          Assert(Pin.INode.OriginalIndex = Index);
-          raise EMemDBInternalException.Create(S_LOCAL_INDEX_INSERTION_DUPLICATE);
+          if not self.PinForIndex(TidLocal.FTid, TABSelType.abLatest, INode) then
+            raise EMemDbInternalException.Create(S_LOCAL_INDEX_INSERTION_BAD_1);
+          if not Index.Add(abCurrent, INode) then
+            raise EMemDbInternalException.Create(S_LOCAL_INDEX_INSERTION_BAD_2);
+          LastAdded := i;
         finally
-          ReleaseIndexPinOutsideLock(Pin, nil);
+          INode.Release;
         end;
       end;
-{$ENDIF}
-      //OK, we're in with a chance of a good insertion.
-      if i < 0 then
-        INode := TMemDBInternalIndexLeaf.Create
-      else
-        INode := TMemDbIndexLeaf.Create;
-      try
-        if not self.PinForIndex(TidLocal.FTid, TABSelType.abLatest, INode) then
-          raise EMemDbInternalException.Create(S_LOCAL_INDEX_INSERTION_BAD_1);
-        if not Index.Add(abCurrent, INode) then
-          raise EMemDbInternalException.Create(S_LOCAL_INDEX_INSERTION_BAD_2);
-      finally
-        INode.Release;
+    except
+      //Roll back a partial addition by removal.
+      for j := LastAdded downto -1 do
+      begin
+        if j < 0 then
+          Index:= TidLocal.FInternalIndexCopy
+        else
+          Index := TidLocal.FLocalIndexCopies.Items[j] as TMemDbIndex;
+        //No exception handler here, failure is in itself an error,
+        //(this should work), happy for internal exception to mask original.
+        RemoveFromLocalIndex(TidLocal, Index, ListTmp);
       end;
+      raise;
     end;
   finally
     ListTmp.Free;
@@ -6979,11 +7254,11 @@ var
 begin
   Entity := TMemDBEntity(Ref1);
   PreContext := PPOPreContext(Ref2);
-  Entity.FParentDB.FEntityThrottle.Acquire;
+  FEntityThrottle.Acquire;
   try
     Entity.PreCommit(PreContext.Tid, PreContext.Phase, PreContext.Opts, PreContext.Ctxt);
   finally
-    Entity.FParentDB.FEntityThrottle.Release;
+    FEntityThrottle.Release;
   end;
   result := nil;
 end;
@@ -7213,11 +7488,11 @@ var
 begin
   Entity := TMemDBEntity(Ref1);
   PContext := PPOPrepareContext(Ref2);
-  Entity.FParentDB.FEntityThrottle.Acquire;
+  FEntityThrottle.Acquire;
   try
     Entity.Prepare(PContext.Tid, PContext.Opts, PContext.FromScratch, PContext.Ctxt);
   finally
-    Entity.FParentDB.FEntityThrottle.Release;
+    FEntityThrottle.Release;
   end;
   result := nil;
 end;
@@ -7330,6 +7605,8 @@ begin
   Stream.WriteBuffer(i64, sizeof(i64));
   CtxtLocal := Ctxt as TXTransactionLocalContext;
 
+  //There are arguments for making this PseduoTid.Iso,
+  //but it doesn't make any practical difference.
   EList := CTxtLocal.GetEntityList(Low(TMDBIsolationLevel));
   try
     for i := 0 to Pred(EList.Count) do
@@ -7578,11 +7855,11 @@ begin
   Entity := TMemDBEntity(Ref1);
   PPOContext := PPOCommitContext(Ref2);
 
-  Entity.FParentDB.FEntityThrottle.Acquire;
+  FEntityThrottle.Acquire;
   try
     Entity.Commit(PPOContext.Tid, PPOContext.Phase, PPOContext.Opts, PPOContext.Ctxt);
   finally
-    Entity.FParentDB.FEntityThrottle.Release;
+    FEntityThrottle.Release;
   end;
   result := nil;
 end;
@@ -7602,6 +7879,7 @@ var
   Rets: TPHRefs;
   PCount: integer;
   TPOComm: TPOCommitContext;
+  NCache: TMemDbNodeCache;
 
 begin
   inherited;
@@ -7632,8 +7910,16 @@ begin
     end;
     if OptApplies(optEntitiesParallel, Opts) and (PCount > 0) then
       ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
+
     if Phase = ccpCleardown then
-      ConsolidateAndFreeCaches(Ctxt);
+    begin
+      for i := Pred(CTxtLocal.FCacheList.Count) downto 0 do
+      begin
+        NCache := TMemDBNodeCache(CTxtLocal.FCacheList[i]);
+        CTxtLocal.FCacheList.Delete(i);
+        NCache.Free;
+      end;
+    end;
   finally
     CtxtLocal.PutEntityList(EList);
   end;
@@ -7656,11 +7942,11 @@ begin
   Entity := TMemDBEntity(Ref1);
   PPORoll := PPORollbackContext(Ref2);
 
-  Entity.FParentDB.FEntityThrottle.Acquire;
+  FEntityThrottle.Acquire;
   try
     Entity.Rollback(PPORoll.Tid, PPORoll.Phase, PPORoll.Opts, PPORoll.Ctxt);
   finally
-    Entity.FParentDB.FEntityThrottle.Release;
+    FEntityThrottle.Release;
   end;
   result := nil;
 end;
@@ -7681,6 +7967,7 @@ var
   PCount: integer;
   TPORoll: TPORollbackContext;
   Parallel: boolean;
+  NCache: TMemDBNodeCache;
 
 begin
   inherited;
@@ -7720,42 +8007,20 @@ begin
         ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBXlateExceptions);
 
       if Phase = rbpDelayedRollback then
-        ConsolidateAndFreeCaches(Ctxt);
+      begin
+        for i := Pred(CTxtLocal.FCacheList.Count) downto 0 do
+        begin
+          NCache := TMemDBNodeCache(CTxtLocal.FCacheList[i]);
+          CTxtLocal.FCacheList.Delete(i);
+          NCache.Free;
+        end;
+      end;
     finally
       CtxtLocal.PutEntityList(EList);
     end;
   end;
 end;
 
-procedure TMemDBDatabasePersistent.ConsolidateAndFreeCaches(Ctxt: TTXLocalContext);
-var
-  MCache: TMemDbNodeCache;
-  CETxt: TXTransactionLocalContext;
-  i, TSize: integer;
-begin
-  //This does not *have* to work, things will just run faster when it does.
-  //Put all the caches together, put into one big sorted list,
-  //And then free the whole lot sequentially.
-  CETxt := Ctxt as TXTransactionLocalContext;
-  MCache := nil;
-  TSize := 0;
-  try
-    for i := 0 to Pred(CETxt.FCacheList.Count) do
-      Inc(TSize, TMemDBNodeCache(CETxt.FCacheList[i]).Count);
-    MCache := TMemDBNodeCache.Create;
-    //All mem-alloc is done up front here.
-    MCache.Capacity := TSize;
-    //Copying and freeing from here on in
-    for i := 0 to Pred(CETxt.FCacheList.Count) do
-      MCache.TakeNodesFrom(TMemDBNodeCache(CETxt.FCacheList[i]));
-    for i := 0 to Pred(CETxt.FCacheList.Count) do
-      TMemDBNodeCache(CETxt.FCacheList[i]).Free;
-    CETxt.FCacheList.Clear;
-  except
-    on EOutOfMemory do
-  end;
-  MCache.Free;
-end;
 
 procedure TMemDBDatabasePersistent.SizeHint(const Tid: TTransactionID; var SizeHint: TDBSizeHint; Ctxt: TTXLocalContext);
 var
@@ -7876,6 +8141,34 @@ begin
   FIndexThrottle := TSemaphore.Create(nil, FPolicies.MaxParallel, High(integer), '', false);
 end;
 
+{
+procedure ParallelInit(
+  var Handlers: TParallelHandlers;
+  var Refs1: TPHRefs;
+  var Refs2: TPHRefs;
+  var Excepts: TPHExcepts;
+  var Rets: TPHRefs;
+  var PCount: integer);
+begin
+}
+
+function TMemDBDatabasePersistent.DBFastTeardown(Ref1, Ref2: pointer):pointer;
+var
+  Proxy: TMemDBEntityProxy;
+  Entity: TMemDBEntity;
+begin
+  FEntityThrottle.Acquire;
+  try
+    Proxy := TObject(Ref1) as TMemDBEntityProxy;
+    Entity := Proxy.Proxy as TMemDBEntity;
+    Entity.FastTeardown := true;
+    while Proxy.TryRelease do ;
+  finally
+    FEntityThrottle.Release;
+  end;
+  result := nil;
+end;
+
 destructor TMemDBDatabasePersistent.Destroy;
 var
   EntityList: TReffedList;
@@ -7890,7 +8183,15 @@ var
   FKs, Del: boolean;
   Ctxt: TXTransactionLocalContext;
 {$ENDIF}
+  Handlers: TParallelHandlers;
+  Refs1: TPHRefs;
+  Refs2: TPHRefs;
+  Excepts: TPHExcepts;
+  Rets: TPHRefs;
+  PCount: integer;
 begin
+  ParallelInit(Handlers, Refs1, Refs2, Excepts, Rets, PCount);
+
   EntSnapshot := nil;
   EntRegistered := nil;
 {$IFDEF CHECK_TEARDOWN_REFS}
@@ -7900,46 +8201,50 @@ begin
   try
     for FKs := True downto False do
     begin
-      PseudoTid := TTransactionId.NewTransactionId(ilSerialisable);
-      EntSnapshot.Release;
-      EntSnapShot := nil;
-      EntRegistered.Release;
-      EntRegistered := nil;
-
-      StartTransaction(PseudoTid, Ctxt);
-      //Destructor, raw entity list OK.
-      EntityList := AssembleEntityList;
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+      Inc(DbgUnderCommitLock); //Serialised, no commit lock needed.
+{$ENDIF}
       try
-        for i := 0 to Pred(EntityList.Count) do
-        begin
-          Proxy := EntityList.Items[i] as TMemDBEntityProxy;
-          Entity := Proxy.Proxy as TMemDBEntity;
-          if FKs then begin
-            Del := Entity is TMemDBForeignKeyPersistent
-          end else begin
-            Del := Entity is TMemDBTablePersistent;
+        PseudoTid := TTransactionId.NewTransactionId(ilSerialisable);
+        EntSnapshot.Release;
+        EntSnapShot := nil;
+        EntRegistered.Release;
+        EntRegistered := nil;
+
+        StartTransaction(PseudoTid, Ctxt);
+        //Destructor, raw entity list OK.
+        EntityList := AssembleEntityList;
+        try
+          for i := 0 to Pred(EntityList.Count) do
+          begin
+            Proxy := EntityList.Items[i] as TMemDBEntityProxy;
+            Entity := Proxy.Proxy as TMemDBEntity;
+            if FKs then begin
+              Del := Entity is TMemDBForeignKeyPersistent
+            end else begin
+              Del := Entity is TMemDBTablePersistent;
+            end;
+            if Del then
+              Entity.Metadata.Delete(PseudoTid);
+              //Should clear all pins and refs, assuming no oustanding txions.
           end;
-          if Del then
-            Entity.Metadata.Delete(PseudoTid);
-            //Should clear all pins and refs, assuming no oustanding txions.
+        finally
+          EntityList.Release;
         end;
+        Prepare(PseudoTid, CleardownOptSet, false, Ctxt);
+        ToJournal(PseudoTid, NullStream, Ctxt);
+        PreCommit(PseudoTid, pcpEntitySet, CleardownOptSet, Ctxt);
+        PreCommit(PseudoTid, pcpTables, CleardownOptSet, Ctxt);
+        PreCommit(PseudoTid, pcpFKeys, CleardownOptSet, Ctxt);
+        Commit(PseudoTid, ccpData, CleardownOptSet, Ctxt);
+        Commit(PseudoTid, ccpMetaIndex, [], Ctxt);
+        Commit(PseudoTid, ccpCleardown, CleardownOptSet, Ctxt);
       finally
-        EntityList.Release;
+{$IFDEF DBG_UNDER_COMMIT_LOCK}
+        Assert(DbgUnderCommitLock > 0);
+        Dec(DbgUnderCommitLock);
+{$ENDIF}
       end;
-{$IFDEF DBG_UNDER_COMMIT_LOCK}
-      DbgUnderCommitLock := true;
-{$ENDIF}
-      Prepare(PseudoTid, CleardownOptSet, false, Ctxt);
-      ToJournal(PseudoTid, NullStream, Ctxt);
-      PreCommit(PseudoTid, pcpEntitySet, CleardownOptSet, Ctxt);
-      PreCommit(PseudoTid, pcpTables, CleardownOptSet, Ctxt);
-      PreCommit(PseudoTid, pcpFKeys, CleardownOptSet, Ctxt);
-      Commit(PseudoTid, ccpData, CleardownOptSet, Ctxt);
-      Commit(PseudoTid, ccpMetaIndex, [], Ctxt);
-      Commit(PseudoTid, ccpCleardown, CleardownOptSet, Ctxt);
-{$IFDEF DBG_UNDER_COMMIT_LOCK}
-      DbgUnderCommitLock := false;
-{$ENDIF}
     end;
   finally
     NullStream.Free;
@@ -7948,19 +8253,58 @@ begin
     EntRegistered.Release;
   end;
 {$ELSE}
-  //Destructor, raw entity list OK.
-  EntityList := AssembleEntityList;
-  try
-    for i := 0 to Pred(EntityList.Count) do
-    begin
-      Proxy := EntityList.Items[i] as TMemDBEntityProxy;
-      //Refcount should be 1 (has metadata),
-      //expect no client code running.
-      while Proxy.TryRelease do ;
-      EntityList.Items[i] := nil;
+  //No fast teardown in failed ctor case.
+  if FFastTeardown then
+  begin
+    //When everything in working set, does little except hammer the mem manager locks.
+    //when everything *not* in working set, and a decent SSD, we get a performance
+    //speedup from multiple threads issuing page faults in parallel.
+
+    //TODO - Exception handling cases needs to be considered here.
+    //Will not run this path if we've had an out of memory exception.
+
+    EntityList := AssembleEntityList;
+    try
+      for i := 0 to Pred(EntityList.Count) do
+      begin
+        Assert(Assigned(EntityList.Items[i]));
+        Proxy := EntityList.Items[i] as TMemDBEntityProxy;
+        ParallelAddHandler(DBFastTeardown, Proxy, nil,
+          Handlers, Refs1, Refs2, Excepts, Rets, PCount);
+        EntityList.Items[i] := nil;
+      end;
+      if PCount > 0 then
+        ExecParallel(Handlers, Refs1, Refs2, Excepts, Rets, @MemDBRecordAndSwallowExceptions);
+    except
+      for i := 0 to Pred(EntityList.Count) do
+      begin
+        if not Assigned(EntityList.Items[i]) then
+        begin
+          Assert(i < Length(Refs1));
+          Proxy := Refs1[i];
+          EntityList.Items[i] := Proxy;
+        end;
+      end;
     end;
-  finally
+    //Might actually release the whole thing...
     EntityList.Release;
+  end
+  else
+  begin
+    //Destructor, raw entity list OK.
+    EntityList := AssembleEntityList;
+    try
+      for i := 0 to Pred(EntityList.Count) do
+      begin
+        Proxy := EntityList.Items[i] as TMemDBEntityProxy;
+        //Refcount should be 1 (has metadata),
+        //expect no client code running.
+        while Proxy.TryRelease do ;
+        EntityList.Items[i] := nil;
+      end;
+    finally
+      EntityList.Release;
+    end;
   end;
 {$ENDIF}
   Assert(DlItemIsEmpty(@FEntityList));
@@ -7971,6 +8315,12 @@ begin
   FEntityThrottle.Free;
   FIndexThrottle.Free;
   inherited;
+  for i := 0 to Pred(Length(Excepts)) do
+    if Assigned(Excepts[i].EClass) then
+    begin
+      MemDBGeneralXlateExceptions(Excepts[i].EClass, Excepts[i].EMsg);
+      ParalleliserForwardCommonExceptions(Excepts[i].EClass, Excepts[i].EMsg);
+    end;
 end;
 
 function TMemDBDatabasePersistent.HandleInterfacedObjRequest(Transaction: TObject; ID: TMemDBAPIId): TMemDBAPI;
@@ -8397,7 +8747,11 @@ end;
 destructor TMemDblBufListHelper.Destroy;
 begin
   ClearLists;
+  FOnChangeRequest := nil;
   inherited;
 end;
 
+initialization
+  Assert(@MemDBXlateExceptions = @MemDBXlateExceptions[0]);
+  Assert(@MemDBRecordAndSwallowExceptions = @MemDBRecordAndSwallowExceptions[0]);
 end.

@@ -1,11 +1,11 @@
-unit SRWLockWrapper;
+ï»¿unit SRWLockWrapper;
 
 {
 
-Copyright © 2025 Martin Harvey <martin_c_harvey@hotmail.com>
+Copyright Â© 2025 Martin Harvey <martin_c_harvey@hotmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the “Software”), to deal in
+this software and associated documentation files (the â€œSoftwareâ€), to deal in
 the Software without restriction, including without limitation the rights to
 use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
 of the Software, and to permit persons to whom the Software is furnished to do
@@ -14,7 +14,7 @@ so, subject to the following conditions:
 The above copyright notice and this permission notice shall be included in
 all copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+THE SOFTWARE IS PROVIDED â€œAS ISâ€, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
@@ -28,10 +28,9 @@ interface
 
 {$IFDEF MSWINDOWS}
 
+//N.B. Must not use Trackables: Trackables -> LockAbstractions -> SRWLockWrapper
+//would be a circular unit reference.
 uses
-{$IFDEF USE_TRACKABLES}
-  Trackables,
-{$ENDIF}
   Winapi.Windows;
 
 (*
@@ -51,11 +50,7 @@ type
 
   { N.B. Note that this SRWLock is *not* recursive.
     It also doesn't allow promotion of readers to writers. }
-{$IFDEF USE_TRACKABLES}
-  TSRWLock = class(TTrackable)
-{$ELSE}
   TSRWLock = class
-{$ENDIF}
   private
     FLock: RTL_SRWLOCK;
   public

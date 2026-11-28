@@ -1,9 +1,32 @@
 unit SBatchUtils;
+{
+
+Copyright © 2026 Martin Harvey <martin_c_harvey@hotmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.
+
+}
 
 interface
 
 uses
-  SysUtils, Classes, SyncObjs, WorkItems;
+  SysUtils, Classes, LockAbstractions, WorkItems;
 
 type
   EBatchSudokuError = class(Exception);
@@ -87,7 +110,7 @@ function TSudokuSpecList.InterlockedGetString: string;
 var
   Idx: integer;
 begin
-  Idx := Pred(TInterlocked.Increment(FIndex));
+  Idx := Pred(LockAbstractions.InterlockedIncrement(FIndex));
   if Idx < FStrings.Count then
     result := FStrings[idx]
   else
@@ -108,7 +131,7 @@ var
 
   procedure DoError;
   begin
-    if TInterlocked.Increment(Error) < 10 then
+    if LockAbstractions.InterlockedIncrement(Error) < 10 then
     begin
       ErrStr := 'Error on puzzle (roughly) ' + IntToStr(SpecList.FIndex) +
       ' : ' + PuzzleDesc;
@@ -163,8 +186,8 @@ begin
       case Solver.Stats.Classification of
         scInvalid, scMany:
           DoError;
-        scNone: TInterlocked.Increment(Unsolved);
-        scOne: TInterlocked.Increment(Solved);
+        scNone: LockAbstractions.InterlockedIncrement(Unsolved);
+        scOne: LockAbstractions.InterlockedIncrement(Solved);
       end;
 next:
       PuzzleDesc := SpecList.InterlockedGetString;
@@ -172,7 +195,7 @@ next:
   finally
     Solver.Free;
     TmpBoardState.Free;
-    SolversRunning := TInterlocked.Decrement(WorkItemsOutstanding);
+    SolversRunning := LockAbstractions.InterlockedDecrement(WorkItemsOutstanding);
     if SolversRunning = 0 then
       WorkItemsDone.SetEvent;
   end;

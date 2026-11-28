@@ -421,85 +421,86 @@ begin
 
       result := NewNode;
       NewNode := nil; // transfer ownership
-      Exit;
-    end;
-
-    comparison := item.compare(InP, true);
-
-    if comparison > 0 then
-    begin
-      // go left
-      CallP := InP.left;
-      Retp := SearchAndInsertInt(item, CallP, h, found, consumed);
-      if Assigned(RetP) then //subtree ptr changed, but we know what it was before.
-      begin
-        Assert(RetP <> CallP);
-        Tmp := InP.DupInit(self);
-        // LEFT comes from recursion → TRANSFER (NO AddRef)
-        Tmp.left := RetP;
-        RetP := nil;
-        // RIGHT comes from existing tree → SHARE (AddRef)
-{$IFOPT C+}
-        Tmp.right := InP.right.AddRef as TCowTreeItem;
-{$ELSE}
-        Tmp.right := TCowTreeItem(InP.right.AddRef);
-{$ENDIF}
-        Tmp.bal := InP.bal;
-      end;
-
-      if RdCk(h) and not RdCk(found) then
-      begin
-        Assert(Assigned(Tmp));
-        CallP := Tmp;
-        Retp := BalanceLeft(CallP, false, h);
-        Assert(RetP <> CallP);
-        Tmp.ReleaseToCache(Self.FCache);  //Release newly created temp.
-        Tmp := RetP;
-        RetP := nil;
-      end;
-    end
-    else if comparison < 0 then
-    begin
-      // go right
-      CallP := InP.right;
-      Retp := SearchAndInsertInt(item, CallP, h, found, consumed);
-      if Assigned(RetP) then  //subtree ptr changed, but we know what it was before.
-      begin
-        Assert(RetP <> CallP);
-        Tmp := InP.DupInit(self);
-        // LEFT comes from existing tree → SHARE (AddRef)
-{$IFOPT C+}
-        Tmp.left := InP.left.AddRef as TCowTreeItem;
-{$ELSE}
-        Tmp.left := TCowTreeItem(InP.left.AddRef);
-{$ENDIF}
-        // RIGHT comes from recursion → TRANSFER (NO AddRef)
-        Tmp.right := RetP;
-        RetP := nil;
-        Tmp.bal := InP.bal;
-      end;
-
-      if RdCk(h) and not RdCk(found) then
-      begin
-        Assert(Assigned(Tmp));
-        CallP := Tmp;
-        Retp := BalanceRight(CallP, false, h);
-        Assert(RetP <> CallP);
-        Tmp.ReleaseToCache(Self.FCache);  //Release newly created temp.
-        Tmp := RetP;
-        RetP := nil;
-      end;
     end
     else
     begin
-      // duplicate
-      WrCk(h, false);
-      WrCk(found, true);
-      //Tmp still nil, RetP nil.
-    end;
+      comparison := item.compare(InP, true);
 
-    Result := Tmp;
-    Tmp := nil;
+      if comparison > 0 then
+      begin
+        // go left
+        CallP := InP.left;
+        Retp := SearchAndInsertInt(item, CallP, h, found, consumed);
+        if Assigned(RetP) then //subtree ptr changed, but we know what it was before.
+        begin
+          Assert(RetP <> CallP);
+          Tmp := InP.DupInit(self);
+          // LEFT comes from recursion → TRANSFER (NO AddRef)
+          Tmp.left := RetP;
+          RetP := nil;
+          // RIGHT comes from existing tree → SHARE (AddRef)
+  {$IFOPT C+}
+          Tmp.right := InP.right.AddRef as TCowTreeItem;
+  {$ELSE}
+          Tmp.right := TCowTreeItem(InP.right.AddRef);
+  {$ENDIF}
+          Tmp.bal := InP.bal;
+        end;
+
+        if RdCk(h) and not RdCk(found) then
+        begin
+          Assert(Assigned(Tmp));
+          CallP := Tmp;
+          Retp := BalanceLeft(CallP, false, h);
+          Assert(RetP <> CallP);
+          Tmp.ReleaseToCache(Self.FCache);  //Release newly created temp.
+          Tmp := RetP;
+          RetP := nil;
+        end;
+      end
+      else if comparison < 0 then
+      begin
+        // go right
+        CallP := InP.right;
+        Retp := SearchAndInsertInt(item, CallP, h, found, consumed);
+        if Assigned(RetP) then  //subtree ptr changed, but we know what it was before.
+        begin
+          Assert(RetP <> CallP);
+          Tmp := InP.DupInit(self);
+          // LEFT comes from existing tree → SHARE (AddRef)
+  {$IFOPT C+}
+          Tmp.left := InP.left.AddRef as TCowTreeItem;
+  {$ELSE}
+          Tmp.left := TCowTreeItem(InP.left.AddRef);
+  {$ENDIF}
+          // RIGHT comes from recursion → TRANSFER (NO AddRef)
+          Tmp.right := RetP;
+          RetP := nil;
+          Tmp.bal := InP.bal;
+        end;
+
+        if RdCk(h) and not RdCk(found) then
+        begin
+          Assert(Assigned(Tmp));
+          CallP := Tmp;
+          Retp := BalanceRight(CallP, false, h);
+          Assert(RetP <> CallP);
+          Tmp.ReleaseToCache(Self.FCache);  //Release newly created temp.
+          Tmp := RetP;
+          RetP := nil;
+        end;
+      end
+      else
+      begin
+        // duplicate
+        WrCk(h, false);
+        WrCk(found, true);
+        //Tmp still nil, RetP nil.
+      end;
+
+      Result := Tmp;
+      Tmp := nil;
+    end;
   except
     NewNode.Release; //Releases newly created subtree, *including supplied node* on exception.
     Tmp.Release;

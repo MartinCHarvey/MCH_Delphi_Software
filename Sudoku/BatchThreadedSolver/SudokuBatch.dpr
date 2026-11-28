@@ -16,7 +16,9 @@ uses
   BinaryTree in '..\..\Common\Balanced Tree\BinaryTree.pas',
   SudokuAbstracts in '..\SudokuShared\SudokuAbstracts.pas',
   SudokuBoard in '..\Sudoku1\SudokuBoard.pas',
-  BufferedFileStream in '..\..\Common\CachedStream\BufferedFileStream.pas';
+  BufferedFileStream in '..\..\Common\CachedStream\BufferedFileStream.pas',
+  LockAbstractions in '..\..\Common\LockAbstractions\LockAbstractions.pas',
+  SRWLockWrapper in '..\..\Common\SRWLockWrapper\SRWLockWrapper.pas';
 
 var
   Start, Finish: TDateTime;

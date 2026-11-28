@@ -1,0 +1,111 @@
+{
+
+Copyright (c) 2026 Martin Harvey <martin_c_harvey@hotmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.
+
+}
+
+// Exports for the MemDB2 C API. Include in the DLL project's .dpr with:
+//   {$I ..\C_API\MemDB2CApi_Exports.inc}
+// Generated from MemDB2CApi.pas; keep in step with memdb2.h.
+
+exports
+  mdb_api_version,
+  mdb_last_error_code,
+  mdb_last_error_message,
+  mdb_close,
+  mdb_shutdown,
+  mdb_db_open,
+  mdb_db_open_ex,
+  mdb_db_close,
+  mdb_db_checkpoint,
+  mdb_db_checkpoint_ex,
+  mdb_db_state,
+  mdb_db_last_error,
+  mdb_session_open,
+  mdb_session_close,
+  mdb_session_get_temp_storage,
+  mdb_session_set_temp_storage,
+  mdb_txn_begin,
+  mdb_txn_commit,
+  mdb_txn_rollback,
+  mdb_txn_create_table,
+  mdb_txn_create_foreign_key,
+  mdb_txn_rename_entity,
+  mdb_txn_delete_entity,
+  mdb_txn_entity_names,
+  mdb_txn_open_table_meta,
+  mdb_txn_open_table_data,
+  mdb_txn_open_foreign_key,
+  mdb_meta_create_field,
+  mdb_meta_delete_field,
+  mdb_meta_rename_field,
+  mdb_meta_field_type,
+  mdb_meta_field_names,
+  mdb_meta_create_index,
+  mdb_meta_create_multi_index,
+  mdb_meta_delete_index,
+  mdb_meta_rename_index,
+  mdb_meta_index_info,
+  mdb_meta_index_names,
+  mdb_data_locate,
+  mdb_data_find,
+  mdb_data_find_edge,
+  mdb_data_row_selected,
+  mdb_data_append,
+  mdb_data_post,
+  mdb_data_discard,
+  mdb_data_delete,
+  mdb_data_read_int32,
+  mdb_data_read_uint32,
+  mdb_data_read_int64,
+  mdb_data_read_uint64,
+  mdb_data_read_double,
+  mdb_data_read_guid,
+  mdb_data_read_string,
+  mdb_data_read_blob,
+  mdb_data_read_blob_prefix,
+  mdb_data_write_int32,
+  mdb_data_write_uint32,
+  mdb_data_write_int64,
+  mdb_data_write_uint64,
+  mdb_data_write_double,
+  mdb_data_write_guid,
+  mdb_data_write_string,
+  mdb_data_write_blob,
+  mdb_key_create,
+  mdb_key_clear,
+  mdb_key_count,
+  mdb_key_add_int32,
+  mdb_key_add_uint32,
+  mdb_key_add_int64,
+  mdb_key_add_uint64,
+  mdb_key_add_double,
+  mdb_key_add_guid,
+  mdb_key_add_string,
+  mdb_key_add_blob,
+  mdb_fk_set_referencing_child,
+  mdb_fk_set_referenced_parent,
+  mdb_fk_get_child_table,
+  mdb_fk_get_child_index,
+  mdb_fk_get_parent_table,
+  mdb_fk_get_parent_index,
+  mdb_strlist_count,
+  mdb_strlist_get;

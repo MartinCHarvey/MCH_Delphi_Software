@@ -62,6 +62,7 @@ type
     procedure FindCommonRoot(OtherPath: TCanonicalPath);
     procedure Assign(Src: TCanonicalPath); virtual;
     procedure ReRoot(OldRoot, NewRoot: TCanonicalPath);
+    procedure AddComponent(Component: string);
     property Path: string read GetPath write SetPath;
     property PathType: TCanonicalPathType read FPathType;
     property ComponentCount: integer read GetComponentCount write SetComponentCount;
@@ -136,7 +137,7 @@ begin
   if TPath.IsDriveRooted(NewPath) then
   begin
     FPathType := cptDriveRooted;
-    FPrefix := NewPath[1];
+    FPrefix := UpperCase(NewPath[1]);
     NewPath := NewPath.Substring(3);
   end
   else if TPath.IsUNCRooted(NewPath) then
@@ -233,6 +234,11 @@ procedure TCanonicalPath.MakeAbsolute;
 begin
   if FPathType = cptRelative then
     Path := (TPath.Combine(GetCurrentDir, Path));
+end;
+
+procedure TCanonicalPath.AddComponent(Component: string);
+begin
+  Path := TPath.Combine(Path, Component);
 end;
 
 //TODO - Potentially better trailing slash handling to deal with

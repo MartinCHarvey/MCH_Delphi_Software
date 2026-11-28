@@ -16,7 +16,9 @@ uses
   ExactCover in '..\..\..\..\Common\ExactCover\ExactCover.pas',
   SparseMatrix in '..\..\..\..\Common\SparseMatrix\SparseMatrix.pas',
   CellCountSymmetries in '..\..\CellCount\CellCountSymmetries.pas',
-  CellCountShared in '..\..\Shared\CellCountShared.pas';
+  CellCountShared in '..\..\Shared\CellCountShared.pas',
+  LockAbstractions in '..\..\..\..\Common\LockAbstractions\LockAbstractions.pas',
+  SRWLockWrapper in '..\..\..\..\Common\SRWLockWrapper\SRWLockWrapper.pas';
 
 begin
   try

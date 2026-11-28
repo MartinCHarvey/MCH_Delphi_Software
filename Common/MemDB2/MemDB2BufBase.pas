@@ -90,6 +90,13 @@ type
 {$ELSE}
   TTXLocalContext = class
 {$ENDIF}
+  protected
+    //Set by the checkpoint code (via TXTransactionLocalContext).
+    FAsynchronousCheckpoint: boolean;
+  public
+    //If set, ToScratch is running outside the commit lock, and must
+    //pin current copies rather than use GetCurUnderCommitLock.
+    property AsynchronousCheckpoint: boolean read FAsynchronousCheckpoint;
   end;
 
   //Object which can write changes between current and next version to journal.
@@ -280,9 +287,11 @@ type
   public
     constructor Create;
     destructor Destroy; override;
+    //Ordinary cached stuff.
     function GetFromCache: PMemDBIndexPin;
     function PutToCache(Pin: PMemDBIndexPin): boolean;
-    procedure TakeNodesFrom(Cache: TMemDBIPinCache);
+    //Caching the caches.
+    procedure TrimForCacheCache;
     property Capacity: integer read GetCapacity write SetCapacity;
   end;
 
@@ -406,6 +415,10 @@ type
     //pinning. Additionally must be sure you want current current, not
     //some possibly old copy (user indexes etc).
     function GetCurUnderCommitLock: TMemDBStreamable;
+
+    //For ToScratch (checkpoint): asynchronous checkpoints are not under
+    //the commit lock, so pin current, otherwise GetCurUnderCommitLock.
+    function GetCurForToScratch(const PseudoTid: TTransactionId; Ctxt: TTXLocalContext): TMemDBStreamable;
 
     function GetNext(const Tid: TTransactionId): TMemDBStreamable;
     function GetPinLatest(const Tid: TTransactionId;
@@ -581,12 +594,16 @@ end;
 destructor TMemDBIPinCache.Destroy;
 var
   i: integer;
+  P: PMemDBIndexPin;
 begin
   if Assigned(FPtrs) then
   begin
-    FPtrs.Sort(ComparePointers);
-    for i := 0 to Pred(FPtrs.Count) do
-      DisposeIndexPin(PMemDBIndexPin(FPtrs[i]));
+    for i := Pred(FPtrs.Count) downto 0 do
+    begin
+      P := PMemDBIndexPin(FPtrs[i]);
+      FPtrs.Delete(i);
+      DisposeIndexPin(P);
+    end;
   end;
   FPtrs.Free;
   inherited;
@@ -600,7 +617,7 @@ begin
   if Count > 0 then
   begin
     Dec(Count);
-    result := PMemDBIndexPin(FPtrs[Count]);
+    result := PMemDBIndexPin(FPtrs.List[Count]);
     FPtrs.Delete(Count);
   end
   else
@@ -627,13 +644,25 @@ begin
     result := true;
 end;
 
-procedure TMemDBIPinCache.TakeNodesFrom(Cache: TMemDBIPinCache);
+procedure TMemDBIPinCache.TrimForCacheCache;
 var
   i: integer;
+  P: PMemDbIndexPin;
 begin
-  for i := 0 to Pred(Cache.FPtrs.Count) do
-    FPtrs.Add(Cache.FPtrs[i]);
-  Cache.FPtrs.Clear;
+  if Assigned(FPtrs) then
+  begin
+    if FPtrs.Count > SMALL_NODE_PIN_CACHE_SIZE then
+    begin
+      for i := Pred(FPtrs.Count) downto SMALL_NODE_PIN_CACHE_SIZE do
+      begin
+        P := PMemDBIndexPin(FPtrs[i]);
+        FPtrs.Delete(i);
+        DisposeIndexPin(P);
+      end;
+      Assert(FPtrs.Count = SMALL_NODE_PIN_CACHE_SIZE);
+      FPtrs.Capacity := FPtrs.Count;
+    end;
+  end;
 end;
 
 function TMemDBIPinCache.GetCapacity: integer;
@@ -1878,11 +1907,20 @@ var
   Cur: PMemDBMultiItem;
 begin
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
-  Assert(DbgUnderCommitLock);
+  Assert(DbgUnderCommitLock > 0);
 {$ENDIF}
   Cur := FindCurMultiItem;
   Assert(Assigned(Cur));
   result := Cur.Item;
+end;
+
+function TMemDbMultiBuffered.GetCurForToScratch(const PseudoTid: TTransactionId; Ctxt: TTXLocalContext): TMemDBStreamable;
+begin
+  Assert(Assigned(Ctxt));
+  if Ctxt.AsynchronousCheckpoint then
+    result := PinCurrent(PseudoTid, pinEvolve)
+  else
+    result := GetCurUnderCommitLock;
 end;
 
 function TMemDbMultiBuffered.GetNext(const Tid: TTransactionId): TMemDBStreamable;
@@ -2097,7 +2135,7 @@ var
   Current: TMemDbStreamable;
 begin
   inherited;
-  Current := GetCurUnderCommitLock;
+  Current := GetCurForToScratch(PseudoTid, Ctxt);
   ToScratchPinnedMB(Stream, Current);
 end;
 

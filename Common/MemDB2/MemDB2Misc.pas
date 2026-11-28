@@ -243,10 +243,18 @@ const
     'Closed',
     'Closed (Error)');
 
-  THIRTY_TWO_K = 32 * 1024;
-  TWO_FIFTY_SIX_K = 256 * 1024;
-  ONE_MEG = 1024*1024;
+  ONE_K = 1024;
+  THIRTY_TWO_K = 32 * ONE_K;
+{$IFOPT C+}
+  PARALLEL_COMMIT_ROW_COUNT = THIRTY_TWO_K;
+{$ELSE}
+  PARALLEL_COMMIT_ROW_COUNT = ONE_K;
+{$ENDIF}
+  TWO_FIFTY_SIX_K = 256 * ONE_K;
+  ONE_MEG = ONE_K * ONE_K;
+  ONE_TWO_EIGHT_MEG = 128 * ONE_MEG;
   FILE_CACHE_SIZE = ONE_MEG;
+  JOURNAL_PENDING_BYTES_LIMIT = ONE_TWO_EIGHT_MEG;
 
   SMALL_NODE_PIN_CACHE_SIZE = 64; //Longest possible path + rebalances
 
@@ -273,10 +281,14 @@ const
 var
   AllIndexAttrs: TMDBIndexAttrs;
   MemDBXlateExceptions: array [0..1] of TExceptionHandlerChain;
+  MemDBRecordAndSwallowExceptions: array [0..1] of TExceptionHandlerChain;
 
 procedure AppendTrailingDirSlash(var Path: string);
 
 function CompareGuids(const OtherGuid, OwnGuid: TGUID): integer;
+
+procedure MemDBGeneralXlateExceptions(EClass: SysUtils.ExceptClass;
+                              EMsg: string);
 
 //Optimization helper functions.
 type
@@ -303,7 +315,9 @@ function DefaultOptimizePolicies: TOptimizePolicies;
 
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
 var
-  DbgUnderCommitLock: boolean;
+  //Commit lock is recursive: this is a nesting count, not a flag.
+  //Only modified whilst holding the commit lock.
+  DbgUnderCommitLock: integer;
 {$ENDIF}
 
 implementation
@@ -391,7 +405,7 @@ begin
   with result.P[TOptimization.optEntitiesParallel] do
   begin
     PolicyType := optTxionSize;
-    EnabledRowChangeCount := THIRTY_TWO_K;
+    EnabledRowChangeCount := PARALLEL_COMMIT_ROW_COUNT;
     EnabledTxionBufSize := TWO_FIFTY_SIX_K;
     EnabledFKRowsTotal := TWO_FIFTY_SIX_K;
   end;
@@ -403,7 +417,7 @@ begin
   with result.P[TOptimization.optIndexEvolveParallel] do
   begin
     PolicyType := optTxionSize;
-    EnabledRowChangeCount := THIRTY_TWO_K;
+    EnabledRowChangeCount := PARALLEL_COMMIT_ROW_COUNT;
     EnabledTxionBufSize := TWO_FIFTY_SIX_K;
     EnabledFKRowsTotal := TWO_FIFTY_SIX_K;
   end;
@@ -693,6 +707,31 @@ end;
 
 { TMemDBStats }
 
+function MemDbGeneralRecordExceptions(EClass: SysUtils.ExceptClass;
+                                             EMsg: string):TExceptionFilterAction;
+begin
+  while Assigned(EClass) do
+  begin
+    if (EClass = EMemDBInternalException)
+      or (EClass = EMemDBConsistencyException)
+      or (EClass = EMemDBAPIException)
+      or (EClass = EMemDBConcurrencyException)
+      or (EClass = EMemDBException) then
+    begin
+      result := tetaRecordException;
+      exit;
+    end;
+    EClass := SysUtils.ExceptClass(EClass.ClassParent);
+  end;
+  result := tetaIgnore;
+end;
+
+procedure MemDbGeneralNoXlateExceptions(EClass: SysUtils.ExceptClass;
+                              EMsg: string);
+begin
+  { NOP }
+end;
+
 function MemDbGeneralFilterExceptions(EClass: SysUtils.ExceptClass;
                                              EMsg: string):TExceptionFilterAction;
 begin
@@ -733,7 +772,7 @@ end;
 
 initialization
 {$IFDEF DBG_UNDER_COMMIT_LOCK}
-  DbgUnderCommitLock := false;
+  DbgUnderCommitLock := 0;
 {$ENDIF}
 
   AllIndexAttrs := GetAllIndexAttrs;
@@ -745,10 +784,23 @@ initialization
   end;
   with MemDBXlateExceptions[1] do
   begin
-    FilterFunc := ParalleliserFilterCommonExceptions;
+    FilterFunc := ParalleliserPropagateCommonExceptions;
     XLatorFunc := ParalleliserForwardCommonExceptions;
     Next := nil;
   end;
+  with MemDBRecordAndSwallowExceptions[0] do
+  begin
+    FilterFunc := MemDBGeneralRecordExceptions;
+    XlatorFunc := MemDBGeneralNoXlateExceptions;
+    Next := @MemDBRecordAndSwallowExceptions[1];
+  end;
+  with MemDBRecordAndSwallowExceptions[1] do
+  begin
+    FilterFunc := ParalleliserRecordCommonExceptions;
+    XLatorFunc := ParalleliserNoForwardCommonExceptions;
+    Next := nil;
+  end;
+
   //N.B. When you do things in parallel, even commits and rollbacks under the
   //MetaIndex lock involve some degree of memory allocation and freeing.
   //Calling sleep whilst under that lock is fairly terminal for performance.

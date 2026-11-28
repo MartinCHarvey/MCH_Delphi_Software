@@ -51,7 +51,7 @@
         <Base>true</Base>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Base)'!=''">
-        <DCC_Define>ORDER2;$(DCC_Define)</DCC_Define>
+        <DCC_Define>USE_WINDOWS_LOCKS;ORDER2;$(DCC_Define)</DCC_Define>
         <Manifest_File>None</Manifest_File>
         <DCC_Namespace>System;Xml;Data;Datasnap;Web;Soap;$(DCC_Namespace)</DCC_Namespace>
         <VerInfo_Keys>CompanyName=;FileDescription=;FileVersion=1.0.0.0;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=;ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
@@ -119,6 +119,8 @@
         <DCCReference Include="..\..\..\..\Common\ExactCover\ExactCover.pas"/>
         <DCCReference Include="..\..\..\..\Common\SparseMatrix\SparseMatrix.pas"/>
         <DCCReference Include="..\..\Shared\CellCountShared.pas"/>
+        <DCCReference Include="..\..\..\..\Common\LockAbstractions\LockAbstractions.pas"/>
+        <DCCReference Include="..\..\..\..\Common\SRWLockWrapper\SRWLockWrapper.pas"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>
