@@ -1,11 +1,34 @@
-unit MemDBUtils;
+﻿unit MemDB2Utils;
+{
 
-{ Martin Harvey 2019. Some top level utility routines }
+Copyright © 2026 Martin Harvey <martin_c_harvey@hotmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.
+
+}
+
+{ Some top level utility routines }
 
 interface
 
 uses
-  MemDB, MemDBAPI, MEMDBMisc, Classes;
+  MemDB2, MemDB2API, MemDB2Misc, Classes;
 
 procedure CopyDatabase(Src: TMemDB; Dst: TMemDB);
 
@@ -16,7 +39,6 @@ var
   Trans: TMemDBTransaction;
   EntityNames: TStringList;
   DBAPI: TMemAPIDatabase;
-  Entity: TMemDBHandle;
   FKAPI: TMemAPIForeignKey;
   idx: integer;
 begin
@@ -30,12 +52,13 @@ begin
         //Delete all foreign keys.
         for idx := 0 to Pred(EntityNames.Count) do
         begin
-          Entity := DBAPI.OpenTableOrKey(EntityNames[idx]);
-          FKAPI := DBAPI.GetApiObjectFromHandle(Entity, APIForeignKey, false) as TMemAPIForeignKey;
+          //Nil (no exception) if the entity is a table, not a foreign key.
+          FKAPI := DBAPI.GetAPIObjectFromEntity(EntityNames[idx], APIForeignKey, false) as TMemAPIForeignKey;
           if Assigned(FKAPI) then
           begin
-            DBAPI.DeleteTableOrKey(EntityNames[idx]);
+            //Free the API object before deleting the entity it refers to.
             FKAPI.Free;
+            DBAPI.DeleteTableOrKey(EntityNames[idx]);
           end;
         end;
       finally
@@ -73,7 +96,6 @@ begin
 end;
 
 procedure CopyTable(SrcAPI: TMemAPIDatabase;
-                    SrcEntity: TMemDBHandle;
                     EntityName: string;
                     DstSess: TMemDBSession);
 var
@@ -82,7 +104,6 @@ var
   DstTableMeta: TMemAPITableMetadata;
   DstTableData: TMemAPITableData;
   DstTrans: TMemDBTransaction;
-  DstEntity: TMemDBHandle;
   DstAPI: TMemAPIDatabase;
   idx: integer;
   SList: TStringList;
@@ -93,16 +114,17 @@ var
   IndexAttrs: TMDBIndexAttrs;
   Data: TMemDbFieldDataRec;
 begin
-  SrcTableMeta := SrcAPI.GetApiObjectFromHandle(SrcEntity, APITableMetadata) as TMemAPITableMetadata;
-  SrcTableData := SrcAPI.GetApiObjectFromHandle(SrcEntity, APITableData) as TMemAPITableData;
+  SrcTableData := nil;
+  SrcTableMeta := SrcAPI.GetAPIObjectFromEntity(EntityName, APITableMetadata, true) as TMemAPITableMetadata;
   try
+    SrcTableData := SrcAPI.GetAPIObjectFromEntity(EntityName, APITableData, true) as TMemAPITableData;
     //First, create destination table, and add same fields and indexes as source.
     DstTrans := DstSess.StartTransaction(amReadWrite);
     try
       DstAPI := DstTrans.GetAPI;
       try
-        DstEntity := DstAPI.CreateTable(EntityName);
-        DstTableMeta := DstAPI.GetApiObjectFromHandle(DstEntity, APITableMetadata) as TMemAPITableMetadata;
+        DstAPI.CreateTable(EntityName);
+        DstTableMeta := DstAPI.GetAPIObjectFromEntity(EntityName, APITableMetadata, true) as TMemAPITableMetadata;
         try
           //First, fields.
           SList := SrcTableMeta.GetFieldNames;
@@ -144,8 +166,7 @@ begin
     try
       DstAPI := DstTrans.GetAPI;
       try
-        DstEntity := DstAPI.OpenTableOrKey(EntityName);
-        DstTableData := DstAPI.GetApiObjectFromHandle(DstEntity, APITableData) as TMemAPITableData;
+        DstTableData := DstAPI.GetAPIObjectFromEntity(EntityName, APITableData, true) as TMemAPITableData;
         try
           SList := SrcTableMeta.GetFieldNames;
           try
@@ -186,7 +207,6 @@ end;
 procedure CopyTables(SrcAPI: TMemAPIDatabase; DstSess: TMemDBSession);
 var
   EntityNames: TStringList;
-  Entity: TMemDBHandle;
   idx: integer;
   TblMetaAPI: TMemAPITableMetadata;
 begin
@@ -194,12 +214,12 @@ begin
   try
     for idx := 0 to Pred(EntityNames.Count) do
     begin
-      Entity := SrcAPI.OpenTableOrKey(EntityNames[idx]);
-      TblMetaAPI := SrcAPI.GetApiObjectFromHandle(Entity, APITableMetadata, false) as TMemAPITableMetadata;
+      //Nil (no exception) if the entity is a foreign key, not a table.
+      TblMetaAPI := SrcAPI.GetAPIObjectFromEntity(EntityNames[idx], APITableMetadata, false) as TMemAPITableMetadata;
       if Assigned(TblMetaAPI) then
       begin
-        CopyTable(SrcAPI, Entity, EntityNames[idx], DstSess);
         TblMetaAPI.Free;
+        CopyTable(SrcAPI, EntityNames[idx], DstSess);
       end;
     end;
   finally
@@ -210,7 +230,6 @@ end;
 procedure CopyForeignKey(SrcFKAPI: TMemAPIForeignKey; EntityName: string; DstSess: TMemDBSession);
 var
   DstTrans: TMemDBTransaction;
-  DstEntity: TMemDBHandle;
   DstAPI: TMemAPIDatabase;
   DstFKAPI: TMemAPIForeignKey;
   TableName, IndexName: string;
@@ -219,8 +238,8 @@ begin
   try
     DstAPI := DstTrans.GetAPI;
     try
-      DstEntity := DstAPI.CreateForeignKey(EntityName);
-      DstFKAPI := DstAPI.GetApiObjectFromHandle(DstEntity, APIForeignKey) as TMemAPIForeignKey;
+      DstAPI.CreateForeignKey(EntityName);
+      DstFKAPI := DstAPI.GetAPIObjectFromEntity(EntityName, APIForeignKey, true) as TMemAPIForeignKey;
       try
         SrcFKAPI.GetReferencingChild(TableName, IndexName);
         DstFKAPI.SetReferencingChild(TableName, IndexName);
@@ -242,7 +261,6 @@ end;
 procedure CopyForeignKeys(SrcAPI: TMemAPIDatabase; DstSess: TMemDBSession);
 var
   EntityNames: TStringList;
-  Entity: TMemDBHandle;
   idx: integer;
   FKAPI: TMemAPIForeignKey;
 begin
@@ -250,12 +268,15 @@ begin
   try
     for idx := 0 to Pred(EntityNames.Count) do
     begin
-      Entity := SrcAPI.OpenTableOrKey(EntityNames[idx]);
-      FKAPI := SrcAPI.GetApiObjectFromHandle(Entity, APIForeignKey, false) as TMemAPIForeignKey;
+      //Nil (no exception) if the entity is a table, not a foreign key.
+      FKAPI := SrcAPI.GetAPIObjectFromEntity(EntityNames[idx], APIForeignKey, false) as TMemAPIForeignKey;
       if Assigned(FKAPI) then
       begin
-        CopyForeignKey(FKAPI, EntityNames[idx], DstSess);
-        FKAPI.Free;
+        try
+          CopyForeignKey(FKAPI, EntityNames[idx], DstSess);
+        finally
+          FKAPI.Free;
+        end;
       end;
     end;
   finally

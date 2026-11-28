@@ -5,7 +5,7 @@
         <FrameworkType>FMX</FrameworkType>
         <MainSource>KnowComment.dpr</MainSource>
         <Base>True</Base>
-        <Config Condition="'$(Config)'==''">Debug</Config>
+        <Config Condition="'$(Config)'==''">Release</Config>
         <Platform Condition="'$(Platform)'==''">Win64</Platform>
         <TargetedPlatforms>3</TargetedPlatforms>
         <AppType>Application</AppType>
@@ -228,6 +228,9 @@
         <DCCReference Include="..\..\Common\CoWTree\CoWTree.pas"/>
         <DCCReference Include="..\..\Common\PatchFreeMem\PatchFreeMem.pas"/>
         <DCCReference Include="..\..\Common\SRWLockWrapper\SRWLockWrapper.pas"/>
+        <DCCReference Include="..\..\Common\LockedSList\LockedSList.pas"/>
+        <DCCReference Include="..\..\Common\LockedSList\LSLCache.pas"/>
+        <DCCReference Include="..\..\Common\MemDB2\MemDB2ObjectCaches.pas"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>
