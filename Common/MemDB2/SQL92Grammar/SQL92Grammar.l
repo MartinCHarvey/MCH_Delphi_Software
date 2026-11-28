@@ -43,6 +43,7 @@ uses LexLib_oo;
   uses SysUtils, SQL92Grammar_parser;
 %}
 
+[Uu][Nn][Ii][Oo][Nn][ \t\r\n]+[Jj][Oo][Ii][Nn] return(Ord(_UNION_JOIN)); { Two words, one token: see qualified_join in the .y }
 [A-Za-z]([A-Za-z0-9_])* return (BestIdentifierOrLiteral());
 N'([^']|'')*'           return(Ord(national_character_string_literal_start));
 B'(0|1)*'               return(Ord(bit_string_literal_start));
@@ -55,10 +56,10 @@ X'([A-Fa-f0-9])*'       return(Ord(hex_string_literal_start));
 \<=                     return(Ord(less_than_or_equals_operator));
 \|\|                    return(Ord(concatenation_operator));
 \.\.                    return(Ord(double_period));
-[ ]                     return(Ord(space)); { TODO - Ignore by not returning anything? }
-\t                      return(Ord(tab));
-\r                      return(Ord(carriage_return));
-\n                      return(Ord(line_feed));
+[ ]                     ; //Ignore space.
+\t                      ; //Ignore tab.
+\r                      ; //Ignore CR.
+\n                      ; //Ignore LF.
 \"                      return(Ord(double_quote));
 %                       return(Ord(percent));
 &                       return(Ord(ampersand));
@@ -101,10 +102,6 @@ _                       return(Ord(underscore));
         less_than_or_equals_operator: result := 'less_than_or_equals_operator';
         concatenation_operator: result := 'concatenation_operator';
         double_period: result := 'double_period';
-        space: result := 'space';
-        tab: result := 'tab';
-        carriage_return: result := 'carriage_return';
-        line_feed: result := 'line_feed';
         double_quote: result := 'double_quote';
         percent: result := 'percent';
         ampersand: result := 'ampersand';
@@ -335,6 +332,7 @@ _                       return(Ord(underscore));
 	_TRIM: result := '_TRIM';
 	_TRUE: result := '_TRUE';
 	_UNION: result := '_UNION';
+	_UNION_JOIN: result := '_UNION_JOIN';
 	_UNIQUE: result := '_UNIQUE';
 	_UNKNOWN: result := '_UNKNOWN';
 	_UPDATE: result := '_UPDATE';
