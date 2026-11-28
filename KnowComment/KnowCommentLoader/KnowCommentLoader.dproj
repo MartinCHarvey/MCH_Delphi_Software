@@ -63,7 +63,7 @@
         <Base>true</Base>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Base)'!=''">
-        <DCC_Define>INCLUDE_AUTH;$(DCC_Define)</DCC_Define>
+        <DCC_Define>USE_WINDOWS_LOCKS;INCLUDE_AUTH;$(DCC_Define)</DCC_Define>
         <DCC_IMPLICIT_STRING_CAST>false</DCC_IMPLICIT_STRING_CAST>
         <VerInfo_Locale>2057</VerInfo_Locale>
         <VerInfo_Keys>CompanyName=;FileDescription=;FileVersion=1.0.0.0;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=;ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
@@ -213,6 +213,10 @@
         <DCCReference Include="..\..\Common\Reffed\Reffed.pas"/>
         <DCCReference Include="..\..\Common\CoWTree\CoWTree.pas"/>
         <DCCReference Include="..\..\Common\PatchFreeMem\PatchFreeMem.pas"/>
+        <DCCReference Include="..\..\Common\SRWLockWrapper\SRWLockWrapper.pas"/>
+        <DCCReference Include="..\..\Common\LockedSList\LockedSList.pas"/>
+        <DCCReference Include="..\..\Common\LockedSList\LSLCache.pas"/>
+        <DCCReference Include="..\..\Common\MemDB2\MemDB2ObjectCaches.pas"/>
         <None Include="..\..\Common\HTMLParser\CSSGrammar.ATG"/>
         <None Include="..\..\Common\HTMLParser\HTMLGrammar.ATG"/>
         <None Include="..\..\Common\HTMLParser\JScriptGrammar.ATG"/>

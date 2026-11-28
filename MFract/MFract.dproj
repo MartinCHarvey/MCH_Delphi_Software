@@ -130,8 +130,8 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Cfg_2_Win32)'!=''">
     <Manifest_File>$(BDS)\bin\default_app.manifest</Manifest_File>
-    <VerInfo_Keys>CompanyName=;FileDescription=;FileVersion=1.0.5.15;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=;ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
-    <VerInfo_Build>15</VerInfo_Build>
+    <VerInfo_Keys>CompanyName=;FileDescription=;FileVersion=1.0.5.18;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=;ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
+    <VerInfo_Build>18</VerInfo_Build>
     <VerInfo_Locale>1033</VerInfo_Locale>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Cfg_2_Win64)'!=''">
@@ -191,7 +191,7 @@
     <DCCReference Include="..\Common\LockAbstractions\LockAbstractions.pas" />
     <DCCReference Include="..\Common\LockAbstractions\TinyLock.pas" />
     <DCCReference Include="..\Common\PComp\PComp.pas" />
-    <DCCReference Include="..\Common\SRWLockWrapper\SRWLockWrapper.pas"/>
+    <DCCReference Include="..\Common\SRWLockWrapper\SRWLockWrapper.pas" />
     <None Include="todo.txt">
       <ContainerId>File</ContainerId>
     </None>
